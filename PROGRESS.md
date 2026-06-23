@@ -1425,6 +1425,26 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   jumps from 0, and the target's getBoundingClientRect().top lands within [0, innerHeight). Smoke 78
   (paint first to force layout, then assert scrolled + on-screen). 93/93, no survivors.
 
+- 📝 IFRAME support (CreateChildFrame) — execution-ready blueprint (2026-06-24): fully scoped the
+  heavy iframe gap from frame_test_helpers (a working reference — this is a SOLVED pattern, unlike
+  blob: URL). Pieces: (1) MbFrameClient gains `blink::WebLocalFrame* web_frame_` + a Bind(frame,
+  unique_ptr<MbFrameClient> self) (stores web_frame_ + self_owned_) and SetFrame(frame) for the
+  main frame; MbWebView calls frame_client_->SetFrame(main_frame_) after CreateMainFrame. (2)
+  CreateChildFrame(scope,name,...,policy_container_bind_params,...,finish_creation): bind
+  policy_container_bind_params.receiver to a tiny self-owned MbPolicyContainerHost (mojom::blink::
+  PolicyContainerHost — 2 no-op methods: SetReferrerPolicy, AddContentSecurityPolicies); make a
+  child MbFrameClient; `web_frame_->CreateLocalChild(scope, child_client, nullptr, LocalFrameToken())`;
+  child_client->Bind(child, std::move(child_client_uptr)) (self-owned); finish_creation(child,
+  DocumentToken(), mojo::NullRemote(), make_unique<UnguessableToken>(UnguessableToken::Create()));
+  return child. (3) FrameDetached(DetachReason r): for a CHILD (self_owned_ set) do
+  web_frame_->Close(r) then self_owned_.reset() LAST (self-destruct); for the MAIN frame (self_owned_
+  null) do nothing — MbWebView owns its teardown. RISKS to verify at execution: child srcdoc/src
+  content actually loads (frames.length==1, contentDocument!=null); child needs no separate
+  WebFrameWidget (local children composite into the parent — confirm no widget DCHECK); the
+  NullRemote browser-interface-broker for the child is tolerated. ~100 lines across mb_frame_client.
+  {h,cc} + one MbWebView line. Heavy but mechanical with this blueprint; a focused pass, not an
+  end-of-tick cram. iframes currently degrade gracefully (smoke 77), so this is additive.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
