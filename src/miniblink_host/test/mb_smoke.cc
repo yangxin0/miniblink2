@@ -595,6 +595,27 @@ int main() {
            std::string(hdr) + " sz=" + std::to_string(sz));
   }
 
+  // 35. Cutting-edge modern CSS — the M150-vs-M47 selling points, none of which the
+  // frozen ~2015 engine could do. Each rule colors an element only if the feature works.
+  mbLoadHTML(v,
+    "<style>"
+    ".p:has(.kid){color:rgb(1,1,1)} "                    // :has() selector
+    ".n{& .inner{color:rgb(3,3,3)}} "                    // native CSS nesting
+    "@container (min-width:1px){.c{color:rgb(4,4,4)}} "  // container query
+    ".mix{color:color-mix(in srgb,#000,#fff)} "          // color-mix()
+    "</style>"
+    "<div class='p'><span class='kid'>x</span><b id='has'>x</b></div>"
+    "<div class='n'><b class='inner' id='nest'>x</b></div>"
+    "<div style='container-type:inline-size'><b class='c' id='cont'>x</b></div>"
+    "<b class='mix' id='mix'>x</b>",
+    "about:blank");
+  Expect(Eval(v, "getComputedStyle(document.getElementById('has')).color") == "rgb(1, 1, 1)" &&
+             Eval(v, "getComputedStyle(document.getElementById('nest')).color") == "rgb(3, 3, 3)" &&
+             Eval(v, "getComputedStyle(document.getElementById('cont')).color") == "rgb(4, 4, 4)" &&
+             Eval(v, "getComputedStyle(document.getElementById('mix')).color")
+                     .find("0.5") != std::string::npos,
+         "modern CSS: :has(), nesting, @container, color-mix()");
+
   mbDestroyView(v);
   mbShutdown();
 

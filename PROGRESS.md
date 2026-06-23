@@ -815,6 +815,13 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   via /cookies/set, mbGetCookies returns "mbck=val99; expk=expv". 49/49 with network (44
   default), no survivors. Rounds out the cookie story: set (headers/JS/network) + export.
 
+- ✅ CUTTING-EDGE CSS verified (2026-06-23 21:?): probed the headline M150-vs-M47 CSS features —
+  ALL work: :has() selector, native CSS nesting (& .inner), @container queries, color-mix()
+  (-> color(srgb 0.5 0.5 0.5)), oklch() (preserved). Locked smoke 35: one document where each
+  feature colors an element, asserts :has/nesting/container exact colors + color-mix contains
+  0.5. 45/45, no survivors. Demonstrates the whole point of the upgrade (none of these existed
+  in the frozen ~2015 M47 engine). On-theme verification + regression guard.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
