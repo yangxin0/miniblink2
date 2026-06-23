@@ -807,6 +807,14 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   60-paragraph doc -> "PDF document, version 1.4, 5 pages"; smoke 39 checks %PDF- header + size.
   44/44, no survivors. Flagship headless feature (Puppeteer page.pdf equivalent).
 
+- ✅ COOKIE EXPORT (2026-06-23 21:?): mbGetCookies(view,url,out,cap) reads the shared curl jar
+  for a host ("name=value; ...", non-HttpOnly) so a host can extract a session (e.g. after a
+  login flow) for reuse. Re-added MbGetCookiesForUrl to the loader (CURLINFO_COOKIELIST parse;
+  this was the helper from the reverted reverse-bridge — but here it's called DIRECTLY by the
+  host, not from the [Sync] GetCookiesString, so no deadlock). Smoke 35 (network): set cookies
+  via /cookies/set, mbGetCookies returns "mbck=val99; expk=expv". 49/49 with network (44
+  default), no survivors. Rounds out the cookie story: set (headers/JS/network) + export.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

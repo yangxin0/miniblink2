@@ -37,7 +37,7 @@ that satisfies modern Blink so it runs without the full browser.
 | Console capture (`console.log`/`warn`/`error` → host) | ✅ |
 | Init scripts (`evaluateOnNewDocument`: run JS before page scripts) | ✅ |
 | Isolated-world eval (content-script model: separate globals, shared DOM) | ✅ |
-| **Cookies**: HTTP jar + JS `document.cookie`; JS-set cookies bridge to the HTTP jar | ✅ |
+| **Cookies**: HTTP jar + JS `document.cookie`; JS→jar bridge; jar export (`mbGetCookies`) | ✅ |
 | Custom request headers + default `Accept-Language` | ✅ |
 | On-screen window, GPU compositing, IndexedDB | ⏳ roadmap |
 
@@ -166,6 +166,7 @@ void  mbRunJS(mbView*, const char* script);         // host -> page: drive it
 void  mbSetInitScript(mbView*, const char* script); // run before each page's own scripts
 int   mbEvalJS(mbView*, const char* script, char* out, int cap);  // host <- page: read back
 int   mbEvalJSIsolated(mbView*, const char* script, char* out, int cap);  // isolated world
+int   mbGetCookies(mbView*, const char* url, char* out, int cap);  // export the session jar
 int   mbDrainConsole(mbView*, char* out, int cap);  // drain captured console output
 void  mbSendMouseClick(mbView*, int x, int y);      // synthesize a click
 void  mbSendMouseMove(mbView*, int x, int y);       // move pointer: hover + mousemove

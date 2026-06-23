@@ -38,6 +38,10 @@ const std::string& MbDefaultUserAgent();
 // network requests. No-op for non-http(s) URLs. Bridges document.cookie -> fetches.
 void MbAddCookieToJar(const std::string& url, const std::string& cookie);
 
+// Read the shared HTTP jar's non-HttpOnly cookies for `url`'s host as a
+// "name=value; name2=value2" string. Empty for non-http(s). For session extraction.
+std::string MbGetCookiesForUrl(const std::string& url);
+
 // Fetch a file:// or http(s):// URL into `body` (+ server Content-Type if any).
 // Shared by the subresource loader and the top-level navigation in MbWebView::LoadURL.
 // `user_agent` sets the HTTP User-Agent (empty -> MbDefaultUserAgent()).

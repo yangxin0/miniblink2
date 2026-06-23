@@ -286,6 +286,10 @@ std::string MbWebView::DrainConsole() {
   return frame_client_ ? frame_client_->DrainConsole() : std::string();
 }
 
+std::string MbWebView::GetCookies(const char* url) {
+  return url ? MbGetCookiesForUrl(url) : std::string();
+}
+
 void MbWebView::SetExtraHeaders(const char* utf8_headers) {
   if (frame_client_)
     frame_client_->SetExtraHeaders(utf8_headers ? utf8_headers : "");

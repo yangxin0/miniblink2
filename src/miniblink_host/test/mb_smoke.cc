@@ -478,6 +478,21 @@ int main() {
       std::fprintf(stderr, "  [SKIP] no-images (host image unreachable)\n");
     }
   }
+
+  // 35. Cookie export: after the jar has a cookie (set above via /cookies/set),
+  // mbGetCookies returns it for the host to extract/reuse.
+  {
+    mbLoadURL(v, (host + "/cookies/set?expk=expv").c_str());
+    mbWait(v, 400);
+    if (!Eval(v, "(document.body?document.body.innerText:'')").empty()) {
+      char cb[512] = {0};
+      mbGetCookies(v, (host + "/").c_str(), cb, sizeof(cb));
+      Expect(std::string(cb).find("expk=expv") != std::string::npos,
+             "mbGetCookies exports the jar", cb);
+    } else {
+      std::fprintf(stderr, "  [SKIP] cookie export (host unreachable)\n");
+    }
+  }
   }  // MB_NET_TESTS
 
   // 33. document.cookie (JS): write then read round-trips through the in-process

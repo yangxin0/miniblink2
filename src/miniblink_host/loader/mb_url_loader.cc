@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <string>
 #include <variant>
+#include <vector>
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -222,6 +223,56 @@ void MbAddCookieToJar(const std::string& url, const std::string& cookie) {
   const std::string line = "Set-Cookie: " + cookie;
   curl_easy_setopt(curl, CURLOPT_COOKIELIST, line.c_str());
   curl_easy_cleanup(curl);
+}
+
+std::string MbGetCookiesForUrl(const std::string& url) {
+  GURL gurl(url);
+  if (!gurl.SchemeIsHTTPOrHTTPS())
+    return {};
+  const std::string host(gurl.host());
+  CURL* curl = curl_easy_init();
+  if (!curl)
+    return {};
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");  // enable engine
+  if (CURLSH* share = CookieShare())
+    curl_easy_setopt(curl, CURLOPT_SHARE, share);
+  struct curl_slist* list = nullptr;
+  curl_easy_getinfo(curl, CURLINFO_COOKIELIST, &list);
+  std::string out;
+  for (struct curl_slist* it = list; it; it = it->next) {
+    // Netscape TSV: domain \t flag \t path \t secure \t expiry \t name \t value.
+    // "#HttpOnly_" domain prefix marks HttpOnly cookies — exclude them.
+    std::string line = it->data ? it->data : "";
+    if (line.rfind("#HttpOnly_", 0) == 0)
+      continue;
+    std::vector<std::string> f;
+    size_t start = 0;
+    for (size_t i = 0; i <= line.size(); ++i) {
+      if (i == line.size() || line[i] == '\t') {
+        f.push_back(line.substr(start, i - start));
+        start = i + 1;
+      }
+    }
+    if (f.size() < 7)
+      continue;
+    std::string dom = f[0];
+    if (!dom.empty() && dom[0] == '.')
+      dom = dom.substr(1);
+    const bool match =
+        host == dom ||
+        (host.size() > dom.size() &&
+         host.compare(host.size() - dom.size() - 1, dom.size() + 1, "." + dom) == 0);
+    if (!match)
+      continue;
+    if (!out.empty())
+      out += "; ";
+    out += f[5] + "=" + f[6];
+  }
+  if (list)
+    curl_slist_free_all(list);
+  curl_easy_cleanup(curl);
+  return out;
 }
 
 bool MbFetchUrl(const std::string& url_spec, std::string* body,

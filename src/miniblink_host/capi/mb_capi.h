@@ -111,6 +111,11 @@ MB_EXPORT void mbSendText(mbView*, const char* utf8_text);
 // the page downward (toward larger window.scrollY), matching natural intent.
 MB_EXPORT void mbSendScroll(mbView*, int x, int y, int dx, int dy);
 
+// Write the HTTP cookie jar's cookies for `url` ("name=value; name2=value2") into
+// `out` (NUL-terminated, up to out_cap). For exporting a session after a login flow.
+// Returns the full length in bytes; empty for non-http(s) URLs.
+MB_EXPORT int mbGetCookies(mbView*, const char* url, char* out, int out_cap);
+
 // Drain captured page console output (console.log/warn/error) into `out`
 // (NUL-terminated, up to out_cap bytes; one "level: text" line per message), and
 // clear the buffer. Returns the full output length in bytes.

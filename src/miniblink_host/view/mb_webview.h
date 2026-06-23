@@ -67,6 +67,8 @@ class MbWebView {
   void SetTimezone(const char* tz);
   // Return captured console output ("level: text" per line) and clear the buffer.
   std::string DrainConsole();
+  // Return the HTTP cookie jar's cookies for `url` ("name=value; ..."), for session export.
+  std::string GetCookies(const char* url);
   // Set extra request headers (newline-separated "Name: Value") for navigation +
   // subresources. Set before LoadURL to apply to that navigation.
   void SetExtraHeaders(const char* utf8_headers);
