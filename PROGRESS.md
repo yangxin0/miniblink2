@@ -667,6 +667,17 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   runner PublicURLManager binds frame_url_store_ on; consider binding the receiver on the same
   task runner. Blob/createObjectURL/FileReader remain a known host-freeze gap until then.
 
+- ✅ POST-FEATURE-RUN HEALTH CHECK (2026-06-23 19:?): after the long feature run (storage,
+  rAF, observers, cookies, headers, document.cookie, bounded RunJS), verified no rendering
+  regression. Offline rich page (grid+gradient+shadow+transform+CJK+canvas) -> 14.7KB PNG OK;
+  example.com -> 16.5KB PNG; 4/4 repeated single fetches ok=1; raw curl 5/5 = 200. A burst
+  sweep showed sporadic FAILED/3902-byte blanks — diagnosed as TRANSIENT network blips (raw
+  curl works seconds later), NOT a regression, and mb_shot correctly reports them as FAILED
+  (empty-doc detection) rather than silent success. Engine + fetch healthy. (Deferred another
+  Blob debug cycle — understood LocalProvider::GetInterface routes the binder through an async
+  provider pipe, so whether the [Sync] Register pump services it is the open question; left as
+  documented gap to avoid burning ticks on 2-min-hang iterations.)
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
