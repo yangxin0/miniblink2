@@ -11,6 +11,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
+#include "base/no_destructor.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
@@ -67,7 +68,8 @@ bool IsTransientHttpCode(long code) {
 // Blocks the calling task; fine for the headless/synchronous render model. Retries
 // transient failures with linear backoff so a single network hiccup (which produced
 // indistinguishable blank renders before) doesn't doom the whole page.
-bool FetchHttp(const std::string& url, std::string* body, std::string* content_type) {
+bool FetchHttp(const std::string& url, std::string* body, std::string* content_type,
+               const std::string& user_agent) {
   CURL* curl = curl_easy_init();
   if (!curl)
     return false;
@@ -79,7 +81,7 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
   curl_easy_setopt(curl, CURLOPT_USERAGENT,
-                   "Mozilla/5.0 (Macintosh; ARM Mac OS X) miniblink-modern/1.0");
+                   (user_agent.empty() ? mb::MbDefaultUserAgent() : user_agent).c_str());
   curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");  // allow gzip, auto-decode
 
   constexpr int kMaxAttempts = 3;
@@ -145,17 +147,27 @@ blink::WebString MimeFromPath(const std::string& path) {
 
 }  // namespace
 
+const std::string& MbDefaultUserAgent() {
+  // M150 desktop Chrome on macOS — current enough that UA-sniffing sites serve
+  // their modern desktop layout/JS. NoDestructor: no exit-time dtor (-Werror).
+  static const base::NoDestructor<std::string> kUa(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36");
+  return *kUa;
+}
+
 bool MbFetchUrl(const std::string& url_spec, std::string* body,
-                std::string* content_type) {
+                std::string* content_type, const std::string& user_agent) {
   GURL url(url_spec);
   if (url.SchemeIsFile())
     return base::ReadFileToString(base::FilePath(std::string(url.path())), body);
   if (url.SchemeIsHTTPOrHTTPS())
-    return FetchHttp(url_spec, body, content_type);
+    return FetchHttp(url_spec, body, content_type, user_agent);
   return false;
 }
 
-MbURLLoader::MbURLLoader() = default;
+MbURLLoader::MbURLLoader(std::string user_agent)
+    : user_agent_(std::move(user_agent)) {}
 MbURLLoader::~MbURLLoader() = default;
 
 void MbURLLoader::LoadAsynchronously(
@@ -184,7 +196,7 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   if (url.SchemeIsFile()) {
     ok = base::ReadFileToString(base::FilePath(std::string(url.path())), &contents);
   } else if (url.SchemeIsHTTPOrHTTPS()) {
-    ok = FetchHttp(url.spec(), &contents, &http_content_type);
+    ok = FetchHttp(url.spec(), &contents, &http_content_type, user_agent_);
   }
   if (std::getenv("MB_VERBOSE")) {
     std::fprintf(stderr, "[mb_url_loader] %s -> %s (%zu bytes)\n", url.spec().c_str(),

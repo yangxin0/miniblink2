@@ -10,7 +10,14 @@ MbFrameClient::MbFrameClient(MbWebView* owner) : owner_(owner) {}
 MbFrameClient::~MbFrameClient() = default;
 
 std::unique_ptr<blink::URLLoader> MbFrameClient::CreateURLLoaderForTesting() {
-  return std::make_unique<MbURLLoader>();
+  // Subresources use the same UA the frame reports, so the network and DOM agree.
+  return std::make_unique<MbURLLoader>(
+      user_agent_.empty() ? MbDefaultUserAgent() : user_agent_);
+}
+
+blink::WebString MbFrameClient::UserAgentOverride() {
+  return blink::WebString::FromUtf8(
+      user_agent_.empty() ? MbDefaultUserAgent() : user_agent_);
 }
 // TODO(mb): DidStopLoading/DidMeaningfulLayout -> notify owner to paint;
 // CreateChildFrame -> nullptr.

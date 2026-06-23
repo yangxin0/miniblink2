@@ -60,6 +60,11 @@ MB_EXPORT void mbSendMouseMove(mbView*, int x, int y);
 // `scale`x. Allocate paint/PNG buffers at logical_width*scale x logical_height*scale.
 MB_EXPORT void mbSetDeviceScaleFactor(mbView*, float scale);
 
+// Override the User-Agent (navigator.userAgent + outgoing HTTP requests). Call
+// before mbLoadURL/mbLoadHTML so it applies to that navigation. Pass NULL/empty to
+// restore the built-in default.
+MB_EXPORT void mbSetUserAgent(mbView*, const char* utf8_ua);
+
 // Type ASCII text into the focused element (synthesized key events).
 MB_EXPORT void mbSendText(mbView*, const char* utf8_text);
 

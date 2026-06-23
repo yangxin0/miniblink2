@@ -485,6 +485,16 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   --full --scale 2 of go.dev -> 2400x7938 (flags compose). 17/17. Another "non-compositing
   hits compositor-assumption API" solved WITHOUT a blink patch, via the override route.
 
+- ✅ USER-AGENT (2026-06-23 16:?): fixed a real gap — navigator.userAgent was EMPTY (base
+  Platform::UserAgent() returns ""), so UA-sniffing sites could misbehave. Now MbFrameClient
+  overrides UserAgentOverride() to return a realistic M150 desktop-Chrome default (shared
+  with the libcurl fetch so DOM + network agree), and mbSetUserAgent(view, ua) overrides it
+  for navigator.userAgent + main-doc fetch + subresource fetches (the UA is threaded into
+  MbURLLoader at creation and into MbFetchUrl/FetchHttp). Default UA lives in one place
+  (MbDefaultUserAgent(), base::NoDestructor to satisfy -Wexit-time-destructors). Set before
+  navigating. Smoke 18: default contains "Mozilla"; smoke 19: override "MiniblinkBot/9.9
+  (test)" reflected in navigator.userAgent. 19/19. go.dev still renders with the new default.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

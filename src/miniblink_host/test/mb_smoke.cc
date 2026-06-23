@@ -206,6 +206,17 @@ int main() {
              "rgb(1, 2, 3)",
          "HiDPI: min-resolution media query matches");
 
+  // 18. User-Agent: default is a real (non-empty) UA, and the override is reflected
+  // in navigator.userAgent. Set before load so it applies to the committed document.
+  mbLoadHTML(v, "<body>x</body>", "about:blank");  // default UA
+  Expect(Eval(v, "String((navigator.userAgent||'').includes('Mozilla'))") == "true",
+         "user-agent: default is non-empty");
+  mbSetUserAgent(v, "MiniblinkBot/9.9 (test)");
+  mbLoadHTML(v, "<body>x</body>", "about:blank");  // re-navigate to pick up the UA
+  Expect(Eval(v, "navigator.userAgent") == "MiniblinkBot/9.9 (test)",
+         "user-agent: override reflected in navigator.userAgent",
+         Eval(v, "navigator.userAgent"));
+
   mbDestroyView(v);
   mbShutdown();
 

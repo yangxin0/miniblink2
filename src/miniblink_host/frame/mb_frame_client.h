@@ -15,7 +15,9 @@
 #define MINIBLINK_HOST_FRAME_MB_FRAME_CLIENT_H_
 
 #include <memory>
+#include <string>
 
+#include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
 
 namespace mb {
@@ -31,10 +33,19 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // a non-null loader makes Blink use it for subresources. -> our file-backed loader.
   std::unique_ptr<blink::URLLoader> CreateURLLoaderForTesting() override;
 
+  // navigator.userAgent + the value sent on every request. Blink calls this when
+  // non-empty (else Platform::UserAgent(), which is empty here), so we always
+  // return a real UA. Set before navigating to take effect for that load.
+  blink::WebString UserAgentOverride() override;
+
+  void SetUserAgent(const std::string& ua) { user_agent_ = ua; }
+  const std::string& user_agent() const { return user_agent_; }
+
   // TODO(mb): DidStopLoading/DidMeaningfulLayout (paint signal), CreateChildFrame.
 
  private:
   [[maybe_unused]] MbWebView* owner_;  // not owned (used once handshake bodies land)
+  std::string user_agent_;  // empty -> MbDefaultUserAgent() (resolved at use)
 };
 
 }  // namespace mb

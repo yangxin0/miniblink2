@@ -78,6 +78,11 @@ void mbSetDeviceScaleFactor(mbView* v, float scale) {
     v->impl->SetDeviceScaleFactor(scale);
 }
 
+void mbSetUserAgent(mbView* v, const char* utf8_ua) {
+  if (v && v->impl)
+    v->impl->SetUserAgent(utf8_ua);
+}
+
 void mbSendText(mbView* v, const char* utf8_text) {
   if (v && v->impl)
     v->impl->SendText(utf8_text);

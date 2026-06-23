@@ -29,14 +29,20 @@ class DataPipeProducer;
 
 namespace mb {
 
+// The default User-Agent — a realistic modern desktop string so UA-sniffing sites
+// serve their current desktop experience (the base Platform::UserAgent() is empty).
+const std::string& MbDefaultUserAgent();
+
 // Fetch a file:// or http(s):// URL into `body` (+ server Content-Type if any).
 // Shared by the subresource loader and the top-level navigation in MbWebView::LoadURL.
+// `user_agent` sets the HTTP User-Agent (empty -> MbDefaultUserAgent()).
 bool MbFetchUrl(const std::string& url_spec, std::string* body,
-                std::string* content_type);
+                std::string* content_type, const std::string& user_agent = "");
 
 class MbURLLoader : public blink::URLLoader {
  public:
-  MbURLLoader();
+  // `user_agent` is sent on every subresource request (empty -> default).
+  explicit MbURLLoader(std::string user_agent = "");
   ~MbURLLoader() override;
 
   // blink::URLLoader:
@@ -60,6 +66,7 @@ class MbURLLoader : public blink::URLLoader {
   void OnBodyWritten(int64_t length, uint32_t /*MojoResult*/ result);
 
   blink::URLLoaderClient* client_ = nullptr;  // not owned; valid until done/cancel
+  std::string user_agent_;  // sent on each request (empty -> default)
   std::string body_;  // owns the bytes while the data pipe drains them
   std::unique_ptr<mojo::DataPipeProducer> data_pipe_producer_;
   base::WeakPtrFactory<MbURLLoader> weak_factory_{this};

@@ -50,6 +50,9 @@ class MbWebView {
   // window.devicePixelRatio == scale and rasterizes at `scale`x in PaintInto, so
   // captures are retina-crisp. Caller sizes the output bitmap to logical*scale.
   void SetDeviceScaleFactor(float scale);
+  // Override the User-Agent for navigator.userAgent and outgoing requests. Set
+  // before LoadURL/LoadHTML to take effect for that navigation.
+  void SetUserAgent(const char* utf8_ua);
   void SendScroll(int x, int y, int dx, int dy);
   std::string EvalToString(const char* utf8_script);  // eval JS -> string result
   bool PaintToBitmap(void* out_bgra, int w, int h, int stride);

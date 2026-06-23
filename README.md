@@ -125,6 +125,7 @@ int   mbEvalJS(mbView*, const char* script, char* out, int cap);  // host <- pag
 void  mbSendMouseClick(mbView*, int x, int y);      // synthesize a click
 void  mbSendMouseMove(mbView*, int x, int y);       // move pointer: hover + mousemove
 void  mbSetDeviceScaleFactor(mbView*, float scale); // HiDPI: devicePixelRatio + Nx raster
+void  mbSetUserAgent(mbView*, const char* ua);      // navigator.userAgent + HTTP requests
 void  mbSendText(mbView*, const char* text);        // type UTF-8 into the focused element
 void  mbSendScroll(mbView*, int x, int y, int dx, int dy);  // scroll the page (dy>0 = down)
 int   mbPaintToBitmap(mbView*, void* bgra, int w, int h, int stride);
@@ -148,10 +149,11 @@ Requirements: a Chromium M150 source tree with a component `out/Release`
 ./build.sh /path/to/chromium-150.x.y.z   # stages host into the tree, gn gen, ninja, runs the suite
 ```
 
-`mb_smoke` is a 17-case capability test suite (HTML/DOM, JS, CSS computed style, UA
+`mb_smoke` is a 19-case capability test suite (HTML/DOM, JS, CSS computed style, UA
 stylesheet, the `mbRunJS`+`mbEvalJS` bridge, `<canvas>` getImageData, external `<link>`
 CSS via the subresource loader, paint-to-bitmap, synthesized click, typed text (ASCII +
 UTF-8 accent/CJK/emoji), programmatic scroll, mouse-move/hover, embedded-NUL document
-integrity, full-page capture (resize → reflow → render below the fold), and HiDPI
-(devicePixelRatio + resolution media queries)) — it prints PASS/FAIL per case and exits
-non-zero on any failure, so it doubles as a regression test.
+integrity, full-page capture (resize → reflow → render below the fold), HiDPI
+(devicePixelRatio + resolution media queries), and User-Agent (default + override)) — it
+prints PASS/FAIL per case and exits non-zero on any failure, so it doubles as a regression
+test.

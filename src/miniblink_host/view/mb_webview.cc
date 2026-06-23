@@ -176,7 +176,9 @@ void MbWebView::LoadURL(const char* utf8_url) {
     // Top-level http(s): fetch via libcurl, commit with base = the URL so relative
     // subresources resolve and load through MbURLLoader.
     std::string body, content_type;
-    const bool ok = MbFetchUrl(url, &body, &content_type);
+    const bool ok = MbFetchUrl(url, &body, &content_type,
+                               frame_client_ ? frame_client_->user_agent()
+                                             : std::string());
     if (std::getenv("MB_VERBOSE")) {
       std::fprintf(stderr, "[mb_webview] main-doc %s ok=%d bytes=%zu ct='%s'\n",
                    url.c_str(), ok, body.size(), content_type.c_str());
@@ -194,6 +196,11 @@ void MbWebView::SendMouseClick(int x, int y) {
 void MbWebView::SendMouseMove(int x, int y) {
   if (widget_)
     widget_->SendMouseMove(x, y);
+}
+
+void MbWebView::SetUserAgent(const char* utf8_ua) {
+  if (frame_client_)
+    frame_client_->SetUserAgent(utf8_ua ? utf8_ua : "");
 }
 
 void MbWebView::SetDeviceScaleFactor(float scale) {
