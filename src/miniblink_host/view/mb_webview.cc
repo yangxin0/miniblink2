@@ -230,6 +230,33 @@ void MbWebView::SendMouseClick(int x, int y) {
     widget_->SendMouseClick(x, y);
 }
 
+bool MbWebView::ClickSelector(const char* css_selector) {
+  if (!css_selector || !widget_)
+    return false;
+  // Embed the selector as a JS string literal (escape backslash and quote), ask
+  // the page for the element's center, then click there. Returns "" if there is
+  // no match or no box.
+  std::string sel;
+  for (const char* p = css_selector; *p; ++p) {
+    if (*p == '\\' || *p == '"')
+      sel.push_back('\\');
+    sel.push_back(*p);
+  }
+  std::string js =
+      "(function(){var e=document.querySelector(\"" + sel +
+      "\");if(!e)return '';var r=e.getBoundingClientRect();"
+      "if(r.width<=0&&r.height<=0)return '';"
+      "return Math.round(r.left+r.width/2)+','+Math.round(r.top+r.height/2);})()";
+  std::string center = EvalToString(js.c_str());
+  std::string::size_type comma = center.find(',');
+  if (comma == std::string::npos)
+    return false;
+  int x = std::atoi(center.substr(0, comma).c_str());
+  int y = std::atoi(center.substr(comma + 1).c_str());
+  SendMouseClick(x, y);
+  return true;
+}
+
 void MbWebView::SendMouseMove(int x, int y) {
   if (widget_)
     widget_->SendMouseMove(x, y);

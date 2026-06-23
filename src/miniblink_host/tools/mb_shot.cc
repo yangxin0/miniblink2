@@ -13,6 +13,7 @@
 //   --transparent      capture with a transparent background (omitBackground) — areas the
 //                      page doesn't paint keep alpha 0 in the PNG.
 //   --wait-selector S  before capturing, wait until an element matching S exists
+//   --click CSS        before capturing, click the element matching CSS
 //                      (timeout = --wait-ms or 5000ms). For JS-rendered content.
 //   --wait-ms N        before capturing, drive the engine for N ms (settle timers/async).
 //   --console          print the page's console output (console.log/warn/error) to stderr.
@@ -57,6 +58,7 @@ int main(int argc, char** argv) {
   std::string selector;  // CSS selector -> capture that element's box
   std::string headers;   // extra request headers, "Name: Value" per line
   std::string wait_selector;  // wait for this selector before capture
+  std::string click_selector;  // click this selector before capture
   int wait_ms = 0;            // fixed wait before capture
   std::vector<const char*> pos;  // positional args, flags filtered out
   for (int i = 1; i < argc; ++i) {
@@ -75,6 +77,8 @@ int main(int argc, char** argv) {
       selector = argv[++i];
     } else if (a == "--wait-selector" && i + 1 < argc) {
       wait_selector = argv[++i];
+    } else if (a == "--click" && i + 1 < argc) {
+      click_selector = argv[++i];
     } else if (a == "--wait-ms" && i + 1 < argc) {
       wait_ms = std::atoi(argv[++i]);
     } else if (a == "--console") {
@@ -182,6 +186,17 @@ int main(int argc, char** argv) {
     }
   } else if (wait_ms > 0) {
     mbWait(view, wait_ms);
+  }
+
+  // Optionally click an element (e.g. to expand a menu / dismiss a banner) before
+  // capturing, then let the result settle.
+  if (!click_selector.empty()) {
+    if (!mbClickSelector(view, click_selector.c_str())) {
+      std::fprintf(stderr, "mb_shot: WARNING — --click '%s' matched no element\n",
+                   click_selector.c_str());
+    } else {
+      mbWait(view, wait_ms > 0 ? wait_ms : 100);  // let the click's effects render
+    }
   }
 
   if (print_console) {

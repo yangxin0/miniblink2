@@ -1091,6 +1091,17 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   render. This catches cross-subsystem composition bugs that the isolated unit checks miss. Smoke
   60. 73/73, no survivors.
 
+- ✅ CAPABILITY: mbClickSelector + mb_shot --click (2026-06-24): added the Puppeteer-style
+  page.click(selector) automation primitive — the first new C-ABI method in a while, a real
+  capability (not a test). MbWebView::ClickSelector(css) embeds the selector as a JS string
+  literal (escaping \ and "), asks the page for the matched element's center via
+  getBoundingClientRect, and synthesizes a click there via the existing SendMouseClick; returns
+  false on no-match or zero-size box. Exposed as `int mbClickSelector(mbView*, const char*)` and
+  wired into mb_shot as `--click CSS` (clicks before capture — expand a menu, dismiss a banner —
+  then settles). Verified end to end: smoke 61 clicks a button by #id (handler runs) and confirms
+  a non-matching selector returns 0; mb_shot --click toggled a page's DOM to 'CLICKED' before
+  capture. README C-ABI list + mb_shot usage updated. 74/74, no survivors.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

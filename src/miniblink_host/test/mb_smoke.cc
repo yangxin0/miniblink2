@@ -1129,6 +1129,23 @@ int main() {
            "integration: flex+grid layout + SVG icon + text compose in one page");
   }
 
+  // 61. mbClickSelector clicks an element by CSS selector (resolves its box,
+  // clicks the center) — the Puppeteer-style page.click primitive. Place a
+  // button, click it by selector, and confirm its handler ran. Also confirm a
+  // non-matching selector returns 0 (failure) without clicking.
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0'><button id='go' "
+      "style='position:absolute;left:30px;top:30px;width:90px;height:30px' "
+      "onclick='window.__c=(window.__c||0)+1'>Go</button></body>", "about:blank");
+    std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // force layout for hit-testing
+    int hit = mbClickSelector(v, "#go");
+    int miss = mbClickSelector(v, "#nope");
+    Expect(hit == 1 && miss == 0 && Eval(v, "String(window.__c)") == "1",
+           "mbClickSelector: clicks element by selector; 0 when no match");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

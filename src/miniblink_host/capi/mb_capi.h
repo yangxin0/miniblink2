@@ -66,6 +66,12 @@ MB_EXPORT void mbSetInitScript(mbView*, const char* utf8_script);
 // Synthesize a left mouse click (down+up) at (x,y) in the view.
 MB_EXPORT void mbSendMouseClick(mbView*, int x, int y);
 
+// Click the center of the first element matching `css_selector` (Puppeteer-style
+// page.click). Resolves the element's box in the page then clicks its center.
+// Returns 1 on success, 0 if nothing matches or the element has no box
+// (display:none / zero-size). Pair with mbWaitForSelector for dynamic content.
+MB_EXPORT int mbClickSelector(mbView*, const char* css_selector);
+
 // Move the mouse pointer to (x,y): updates :hover state, fires mouseover/mousemove.
 MB_EXPORT void mbSendMouseMove(mbView*, int x, int y);
 

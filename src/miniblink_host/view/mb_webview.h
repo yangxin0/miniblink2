@@ -50,6 +50,12 @@ class MbWebView {
   // Called by the frame client at document-element-available; runs the init script.
   void RunDocumentStartScript();
   void SendMouseClick(int x, int y);
+  // Click the center of the first element matching `css_selector`. Resolves the
+  // element's bounding box in the page, then synthesizes a click there. Returns
+  // false if the selector matches nothing or the element has no box (display:none
+  // / zero-size). Puppeteer-style page.click(selector) — saves callers computing
+  // coordinates by hand.
+  bool ClickSelector(const char* css_selector);
   void SendMouseMove(int x, int y);
   void SendText(const char* utf8);
   // Set the device pixel ratio (HiDPI). The page lays out in CSS px but reports

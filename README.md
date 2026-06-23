@@ -49,7 +49,7 @@ The deliverable example app — a standalone headless screenshot renderer:
 
 ```sh
 mb_shot [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
-        [--wait-selector CSS] [--wait-ms N] [--console] [--header "N: V"] [--text] [--html] [--no-images] [--dark] [--lang L,L2] [--tz Area/City] \
+        [--wait-selector CSS] [--click CSS] [--wait-ms N] [--console] [--header "N: V"] [--text] [--html] [--no-images] [--dark] [--lang L,L2] [--tz Area/City] \
         <input.html | file://URL | http(s)://URL> <out.png> [width height]
 ```
 
@@ -73,7 +73,8 @@ the page doesn't paint keep alpha 0, so the PNG can be composited over other con
 
 `--wait-selector CSS` waits (driving timers/async) until an element matching the selector
 exists before capturing — for JS-rendered content (Puppeteer's `waitForSelector`); `--wait-ms
-N` just settles the page for N ms. Both compose with the capture options.
+N` just settles the page for N ms. Both compose with the capture options. `--click CSS` clicks
+the element matching the selector before capturing (e.g. expand a menu, dismiss a banner).
 
 `--console` prints the page's captured console output (`console.log`/`warn`/`error`) to
 stderr — useful for debugging a page or scripting against its logs.
@@ -171,6 +172,7 @@ int   mbEvalJSIsolated(mbView*, const char* script, char* out, int cap);  // iso
 int   mbGetCookies(mbView*, const char* url, char* out, int cap);  // export the session jar
 int   mbDrainConsole(mbView*, char* out, int cap);  // drain captured console output
 void  mbSendMouseClick(mbView*, int x, int y);      // synthesize a click
+int   mbClickSelector(mbView*, const char* css);    // click element by selector (page.click)
 void  mbSendMouseMove(mbView*, int x, int y);       // move pointer: hover + mousemove
 void  mbSetDeviceScaleFactor(mbView*, float scale); // HiDPI: devicePixelRatio + Nx raster
 void  mbSetUserAgent(mbView*, const char* ua);      // navigator.userAgent + HTTP requests
