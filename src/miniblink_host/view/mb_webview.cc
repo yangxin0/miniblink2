@@ -22,6 +22,7 @@
 #include "base/containers/span.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/platform_thread.h"
@@ -358,14 +359,27 @@ void MbWebView::SendScroll(int x, int y, int dx, int dy) {
 void MbWebView::RunJS(const char* utf8_script) {
   if (!main_frame_ || !utf8_script)
     return;
-  main_frame_->ExecuteScript(
-      blink::WebScriptSource(blink::WebString::FromUtf8(utf8_script)));
-  // Let posted tasks (timers, async continuations) settle, but never spin forever:
-  // a bare RunUntilIdle hangs if the script keeps the task queue busy (a tight
-  // setTimeout loop, or some async APIs). Quit as soon as the loop goes idle, or at
-  // a hard 250ms cap — whichever comes first.
   base::RunLoop loop(base::RunLoop::Type::kNestableTasksAllowed);
   auto runner = base::SingleThreadTaskRunner::GetCurrentDefault();
+  // Run the script INSIDE a task, not synchronously here. Page scripts always
+  // execute within a scheduler task (bracketed by WillProcessTask/DidProcessTask),
+  // and some engine subsystems require that bracketing: in particular a canvas
+  // draw (CanvasRenderingContext::DidDraw) made outside any task scope trips a
+  // FATAL NOTREACHED in CanvasPerformanceMonitor. A synchronous ExecuteScript
+  // here would draw outside a task, so host-driven canvas drawing (mbRunJS) would
+  // crash. Posting the script as a task fixes that and matches page-script timing
+  // (loop.Run() below still blocks until it has executed, so callers see its DOM
+  // effects synchronously). Then let async continuations settle, but never spin
+  // forever: quit when idle, or at a hard 250ms cap — whichever comes first.
+  blink::WebLocalFrame* frame = main_frame_;
+  runner->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          [](blink::WebLocalFrame* f, std::string s) {
+            f->ExecuteScript(
+                blink::WebScriptSource(blink::WebString::FromUtf8(s)));
+          },
+          frame, std::string(utf8_script)));
   runner->PostTask(FROM_HERE, loop.QuitWhenIdleClosure());
   runner->PostDelayedTask(FROM_HERE, loop.QuitClosure(), base::Milliseconds(250));
   loop.Run();

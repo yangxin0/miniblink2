@@ -720,6 +720,27 @@ int main() {
               Eval(v, "String(window.__ws)") == "error"),
          "WebSocket degrades gracefully (error/close event, no hang/crash)");
 
+  // 41. Canvas 2D full round-trip + WebGL graceful-null. Canvas is core for a
+  // renderer and the backbone of chart/image libraries, so verify the complete
+  // path works offline: get a 2D context, draw, read pixels back via
+  // getImageData (exact color), and encode via toDataURL. Separately, WebGL has
+  // no GPU backend here, so getContext('webgl') must return null (clean
+  // feature-detection), not crash. Both are common; this locks in that 2D works
+  // and WebGL degrades.
+  mbLoadHTML(v, "<body><canvas id='c' width='20' height='20'></canvas></body>",
+             "about:blank");
+  mbRunJS(v,
+    "var cv=document.getElementById('c'),x=cv.getContext('2d');"
+    "x.fillStyle='#ff0000';x.fillRect(0,0,20,20);"
+    "var d=x.getImageData(10,10,1,1).data;"
+    "window.__rgba=d[0]+','+d[1]+','+d[2]+','+d[3];"
+    "window.__png=cv.toDataURL().indexOf('data:image/png')===0;"
+    "window.__gl=(document.createElement('canvas').getContext('webgl')===null);");
+  Expect(Eval(v, "window.__rgba") == "255,0,0,255" &&
+             Eval(v, "String(window.__png)") == "true" &&
+             Eval(v, "String(window.__gl)") == "true",
+         "Canvas 2D round-trip (draw/getImageData/toDataURL); WebGL null");
+
   mbDestroyView(v);
   mbShutdown();
 

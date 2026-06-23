@@ -882,6 +882,23 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   exit 0, no survivors. So beyond the worker family, the common network/storage surface is also
   crash/hang-safe; WebSocket in particular fails the "right" way (events, not silence). 50/50.
 
+- ✅ FIX: host-driven canvas draws (mbRunJS) no longer crash + Canvas 2D round-trip verified
+  (2026-06-23): probing canvas turned up a real bug. mbRunJS/RunDocumentStartScript executed JS
+  via main_frame_->ExecuteScript() SYNCHRONOUSLY — outside any scheduler task (the RunLoop was
+  created afterward). A canvas draw (CanvasRenderingContext::DidDraw) made outside a task scope is
+  unbracketed by WillProcessTask/DidProcessTask, and the very next task trips a FATAL NOTREACHED
+  in CanvasPerformanceMonitor (canvas_performance_monitor.cc:181). So any embedder doing the
+  natural "mbRunJS('...fillRect...')" then screenshot pattern would crash (exit 134/SIGABRT).
+  FIX (mb_webview.cc RunJS): post the script as a TASK and run it inside the nested RunLoop, so it
+  is bracketed exactly like a page script; loop.Run() still blocks until it executed, so callers
+  still see DOM effects synchronously. Page-script canvas draws were always fine (case 6) — only
+  host-injected draws were affected. CAVEAT: EvalToString/EvalIsolated still call ExecuteScript
+  synchronously (they are for READING values, where DidDraw doesn't fire); drawing via mbEvalJS
+  would hit the same NOTREACHED — use mbRunJS for draws. Also confirmed: Canvas 2D full round-trip
+  works offline (getContext('2d') -> fillRect -> getImageData reads back 255,0,0,255 -> toDataURL
+  emits data:image/png), so chart/image-processing libs function; WebGL getContext('webgl')
+  returns null (no GPU) gracefully, not a crash. Smoke 41 guards all of it. 51/51, no survivors.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
