@@ -217,6 +217,22 @@ int main() {
          "user-agent: override reflected in navigator.userAgent",
          Eval(v, "navigator.userAgent"));
 
+  // 20. Clip capture: a green box at logical (50,60,100,40). Clipping exactly to it
+  // must yield an all-green bitmap (proves the region offset lands at the origin).
+  mbSetDeviceScaleFactor(v, 1.0f);  // undo case-15's 2x so clip math is 1:1
+  mbLoadHTML(v,
+             "<body style='margin:0'><div style='position:absolute;left:50px;"
+             "top:60px;width:100px;height:40px;background:#00ff00'></div></body>",
+             "about:blank");
+  {
+    const int cw = 100, chh = 40;
+    std::vector<uint8_t> clip(static_cast<size_t>(cw) * chh * 4, 0);
+    mbPaintRectToBitmap(v, clip.data(), 50, 60, cw, chh, cw * 4);
+    const size_t mid = (static_cast<size_t>(20) * cw + 50) * 4;  // center-ish
+    Expect(clip[mid + 2] == 0 && clip[mid + 1] == 255 && clip[mid + 0] == 0,
+           "clip: region capture lands on the element");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

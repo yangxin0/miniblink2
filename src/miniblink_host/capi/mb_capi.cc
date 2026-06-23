@@ -119,4 +119,17 @@ int mbSavePng(mbView* v, const char* path, int width, int height) {
   return v->impl->SavePng(path, width, height) ? 1 : 0;
 }
 
+int mbSavePngRect(mbView* v, const char* path, int x, int y, int w, int h) {
+  if (!v || !v->impl || !path)
+    return 0;
+  return v->impl->SavePngRect(path, x, y, w, h) ? 1 : 0;
+}
+
+int mbPaintRectToBitmap(mbView* v, void* out_bgra, int x, int y, int w, int h,
+                        int stride) {
+  if (!v || !v->impl)
+    return 0;
+  return v->impl->PaintRectToBitmap(out_bgra, x, y, w, h, stride) ? 1 : 0;
+}
+
 }  // extern "C"

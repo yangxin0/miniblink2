@@ -281,7 +281,7 @@ std::string MbWebView::EvalToString(const char* utf8_script) {
   return *utf8 ? std::string(*utf8, utf8.length()) : std::string();
 }
 
-bool MbWebView::PaintInto(SkCanvas& canvas) {
+bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y) {
   if (!widget_ || !widget_->widget() || !main_frame_)
     return false;
   // Interleave lifecycle + task draining: layout issues subresource requests (images
@@ -304,6 +304,11 @@ bool MbWebView::PaintInto(SkCanvas& canvas) {
   // glyphs/vectors crisply at the device pixel ratio into the (logical*dsf) bitmap.
   if (dsf_ != 1.0f)
     canvas.scale(dsf_, dsf_);
+  // Clip capture: shift the document so logical (origin_x, origin_y) lands at the
+  // canvas origin; the (smaller) bitmap then holds just that region. The translate
+  // is in CSS px because it's applied after the dsf scale.
+  if (origin_x != 0 || origin_y != 0)
+    canvas.translate(static_cast<float>(-origin_x), static_cast<float>(-origin_y));
   frame->View()->GetPaintRecord().Playback(&canvas);
   return true;
 }
@@ -319,6 +324,40 @@ bool MbWebView::PaintToBitmap(void* out_bgra, int w, int h, int stride) {
   }
   SkCanvas canvas(bitmap);
   return PaintInto(canvas);
+}
+
+bool MbWebView::PaintRectToBitmap(void* out_bgra, int x, int y, int w, int h,
+                                  int stride) {
+  if (!out_bgra || w <= 0 || h <= 0)
+    return false;
+  SkBitmap bitmap;
+  if (!bitmap.installPixels(
+          SkImageInfo::Make(w, h, kBGRA_8888_SkColorType, kPremul_SkAlphaType),
+          out_bgra, stride)) {
+    return false;
+  }
+  SkCanvas canvas(bitmap);
+  return PaintInto(canvas, x, y);
+}
+
+bool MbWebView::SavePngRect(const char* path, int x, int y, int w, int h) {
+  if (w <= 0 || h <= 0)
+    return false;
+  // The bitmap is in physical px (logical size * dsf); the clip origin (x,y) is in
+  // logical px and applied inside PaintInto after the dsf scale.
+  const int pw = static_cast<int>(w * dsf_);
+  const int ph = static_cast<int>(h * dsf_);
+  SkBitmap bitmap;
+  if (!bitmap.tryAllocPixels(SkImageInfo::Make(pw, ph, kBGRA_8888_SkColorType,
+                                               kPremul_SkAlphaType))) {
+    return false;
+  }
+  SkCanvas canvas(bitmap);
+  if (!PaintInto(canvas, x, y))
+    return false;
+  std::optional<std::vector<uint8_t>> png =
+      gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, /*discard_transparency=*/false);
+  return png && base::WriteFile(base::FilePath(path), *png);
 }
 
 bool MbWebView::SavePng(const char* path, int w, int h) {

@@ -495,6 +495,16 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   navigating. Smoke 18: default contains "Mozilla"; smoke 19: override "MiniblinkBot/9.9
   (test)" reflected in navigator.userAgent. 19/19. go.dev still renders with the new default.
 
+- ✅ CLIP / ELEMENT SCREENSHOT (2026-06-23 16:?): mbSavePngRect + mbPaintRectToBitmap, and
+  mb_shot --clip x,y,w,h / --selector CSS. PaintInto gained an (origin_x,origin_y) shift:
+  after the dsf scale, canvas.translate(-x,-y) so the logical (x,y) lands at the bitmap
+  origin and a (w x h) bitmap holds just that region. --selector evals
+  querySelector(...).getBoundingClientRect()+scroll to get the page-coords box; both first
+  grow the view to full-page height so below-the-fold regions are laid out + painted.
+  Verified: --selector '#card' -> 300x180 at (20,140); --clip 0,0,200,100 -> 200x100;
+  --selector --scale 2 -> 600x360 (composes with HiDPI); no-match -> message + rc=1. Smoke
+  20: green box at (50,60,100,40), clip exactly to it, assert all-green. 20/20.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

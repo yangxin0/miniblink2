@@ -88,6 +88,15 @@ MB_EXPORT int mbPaintToBitmap(mbView*,
 // Render the current frame and encode it to a PNG file. Returns 1 on success.
 MB_EXPORT int mbSavePng(mbView*, const char* path, int width, int height);
 
+// Render just the logical rect (x,y,w,h) of the page to a PNG (e.g. an element
+// screenshot). The output image is (w*dsf x h*dsf) px. Returns 1 on success.
+MB_EXPORT int mbSavePngRect(mbView*, const char* path, int x, int y, int w, int h);
+
+// Composite the logical rect (x,y,w,h) into a caller-provided BGRA8888 buffer
+// (w x h px, `stride` bytes/row; the device scale factor is not applied here).
+MB_EXPORT int mbPaintRectToBitmap(mbView*, void* out_bgra, int x, int y, int w,
+                                  int h, int stride);
+
 #if defined(__cplusplus)
 }  // extern "C"
 #endif

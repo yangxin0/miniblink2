@@ -7,6 +7,9 @@
 //              view to the page's scrollHeight before rendering — like Puppeteer fullPage).
 //   --scale N  device pixel ratio: lay out at [width height] CSS px but render at Nx
 //              (window.devicePixelRatio == N). The PNG is width*N x height*N — retina-crisp.
+//   --clip x,y,w,h     capture only that logical rectangle of the page.
+//   --selector CSS     capture only the bounding box of the first element matching CSS
+//                      (an element screenshot). Overrides --clip.
 //
 // This is the "product" the host enables: a standalone, single-process, modern-Blink
 // screenshot tool — no browser process, no CEF.
@@ -28,6 +31,8 @@ constexpr int kMaxFullPageHeight = 20000;
 int main(int argc, char** argv) {
   bool full_page = false;
   float scale = 1.0f;
+  std::string clip;      // "x,y,w,h"
+  std::string selector;  // CSS selector -> capture that element's box
   std::vector<const char*> pos;  // positional args, flags filtered out
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
@@ -37,6 +42,10 @@ int main(int argc, char** argv) {
       scale = static_cast<float>(std::atof(argv[++i]));
       if (scale <= 0.0f)
         scale = 1.0f;
+    } else if (a == "--clip" && i + 1 < argc) {
+      clip = argv[++i];
+    } else if (a == "--selector" && i + 1 < argc) {
+      selector = argv[++i];
     } else {
       pos.push_back(argv[i]);
     }
@@ -44,8 +53,8 @@ int main(int argc, char** argv) {
   if (pos.size() < 2) {
     std::fprintf(
         stderr,
-        "usage: %s [--full] <input.html|file://URL|http(s)://URL> <out.png> "
-        "[width height]\n",
+        "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
+        "<input.html|file://URL|http(s)://URL> <out.png> [width height]\n",
         argv[0]);
     return 2;
   }
@@ -98,6 +107,56 @@ int main(int argc, char** argv) {
                    input.c_str(), html_len);
       load_ok = false;
     }
+  }
+
+  // Clip / element capture: resolve a logical rectangle and shoot just that. We
+  // first grow the view to the full document height so the region is laid out and
+  // painted even if it sits below the original fold.
+  if (!clip.empty() || !selector.empty()) {
+    char buf[64] = {0};
+    mbEvalJS(view,
+             "String(Math.max(document.documentElement.scrollHeight,"
+             "document.body?document.body.scrollHeight:0))",
+             buf, sizeof(buf));
+    int page_h = std::atoi(buf);
+    if (page_h > h)
+      page_h = page_h < kMaxFullPageHeight ? page_h : kMaxFullPageHeight;
+    mbResize(view, w, page_h > h ? page_h : h);
+
+    int cx = 0, cy = 0, cw = 0, ch = 0;
+    if (!selector.empty()) {
+      // Element box in page coords (viewport rect + scroll offset).
+      std::string js =
+          "(function(){var e=document.querySelector(" "'" + selector +
+          "'" ");if(!e)return '';var r=e.getBoundingClientRect();"
+          "return [Math.round(r.left+scrollX),Math.round(r.top+scrollY),"
+          "Math.round(r.width),Math.round(r.height)].join(',');})()";
+      char rb[128] = {0};
+      mbEvalJS(view, js.c_str(), rb, sizeof(rb));
+      if (std::sscanf(rb, "%d,%d,%d,%d", &cx, &cy, &cw, &ch) != 4 || cw <= 0 ||
+          ch <= 0) {
+        std::fprintf(stderr, "mb_shot: --selector '%s' matched no element\n",
+                     selector.c_str());
+        mbDestroyView(view);
+        mbShutdown();
+        return 1;
+      }
+    } else {
+      if (std::sscanf(clip.c_str(), "%d,%d,%d,%d", &cx, &cy, &cw, &ch) != 4) {
+        std::fprintf(stderr, "mb_shot: --clip wants x,y,w,h (got '%s')\n",
+                     clip.c_str());
+        mbDestroyView(view);
+        mbShutdown();
+        return 2;
+      }
+    }
+    const int ok = mbSavePngRect(view, out, cx, cy, cw, ch);
+    std::fprintf(stderr, "mb_shot: %s -> %s (clip %d,%d %dx%d @%gx) %s\n",
+                 input.c_str(), out, cx, cy, cw, ch, scale,
+                 (ok && load_ok) ? "OK" : "FAILED");
+    mbDestroyView(view);
+    mbShutdown();
+    return (ok && load_ok) ? 0 : 1;
   }
 
   // Full-page capture: grow the view to the document's content height so the

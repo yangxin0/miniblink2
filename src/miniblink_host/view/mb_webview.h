@@ -57,6 +57,10 @@ class MbWebView {
   std::string EvalToString(const char* utf8_script);  // eval JS -> string result
   bool PaintToBitmap(void* out_bgra, int w, int h, int stride);
   bool SavePng(const char* path, int w, int h);  // render + encode PNG to disk
+  // Render just the logical rect (x,y,w,h) to a PNG (output is w*dsf x h*dsf px).
+  bool SavePngRect(const char* path, int x, int y, int w, int h);
+  // Same clip, but into a caller-provided BGRA buffer (w x h px; dsf not applied).
+  bool PaintRectToBitmap(void* out_bgra, int x, int y, int w, int h, int stride);
 
  private:
   MbWebView();
@@ -65,7 +69,9 @@ class MbWebView {
   // LoadURL funnel through here so neither truncates the body at a NUL.
   void CommitHtml(const char* data, size_t len, const char* base_url);
   // Settle async loads, run lifecycle, and play the frame's paint record into `canvas`.
-  bool PaintInto(SkCanvas& canvas);
+  // (origin_x, origin_y) shifts the document so that logical point lands at the canvas
+  // origin — used for clip/region capture; (0,0) renders from the top-left as usual.
+  bool PaintInto(SkCanvas& canvas, int origin_x = 0, int origin_y = 0);
 
   std::unique_ptr<MbViewClient> view_client_;
   std::unique_ptr<MbFrameClient> frame_client_;
