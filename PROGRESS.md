@@ -1742,9 +1742,20 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   could not cleanly observe non-Enter keys via a JS keydown listener in the smoke harness (focus/
   world timing) though they go through the identical trusted path as the verified Enter.
 
+- ✅✅ DONE: page focus + correct key codes (2026-06-24): completed last tick's P2-focus follow-up,
+  and fixed a real mbSendKey bug found along the way. TWO fixes: (1) MbWebView::Create now calls
+  web_view_->SetIsActive(true) + SetPageFocus(true) after DidAttachLocalMainFrame, so the page is
+  "focused" headlessly — document.hasFocus()==true, <input autofocus> grabs focus on load, and
+  :focus styles apply (all previously broken; last tick's SetFocus(true) at widget-init was too
+  early/ineffective). (2) mbSendKey set dom_key to RAW code points (0x0009 for Tab) instead of the
+  encoded ui::DomKey — so KeyboardEvent.key was wrong for every special key, and page default
+  handlers gated on key=="Tab" never fired (Enter only worked via windows_key_code). Now uses the
+  ui::DomKey constants (ENTER/TAB/ESCAPE/DEL/ARROW_*/HOME/END/PAGE_*), so event.key is correct.
+  RESULT: smoke case 89 — hasFocus + autofocus + mbSendKey("Tab") advances focus a->b ALL pass
+  (tab=1, was tab=0 last tick). 110/110. This also resolves last tick's "couldn't observe non-Enter
+  keys" — event.key is now right for Escape/Arrows/etc.
+
 ### REMAINING ROADMAP
-- P2-focus: page focus-controller wiring so Tab advances focus + non-Enter key default actions /
-  autofocus / :focus work (WebFrameWidget SetFocus persisted across commits + WebView SetIsActive).
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).

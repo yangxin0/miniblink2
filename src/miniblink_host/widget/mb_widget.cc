@@ -19,6 +19,7 @@
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
+#include "ui/events/keycodes/dom/dom_key.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/latency/latency_info.h"
 
@@ -141,23 +142,30 @@ void MbWidget::SendText(const char* utf8) {
 void MbWidget::SendKey(const char* key_name) {
   if (!widget_ || !key_name)
     return;
-  // Raw numeric values: vk = a Windows VK code (drives default actions like form
-  // submit / focus move), dom_key = the ui::DomKey value (drives JS event.key).
-  // ch != 0 means the key also produces a kChar (Enter -> '\r', Tab -> '\t').
+  // vk = a Windows VK code (drives default actions). dom_key must be the encoded
+  // ui::DomKey value (NOT the raw code point) — KeyboardEvent.key, which gates
+  // page default handlers like Tab focus-advance (key == "Tab"), is derived from
+  // it. ch != 0 means the key also produces a kChar (Enter -> '\r', Tab -> '\t').
   struct KeyDef {
     const char* name;
     int vk;
-    uint32_t dom_key;
+    ui::DomKey dom_key;
     char16_t ch;
   };
   static const KeyDef kKeys[] = {
-      {"Enter", 0x0D, 0x000D, u'\r'},   {"Tab", 0x09, 0x0009, u'\t'},
-      {"Escape", 0x1B, 0x001B, 0},      {"Backspace", 0x08, 0x0008, 0},
-      {"Delete", 0x2E, 0x007F, 0},      {"ArrowLeft", 0x25, 0x0302, 0},
-      {"ArrowUp", 0x26, 0x0304, 0},     {"ArrowRight", 0x27, 0x0303, 0},
-      {"ArrowDown", 0x28, 0x0301, 0},   {"Home", 0x24, 0x0306, 0},
-      {"End", 0x23, 0x0305, 0},         {"PageUp", 0x21, 0x0308, 0},
-      {"PageDown", 0x22, 0x0307, 0},
+      {"Enter", 0x0D, ui::DomKey::ENTER, u'\r'},
+      {"Tab", 0x09, ui::DomKey::TAB, u'\t'},
+      {"Escape", 0x1B, ui::DomKey::ESCAPE, 0},
+      {"Backspace", 0x08, ui::DomKey::BACKSPACE, 0},
+      {"Delete", 0x2E, ui::DomKey::DEL, 0},
+      {"ArrowLeft", 0x25, ui::DomKey::ARROW_LEFT, 0},
+      {"ArrowUp", 0x26, ui::DomKey::ARROW_UP, 0},
+      {"ArrowRight", 0x27, ui::DomKey::ARROW_RIGHT, 0},
+      {"ArrowDown", 0x28, ui::DomKey::ARROW_DOWN, 0},
+      {"Home", 0x24, ui::DomKey::HOME, 0},
+      {"End", 0x23, ui::DomKey::END, 0},
+      {"PageUp", 0x21, ui::DomKey::PAGE_UP, 0},
+      {"PageDown", 0x22, ui::DomKey::PAGE_DOWN, 0},
   };
   const KeyDef* k = nullptr;
   for (const auto& e : kKeys) {
@@ -173,7 +181,7 @@ void MbWidget::SendKey(const char* key_name) {
     blink::WebKeyboardEvent e(type, blink::WebInputEvent::kNoModifiers,
                               base::TimeTicks::Now());
     e.windows_key_code = k->vk;
-    e.dom_key = k->dom_key;
+    e.dom_key = static_cast<int>(k->dom_key);
     if (with_text && k->ch) {
       e.text[0] = k->ch;
       e.unmodified_text[0] = k->ch;

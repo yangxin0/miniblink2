@@ -170,6 +170,14 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
   v->widget_->Attach(v->main_frame_, width, height);
   v->web_view_->DidAttachLocalMainFrame();
 
+  // Mark the page active + focused so focus-dependent behavior works headlessly:
+  // Tab advancing focus (FocusController::AdvanceFocus is gated on page focus),
+  // <input autofocus>, and :focus styles. A real browser sets this when its
+  // window gains focus; we always want it for an automation view. Done after
+  // DidAttachLocalMainFrame so the FocusController is on a live main frame.
+  v->web_view_->SetIsActive(true);
+  v->web_view_->SetPageFocus(true);
+
   // 4. Attach a session-storage namespace to the page so window.sessionStorage
   //    resolves (without it StorageNamespace::From(page) is null -> TypeError).
   //    The id is normally a browser-assigned 36-char token; any non-empty one of

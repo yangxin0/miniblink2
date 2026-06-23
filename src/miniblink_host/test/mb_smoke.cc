@@ -1866,6 +1866,24 @@ int main() {
            "mbSendKey Enter triggers form submission (trusted default action)");
   }
 
+  // 89. Page focus is set, enabling focus-dependent behavior: document.hasFocus()
+  // is true, <input autofocus> grabs focus on load, and mbSendKey("Tab") advances
+  // focus to the next field (FocusController::AdvanceFocus, gated on page focus).
+  {
+    mbLoadHTML(v, "<body><input id='a' autofocus><input id='b'></body>",
+               "about:blank");
+    mbWait(v, 30);
+    const bool has_focus = Eval(v, "String(document.hasFocus())") == "true";
+    const bool autofocused = Eval(v, "document.activeElement.id") == "a";
+    mbSendKey(v, "Tab");
+    mbWait(v, 30);
+    const bool tab_advanced = Eval(v, "document.activeElement.id") == "b";
+    Expect(has_focus && autofocused && tab_advanced,
+           "page focus enables autofocus + Tab focus-advance",
+           std::string("hasFocus=") + (has_focus ? "1" : "0") + " autofocus=" +
+               (autofocused ? "1" : "0") + " tab=" + (tab_advanced ? "1" : "0"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
