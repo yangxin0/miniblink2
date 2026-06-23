@@ -913,6 +913,25 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   and ALL pre-existing Eval-driven cases still pass (no regression from task-wrapping reads).
   So host-driven canvas drawing is fully crash-safe through every JS entry point now. 53/53.
 
+- ✅ FIX: JS dialogs (alert/confirm/prompt) no longer HANG the host (2026-06-23): probed a common
+  hazard and found a hard hang. alert()/confirm()/prompt() route through
+  ChromeClientImpl::OpenJavaScript{Alert,Confirm,Prompt}Delegate, which make [Sync] mojo calls on
+  frame->GetLocalFrameHostRemote() (RunModalAlertDialog/RunModalConfirmDialog/RunModalPromptDialog,
+  frame.mojom marks all three [Sync]). With no browser process to service LocalFrameHost, the sync
+  call blocks the main thread FOREVER — and pages routinely call these during load, so any such
+  page would hang the entire host (confirmed: mb_shot exit 137, watchdog-killed). This is the same
+  [Sync]-mojo-to-browser class as the Blob hang. FIX (patches/0002-suppress-js-dialogs.patch, a
+  Blink-compat patch in the established patches/ mechanism): the three delegates auto-dismiss —
+  headless semantics — instead of making the sync call: alert returns, confirm/prompt return their
+  "Cancel" defaults (false / null result). TruncateDialogMessage became unused -> marked
+  [[maybe_unused]] (it has -Werror,-Wunused-function). Verified: mb_shot now exits 0 and the page
+  runs to completion (alert->undefined, confirm->false, prompt->null, then continues); patch is
+  reproducible (git reverse-check OK). Smoke 44 guards it by calling all three INLINE DURING LOAD
+  (the realistic hang path) — a regression would hang the whole suite (caught by the watchdog).
+  54/54, no survivors. NOTE: this knocks out a second member of the [Sync]-mojo hang family; only
+  Blob's [Sync] BlobURLStore.Register remains (and unlike dialogs it needs the call's RESULT, so
+  auto-dismiss won't work — it still wants a servicing thread).
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

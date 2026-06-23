@@ -1,0 +1,82 @@
+diff --git a/third_party/blink/renderer/core/page/chrome_client_impl.cc b/third_party/blink/renderer/core/page/chrome_client_impl.cc
+index b58921d..43bf252 100644
+--- a/third_party/blink/renderer/core/page/chrome_client_impl.cc
++++ b/third_party/blink/renderer/core/page/chrome_client_impl.cc
+@@ -159,7 +159,10 @@ const char* DismissalTypeToString(Document::PageDismissalType dismissal_type) {
+   NOTREACHED();
+ }
+ 
+-String TruncateDialogMessage(const String& message) {
++// miniblink-modern patch: now unused because the JS-dialog delegates auto-dismiss
++// (the [Sync] RunModal*Dialog calls were removed). Kept (not deleted) to minimize
++// the patch surface; mark maybe_unused so -Wunused-function does not fire.
++[[maybe_unused]] String TruncateDialogMessage(const String& message) {
+   if (message.IsNull())
+     return g_empty_string;
+ 
+@@ -511,32 +514,20 @@ void ChromeClientImpl::CloseWindow() {
+ bool ChromeClientImpl::OpenJavaScriptAlertDelegate(LocalFrame* frame,
+                                                    const String& message) {
+   NotifyPopupOpeningObservers();
+-  bool disable_suppression = false;
+-  if (frame && frame->GetDocument()) {
+-    disable_suppression = RuntimeEnabledFeatures::
+-        DisableDifferentOriginSubframeDialogSuppressionEnabled(
+-            frame->GetDocument()->GetExecutionContext());
+-  }
+-  // Synchronous mojo call.
+-  frame->GetLocalFrameHostRemote().RunModalAlertDialog(
+-      TruncateDialogMessage(message), disable_suppression);
++  // miniblink-modern patch: no browser process services LocalFrameHost, so the
++  // [Sync] RunModalAlertDialog call below deadlocks the main thread forever (no
++  // servicer ever replies). Auto-dismiss instead — headless semantics — so a page
++  // that calls alert() cannot hang the host. alert() has no return value.
+   return true;
+ }
+ 
+ bool ChromeClientImpl::OpenJavaScriptConfirmDelegate(LocalFrame* frame,
+                                                      const String& message) {
+   NotifyPopupOpeningObservers();
+-  bool success = false;
+-  bool disable_suppression = false;
+-  if (frame && frame->GetDocument()) {
+-    disable_suppression = RuntimeEnabledFeatures::
+-        DisableDifferentOriginSubframeDialogSuppressionEnabled(
+-            frame->GetDocument()->GetExecutionContext());
+-  }
+-  // Synchronous mojo call.
+-  frame->GetLocalFrameHostRemote().RunModalConfirmDialog(
+-      TruncateDialogMessage(message), disable_suppression, &success);
+-  return success;
++  // miniblink-modern patch: auto-dismiss (see OpenJavaScriptAlertDelegate). The
++  // [Sync] RunModalConfirmDialog would deadlock with no LocalFrameHost servicer;
++  // return the default "Cancel" (false) so confirm() resolves instead of hanging.
++  return false;
+ }
+ 
+ bool ChromeClientImpl::OpenJavaScriptPromptDelegate(LocalFrame* frame,
+@@ -544,19 +535,11 @@ bool ChromeClientImpl::OpenJavaScriptPromptDelegate(LocalFrame* frame,
+                                                     const String& default_value,
+                                                     String& result) {
+   NotifyPopupOpeningObservers();
+-  bool success = false;
+-  bool disable_suppression = false;
+-  if (frame && frame->GetDocument()) {
+-    disable_suppression = RuntimeEnabledFeatures::
+-        DisableDifferentOriginSubframeDialogSuppressionEnabled(
+-            frame->GetDocument()->GetExecutionContext());
+-  }
+-  // Synchronous mojo call.
+-  frame->GetLocalFrameHostRemote().RunModalPromptDialog(
+-      TruncateDialogMessage(message),
+-      default_value.IsNull() ? g_empty_string : default_value,
+-      disable_suppression, &success, &result);
+-  return success;
++  // miniblink-modern patch: auto-dismiss (see OpenJavaScriptAlertDelegate). The
++  // [Sync] RunModalPromptDialog would deadlock with no LocalFrameHost servicer;
++  // return the default "Cancel" (false) and leave `result` null, so prompt()
++  // yields null instead of hanging the host.
++  return false;
+ }
+ bool ChromeClientImpl::TabsToLinks() {
+   DCHECK(web_view_);

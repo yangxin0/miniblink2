@@ -766,6 +766,28 @@ int main() {
                  "return x.getImageData(0,0,1,1).data[2];})()") == "255",
          "canvas draw via mbEvalJSIsolated is crash-safe (task-bracketed)");
 
+  // 44. JS dialogs must NOT hang the host. alert()/confirm()/prompt() are
+  // [Sync] mojo calls to LocalFrameHost (RunModal*Dialog); with no browser
+  // process to service them they deadlock the main thread forever — and pages
+  // call them during load, so this is a severe common-case hazard. The
+  // 0002-suppress-js-dialogs patch auto-dismisses them (headless semantics):
+  // alert returns, confirm/prompt return their "Cancel" defaults (false/null).
+  // This calls all three INLINE DURING LOAD (the realistic hang path); if the
+  // suppression regressed, the whole smoke run would hang here (caught by the
+  // bounded watchdog). Asserts completion + the documented default values.
+  mbLoadHTML(v,
+    "<body>dlg<script>"
+    "window.__a=alert('hi');"
+    "window.__c=confirm('ok?');"
+    "window.__p=prompt('name?','def');"
+    "window.__done=true;"
+    "</script></body>", "about:blank");
+  Expect(Eval(v, "String(window.__done)") == "true" &&
+             Eval(v, "String(window.__a)") == "undefined" &&
+             Eval(v, "String(window.__c)") == "false" &&
+             Eval(v, "String(window.__p)") == "null",
+         "JS dialogs auto-dismiss, no hang (alert/confirm/prompt)");
+
   mbDestroyView(v);
   mbShutdown();
 
