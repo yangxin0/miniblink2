@@ -1199,6 +1199,22 @@ int main() {
            "Blob data resolves: text()/arrayBuffer()/FileReader deliver bytes");
   }
 
+  // 65. Blob data works at realistic sizes, not just a few bytes. A 100 KB blob
+  // (still inline embedded_data, <=256 KB) must round-trip fully through
+  // ReadAll's data-pipe write. Guards that the shipped path handles real content
+  // (canvas exports, fetched bodies), not only tiny strings. (>256 KB needs the
+  // BytesProvider path — a documented follow-up.)
+  {
+    mbLoadHTML(v, "<body>blob100k</body>", "about:blank");
+    mbRunJS(v,
+      "window.__n=-1;"
+      "var b=new Blob(['z'.repeat(100000)]);"
+      "b.text().then(function(s){window.__n=s.length;});");
+    mbWait(v, 300);
+    Expect(Eval(v, "String(window.__n)") == "100000",
+           "Blob data round-trips at 100 KB (realistic size, not just bytes)");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

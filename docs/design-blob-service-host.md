@@ -153,6 +153,33 @@ All unknowns resolved by code inspection; increment 3+4 is now mechanical:
 - **GN:** new `blob/mb_blob_registry.{h,cc}` added to `miniblink_host` sources; deps already
   cover `//third_party/blink/public:blink` (mojom-blink) and mojo bindings.
 
+## Increment 6 — large blobs (>256 KB), ready to execute (scoped 2026-06-24)
+
+Status: increments 3+4 SHIPPED (small/inline blobs read via `MbBlob::ReadAll`).
+Measured: blobs up to **200 KB round-trip fine** (inline `embedded_data` + one
+`WriteAllData`); only **>256 KB** fails — `text()` resolves EMPTY because there is no
+`embedded_data` and we ignore the `BytesProvider`. Two pieces, both needed, atomic:
+
+1. **Fetch via `BytesProvider`.** In `Register`, build an ordered list of parts; for a
+   bytes element with no `embedded_data`, bind its `data` (`PendingRemote<BytesProvider>`)
+   on the service thread and remember it. Reply to `Register` IMMEDIATELY (must unblock
+   the main thread — the provider lives on that thread and can't answer while it's
+   blocked). After the reply, lazily materialize: walk parts in order, for each provider
+   call `RequestAsReply() => (bytes)` (async; main thread is now unblocked so it
+   services it), append to `data_`. Gate reads: if a `ReadAll` arrives before
+   materialization completes, queue `{pipe, client}` and drain when ready. Capturing raw
+   `this` in the reply callback is safe — the `Remote<BytesProvider>` is a member, so
+   destroying `MbBlob` cancels the pending callback (no UAF).
+2. **Chunked pipe write.** `WriteAllData` (ALL_OR_NONE) fails once `data_` exceeds the
+   pipe capacity (~256 KB+). Replace with a `mojo::SimpleWatcher` on the service thread:
+   write what fits, on `MOJO_RESULT_SHOULD_WAIT` arm the watcher for writable and
+   continue, fire `OnComplete` + drop the producer at the end.
+
+Verify (NEW smoke): `new Blob(['x'.repeat(500000)]).text().length === 500000`;
+`arrayBuffer().byteLength === 500000`. Watchdog-bounded (hang risk if the watcher never
+arms or a provider stalls — test must catch it). Risk: this is real async state — execute
+in a focused pass with the watchdog, revert if it can't be made clean in-tick.
+
 ## Risks / open questions
 
 - IO-pump thread + Blink's mojo core: confirm `mojo::core` is initialized in a mode

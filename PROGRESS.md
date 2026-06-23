@@ -1187,6 +1187,19 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   patches/0003) and, later, real worker execution. Honest scope: small blobs only (inline bytes);
   >256KB needs the BytesProvider callback (increment 6); blob: URL load is increment 5.
 
+- ✅ Consolidated the blob win + scoped the remainder (2026-06-24): measured the shipped path's
+  real reach — blobs up to 200KB round-trip fine (inline embedded_data + one WriteAllData); the
+  ONLY gap is >256KB, which resolves EMPTY (no embedded_data, BytesProvider ignored). Locked in
+  smoke 65 (a 100KB blob text() round-trips to length 100000 — proves realistic sizes work, not
+  just 'hello'). 78/78. Precisely scoped increment 6 in the design doc (BytesProvider lazy-fetch
+  after the Register reply + read-gating; SimpleWatcher chunked pipe write for data > pipe
+  capacity; verify with a 500KB blob), same pre-scope-then-execute approach that made increment 3
+  go in first-try. Increment 5 (blob: URL resolution) needs the frame's navigation-ASSOCIATED
+  interface channel (BlobURLStore is bound via GetRemoteNavigationAssociatedInterfaces, NOT the
+  Platform broker we control for BlobRegistry) plus a blob: URLLoaderFactory — a separate heavier
+  effort, not the broker-routing pattern used for blob data. Both remain focused follow-ups; the
+  common blob-data case is shipped and guarded.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
