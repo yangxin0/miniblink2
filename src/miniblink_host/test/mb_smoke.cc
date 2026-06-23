@@ -2073,6 +2073,51 @@ int main() {
                (blurred ? "1" : "0"));
   }
 
+  // 98. History stress on a FRESH view (clean stack): deep navigation +
+  // back-to-start + forward + forward-truncation. Exercises the history index/
+  // dedup/truncation logic end to end.
+  {
+    mbView* hv = mbCreateView(W, H);
+    const char ids[5] = {'A', 'B', 'C', 'D', 'E'};
+    std::string paths[5];
+    for (int hi = 0; hi < 5; ++hi) {
+      paths[hi] = std::string("/tmp/mb_hs") + ids[hi] + ".html";
+      std::string doc = std::string("<body><div id=o>") + ids[hi] + "</div></body>";
+      if (FILE* f = std::fopen(paths[hi].c_str(), "wb")) {
+        std::fwrite(doc.data(), 1, doc.size(), f); std::fclose(f);
+      }
+    }
+    auto cur = [&]() {
+      return Eval(hv, "document.getElementById('o').textContent");
+    };
+    for (int hi = 0; hi < 5; ++hi)
+      mbLoadURL(hv, ("file://" + paths[hi]).c_str());  // history: A B C D E
+    const bool at_e = cur() == "E" && mbCanGoForward(hv) == 0;
+    int steps = 0;
+    while (mbCanGoBack(hv) == 1 && steps < 10) {
+      mbGoBack(hv); mbWait(hv, 40); ++steps;
+    }
+    const bool at_a = cur() == "A" && steps == 4 && mbCanGoBack(hv) == 0;
+    mbGoForward(hv); mbWait(hv, 40);  // -> B
+    mbGoForward(hv); mbWait(hv, 40);  // -> C
+    const bool at_c = cur() == "C";
+    std::string xdoc = "<body><div id=o>X</div></body>";
+    if (FILE* f = std::fopen("/tmp/mb_hsX.html", "wb")) {
+      std::fwrite(xdoc.data(), 1, xdoc.size(), f); std::fclose(f);
+    }
+    mbLoadURL(hv, "file:///tmp/mb_hsX.html");  // a new nav at C -> truncates D,E
+    mbWait(hv, 40);
+    const bool truncated = cur() == "X" && mbCanGoForward(hv) == 0;
+    mbGoBack(hv); mbWait(hv, 40);
+    const bool back_to_c = cur() == "C";  // back from X lands on C (not D)
+    mbDestroyView(hv);
+    Expect(at_e && at_a && at_c && truncated && back_to_c,
+           "history stress: deep nav + back-to-start + forward-truncation",
+           std::string("e=") + (at_e ? "1" : "0") + " a=" + (at_a ? "1" : "0") +
+               " c=" + (at_c ? "1" : "0") + " trunc=" + (truncated ? "1" : "0") +
+               " backC=" + (back_to_c ? "1" : "0"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

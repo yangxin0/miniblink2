@@ -1847,6 +1847,16 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   invoke standalone. Smoke case 97: focus sets activeElement + fires onfocus; blur fires onblur
   (reading the typed value) + moves focus away. 118/118. C API now 59 fns.
 
+- ✅ DONE: history-stack stress coverage (2026-06-24): the host history stack (commit
+  e10321a) was only lightly tested (A->B->back->forward). Smoke case 98 exercises it end to end on a
+  FRESH view (clean stack): deep nav A..E, walk back exactly 4 to A (canGoBack==0), forward twice to
+  C, a NEW nav at C that must TRUNCATE the D/E forward entries (canGoForward==0), and back-from-X
+  landing on C not D. All pass — the index/dedup/forward-truncation logic is correct under stress,
+  and the test also exercises view create/destroy + 5 loads + many back/forwards with no crash/leak.
+  Note: history accumulates over a view's whole lifetime (correct), so this MUST use its own view —
+  the shared smoke view already has 90+ tests' worth of entries (caught + fixed during this tick).
+  119/119.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.
