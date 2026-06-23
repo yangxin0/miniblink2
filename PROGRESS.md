@@ -932,6 +932,23 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   Blob's [Sync] BlobURLStore.Register remains (and unlike dialogs it needs the call's RESULT, so
   auto-dismiss won't work — it still wants a servicing thread).
 
+- ✅ Completed LocalFrameHost [Sync] coverage + clipboard verified safe (2026-06-23): audited
+  frame.mojom for [Sync] methods — exactly four: RunModal{Alert,Confirm,Prompt}Dialog (fixed last
+  tick) and RunBeforeUnloadConfirm. Added beforeunload to patches/0002: its delegate
+  (OpenBeforeUnloadConfirmPanelDelegate) made the same [Sync] call and would deadlock identically.
+  HONEST NOTE: beforeunload is NOT currently reachable — CommitHtml calls
+  WebLocalFrameImpl::CommitNavigation() directly, which skips the FrameLoader prompt-to-unload step
+  that fires beforeunload — so this is a DEFENSIVE fix completing the [Sync] set, guarding a future
+  real-navigation path (not a confirmed live hang like the dialogs were). Delegate now returns true
+  (auto-proceed = unload allowed, the safe headless default). Also swept the clipboard, which has
+  its own [Sync] reads (ClipboardHost ReadText/IsFormatAvailable/GetSequenceNumber/ReadAvailable
+  Types) — the same deadlock class — and found it SAFE: Blink gates those reads behind permission/
+  gesture, so page JS never reaches the sync call. execCommand('copy'/'paste') return false,
+  navigator.clipboard read/write reject (NotAllowedError); nothing hangs (mb_shot exit 0). Smoke 45
+  guards clipboard hang-safety (copy/paste/writeText run to completion, host stays scriptable).
+  55/55, no survivors. So ALL four LocalFrameHost [Sync] calls are now handled and the clipboard
+  [Sync] surface is confirmed gated; Blob's BlobURLStore.Register stays the one open [Sync] hang.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

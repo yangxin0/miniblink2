@@ -788,6 +788,34 @@ int main() {
              Eval(v, "String(window.__p)") == "null",
          "JS dialogs auto-dismiss, no hang (alert/confirm/prompt)");
 
+  // 45. Clipboard is crash/hang-safe. ClipboardHost has [Sync] read methods
+  // (ReadText/IsFormatAvailable/...) — the same deadlock class as the JS
+  // dialogs — but Blink gates them behind permission/gesture, so page JS never
+  // reaches the sync call without a backend: execCommand('copy'/'paste') return
+  // false, and navigator.clipboard read/write reject (NotAllowedError). Verify
+  // none of it hangs and the host stays scriptable. (A regression that made a
+  // clipboard op block would hang the suite, caught by the watchdog.)
+  mbLoadHTML(v, "<body><textarea id='t'>x</textarea></body>", "about:blank");
+  mbRunJS(v,
+    "window.__done=false;var t=document.getElementById('t');t.select();"
+    "try{window.__copy=document.execCommand('copy');}catch(e){window.__copy='threw';}"
+    "try{window.__paste=document.execCommand('paste');}catch(e){window.__paste='threw';}"
+    "window.__clip=(typeof navigator.clipboard);"
+    "try{if(navigator.clipboard&&navigator.clipboard.writeText)"
+    "navigator.clipboard.writeText('x').then(function(){},function(){});}catch(e){}"
+    "window.__done=true;");
+  mbWait(v, 60);
+  // The invariant is hang-safety: __done==true proves the whole script — copy,
+  // paste, and the clipboard-API call — ran to completion without blocking, and
+  // the host still evaluates JS. (Specific return values and clipboard
+  // availability vary by origin/secure-context, so we don't pin them; we only
+  // require execCommand returned a real boolean rather than hanging/throwing.)
+  Expect(Eval(v, "1+1") == "2" &&
+             Eval(v, "String(window.__done)") == "true" &&
+             (Eval(v, "String(window.__copy)") == "false" ||
+              Eval(v, "String(window.__copy)") == "true"),
+         "clipboard ops degrade gracefully, no hang (copy/paste/clipboard API)");
+
   mbDestroyView(v);
   mbShutdown();
 

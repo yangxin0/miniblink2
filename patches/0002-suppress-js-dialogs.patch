@@ -1,5 +1,5 @@
 diff --git a/third_party/blink/renderer/core/page/chrome_client_impl.cc b/third_party/blink/renderer/core/page/chrome_client_impl.cc
-index b58921d..43bf252 100644
+index b58921d..4d4eb50 100644
 --- a/third_party/blink/renderer/core/page/chrome_client_impl.cc
 +++ b/third_party/blink/renderer/core/page/chrome_client_impl.cc
 @@ -159,7 +159,10 @@ const char* DismissalTypeToString(Document::PageDismissalType dismissal_type) {
@@ -14,7 +14,26 @@ index b58921d..43bf252 100644
    if (message.IsNull())
      return g_empty_string;
  
-@@ -511,32 +514,20 @@ void ChromeClientImpl::CloseWindow() {
+@@ -492,10 +495,14 @@ bool ChromeClientImpl::OpenBeforeUnloadConfirmPanelDelegate(LocalFrame* frame,
+     before_unload_confirm_panel_result_for_testing_.reset();
+     return success;
+   }
+-  bool success = false;
+-  // Synchronous mojo call.
+-  frame->GetLocalFrameHostRemote().RunBeforeUnloadConfirm(is_reload, &success);
+-  return success;
++  // miniblink-modern patch: the [Sync] RunBeforeUnloadConfirm call below would
++  // deadlock the main thread forever (no browser process services
++  // LocalFrameHost) — the same hazard as the alert/confirm/prompt dialogs above.
++  // This is not reachable via the current direct-commit load path, but completes
++  // the LocalFrameHost [Sync] coverage so a future real-navigation path can't
++  // hang here. Auto-proceed (return true = "unload allowed"), the safe headless
++  // default, instead of prompting.
++  return true;
+ }
+ 
+ void ChromeClientImpl::SetBeforeUnloadConfirmPanelResultForTesting(
+@@ -511,32 +518,20 @@ void ChromeClientImpl::CloseWindow() {
  bool ChromeClientImpl::OpenJavaScriptAlertDelegate(LocalFrame* frame,
                                                     const String& message) {
    NotifyPopupOpeningObservers();
@@ -55,7 +74,7 @@ index b58921d..43bf252 100644
  }
  
  bool ChromeClientImpl::OpenJavaScriptPromptDelegate(LocalFrame* frame,
-@@ -544,19 +535,11 @@ bool ChromeClientImpl::OpenJavaScriptPromptDelegate(LocalFrame* frame,
+@@ -544,19 +539,11 @@ bool ChromeClientImpl::OpenJavaScriptPromptDelegate(LocalFrame* frame,
                                                      const String& default_value,
                                                      String& result) {
    NotifyPopupOpeningObservers();
