@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/weak_ptr.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-shared.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_console_message.h"
@@ -51,9 +52,10 @@ class MbFrameClient : public blink::WebLocalFrameClient {
       ukm::SourceId document_ukm_source_id,
       FinishChildFrameCreationFn complete_creation) override;
 
-  // Child-frame navigation: commit it so iframe content loads (only fires for
-  // child frames; the main frame is committed by MbWebView). Fills the srcdoc
-  // body + a policy container, both required by CommitNavigation.
+  // Navigation hook. Child frames commit synchronously (iframe content). The
+  // main frame handles page-initiated navigations (link click, location=, form
+  // submit) by posting the commit (re-entrancy-safe). The initial main-frame
+  // document is still committed directly by MbWebView, not here.
   void BeginNavigation(std::unique_ptr<blink::WebNavigationInfo>) override;
 
   // Frame lifecycle. A child client self-destructs on detach; the main frame is
@@ -102,6 +104,11 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // TODO(mb): DidStopLoading/DidMeaningfulLayout (paint signal), CreateChildFrame.
 
  private:
+  // Build the WebNavigationParams (fetch body / srcdoc, policy container,
+  // sandbox flags) and commit them into web_frame_. Called synchronously for
+  // child frames and via a posted task for the main frame (see BeginNavigation).
+  void DoCommit(std::unique_ptr<blink::WebNavigationInfo> info);
+
   [[maybe_unused]] MbWebView* owner_;  // not owned (used once handshake bodies land)
   std::string user_agent_;  // empty -> MbDefaultUserAgent() (resolved at use)
   std::string extra_headers_;  // newline-separated "Name: Value" request headers
@@ -110,6 +117,10 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   std::unique_ptr<MbFrameClient> self_owned_;        // set for child frames only
   network::mojom::WebSandboxFlags sandbox_flags_ =
       network::mojom::WebSandboxFlags::kNone;        // child <iframe sandbox>
+
+  // Guards posted main-frame commits: if the client is torn down before the
+  // task runs, it no-ops. Must be the last member.
+  base::WeakPtrFactory<MbFrameClient> weak_factory_{this};
 
 };
 

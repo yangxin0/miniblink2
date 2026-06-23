@@ -1562,6 +1562,21 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   network reads (calling thread). Smoke case 33b added (inline read-first asserts no hang + reads
   back the a=1/b=2 from case 33, same file:// origin). 97/97, no survivors.
 
+- ✅✅ DONE: page-initiated main-frame navigation — shipped (2026-06-24): broad API probing (after
+  the cookie fix) showed nearly everything works (localStorage, async fetch/XHR data:, observers,
+  ES module graphs over the loader, dynamic import, FileReader, DOMParser, crypto.subtle, etc.) —
+  but a page navigating ITSELF (link click / location.href= / form submit) did NOTHING. Cause:
+  MbFrameClient::BeginNavigation early-returned for the main frame ("driven by MbWebView"); only the
+  INITIAL document is driven by MbWebView (CommitHtml), page-initiated navs were dropped. FIX:
+  refactored BeginNavigation to dispatch — child frames still commit synchronously (fires during
+  parent parse; proven), the main frame POSTS the commit to web_frame_->GetTaskRunner(kInternalLoading)
+  guarded by a WeakPtr (re-entrancy: main-frame navs fire from inside JS/event handling, so a
+  synchronous re-commit is unsafe — frame_test_helpers also posts it). Extracted the shared commit
+  body into DoCommit(info). Main frame only handles real navs (about:*/empty left alone). VERIFIED:
+  mb_shot --click on an <a href> AND a location.href= onclick both land on pageB; smoke case 80
+  (location.href= → new document commits, navB-here). 98/98, no survivors. LIMITATION: GET only
+  (MbFetchUrl is GET) — POST form submit would fetch as GET; documented follow-up.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

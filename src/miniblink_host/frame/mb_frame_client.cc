@@ -6,7 +6,11 @@
 #include <utility>
 
 #include "base/containers/span.h"
+#include "base/functional/bind.h"
+#include "base/location.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/unguessable_token.h"
+#include "third_party/blink/public/platform/task_type.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/view/mb_webview.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
@@ -83,8 +87,33 @@ blink::WebLocalFrame* MbFrameClient::CreateChildFrame(
 
 void MbFrameClient::BeginNavigation(
     std::unique_ptr<blink::WebNavigationInfo> info) {
-  if (!self_owned_ || !web_frame_)
-    return;  // child frames only; the main frame is driven by MbWebView
+  if (!web_frame_)
+    return;
+  if (self_owned_) {
+    // Child frame: BeginNavigation fires during the parent's parse (not from JS
+    // event handling), so committing synchronously is safe — and is what the
+    // iframe path has always done.
+    DoCommit(std::move(info));
+    return;
+  }
+  // Main frame: a page-initiated navigation (a link click, location= assignment,
+  // or form submit). The *initial* document is committed by MbWebView
+  // (CommitHtml), not here, so only handle real document navigations and leave
+  // about:* / empty alone. Commit on a task rather than synchronously: we are
+  // called from inside JS / event handling, where re-entrantly committing a new
+  // document is unsafe. This mirrors frame_test_helpers, which also posts it.
+  blink::KURL url = info->url_request.Url();
+  if (url.IsEmpty() || url.ProtocolIsAbout())
+    return;
+  web_frame_->GetTaskRunner(blink::TaskType::kInternalLoading)
+      ->PostTask(FROM_HERE,
+                 base::BindOnce(&MbFrameClient::DoCommit,
+                                weak_factory_.GetWeakPtr(), std::move(info)));
+}
+
+void MbFrameClient::DoCommit(std::unique_ptr<blink::WebNavigationInfo> info) {
+  if (!web_frame_)
+    return;
   auto params = blink::WebNavigationParams::CreateFromInfo(*info);
   blink::KURL url = info->url_request.Url();
   std::string body;  // CommitNavigation requires a body_loader (even for srcdoc)

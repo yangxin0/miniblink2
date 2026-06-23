@@ -1555,6 +1555,32 @@ int main() {
         "scrollIntoView scrolls the target into the viewport");
   }
 
+  // 80. Page-initiated main-frame navigation: a link click or location=
+  // assignment must actually navigate the top frame. Previously BeginNavigation
+  // early-returned for the main frame, so a page that navigated itself did
+  // nothing. Now the main frame posts the commit. Drive it via a JS location
+  // assignment (the anchor default-action path is the same BeginNavigation
+  // hook) and confirm the new document is live.
+  {
+    const char* a = "<body><div id=o>navA-here</div></body>";
+    const char* b = "<body><div id=o>navB-here</div></body>";
+    if (FILE* f = std::fopen("/tmp/mb_navA.html", "wb")) {
+      std::fwrite(a, 1, std::strlen(a), f); std::fclose(f);
+    }
+    if (FILE* f = std::fopen("/tmp/mb_navB.html", "wb")) {
+      std::fwrite(b, 1, std::strlen(b), f); std::fclose(f);
+    }
+    mbLoadURL(v, "file:///tmp/mb_navA.html");
+    const bool on_a =
+        Eval(v, "document.getElementById('o').textContent") == "navA-here";
+    mbRunJS(v, "location.href='file:///tmp/mb_navB.html';");
+    mbWait(v, 300);  // posted commit + fetch + parse
+    const std::string after =
+        Eval(v, "document.getElementById('o').textContent");
+    Expect(on_a && after == "navB-here",
+           "page-initiated main-frame navigation (location=) commits", after);
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
