@@ -139,6 +139,9 @@ MB_EXPORT int mbPaintToBitmap(mbView*,
 // extension: .jpg/.jpeg -> JPEG (quality 90), anything else -> PNG. Returns 1 on success.
 MB_EXPORT int mbSavePng(mbView*, const char* path, int width, int height);
 
+// Print the document to a multi-page PDF (US Letter) at `path`. Returns 1 on success.
+MB_EXPORT int mbSavePdf(mbView*, const char* path);
+
 // Render just the logical rect (x,y,w,h) of the page to a PNG (e.g. an element
 // screenshot). The output image is (w*dsf x h*dsf) px. Returns 1 on success.
 MB_EXPORT int mbSavePngRect(mbView*, const char* path, int x, int y, int w, int h);

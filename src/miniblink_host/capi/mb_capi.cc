@@ -193,6 +193,12 @@ int mbSavePng(mbView* v, const char* path, int width, int height) {
   return v->impl->SavePng(path, width, height) ? 1 : 0;
 }
 
+int mbSavePdf(mbView* v, const char* path) {
+  if (!v || !v->impl || !path)
+    return 0;
+  return v->impl->SavePdf(path) ? 1 : 0;
+}
+
 int mbSavePngRect(mbView* v, const char* path, int x, int y, int w, int h) {
   if (!v || !v->impl || !path)
     return 0;

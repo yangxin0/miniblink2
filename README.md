@@ -28,7 +28,7 @@ that satisfies modern Blink so it runs without the full browser.
 | **Subresource loading** (external `<link>` CSS, `<img>`) via a `blink::URLLoader` | ✅ |
 | In-process `MimeRegistry` (so `file://` stylesheets validate) | ✅ |
 | **HTTP/HTTPS loading of live websites** via system libcurl | ✅ |
-| Paint readback to a BGRA8888 bitmap + PNG | ✅ |
+| Paint readback to a BGRA8888 bitmap + PNG; **PDF export** (paginated, via Blink print) | ✅ |
 | Input events (click, move/hover, type, scroll), HiDPI, custom UA | ✅ |
 | **DOM storage** (`localStorage` / `sessionStorage`, in-memory) | ✅ |
 | `requestAnimationFrame` (serviced without a compositor) | ✅ |
@@ -85,8 +85,9 @@ images are unaffected). `--dark` emulates `prefers-color-scheme: dark` so pages 
 dark theme. `--lang "fr-FR,fr,en"` sets `navigator.language(s)` for locale-aware pages, and
 `--tz "America/New_York"` overrides the timezone for `Date`/`Intl`.
 
-The output format follows the file extension: `.png` (lossless, alpha) or `.jpg`/`.jpeg`
-(quality 90, much smaller) — e.g. `mb_shot https://example.com out.jpg`.
+The output format follows the file extension: `.png` (lossless, alpha), `.jpg`/`.jpeg`
+(quality 90, much smaller), or `.pdf` (a paginated US-Letter PDF via Blink's print path) —
+e.g. `mb_shot https://example.com out.jpg` or `mb_shot article.html article.pdf`.
 
 Rendered by `mb_shot` from an HTML file (gradient, CSS grid, translucent cards, a
 rotated card, and JS-injected text — all modern Blink, headless, no CEF):
@@ -179,6 +180,7 @@ void  mbSetExtraHeaders(mbView*, const char* headers); // extra HTTP request hea
 void  mbSendText(mbView*, const char* text);        // type UTF-8 into the focused element
 void  mbSendScroll(mbView*, int x, int y, int dx, int dy);  // scroll the page (dy>0 = down)
 int   mbPaintToBitmap(mbView*, void* bgra, int w, int h, int stride);
+int   mbSavePdf(mbView*, const char* path);          // print document -> paginated PDF
 int   mbSavePngRect(mbView*, const char* path, int x, int y, int w, int h);  // clip -> PNG
 int   mbPaintRectToBitmap(mbView*, void* bgra, int x, int y, int w, int h, int stride);
 int   mbSavePng(mbView*, const char* path, int w, int h);  // render -> PNG file

@@ -277,13 +277,24 @@ int main(int argc, char** argv) {
     mbResize(view, w, shot_h);  // reflow to the taller viewport; SavePng repaints
   }
 
-  // Physical output dimensions: logical size times the device pixel ratio. The
-  // view stays sized in logical (CSS) px; PaintInto scales the canvas by the DSF.
-  const int out_w = static_cast<int>(w * scale);
-  const int out_h = static_cast<int>(shot_h * scale);
-  const int ok = mbSavePng(view, out, out_w, out_h);
-  std::fprintf(stderr, "mb_shot: %s -> %s (%dx%d) %s\n", input.c_str(), out, out_w,
-               out_h, (ok && load_ok) ? "OK" : "FAILED");
+  // A .pdf output prints the document to a paginated PDF instead of a raster image.
+  const std::string out_s(out);
+  const bool want_pdf = out_s.size() >= 4 &&
+                        out_s.compare(out_s.size() - 4, 4, ".pdf") == 0;
+  int ok;
+  if (want_pdf) {
+    ok = mbSavePdf(view, out);
+    std::fprintf(stderr, "mb_shot: %s -> %s (PDF) %s\n", input.c_str(), out,
+                 (ok && load_ok) ? "OK" : "FAILED");
+  } else {
+    // Physical output dimensions: logical size times the device pixel ratio. The
+    // view stays sized in logical (CSS) px; PaintInto scales the canvas by the DSF.
+    const int out_w = static_cast<int>(w * scale);
+    const int out_h = static_cast<int>(shot_h * scale);
+    ok = mbSavePng(view, out, out_w, out_h);
+    std::fprintf(stderr, "mb_shot: %s -> %s (%dx%d) %s\n", input.c_str(), out, out_w,
+                 out_h, (ok && load_ok) ? "OK" : "FAILED");
+  }
 
   mbDestroyView(view);
   mbShutdown();

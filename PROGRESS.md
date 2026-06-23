@@ -797,6 +797,16 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   Engine + mb_shot healthy across the whole surface. (Known gaps unchanged: Blob sync-deadlock,
   reverse cookie bridge, IndexedDB, on-screen window — all documented above.)
 
+- ✅ PDF EXPORT (2026-06-23 20:?): mbSavePdf(view,path) + mb_shot infers .pdf -> paginated PDF
+  via Blink's print path. WebLocalFrame::PrintBegin/GetPageDescription/PrintPage/PrintEnd into
+  an SkPDF doc (SkPDF::MakeDocument); each page beginPage(w*0.75,h*0.75 pts), canvas.scale(0.75)
+  to map CSS px -> points, cc::SkiaPaintCanvas wraps the page canvas. US Letter (816x1056 css).
+  TWO fixes during bring-up: (1) needed cc/paint/skia_paint_canvas.h + SkPDFDocument.h + gfx
+  rect_f/size_f includes; (2) DCHECK at pagination_utils.cc:35 — print_scaling_option must be
+  kSourceSize; fixed by using the WebPrintParams(gfx::SizeF) ctor (sets it). Verified: a
+  60-paragraph doc -> "PDF document, version 1.4, 5 pages"; smoke 39 checks %PDF- header + size.
+  44/44, no survivors. Flagship headless feature (Puppeteer page.pdf equivalent).
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

@@ -561,6 +561,25 @@ int main() {
          Eval(v, "new Date(1609459200000).getHours().toString()"));
   mbSetTimezone(v, "UTC");  // restore deterministic UTC for any later case
 
+  // 39. PDF export: print a document to a PDF and confirm it's a real PDF file.
+  mbLoadHTML(v, "<body style='font:30px sans-serif'><h1>PDF</h1><p>page content</p></body>",
+             "about:blank");
+  {
+    const char* pdf_path = "/tmp/mb_smoke.pdf";
+    bool ok = mbSavePdf(v, pdf_path) != 0;
+    char hdr[6] = {0};
+    long sz = 0;
+    if (FILE* f = std::fopen(pdf_path, "rb")) {
+      std::fread(hdr, 1, 5, f);
+      std::fseek(f, 0, SEEK_END);
+      sz = std::ftell(f);
+      std::fclose(f);
+    }
+    Expect(ok && std::string(hdr) == "%PDF-" && sz > 500,
+           "PDF export (valid %PDF, non-trivial)",
+           std::string(hdr) + " sz=" + std::to_string(sz));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

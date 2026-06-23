@@ -28,6 +28,7 @@
 #include "base/time/time.h"
 #include "base/unguessable_token.h"
 #include "cc/paint/paint_record.h"
+#include "cc/paint/skia_paint_canvas.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "third_party/blink/public/common/metrics/document_update_reason.h"
 #include "third_party/blink/public/mojom/page/prerender_page_param.mojom.h"
@@ -39,6 +40,9 @@
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_local_frame.h"
+#include "third_party/blink/public/web/web_node.h"
+#include "third_party/blink/public/web/web_print_page_description.h"
+#include "third_party/blink/public/web/web_print_params.h"
 #include "third_party/blink/public/web/web_navigation_params.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/web/web_script_source.h"
@@ -62,12 +66,16 @@
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkStream.h"
+#include "third_party/skia/include/docs/SkPDFDocument.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/size_f.h"
 #include "v8/include/v8-context.h"
 #include "v8/include/v8-isolate.h"
 #include "v8/include/v8-local-handle.h"
@@ -578,6 +586,48 @@ bool MbWebView::SavePngRect(const char* path, int x, int y, int w, int h) {
   if (!PaintInto(canvas, x, y))
     return false;
   return EncodeBitmapToPath(bitmap, path);
+}
+
+bool MbWebView::SavePdf(const char* path) {
+  if (!main_frame_ || !widget_ || !widget_->widget())
+    return false;
+  // Settle the document, then drive Blink's print path into a Skia PDF document.
+  for (int round = 0; round < 5; ++round) {
+    widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
+    base::RunLoop().RunUntilIdle();
+  }
+  // US Letter at 96 CSS dpi (816x1056 px); PDF user space is points (72/in).
+  constexpr float kCssW = 816.f, kCssH = 1056.f;
+  constexpr float kPtScale = 72.f / 96.f;  // CSS px -> points
+  // This ctor sets printable area + page description AND print_scaling_option =
+  // kSourceSize, which the paginated layout requires (a DCHECK enforces it).
+  blink::WebPrintParams params{gfx::SizeF(kCssW, kCssH)};
+  params.printer_dpi = 300;
+
+  const uint32_t pages = main_frame_->PrintBegin(params, blink::WebNode());
+  if (pages == 0) {
+    main_frame_->PrintEnd();
+    return false;
+  }
+  SkDynamicMemoryWStream stream;
+  sk_sp<SkDocument> doc = SkPDF::MakeDocument(&stream);
+  if (!doc) {
+    main_frame_->PrintEnd();
+    return false;
+  }
+  for (uint32_t i = 0; i < pages; ++i) {
+    SkCanvas* canvas = doc->beginPage(kCssW * kPtScale, kCssH * kPtScale);
+    canvas->scale(kPtScale, kPtScale);  // paint CSS-px content into the points page
+    cc::SkiaPaintCanvas paint_canvas(canvas);
+    main_frame_->PrintPage(i, &paint_canvas);
+    doc->endPage();
+  }
+  main_frame_->PrintEnd();
+  doc->close();
+
+  std::vector<uint8_t> buf(stream.bytesWritten());
+  stream.copyToAndReset(buf.data());
+  return base::WriteFile(base::FilePath(path), buf);
 }
 
 bool MbWebView::SavePng(const char* path, int w, int h) {

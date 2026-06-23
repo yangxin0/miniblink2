@@ -83,6 +83,8 @@ class MbWebView {
   bool WaitForSelector(const char* css, int timeout_ms);
   bool PaintToBitmap(void* out_bgra, int w, int h, int stride);
   bool SavePng(const char* path, int w, int h);  // render + encode PNG to disk
+  // Print the document to a multi-page PDF (US Letter) at `path` via Blink's print path.
+  bool SavePdf(const char* path);
   // Render just the logical rect (x,y,w,h) to a PNG (output is w*dsf x h*dsf px).
   bool SavePngRect(const char* path, int x, int y, int w, int h);
   // Same clip, but into a caller-provided BGRA buffer (w x h px; dsf not applied).
