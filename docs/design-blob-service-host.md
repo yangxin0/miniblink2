@@ -180,6 +180,55 @@ Verify (NEW smoke): `new Blob(['x'.repeat(500000)]).text().length === 500000`;
 arms or a provider stalls — test must catch it). Risk: this is real async state — execute
 in a focused pass with the watchdog, revert if it can't be made clean in-tick.
 
+## Increment 5 — blob: URL resolution, execution-ready spec (scoped 2026-06-24)
+
+Status: increments 3/4/6 + is_blob + RegisterFromStream SHIPPED — blob DATA is complete
+across all creation/read paths. Increment 5 makes `URL.createObjectURL(blob)` produce a
+URL that LOADS (`<img src=blob:…>`, `fetch(blobURL)`). Confirmed heavy: 3 new classes +
+an associated-interface override + a patch revert. All signatures/routing below are
+verified; the only genuinely new surface is the mojo URLLoaderFactory/URLLoader.
+
+Routing (confirmed): a blob: subresource is resolved in loader_factory_for_frame.cc:199
+via `PublicURLManager::Resolve(url, factory_receiver)` -> `BlobURLStore
+.ResolveAsURLLoaderFactory(url, factory)`. So we MUST supply a URLLoaderFactory; there is
+no shortcut through MbURLLoader (blob: never reaches it).
+
+Pieces:
+1. **Associated-interface override.** MbFrameClient::GetRemoteNavigationAssociatedInterfaces
+   returns a lazily-built `blink::AssociatedInterfaceProvider(main_thread_task_runner)`
+   (the local/testing ctor) with `OverrideBinderForTesting("blink.mojom.BlobURLStore",
+   binder)`. The binder gets a `mojo::ScopedInterfaceEndpointHandle`; wrap as
+   `PendingAssociatedReceiver<BlobURLStore>` and post to the service thread to bind
+   MbBlobURLStore. (Today this method is the base default -> requests queue unserviced ->
+   the [Sync] Register hangs, which is why patches/0003 skips Register.)
+2. **MbBlobURLStore** (service thread; one instance, holds `WTF::HashMap<String url,
+   mojo::Remote<Blob>>` — or std::map keyed by url.spec()):
+   - `Register(PendingRemote<Blob> blob, KURL url, RegisterCallback cb)`: store
+     url->Remote<Blob>; `cb.Run()` (unblocks the [Sync] Register).
+   - `Revoke(KURL url)`: erase.
+   - `ResolveAsURLLoaderFactory(KURL url, PendingReceiver<URLLoaderFactory> f)`: look up
+     the blob; MakeSelfOwnedReceiver(MbBlobURLLoaderFactory(blob clone), f). (Clone the
+     Blob remote via Blob.Clone so multiple loads work.)
+   - `ResolveAsBlobURLToken(...)`: minimal/no-op first (navigation to blob: is rarer).
+3. **MbBlobURLLoaderFactory : network::mojom::blink::URLLoaderFactory** — CreateLoaderAndStart
+   -> MbBlobURLLoader; Clone -> bind another factory (same blob).
+4. **MbBlobURLLoader : network::mojom::blink::URLLoader** — on start: ReadAll the blob into
+   a pipe (reuse the BlobReadSession chunked-writer pattern, but here driving the
+   URLLoaderClient), call client->OnReceiveResponse(head, body_consumer, nullopt) with a
+   URLResponseHead (200, Content-Type from the blob type if tracked, Content-Length), then
+   client->OnComplete(URLLoaderCompletionStatus(net::OK)). FollowRedirect/SetPriority/
+   Pause/Resume = no-op. (Body pipe: we hold the producer, the consumer goes to the client
+   in OnReceiveResponse; write the bytes with a SimpleWatcher like BlobReadSession.)
+5. **Revert patches/0003** (un-skip BlobURLStore.Register) — now serviced on the service
+   thread, so the [Sync] call no longer hangs.
+
+Verify (NEW smoke + mb_shot, watchdog-bounded): `var u=URL.createObjectURL(new Blob(
+['hi'],{type:'text/plain'})); fetch(u).then(r=>r.text())` === 'hi'; and `<img src=u>` of a
+1x1 PNG blob renders (pixel check). Risk: the URLResponseHead construction + the mojo
+URLLoaderFactory/URLLoader wiring are new; execute in a focused pass, revert if it can't
+be made clean in-tick (do NOT leave patches/0003 reverted without a working store, or
+createObjectURL hangs again).
+
 ## Risks / open questions
 
 - IO-pump thread + Blink's mojo core: confirm `mojo::core` is initialized in a mode

@@ -1294,6 +1294,21 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   (>256KB), is_blob (Response.blob/slice), and RegisterFromStream (fetch/stream bodies). Only
   increment 5 (blob: URL resolution) remains.
 
+- 📝 Increment 5 (blob: URL) EXECUTION-READY (2026-06-24): confirmed the routing and every
+  signature, scoped it fully in docs/design-blob-service-host.md. Routing: a blob: subresource is
+  resolved in loader_factory_for_frame.cc:199 -> PublicURLManager::Resolve ->
+  BlobURLStore.ResolveAsURLLoaderFactory, so we MUST supply a URLLoaderFactory (blob: never reaches
+  MbURLLoader — no shortcut). Components: (1) MbFrameClient::GetRemoteNavigationAssociatedInterfaces
+  returns an AssociatedInterfaceProvider(task_runner) with OverrideBinderForTesting(
+  "blink.mojom.BlobURLStore", ...) -> service thread; (2) MbBlobURLStore (url->Remote<Blob> map):
+  Register(blob,url,cb) stores + cb.Run(), Revoke erases, ResolveAsURLLoaderFactory binds a
+  factory; (3) MbBlobURLLoaderFactory (network::mojom::blink::URLLoaderFactory); (4)
+  MbBlobURLLoader serving the blob via OnReceiveResponse(head, body pipe via the BlobReadSession
+  chunked-writer) + OnComplete; (5) revert patches/0003. Verify: createObjectURL(blob) -> fetch(u)
+  .text() and <img src=u> render. Genuinely heavy (3 new classes + associated override + the new
+  mojo URLLoaderFactory surface) — a focused pass, not an end-of-tick cram; the spec makes it
+  mechanical. This is the LAST blob item; everything else in the blob subsystem is shipped.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
