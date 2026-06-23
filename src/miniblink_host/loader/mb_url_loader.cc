@@ -64,6 +64,20 @@ bool IsTransientHttpCode(long code) {
   return code == 429 || (code >= 500 && code <= 599);
 }
 
+// A process-wide in-memory cookie jar shared by every fetch, so Set-Cookie is honored
+// across a redirect chain (consent walls, login flows) AND across separate requests
+// (the main document and its subresources, or successive navigations) — i.e. the host
+// behaves like one browsing session. Single-threaded use, so no share lock callbacks.
+CURLSH* CookieShare() {
+  static CURLSH* share = [] {
+    CURLSH* s = curl_share_init();
+    if (s)
+      curl_share_setopt(s, CURLSHOPT_SHARE, CURL_LOCK_DATA_COOKIE);
+    return s;
+  }();
+  return share;
+}
+
 // Synchronous HTTP(S) fetch via the system libcurl (HTTPS via SecureTransport on macOS).
 // Blocks the calling task; fine for the headless/synchronous render model. Retries
 // transient failures with linear backoff so a single network hiccup (which produced
@@ -83,6 +97,9 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   curl_easy_setopt(curl, CURLOPT_USERAGENT,
                    (user_agent.empty() ? mb::MbDefaultUserAgent() : user_agent).c_str());
   curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");  // allow gzip, auto-decode
+  curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");  // enable the in-memory cookie engine
+  if (CURLSH* share = CookieShare())
+    curl_easy_setopt(curl, CURLOPT_SHARE, share);  // shared jar across all fetches
 
   constexpr int kMaxAttempts = 3;
   bool ok = false;

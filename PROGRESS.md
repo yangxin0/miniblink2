@@ -579,6 +579,18 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   'pending' forever (no backend responds) — a real gap, but fixing needs a full in-process
   IndexedDB mojo backend (large); documented as roadmap, not attempted. 34/34.
 
+- ✅ COOKIES (2026-06-23 17:?): added a process-wide in-memory cookie jar in the loader —
+  CookieShare() lazily makes a CURLSH(CURL_LOCK_DATA_COOKIE); every FetchHttp handle sets
+  CURLOPT_COOKIEFILE "" (enable engine) + CURLOPT_SHARE. So Set-Cookie is honored across a
+  redirect chain (consent/login flows) AND across separate requests (main doc + subresources,
+  successive navigations) — the host now behaves like one browsing session. Verified via
+  httpbin /cookies/set (302->/cookies) then a separate /cookies request, both echo mbck=val99.
+  Smoke 31 asserts this when httpbin is reachable, else SKIPs (network flakiness must not fail
+  the suite) — confirmed both a SKIP run and a PASS run. Single-threaded, so no share lock
+  callbacks. No on-disk persistence (session-scoped) — right for headless. 34/35 (cookie case
+  conditional). Note: this is network-side cookies; document.cookie (JS) is separate and not
+  yet wired to this jar.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

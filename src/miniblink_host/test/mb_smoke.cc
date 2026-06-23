@@ -385,6 +385,25 @@ int main() {
   mbWait(v, 150);
   std::fprintf(stderr, "PROBE4 indexedDB=%s\n", Eval(v, "String(window.__idb)").c_str());
 
+  // 31. Cookie jar (network — gracefully skipped if httpbin is unreachable). Set a
+  // cookie via a redirecting endpoint, then make a SEPARATE request that must still
+  // send it: proves Set-Cookie survives the redirect and the in-memory jar is shared
+  // across requests.
+  mbLoadURL(v, "https://httpbin.org/cookies/set?mbck=val99");  // 302 -> /cookies
+  mbWait(v, 400);
+  std::string ck1 = Eval(v, "document.body?document.body.innerText:''");
+  if (ck1.find("cookies") != std::string::npos) {  // httpbin responded
+    bool survived_redirect = ck1.find("val99") != std::string::npos;
+    mbLoadURL(v, "https://httpbin.org/cookies");  // separate request, shared jar
+    mbWait(v, 400);
+    std::string ck2 = Eval(v, "document.body?document.body.innerText:''");
+    bool jar_persists = ck2.find("val99") != std::string::npos;
+    Expect(survived_redirect && jar_persists,
+           "cookie jar: survives redirect + persists across requests");
+  } else {
+    std::fprintf(stderr, "  [SKIP] cookie jar (httpbin unreachable)\n");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

@@ -35,6 +35,7 @@ that satisfies modern Blink so it runs without the full browser.
 | Observers: Mutation, **Intersection** (forced past offscreen throttling), Resize | ✅ |
 | Web/CSS Animations advance (clock serviced); `XMLHttpRequest` + `fetch` | ✅ |
 | Console capture (`console.log`/`warn`/`error` → host) | ✅ |
+| **Cookies** (shared in-memory jar: Set-Cookie across redirects + requests) | ✅ |
 | On-screen window, GPU compositing, IndexedDB | ⏳ roadmap |
 
 ## Tool: `mb_shot` (headless HTML → PNG)
@@ -185,6 +186,7 @@ UTF-8 accent/CJK/emoji), programmatic scroll, mouse-move/hover, embedded-NUL doc
 integrity, full-page capture (resize → reflow → render below the fold), HiDPI
 (devicePixelRatio + resolution media queries), User-Agent (default + override), clip/
 region capture, transparent background, wait-for-selector, DOM storage
-(`localStorage`/`sessionStorage`), `requestAnimationFrame`, observer delivery (Mutation & Intersection & Resize), time-based animation (WAAPI/XHR), and
-console capture) — it prints PASS/FAIL per case and exits non-zero on any failure, so it
-doubles as a regression test.
+(`localStorage`/`sessionStorage`), `requestAnimationFrame`, observer delivery (Mutation & Intersection & Resize), time-based animation (WAAPI/XHR),
+console capture, and a cookie-jar check over the network) — it prints PASS/FAIL per case and
+exits non-zero on any failure, so it doubles as a regression test. (The cookie case is
+skipped, not failed, when the network is unavailable.)
