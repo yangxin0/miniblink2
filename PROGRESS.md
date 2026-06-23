@@ -5,6 +5,14 @@
 > the single source of truth for loop continuity. **Read it, do the next action,
 > update it, repeat.**
 
+## Git
+- miniblink-modern is a git repo (user-init'd). Initial commit 64f098b (2026-06-23).
+- COMMIT CONVENTION (parent CLAUDE.md, OVERRIDES the harness default): author
+  `Xin Yang <yangxin0@outlook.com>`, ~72-col wrapped body explaining WHY, NO AI/Claude
+  trailer (no Co-Authored-By). .gitignore excludes vendor/reference/ (verbatim Chromium copy).
+- patches/ are tracked here but apply to the DONOR chromium tree, not this repo.
+- Commit per-milestone going forward (only when it's a clean, tested state).
+
 ## Fixed facts
 - **Goal:** modern Blink (M150) running, driven by the `wke`/`mb` C API. NOT CEF.
   Single-process, libcurl networking, small outer shell.
@@ -371,6 +379,20 @@ implement the software LayerTreeFrameSink (mb_sw_frame_sink, scaffolded), Initia
 wiring + LayerTreeSettings, and keep the GetPaintRecord readback (still works post-composite).
 RECOMMENDED as the next big robustness investment instead of more per-crash guards.
 
+### ✅ CJK / i18n WORKS (2026-06-23 15:30) — no code change needed
+ja.wikipedia.org renders full Japanese text correctly (docs/demos/japanese-wikipedia.png) —
+Blink font fallback finds macOS system CJK fonts (PingFang/Hiragino) via CoreText
+automatically; the Latin SetStandardFontFamily etc. don't block fallback. bbc.com OK too.
+NOTE: baidu.com renders blank but that's NOT a bug — it serves a 227-byte redirect/JS stub
+to our UA (no content to render). To render baidu-style sites would need cookie/redirect
+handling + heavier JS; out of scope for a screenshot tool. No fix this tick (validation only).
+
+### ✅ FORM CONTROLS + THEME (2026-06-23 15:38) — no code change needed
+docs/demos/form-controls.png: text input, checkbox/radio (checked, blue), button (native
+gradient), select + dropdown arrow, textarea, range slider, progress bar — all render with
+correct native theming (LayoutTheme -> skia default theme). No crash, no fix. Interactive
+form UIs work (display only; actual input event handling is P3/未).
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
@@ -616,6 +638,12 @@ signatures, do this next tick:
   mb_smoke. Bring-up reaches step 8 then SIGSEGV. Got backtrace from the .ips crash report
   (lldb perm-blocked). ROOT CAUSE: MbPlatform::GetBrowserInterfaceBroker()==nullptr,
   deref'd by TimeZoneController::Init during CoreInitializer. Next: implement empty broker.
+- 2026-06-23 15:38 — Loop tick. Validated form controls + theming (input/checkbox/radio/
+  button/select/textarea/range/progress all render native-styled). No code change.
+  docs/demos/form-controls.png. Committed doc/demo updates.
+- 2026-06-23 15:30 — Loop tick. Validated CJK/i18n: ja.wikipedia renders Japanese via
+  CoreText font fallback (no code change). baidu = 227-byte stub (not a bug). docs/demos/
+  japanese-wikipedia.png. + committed initial repo (64f098b) last tick.
 - 2026-06-23 15:18 — Loop tick. **🎉 react.dev FIXED** — image.decode() on raster images
   re-entered DecodeRequestFinished synchronously mid-EraseIf (no-compositor sync callback).
   Patched WebFrameWidgetImpl::RequestDecode to PostTask the callback async. ~19/20 hard sites.
