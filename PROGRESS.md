@@ -601,6 +601,19 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   — got a real PASS. 35/36 (two conditional network cases: cookies + headers). This subsumes
   many needs (auth tokens, content negotiation, custom API headers).
 
+- ✅ mb_shot --text + document.cookie INVESTIGATION (2026-06-23 18:?): shipped --text (dump
+  document.body.innerText to stdout — mb_shot doubles as a scraper; verified on a known page).
+  Probed document.cookie (JS): write is a silent no-op, read returns '' (no throw). ROOT CAUSE
+  mapped: CookieJar uses the FRAME's BrowserInterfaceBroker (document_->GetFrame()->
+  GetBrowserInterfaceBroker(), cookie_jar.cc:305) to bind network::mojom::RestrictedCookieManager
+  — NOT Platform's broker (where MbEmptyBroker lives). We pass NullRemote for the main-frame
+  broker in CreateMainFrame, and frame_test_helpers (our model) does the same + never wires
+  cookies; the broker is also reset on each navigation commit. To fix: implement in-process
+  BrowserInterfaceBroker (1 method: GetInterface) routing RestrictedCookieManager (6 methods,
+  back with an in-memory per-origin store) + wire a real PendingRemote into CreateMainFrame AND
+  likely WebNavigationParams (broker-reset-on-commit). Deferred as a scoped roadmap gap (HTTP
+  cookies already cover most sites). 35/36.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

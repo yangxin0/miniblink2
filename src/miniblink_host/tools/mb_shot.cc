@@ -17,11 +17,13 @@
 //   --wait-ms N        before capturing, drive the engine for N ms (settle timers/async).
 //   --console          print the page's console output (console.log/warn/error) to stderr.
 //   --header "N: V"    add an HTTP request header (repeatable) to the navigation + subresources.
+//   --text             print the page's visible text (document.body.innerText) to stdout.
 //
 // This is the "product" the host enables: a standalone, single-process, modern-Blink
 // screenshot tool — no browser process, no CEF.
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -39,6 +41,7 @@ int main(int argc, char** argv) {
   bool full_page = false;
   bool transparent = false;
   bool print_console = false;
+  bool print_text = false;
   float scale = 1.0f;
   std::string clip;      // "x,y,w,h"
   std::string selector;  // CSS selector -> capture that element's box
@@ -66,6 +69,8 @@ int main(int argc, char** argv) {
       wait_ms = std::atoi(argv[++i]);
     } else if (a == "--console") {
       print_console = true;
+    } else if (a == "--text") {
+      print_text = true;
     } else if (a == "--header" && i + 1 < argc) {
       if (!headers.empty())
         headers += "\n";
@@ -156,6 +161,16 @@ int main(int argc, char** argv) {
     mbDrainConsole(view, cbuf, sizeof(cbuf));
     if (cbuf[0])
       std::fprintf(stderr, "---- page console ----\n%s----------------------\n", cbuf);
+  }
+
+  // --text: dump the page's visible text to stdout (a scraping mode). innerText
+  // reflects post-JS rendered text; large pages are truncated to the buffer.
+  if (print_text) {
+    std::vector<char> tbuf(1 << 20, 0);  // 1 MiB
+    mbEvalJS(view, "document.body ? document.body.innerText : ''", tbuf.data(),
+             static_cast<int>(tbuf.size()));
+    std::fwrite(tbuf.data(), 1, std::strlen(tbuf.data()), stdout);
+    std::fputc('\n', stdout);
   }
 
   // Clip / element capture: resolve a logical rectangle and shoot just that. We
