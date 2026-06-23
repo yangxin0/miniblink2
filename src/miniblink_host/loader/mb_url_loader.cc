@@ -12,6 +12,7 @@
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/task/single_thread_task_runner.h"
+#include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "net/base/net_errors.h"
 #include "services/network/public/cpp/resource_request.h"
@@ -39,8 +40,33 @@ size_t CurlWrite(char* ptr, size_t size, size_t nmemb, void* userdata) {
   return size * nmemb;
 }
 
+// A transient failure is worth retrying: it's a network-layer hiccup (DNS/TLS/
+// connect/timeout/dropped-connection) or a server backpressure code (429/5xx),
+// not a deterministic answer like 404/403 that a retry can't change.
+bool IsTransientCurlError(CURLcode rc) {
+  switch (rc) {
+    case CURLE_COULDNT_RESOLVE_HOST:
+    case CURLE_COULDNT_RESOLVE_PROXY:
+    case CURLE_COULDNT_CONNECT:
+    case CURLE_OPERATION_TIMEDOUT:
+    case CURLE_SSL_CONNECT_ERROR:
+    case CURLE_GOT_NOTHING:
+    case CURLE_PARTIAL_FILE:
+    case CURLE_RECV_ERROR:
+    case CURLE_SEND_ERROR:
+      return true;
+    default:
+      return false;
+  }
+}
+bool IsTransientHttpCode(long code) {
+  return code == 429 || (code >= 500 && code <= 599);
+}
+
 // Synchronous HTTP(S) fetch via the system libcurl (HTTPS via SecureTransport on macOS).
-// Blocks the calling task; fine for the headless/synchronous render model.
+// Blocks the calling task; fine for the headless/synchronous render model. Retries
+// transient failures with linear backoff so a single network hiccup (which produced
+// indistinguishable blank renders before) doesn't doom the whole page.
 bool FetchHttp(const std::string& url, std::string* body, std::string* content_type) {
   CURL* curl = curl_easy_init();
   if (!curl)
@@ -50,19 +76,45 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, body);
   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
   curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
   curl_easy_setopt(curl, CURLOPT_USERAGENT,
                    "Mozilla/5.0 (Macintosh; ARM Mac OS X) miniblink-modern/1.0");
   curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");  // allow gzip, auto-decode
-  const CURLcode rc = curl_easy_perform(curl);
-  long http_code = 0;
-  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+  constexpr int kMaxAttempts = 3;
+  bool ok = false;
+  for (int attempt = 1; attempt <= kMaxAttempts; ++attempt) {
+    body->clear();  // CurlWrite appends; start each attempt fresh
+    const CURLcode rc = curl_easy_perform(curl);
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    ok = rc == CURLE_OK && http_code >= 200 && http_code < 400 && !body->empty();
+    const bool retryable =
+        !ok && attempt < kMaxAttempts &&
+        (IsTransientCurlError(rc) ||
+         (rc == CURLE_OK && IsTransientHttpCode(http_code)));
+    if (!retryable)
+      break;
+
+    if (std::getenv("MB_VERBOSE")) {
+      std::fprintf(stderr,
+                   "[mb_url_loader] transient failure (curl=%d http=%ld) on %s "
+                   "— retry %d/%d\n",
+                   rc, http_code, url.c_str(), attempt, kMaxAttempts - 1);
+    }
+    // Linear backoff: 250ms, 500ms. Modest — a render shouldn't stall for long,
+    // and curl already bounds each attempt with its own timeouts.
+    base::PlatformThread::Sleep(base::Milliseconds(250 * attempt));
+  }
+
   const char* ct = nullptr;
   curl_easy_getinfo(curl, CURLINFO_CONTENT_TYPE, &ct);
   if (ct)
     *content_type = ct;
   curl_easy_cleanup(curl);
-  return rc == CURLE_OK && http_code >= 200 && http_code < 400 && !body->empty();
+  return ok;
 }
 }  // namespace
 

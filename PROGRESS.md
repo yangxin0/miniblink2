@@ -441,6 +441,16 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   Possible follow-up: thread a real load-status through the C ABI (mbLoadURL is void), and/or
   curl retry/backoff, so transient failures recover instead of just being reported.
 
+- ✅ FETCH RETRY/BACKOFF (2026-06-23 16:?): direct follow-up to the load-failure-visibility
+  tick — now transient failures RECOVER, not just get reported. FetchHttp retries up to 3
+  attempts with linear backoff (250ms, 500ms) but ONLY for transient causes: network-layer
+  curl errors (resolve/connect/timeout/TLS/recv/send/got-nothing/partial) and server
+  backpressure (429, 5xx). Deterministic answers (404/403/etc.) are NOT retried. Added
+  CURLOPT_CONNECTTIMEOUT=15 to bound a dead host. Verified: bad host retries 2x then fails;
+  example.com succeeds first try (no added latency on the happy path). The sleep is on the
+  main thread, consistent with the existing synchronous-fetch render model (the fetch
+  already blocks the main thread). 13/13 suite unaffected.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
