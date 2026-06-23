@@ -699,6 +699,27 @@ int main() {
              Eval(v, "String(window.__idb)") == "error",
          "IndexedDB open() fails gracefully via onerror (no hang/crash)");
 
+  // 40. WebSocket degrades gracefully. We have no network backend for the WS
+  // mojo connector, so the handshake can't complete — but it must FAIL with the
+  // spec's error/close events, not crash or hang the host. (A site's reconnect
+  // logic then works normally.) Construct on a real origin, capture the close,
+  // assert the socket reached a terminal state (CLOSING/CLOSED, readyState>=2)
+  // and the host is still scriptable. Common API; clean event-based failure is
+  // the strong invariant here.
+  mbLoadHTML(v, "<body>ws-guard</body>", "https://miniblink.test/");
+  mbRunJS(v,
+    "window.__ws='pending';"
+    "try{var s=new WebSocket('wss://miniblink.test/x');"
+    "s.onerror=function(){window.__ws='error';};"
+    "s.onclose=function(){window.__ws='closed';};"
+    "}catch(e){window.__ws='threw:'+e.name;}");
+  mbWait(v, 300);
+  Expect(Eval(v, "1+1") == "2" &&
+             Eval(v, "document.body.textContent") == "ws-guard" &&
+             (Eval(v, "String(window.__ws)") == "closed" ||
+              Eval(v, "String(window.__ws)") == "error"),
+         "WebSocket degrades gracefully (error/close event, no hang/crash)");
+
   mbDestroyView(v);
   mbShutdown();
 

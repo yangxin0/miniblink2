@@ -871,6 +871,17 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   confirmed graceful. Only Blob's [Sync] BlobURLStore.Register remains a true HANG (sync mojo on
   the main thread, no servicing thread) — the last hard hazard in this family.
 
+- ✅ NETWORK/STORAGE APIs crash-safe; WebSocket degrades cleanly (2026-06-23): swept three more
+  common backend-dependent APIs. (1) WebSocket: `new WebSocket(wss://...)` constructs, then with
+  no network backend fires onerror + onclose — i.e. it reaches a terminal CLOSED state via the
+  spec events rather than crashing or hanging, so a site's reconnect logic behaves normally.
+  STRONG graceful degradation; smoke 40 guards it (construct on a real origin, assert the close/
+  error event fired + host scriptable). (2) Cache API: `caches` exists (typeof object);
+  caches.open() stays pending (no backend settles it) — an unsettled promise, NOT a host hang, no
+  crash. (3) BroadcastChannel: constructs and postMessage() is a safe no-op (no peer). All three
+  exit 0, no survivors. So beyond the worker family, the common network/storage surface is also
+  crash/hang-safe; WebSocket in particular fails the "right" way (events, not silence). 50/50.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
