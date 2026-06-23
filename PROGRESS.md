@@ -1280,6 +1280,20 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   new Blob(...) reads work; only the fetched-response->blob combination remains. Separate follow-up
   alongside blob: URL (increment 5).
 
+- ✅ FIX: fetch(url).blob() works — RegisterFromStream implemented + VERIFIED reached (2026-06-24):
+  closed the gap noted just above. A *fetched* response's .blob() streams the body through
+  BlobRegistry.RegisterFromStream (FetchDataLoader::CreateLoaderAsBlobHandle, fetch_data_loader.cc),
+  which was stubbed to return nullptr -> "Failed to fetch". (Earlier I reverted a RegisterFromStream
+  impl because new Response(string).blob() didn't reach it — that path uses the is_blob wrapper,
+  smoke 68. A FETCHED response's body genuinely uses RegisterFromStream — the distinction the
+  instrumentation revealed.) Implemented StreamRegistration (mojo::DataPipeDrainer reads the body
+  pipe to EOF -> MbBlob(uuid,bytes) -> reply with BlobDataHandle::Create(uuid,type,size,remote), the
+  blink type-mapped SerializedBlob reply). VERIFIED reached + correct: fetch('data:text/plain,
+  blob-data').blob().text() === 'blob-data' (smoke 69 — would fail if RegisterFromStream returned
+  null). 82/82, no survivors. Blob is now complete across ALL creation paths: inline, BytesProvider
+  (>256KB), is_blob (Response.blob/slice), and RegisterFromStream (fetch/stream bodies). Only
+  increment 5 (blob: URL resolution) remains.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

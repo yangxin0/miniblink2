@@ -1270,23 +1270,26 @@ int main() {
            "Blob-of-blob resolves: Response.blob() + Blob.slice() read through");
   }
 
-  // 69. fetch('data:...') resolves (the loader now decodes data: URLs in-process
-  // via net::DataURL::Parse instead of failing). Covers .text() and
-  // .arrayBuffer() of a data: response. (fetch(...).blob() of a fetched response
-  // is a separate known gap — a fetch/blob-response interaction, not data:
-  // decoding; see PROGRESS.)
+  // 69. fetch('data:...') resolves (loader decodes data: via net::DataURL::Parse)
+  // for .text(), .arrayBuffer() AND .blob(). A fetched response's .blob() streams
+  // the body through BlobRegistry.RegisterFromStream (fetch_data_loader.cc), which
+  // we now service by draining the body into a blob.
   {
     mbLoadHTML(v, "<body>fetchdata</body>", "about:blank");
     mbRunJS(v,
-      "window.__ft='pending';window.__fa=-1;"
+      "window.__ft='pending';window.__fa=-1;window.__fb='pending';"
       "fetch('data:text/plain,hello-data').then(function(r){return r.text();})"
       ".then(function(t){window.__ft=t;},function(e){window.__ft='rej';});"
       "fetch('data:application/octet-stream,abcd').then(function(r){return r.arrayBuffer();})"
-      ".then(function(a){window.__fa=a.byteLength;},function(e){window.__fa='rej';});");
+      ".then(function(a){window.__fa=a.byteLength;},function(e){window.__fa='rej';});"
+      "fetch('data:text/plain,blob-data').then(function(r){return r.blob();})"
+      ".then(function(b){return b.text();}).then(function(t){window.__fb=t;},"
+      "function(e){window.__fb='rej';});");
     mbWait(v, 400);
     Expect(Eval(v, "window.__ft") == "hello-data" &&
-               Eval(v, "String(window.__fa)") == "4",
-           "fetch('data:...') resolves: .text() and .arrayBuffer()");
+               Eval(v, "String(window.__fa)") == "4" &&
+               Eval(v, "window.__fb") == "blob-data",
+           "fetch('data:...') resolves: .text(), .arrayBuffer(), .blob()");
   }
 
   mbDestroyView(v);

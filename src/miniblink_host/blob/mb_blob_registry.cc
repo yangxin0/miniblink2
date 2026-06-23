@@ -21,6 +21,8 @@
 #include "mojo/public/cpp/system/simple_watcher.h"
 #include "third_party/blink/public/mojom/blob/blob.mojom-blink.h"
 #include "third_party/blink/public/mojom/blob/data_element.mojom-blink.h"
+#include "third_party/blink/renderer/platform/blob/blob_data.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace mb {
 namespace {
@@ -291,6 +293,56 @@ class MbBlob : public blink::mojom::blink::Blob {
   base::WeakPtrFactory<MbBlob> weak_factory_{this};
 };
 
+// Services BlobRegistry.RegisterFromStream: drains the body data pipe into
+// bytes, builds an MbBlob, and replies with a BlobDataHandle (the blink-variant
+// type mapping of the SerializedBlob reply). Used when a blob is built from a
+// streamed body — e.g. fetch(url).blob() (FetchDataLoader::CreateLoaderAsBlobHandle,
+// fetch_data_loader.cc:84). Self-owned on the service thread.
+class StreamRegistration : public mojo::DataPipeDrainer::Client {
+ public:
+  static void Start(
+      blink::String content_type,
+      mojo::ScopedDataPipeConsumerHandle data,
+      blink::mojom::blink::BlobRegistry::RegisterFromStreamCallback callback) {
+    (new StreamRegistration(std::move(content_type), std::move(callback)))
+        ->Begin(std::move(data));
+  }
+
+ private:
+  StreamRegistration(
+      blink::String content_type,
+      blink::mojom::blink::BlobRegistry::RegisterFromStreamCallback callback)
+      : content_type_(std::move(content_type)),
+        callback_(std::move(callback)) {}
+
+  void Begin(mojo::ScopedDataPipeConsumerHandle data) {
+    drainer_ = std::make_unique<mojo::DataPipeDrainer>(this, std::move(data));
+  }
+  void OnDataAvailable(base::span<const uint8_t> data) override {
+    bytes_.insert(bytes_.end(), data.begin(), data.end());
+  }
+  void OnDataComplete() override {
+    static uint64_t next_id = 0;  // service-thread only
+    blink::String uuid = "mb-stream-" + blink::String::Number(next_id++);
+    mojo::PendingRemote<blink::mojom::blink::Blob> remote;
+    std::vector<MbBlob::Part> parts;
+    MbBlob::Part p;
+    p.inline_bytes = bytes_;
+    parts.push_back(std::move(p));
+    mojo::MakeSelfOwnedReceiver(
+        std::make_unique<MbBlob>(uuid, std::move(parts)),
+        remote.InitWithNewPipeAndPassReceiver());
+    std::move(callback_).Run(blink::BlobDataHandle::Create(
+        uuid, content_type_, bytes_.size(), std::move(remote)));
+    delete this;
+  }
+
+  blink::String content_type_;
+  blink::mojom::blink::BlobRegistry::RegisterFromStreamCallback callback_;
+  std::vector<uint8_t> bytes_;
+  std::unique_ptr<mojo::DataPipeDrainer> drainer_;
+};
+
 // In-process BlobRegistry. Lives on the service thread; turns Register's
 // DataElements into an MbBlob (inline bytes or BytesProvider per element).
 class MbBlobRegistry : public blink::mojom::blink::BlobRegistry {
@@ -332,13 +384,13 @@ class MbBlobRegistry : public blink::mojom::blink::BlobRegistry {
   }
 
   void RegisterFromStream(
-      const blink::String&,
-      const blink::String&,
-      uint64_t,
-      mojo::ScopedDataPipeConsumerHandle,
+      const blink::String& content_type,
+      const blink::String& /*content_disposition*/,
+      uint64_t /*length_hint*/,
+      mojo::ScopedDataPipeConsumerHandle data,
       mojo::PendingAssociatedRemote<blink::mojom::blink::ProgressClient>,
       RegisterFromStreamCallback callback) override {
-    std::move(callback).Run(nullptr);  // not supported yet
+    StreamRegistration::Start(content_type, std::move(data), std::move(callback));
   }
 };
 
