@@ -45,6 +45,7 @@ class MbWebView {
   void RunJS(const char* utf8_script);  // execute JS in the main frame
   void SendMouseClick(int x, int y);
   void SendText(const char* utf8);
+  void SendScroll(int x, int y, int dx, int dy);
   std::string EvalToString(const char* utf8_script);  // eval JS -> string result
   bool PaintToBitmap(void* out_bgra, int w, int h, int stride);
   bool SavePng(const char* path, int w, int h);  // render + encode PNG to disk

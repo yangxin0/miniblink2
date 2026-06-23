@@ -73,6 +73,11 @@ void mbSendText(mbView* v, const char* utf8_text) {
     v->impl->SendText(utf8_text);
 }
 
+void mbSendScroll(mbView* v, int x, int y, int dx, int dy) {
+  if (v && v->impl)
+    v->impl->SendScroll(x, y, dx, dy);
+}
+
 int mbEvalJS(mbView* v, const char* utf8_script, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;

@@ -55,6 +55,10 @@ MB_EXPORT void mbSendMouseClick(mbView*, int x, int y);
 // Type ASCII text into the focused element (synthesized key events).
 MB_EXPORT void mbSendText(mbView*, const char* utf8_text);
 
+// Synthesize a gesture scroll at (x,y) by (dx,dy) pixels. Positive dy scrolls
+// the page downward (toward larger window.scrollY), matching natural intent.
+MB_EXPORT void mbSendScroll(mbView*, int x, int y, int dx, int dy);
+
 // Evaluate JS and write its result (coerced to string) into `out` (NUL-terminated,
 // up to out_cap bytes). Returns the full result length in bytes (may exceed out_cap-1,
 // indicating truncation). Lets the host read data back from the page (e.g. document.title).

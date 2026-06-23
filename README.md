@@ -114,6 +114,7 @@ void  mbRunJS(mbView*, const char* script);         // host -> page: drive it
 int   mbEvalJS(mbView*, const char* script, char* out, int cap);  // host <- page: read back
 void  mbSendMouseClick(mbView*, int x, int y);      // synthesize a click
 void  mbSendText(mbView*, const char* text);        // type ASCII into the focused element
+void  mbSendScroll(mbView*, int x, int y, int dx, int dy);  // scroll the page (dy>0 = down)
 int   mbPaintToBitmap(mbView*, void* bgra, int w, int h, int stride);
 int   mbSavePng(mbView*, const char* path, int w, int h);  // render -> PNG file
 void  mbResize(mbView*, int w, int h);
@@ -135,7 +136,8 @@ Requirements: a Chromium M150 source tree with a component `out/Release`
 ./build.sh /path/to/chromium-150.x.y.z   # stages host into the tree, gn gen, ninja, runs the suite
 ```
 
-`mb_smoke` is an 8-case capability test suite (HTML/DOM, JS, CSS computed style, UA
+`mb_smoke` is an 11-case capability test suite (HTML/DOM, JS, CSS computed style, UA
 stylesheet, the `mbRunJS`+`mbEvalJS` bridge, `<canvas>` getImageData, external `<link>`
-CSS via the subresource loader, and paint-to-bitmap) — it prints PASS/FAIL per case and
-exits non-zero on any failure, so it doubles as a regression test.
+CSS via the subresource loader, paint-to-bitmap, synthesized click, typed text, and
+programmatic scroll) — it prints PASS/FAIL per case and exits non-zero on any failure, so
+it doubles as a regression test.

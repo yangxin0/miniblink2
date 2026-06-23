@@ -34,6 +34,7 @@
 #include "third_party/blink/public/web/web_view.h"
 #include "third_party/icu/source/common/unicode/uscript.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
@@ -178,6 +179,27 @@ void MbWebView::SendMouseClick(int x, int y) {
 void MbWebView::SendText(const char* utf8) {
   if (widget_)
     widget_->SendText(utf8);
+}
+
+void MbWebView::SendScroll(int x, int y, int dx, int dy) {
+  // Modern Blink routes gesture/wheel scrolls through the compositor input
+  // pipeline; the main-thread WebFrameWidgetImpl::HandleGestureEvent CHECKs that
+  // scroll events never reach it. A non-compositing offscreen widget has no such
+  // pipeline, so we scroll the layout viewport programmatically on the main
+  // thread. This moves the viewport, updates window.scrollY, and fires the
+  // 'scroll' event — what a headless capture/automation host needs. (x,y) is
+  // accepted for API symmetry with input events but unused: the document
+  // viewport is the scroll target. Positive dy scrolls the page downward.
+  (void)x;
+  (void)y;
+  if (!main_frame_)
+    return;
+  auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
+  blink::LocalFrame* frame = impl->GetFrame();
+  if (!frame || !frame->DomWindow())
+    return;
+  frame->DomWindow()->scrollByForTesting(static_cast<double>(dx),
+                                         static_cast<double>(dy));
 }
 
 void MbWebView::RunJS(const char* utf8_script) {

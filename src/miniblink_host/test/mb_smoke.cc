@@ -3,6 +3,7 @@
 // robust; plus one pixel check). Prints PASS/FAIL per case and a summary; exit 0 iff all pass.
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -116,6 +117,21 @@ int main() {
   mbSendText(v, "hi there");
   Expect(Eval(v, "document.getElementById('t').value") == "hi there",
          "input: typed text");
+
+  // 11. Scroll: a tall page, synthesize a downward gesture scroll, verify scrollY.
+  mbLoadHTML(v,
+             "<body style='margin:0'><div style='height:5000px'></div></body>",
+             "about:blank");
+  {
+    std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // force layout so it's scrollable
+  }
+  mbSendScroll(v, 200, 150, 0, 400);  // scroll down 400px
+  {
+    int sy = std::atoi(Eval(v, "String(Math.round(window.scrollY))").c_str());
+    Expect(sy > 0, "input: gesture scroll (scrollY)",
+           std::to_string(sy));
+  }
 
   mbDestroyView(v);
   mbShutdown();

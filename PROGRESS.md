@@ -404,6 +404,17 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   kRawKeyDown+kChar(text[0])+kKeyUp through HandleInputEvent. Suite case 10: focus an
   <input>, type "hi there", verify .value via mbEvalJS. 10/10. (ASCII only; UTF-8 decode TODO.)
   => click + type = forms are fillable/submittable. Engine is interactively drivable.
+- ✅ SCROLL (2026-06-23 16:?): mbSendScroll(view,x,y,dx,dy) — dy>0 scrolls down. Suite case
+  11: tall page, scroll 400px, assert window.scrollY>0 (== 400). **Architectural finding:**
+  a SYNTHETIC gesture/wheel scroll has NO valid path in a non-compositing widget — modern
+  Blink routes scroll gestures through the compositor input pipeline and
+  WebFrameWidgetImpl::HandleGestureEvent has CHECK(!event.IsScrollEvent()) (web_frame_widget_impl.cc:1205),
+  so injecting kGestureScrollUpdate via HandleInputEvent crashes. Resolution: scroll the
+  layout viewport PROGRAMMATICALLY on the main thread via LocalDOMWindow::scrollByForTesting
+  (moves viewport, updates scrollY, fires 'scroll' event) — the headless-correct behavior.
+  (x,y) accepted for API symmetry but unused; the document viewport is the target. This is
+  another instance of the "non-compositing widget hits compositor-assumption paths" theme —
+  but solved without a blink patch, by using the main-thread scroll API.
 
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
