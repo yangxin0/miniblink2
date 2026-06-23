@@ -18,6 +18,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "net/base/data_url.h"
+#include "net/base/filename_util.h"
 #include "net/base/net_errors.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "third_party/blink/public/platform/web_string.h"
@@ -280,8 +281,13 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* content_type, const std::string& user_agent,
                 const std::string& extra_headers) {
   GURL url(url_spec);
-  if (url.SchemeIsFile())
-    return base::ReadFileToString(base::FilePath(std::string(url.path())), body);
+  if (url.SchemeIsFile()) {
+    // Convert via net (percent-decodes the path; "Andale%20Mono.ttf" -> a space)
+    // — a raw url.path() leaves it encoded and ReadFileToString fails.
+    base::FilePath fp;
+    return net::FileURLToFilePath(url, &fp) &&
+           base::ReadFileToString(fp, body);
+  }
   if (url.SchemeIsHTTPOrHTTPS())
     return FetchHttp(url_spec, body, content_type, user_agent, extra_headers);
   if (url.SchemeIs("data")) {
@@ -324,7 +330,9 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   std::string http_content_type;  // from the server, may be "text/html; charset=..."
   bool ok = false;
   if (url.SchemeIsFile()) {
-    ok = base::ReadFileToString(base::FilePath(std::string(url.path())), &contents);
+    base::FilePath fp;  // net path conversion percent-decodes (spaces etc.)
+    ok = net::FileURLToFilePath(url, &fp) &&
+         base::ReadFileToString(fp, &contents);
   } else if (url.SchemeIsHTTPOrHTTPS()) {
     ok = FetchHttp(url.spec(), &contents, &http_content_type, user_agent_,
                    extra_headers_);

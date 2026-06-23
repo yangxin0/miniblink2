@@ -1389,6 +1389,19 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   correctly, the final load is exactly right, exit 0, no survivors. Confirms clean per-load lifecycle
   (no accumulated breakage / state leak across navigations). Smoke 74. 89/89.
 
+- ✅ FIX: file:// URLs now percent-decode (spaces) + web fonts (@font-face) work (2026-06-24):
+  probing @font-face over file:// (a documented "fonts" gap) surfaced a real loader bug. MbURLLoader
+  fed url.path() — still percent-encoded — to ReadFileToString, so any file:// path with a space
+  (e.g. "Andale%20Mono.ttf", or macOS "Application Support") failed (0 bytes, NetworkError). FIX:
+  both file:// sites (MbFetchUrl + Deliver) now use net::FileURLToFilePath(url,&fp), which decodes
+  and converts properly. RESULT: @font-face over file:// now LOADS end to end — verified via mb_shot
+  (FontFace.load() status='loaded'; the custom monospace font measures differently from serif:
+  wTF=192 vs wSerif=195), so web fonts via the FontFace API + Skia/FreeType parse + metrics work
+  (the "web fonts" gap was really this decode bug, not a missing pipeline). Portable regression guard
+  (smoke 75): write a stylesheet with a space in its name, link it via file:///...%20..., assert the
+  style applies (rgb(7,8,9)); uses a file:// base so it's same-origin (opaque about:blank -> file://
+  is separately policy-blocked — noted). 90/90, no survivors. Real bug fix, found by probing.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

@@ -1399,6 +1399,31 @@ int main() {
            "stability: 25 sequential loads each render + script correctly");
   }
 
+  // 75. file:// URLs with percent-encoded chars (spaces) decode correctly. The
+  // loader used to pass url.path() (still %20-encoded) to the filesystem, so any
+  // path with a space failed (common on macOS: "Application Support", fonts with
+  // spaces — this broke @font-face). Now it goes through net::FileURLToFilePath.
+  // Portable check (no system-font dependency): write a stylesheet whose name has
+  // a space, link it via file:///...%20..., and confirm the style applies.
+  {
+    const char* css_path = "/tmp/mb url space.css";
+    if (FILE* f = std::fopen(css_path, "wb")) {
+      std::fputs("#z{color:rgb(7,8,9)}", f);
+      std::fclose(f);
+    }
+    // file:// base so the file:// stylesheet is same-origin (isolates the decode
+    // fix from opaque-origin subresource policy).
+    mbLoadHTML(v,
+      "<head><link rel='stylesheet' href='file:///tmp/mb%20url%20space.css'>"
+      "</head><body><b id='z'>x</b></body>", "file:///tmp/mb_page.html");
+    mbWaitForSelector(v, "#z", 1000);
+    mbWait(v, 80);  // let the stylesheet fetch + apply
+    Expect(Eval(v, "getComputedStyle(document.getElementById('z')).color") ==
+               "rgb(7, 8, 9)",
+           "file:// path with spaces decodes + loads (net::FileURLToFilePath)");
+    std::remove(css_path);
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
