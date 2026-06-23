@@ -616,6 +616,23 @@ int main() {
                      .find("0.5") != std::string::npos,
          "modern CSS: :has(), nesting, @container, color-mix()");
 
+  // 36. Web Components (Custom Elements v1 + Shadow DOM) — a major modern-platform
+  // feature (M47 had only the v0 prototype). Define a custom element (its
+  // connectedCallback upgrades it), and attach an encapsulated shadow tree.
+  mbLoadHTML(v, "<body><div id='host'></div></body>", "about:blank");
+  mbRunJS(v,
+    "customElements.define('my-el',class extends HTMLElement{"
+    "  connectedCallback(){this.textContent='upgraded';}});"
+    "document.body.appendChild(document.createElement('my-el'));"
+    "var sr=document.getElementById('host').attachShadow({mode:'open'});"
+    "sr.innerHTML='<span id=s>shadow</span>';");
+  mbWait(v, 40);
+  Expect(Eval(v, "document.querySelector('my-el').textContent") == "upgraded" &&
+             Eval(v, "document.getElementById('host').shadowRoot.querySelector('#s')"
+                     ".textContent") == "shadow" &&
+             Eval(v, "String(document.querySelector('#s'))") == "null",  // encapsulated
+         "Web Components: custom element upgrade + shadow DOM encapsulation");
+
   mbDestroyView(v);
   mbShutdown();
 

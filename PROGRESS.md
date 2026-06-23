@@ -822,6 +822,12 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   0.5. 45/45, no survivors. Demonstrates the whole point of the upgrade (none of these existed
   in the frozen ~2015 M47 engine). On-theme verification + regression guard.
 
+- ✅ WEB COMPONENTS verified (2026-06-23 21:?): Custom Elements v1 + Shadow DOM both work —
+  customElements.define + connectedCallback upgrades a created element (textContent='upgraded'),
+  attachShadow({open}) + shadowRoot.querySelector returns the shadow content, and light-DOM
+  querySelector can't see it (encapsulated). Smoke 36 asserts all three. 46/46, no survivors.
+  Another on-theme M150 marker (M47 had only the v0 prototype). Pure-DOM, offline-verifiable.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

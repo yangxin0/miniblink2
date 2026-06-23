@@ -22,6 +22,7 @@ that satisfies modern Blink so it runs without the full browser.
 | Fonts + text (CoreText), real glyph rasterization | ✅ |
 | **Modern CSS**: Grid, Flexbox+gap, gradients, border-radius, box-shadow, 2D transforms | ✅ |
 | **Cutting-edge CSS**: `:has()`, native nesting, `@container`, `color-mix()`, `oklch()` | ✅ |
+| **Web Components**: Custom Elements v1 + Shadow DOM (encapsulated) | ✅ |
 | **JavaScript** (V8) + DOM mutation → style recalc → relayout → repaint | ✅ |
 | `<canvas>` 2D drawing via JS (shapes, gradients, text → skia) | ✅ |
 | `mbLoadURL("file://…")` — load a document from disk | ✅ |
