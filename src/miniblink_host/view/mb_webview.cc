@@ -241,11 +241,16 @@ void MbWebView::LoadURL(const char* utf8_url) {
   if (url.rfind("http", 0) == 0) {
     // Top-level http(s): fetch via libcurl, commit with base = the URL so relative
     // subresources resolve and load through MbURLLoader.
-    std::string body, content_type;
+    std::string body, content_type, final_url;
     const bool ok = MbFetchUrl(
         url, &body, &content_type,
         frame_client_ ? frame_client_->user_agent() : std::string(),
-        frame_client_ ? frame_client_->extra_headers() : std::string());
+        frame_client_ ? frame_client_->extra_headers() : std::string(),
+        /*post_body=*/std::string(), /*post_content_type=*/std::string(),
+        /*http_method=*/std::string(), &final_url);
+    // If the server redirected us, commit with the FINAL URL as the document's
+    // base so location.href and relative subresources reflect where we landed.
+    const std::string& doc_url = final_url.empty() ? url : final_url;
     if (std::getenv("MB_VERBOSE")) {
       std::fprintf(stderr, "[mb_webview] main-doc %s ok=%d bytes=%zu ct='%s'\n",
                    url.c_str(), ok, body.size(), content_type.c_str());
@@ -261,7 +266,7 @@ void MbWebView::LoadURL(const char* utf8_url) {
         std::string::size_type end = content_type.find_first_of("; \t", p);
         charset = content_type.substr(p, end == std::string::npos ? end : end - p);
       }
-      CommitHtml(body.data(), body.size(), url.c_str(), charset);
+      CommitHtml(body.data(), body.size(), doc_url.c_str(), charset);
     }
   }
 }

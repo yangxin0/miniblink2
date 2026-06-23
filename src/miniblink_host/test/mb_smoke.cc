@@ -590,6 +590,25 @@ int main() {
                    st.c_str());
     }
   }
+
+  // 40. Navigation redirect: navigating to a URL that 302-redirects must commit
+  // with the FINAL URL as the document URL (location.href), not the original.
+  // curl follows the redirect; LoadURL now commits the effective URL as the base.
+  {
+    mbLoadURL(v,
+              (host + "/redirect-to?url=" + host + "/get&status_code=302").c_str());
+    mbWait(v, 700);
+    std::string loc = Eval(v, "String(location.href)");
+    if (loc.find("/get") != std::string::npos ||
+        loc.find("/redirect-to") != std::string::npos) {  // host responded
+      Expect(loc.find("/get") != std::string::npos &&
+                 loc.find("/redirect-to") == std::string::npos,
+             "navigation redirect commits the final URL as location.href", loc);
+    } else {
+      std::fprintf(stderr, "  [SKIP] nav redirect (host unreachable: %s)\n",
+                   loc.c_str());
+    }
+  }
   }  // MB_NET_TESTS
 
   // 33. document.cookie (JS): write then read round-trips through the in-process

@@ -1658,6 +1658,26 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   '日本' all decode; UTF-8 WITH and WITHOUT <meta> still correct (café / café 日本). Smoke cases 81
   (ISO-8859-1 via meta) + 82 (UTF-8 no-meta auto-detect) added — 100/100, no survivors.
 
+- ✅ DONE: navigation redirects commit the final URL — shipped (2026-06-24): navigating to a URL
+  that 3xx-redirects (http->https, www, shorteners, login flows) committed the document with the
+  ORIGINAL URL as its base, so location.href was wrong and relative subresources resolved against
+  the pre-redirect URL. curl follows the redirect internally; now FetchHttp exposes the effective
+  URL (CURLINFO_EFFECTIVE_URL) via a new out_final_url param, MbFetchUrl forwards it, and
+  MbWebView::LoadURL commits with that final URL as the document base. VERIFIED: mb_shot nav to
+  httpbin /redirect-to?url=example.com renders Example Domain; gated smoke case 40 asserts
+  location.href == <host>/get after a 302 (was the /redirect-to URL). Net suite 109/109, default
+  100/100. SCOPED OUT (the harder sibling): fetch()/XHR response.url + response.redirected after a
+  redirect still report the request URL — fixing those needs the loader to follow redirects MANUALLY
+  and report each hop via WillFollowRedirect (Blink DCHECKs response.CurrentRequestUrl()==url_list_
+  .back(), so you can't just rewrite the response URL — confirmed: it aborts at fetch_manager.cc:714).
+  That's a sizable loader rework; deferred.
+- ⚠️ KNOWN GAPS (probed 2026-06-24, all the documented heavy items; everything else works): fetch(blob:)
+  fails (TypeError) — blob: URL resolution is the reverted BlobURLStore work; Web Workers are inert
+  (new Worker never fires onmessage/onerror) — "real worker execution"; fetch redirect response.url/
+  redirected (above). NOT gaps (verified working this tick): CSS calc/vw/@supports, TextDecoder,
+  AbortController fetch-abort, pseudo-elements, tables, media queries, checkbox-click+change,
+  animationend, custom elements/shadow DOM, designMode.
+
 ### REMAINING ROADMAP
 - P0-history: page-driven history.back()/forward() does nothing — History::back() ->
   LocalFrameClientImpl::NavigateBackForward -> LocalFrameHost.GoToEntryAtOffset (mojo to the absent

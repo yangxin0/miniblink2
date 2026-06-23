@@ -51,12 +51,16 @@ std::string MbGetCookiesForUrl(const std::string& url);
 // submission and fetch()/XHR with a body. `http_method` (e.g. "POST", "PUT",
 // "DELETE") sets the verb; empty means GET, or POST when a body is present. The
 // body/method apply only to http(s); file/data ignore them.
+// `out_final_url` (optional) receives the URL after any server redirects curl
+// followed (http only) — use it as the committed document's base so location and
+// relative subresources reflect where we actually landed.
 bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* content_type, const std::string& user_agent = "",
                 const std::string& extra_headers = "",
                 const std::string& post_body = "",
                 const std::string& post_content_type = "",
-                const std::string& http_method = "");
+                const std::string& http_method = "",
+                std::string* out_final_url = nullptr);
 
 class MbURLLoader : public blink::URLLoader {
  public:

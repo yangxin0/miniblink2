@@ -134,7 +134,8 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
                const std::string& post_body = "",
                const std::string& post_content_type = "",
                const std::string& http_method = "", int* out_status = nullptr,
-               std::string* out_headers = nullptr) {
+               std::string* out_headers = nullptr,
+               std::string* out_final_url = nullptr) {
   CURL* curl = curl_easy_init();
   if (!curl)
     return false;
@@ -245,6 +246,11 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
     *out_status = static_cast<int>(http_code);
   if (out_headers)
     *out_headers = std::move(header_block);
+  if (out_final_url) {
+    const char* eu = nullptr;  // URL after curl-followed redirects
+    if (curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &eu) == CURLE_OK && eu)
+      *out_final_url = eu;
+  }
   curl_easy_cleanup(curl);
   if (header_list)
     curl_slist_free_all(header_list);
@@ -417,7 +423,7 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* content_type, const std::string& user_agent,
                 const std::string& extra_headers, const std::string& post_body,
                 const std::string& post_content_type,
-                const std::string& http_method) {
+                const std::string& http_method, std::string* out_final_url) {
   GURL url(url_spec);
   if (url.SchemeIsFile()) {
     // Convert via net (percent-decodes the path; "Andale%20Mono.ttf" -> a space)
@@ -428,7 +434,9 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
   }
   if (url.SchemeIsHTTPOrHTTPS())
     return FetchHttp(url_spec, body, content_type, user_agent, extra_headers,
-                     post_body, post_content_type, http_method);
+                     post_body, post_content_type, http_method,
+                     /*out_status=*/nullptr, /*out_headers=*/nullptr,
+                     out_final_url);
   if (url.SchemeIs("data")) {
     std::string mime, charset;
     if (!net::DataURL::Parse(url, &mime, &charset, body))
