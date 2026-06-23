@@ -305,6 +305,31 @@ int main() {
   Expect(Eval(v, "String(window.__n)") == "2",
          "requestAnimationFrame chain advances", Eval(v, "String(window.__n)"));
 
+  // 27. Observer delivery: MutationObserver must fire on a DOM change, and an
+  // IntersectionObserver on an in-viewport element must deliver (the offscreen
+  // frame reads as throttled, so IO is force-computed by the host).
+  {
+    const char* doc =
+        "<body><div id='t'>0</div><div id='io' style='height:20px'></div>"
+        "<script>"
+        "window.__mo=0;new MutationObserver(function(){window.__mo=1;})"
+        ".observe(document.getElementById('t'),{childList:true,subtree:true,characterData:true});"
+        "document.getElementById('t').textContent='changed';"
+        "window.__io=0;new IntersectionObserver(function(es){"
+        "es.forEach(function(e){if(e.isIntersecting)window.__io=1;});})"
+        ".observe(document.getElementById('io'));"
+        "</script></body>";
+    if (FILE* f = std::fopen("/tmp/mb_observers.html", "wb")) {
+      std::fwrite(doc, 1, std::strlen(doc), f); std::fclose(f);
+    }
+    mbLoadURL(v, "file:///tmp/mb_observers.html");
+    mbWait(v, 80);
+    Expect(Eval(v, "String(window.__mo)") == "1", "MutationObserver delivers");
+    Expect(Eval(v, "String(window.__io)") == "1",
+           "IntersectionObserver delivers (in-viewport)",
+           Eval(v, "String(window.__io)"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

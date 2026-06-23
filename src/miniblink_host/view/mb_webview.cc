@@ -357,6 +357,15 @@ void MbWebView::ServiceAnimations() {
     web_view_->GetPage()->Animator().ServiceScriptedAnimations(
         base::TimeTicks::Now());
   }
+  // Force IntersectionObserver computation. The normal lifecycle step skips it for
+  // a throttled frame, and our offscreen widget reads as throttled — so observers
+  // (lazy-load, infinite scroll, viewability) would never fire. This bypasses the
+  // throttle gate; the queued notifications are then delivered by the loop pump.
+  if (main_frame_) {
+    auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
+    if (impl->GetFrame() && impl->GetFrame()->View())
+      impl->GetFrame()->View()->ForceUpdateViewportIntersections();
+  }
 }
 
 bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y) {

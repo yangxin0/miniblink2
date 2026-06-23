@@ -550,6 +550,17 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   origin — fine on real pages, not a gap.) Another compositor-assumption gap closed by calling
   the page-level service directly, no patch.
 
+- ✅ INTERSECTIONOBSERVER DELIVERY (2026-06-23 17:?): probed observer/event delivery —
+  MutationObserver fires, load/DOMContentLoaded fire, pushState works on file://, animate/
+  document.fonts present, but IntersectionObserver callbacks NEVER delivered (lazy-load,
+  infinite scroll, viewability all depend on it). Cause: RunIntersectionObserverSteps gates
+  on ShouldThrottleRendering() (local_frame_view.cc:1082) and our offscreen frame reads as
+  throttled, so IO is skipped in the lifecycle. Fix: ServiceAnimations() now also calls
+  frame->View()->ForceUpdateViewportIntersections() (DisallowThrottlingScope — blink's own
+  hidden-frame path); the queued notifications deliver via the loop pump. Verified smoke 27/28:
+  MutationObserver + IntersectionObserver(isIntersecting) both fire. 29/29, go.dev unaffected.
+  (pushState earlier showed SecurityError only because about:blank is an opaque origin.)
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
