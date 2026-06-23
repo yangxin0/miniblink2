@@ -19,6 +19,17 @@ class H(BaseHTTPRequestHandler):
             self.send_header('Location', '/cookies')
             self.end_headers()
             return
+        if u.path == '/img':
+            # 1x1 transparent GIF, so an <img> from the network loads (naturalWidth>0).
+            import base64
+            gif = base64.b64decode(
+                'R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==')
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/gif')
+            self.send_header('Content-Length', str(len(gif)))
+            self.end_headers()
+            self.wfile.write(gif)
+            return
         if u.path == '/cookies':
             jar = {}
             ck = self.headers.get('Cookie', '')

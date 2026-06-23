@@ -758,6 +758,15 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   that must not collide with or be observed by page script. (Reverse cookie bridge + Blob remain
   the known gaps; both are same-thread [Sync] mojo issues.)
 
+- ✅ DISABLE IMAGE LOADING (2026-06-23 20:?): mbSetLoadImages(view, 0) + mb_shot --no-images
+  for faster text/HTML scraping. settings->SetLoadsImagesAutomatically(enabled). FINDING: this
+  gates NETWORK image fetches only — inline data: images decode regardless (my first test used
+  a data: GIF and showed on=1/off=1, exposing this). Re-tested correctly with a SERVED image:
+  added /img to echo_server.py; network smoke case loads <img src=$host/img> on (naturalWidth>0)
+  vs off (0) -> PASS (on=1 off=0). 43/43 with MB_NET_TESTS against the local server; 39/39
+  default. No survivors (bounded self-killing run). Lesson reinforced: pick test image type to
+  match what the setting actually gates.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

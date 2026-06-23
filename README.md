@@ -47,7 +47,7 @@ The deliverable example app — a standalone headless screenshot renderer:
 
 ```sh
 mb_shot [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
-        [--wait-selector CSS] [--wait-ms N] [--console] [--header "N: V"] [--text] [--html] \
+        [--wait-selector CSS] [--wait-ms N] [--console] [--header "N: V"] [--text] [--html] [--no-images] \
         <input.html | file://URL | http(s)://URL> <out.png> [width height]
 ```
 
@@ -79,6 +79,9 @@ stderr — useful for debugging a page or scripting against its logs.
 `--text` prints the page's visible text (post-JS `document.body.innerText`) to stdout, so
 `mb_shot` doubles as a simple scraper/text extractor. `--html` prints the rendered
 (post-JS) DOM as serialized HTML — useful for SPAs whose fetched source is near-empty.
+
+`--no-images` disables network image loading (faster text/HTML scraping; inline `data:`
+images are unaffected).
 
 The output format follows the file extension: `.png` (lossless, alpha) or `.jpg`/`.jpeg`
 (quality 90, much smaller) — e.g. `mb_shot https://example.com out.jpg`.
@@ -166,6 +169,7 @@ void  mbSendMouseMove(mbView*, int x, int y);       // move pointer: hover + mou
 void  mbSetDeviceScaleFactor(mbView*, float scale); // HiDPI: devicePixelRatio + Nx raster
 void  mbSetUserAgent(mbView*, const char* ua);      // navigator.userAgent + HTTP requests
 void  mbSetTransparentBackground(mbView*, int on);  // omitBackground: alpha-preserving capture
+void  mbSetLoadImages(mbView*, int enabled);        // 0 = skip network image loads
 void  mbSetExtraHeaders(mbView*, const char* headers); // extra HTTP request headers
 void  mbSendText(mbView*, const char* text);        // type UTF-8 into the focused element
 void  mbSendScroll(mbView*, int x, int y, int dx, int dy);  // scroll the page (dy>0 = down)

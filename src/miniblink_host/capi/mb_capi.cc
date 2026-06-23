@@ -104,6 +104,11 @@ void mbSetTransparentBackground(mbView* v, int transparent) {
     v->impl->SetTransparentBackground(transparent != 0);
 }
 
+void mbSetLoadImages(mbView* v, int enabled) {
+  if (v && v->impl)
+    v->impl->SetLoadImages(enabled != 0);
+}
+
 void mbSetExtraHeaders(mbView* v, const char* utf8_headers) {
   if (v && v->impl)
     v->impl->SetExtraHeaders(utf8_headers);

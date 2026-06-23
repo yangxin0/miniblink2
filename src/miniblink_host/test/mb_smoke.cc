@@ -454,6 +454,30 @@ int main() {
   } else {
     std::fprintf(stderr, "  [SKIP] cookie bridge (host unreachable)\n");
   }
+
+  // 34. Image loading toggle: a NETWORK <img> loads (naturalWidth>0) by default but
+  // is skipped (naturalWidth==0) when image loading is disabled. (data: images are
+  // inline and not gated by this setting, so the test uses a served image.)
+  {
+    const std::string page = "<body><img id='i' src='" + host + "/img'></body>";
+    std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+    mbSetLoadImages(v, 1);
+    mbLoadHTML(v, page.c_str(), (host + "/").c_str());
+    mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // settle the fetch+decode
+    std::string on_nw = Eval(v, "String(document.getElementById('i').naturalWidth)");
+    if (std::atoi(on_nw.c_str()) > 0) {  // host served the image
+      mbSetLoadImages(v, 0);
+      mbLoadHTML(v, page.c_str(), (host + "/").c_str());
+      mbPaintToBitmap(v, tmp.data(), W, H, W * 4);
+      std::string off_nw =
+          Eval(v, "String(document.getElementById('i').naturalWidth)");
+      Expect(off_nw == "0", "no-images: network image skipped when disabled",
+             "on=" + on_nw + " off=" + off_nw);
+      mbSetLoadImages(v, 1);
+    } else {
+      std::fprintf(stderr, "  [SKIP] no-images (host image unreachable)\n");
+    }
+  }
   }  // MB_NET_TESTS
 
   // 33. document.cookie (JS): write then read round-trips through the in-process

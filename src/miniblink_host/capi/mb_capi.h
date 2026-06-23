@@ -83,6 +83,10 @@ MB_EXPORT void mbSetUserAgent(mbView*, const char* utf8_ua);
 // transparency on, areas the page does not paint keep alpha 0 in the output.
 MB_EXPORT void mbSetTransparentBackground(mbView*, int transparent);
 
+// Enable (1, default) or disable (0) automatic image loading. Disabling speeds up
+// text/HTML scraping. Call before mbLoadURL/mbLoadHTML.
+MB_EXPORT void mbSetLoadImages(mbView*, int enabled);
+
 // Set extra HTTP request headers added to the navigation and its subresources:
 // newline-separated "Name: Value" lines. Call before mbLoadURL. (A default
 // Accept-Language is sent unless one is provided here.) Pass NULL/empty to clear.

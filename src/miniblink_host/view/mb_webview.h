@@ -57,6 +57,8 @@ class MbWebView {
   // Override the User-Agent for navigator.userAgent and outgoing requests. Set
   // before LoadURL/LoadHTML to take effect for that navigation.
   void SetUserAgent(const char* utf8_ua);
+  // Enable/disable automatic image loading (off = faster text/HTML scraping).
+  void SetLoadImages(bool enabled);
   // Return captured console output ("level: text" per line) and clear the buffer.
   std::string DrainConsole();
   // Set extra request headers (newline-separated "Name: Value") for navigation +
