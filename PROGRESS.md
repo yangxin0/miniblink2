@@ -1832,6 +1832,15 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   COMPONENTS: MbBlobURLStore (4 methods) + MbBlobURLLoaderFactory (2-method shim) + MbBlob::Load
   impl + the AssociatedInterfaceProvider wiring. No remaining unknowns.
 
+- ✅ DONE: C API buffer-contract hardening (2026-06-24): the size-returning string getters
+  (mbGetHTML/Text/URL/Title/Cookies/EvalJS/DrainConsole) share a NUL-terminated buffer-copy
+  convention that was never stress-tested for the small-buffer / overflow case. Smoke case 96
+  hammers mbGetHTML on a ~7KB DOM with a 16-byte buffer + a guard byte past the cap and confirms:
+  (a) the TRUE length is returned (7329, not 16), (b) the copy is NUL-terminated at cap-1, (c) the
+  guard byte past the cap is untouched (no overflow), and (d) the size-first(cap=0)->allocate->refill
+  two-call pattern captures the whole document. Locks in a critical safety property (a buffer
+  overflow here would be a security bug). 117/117.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

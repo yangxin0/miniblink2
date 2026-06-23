@@ -2019,6 +2019,40 @@ int main() {
            "mbRightClickSelector fires contextmenu");
   }
 
+  // 96. C API buffer contract: the size-returning string getters must (a) return
+  // the FULL length even when the buffer is too small, (b) NUL-terminate the
+  // truncated copy without overflowing, and (c) support the size-first/allocate/
+  // refill two-call pattern. Stress mbGetHTML on a page whose DOM is much larger
+  // than the buffer.
+  {
+    std::string big = "<body>";
+    for (int bi = 0; bi < 200; ++bi)
+      big += "<p class='x'>paragraph number " + std::to_string(bi) + "</p>";
+    big += "</body>";
+    mbLoadHTML(v, big.c_str(), "about:blank");
+    // Tiny buffer with a guard byte just past the cap — must stay untouched.
+    char tiny[17];
+    std::memset(tiny, 0x7F, sizeof(tiny));
+    const int full_len = mbGetHTML(v, tiny, 16);  // cap 16 -> 15 chars + NUL
+    const bool full_returned = full_len > 16;     // reports the true length
+    const bool nul_terminated = tiny[15] == '\0';
+    const bool no_overflow = static_cast<unsigned char>(tiny[16]) == 0x7F;
+    // Size-first: cap 0 returns the length without writing; then a right-sized
+    // buffer captures the whole document.
+    const int sized = mbGetHTML(v, nullptr, 0);
+    std::vector<char> buf(sized + 1, 1);
+    const int got = mbGetHTML(v, buf.data(), sized + 1);
+    const bool complete = got == sized && buf[sized] == '\0' &&
+                          std::string(buf.data()).find("paragraph number 199") !=
+                              std::string::npos;
+    Expect(full_returned && nul_terminated && no_overflow && sized == full_len &&
+               complete,
+           "C API string buffers: full length, NUL-terminated, no overflow",
+           std::string("len=") + std::to_string(full_len) + " term=" +
+               (nul_terminated ? "1" : "0") + " noovf=" +
+               (no_overflow ? "1" : "0") + " complete=" + (complete ? "1" : "0"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
