@@ -1140,6 +1140,21 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   foundation later hosts the worker host. Deferred deliberately: this is multi-tick design work,
   not a 5-minute cram; the plan de-risks it. (No code change this tick — the doc is the artifact.)
 
+- 📝 PLAN REFINED with investigation findings (2026-06-24): de-risked the service-host plan with
+  three concrete findings (folded into docs/design-blob-service-host.md): (1) the service thread
+  ALREADY EXISTS — MbRuntime runs io_thread_ (mb-io, IO pump) with mojo::core::ScopedIPCSupport
+  attached (mb_runtime.cc:146-151), so bind blob receivers there; no new thread (increment 1 done).
+  (2) [Sync] mojo servicing already WORKS in-process — verified a file:// stylesheet loads + applies
+  via the [Sync] MimeRegistry path (external CSS sets color:rgb(1,2,3), no hang); it doesn't
+  deadlock because that caller is a loading sequence, not the blocked main thread. (3) For the real
+  integration WE only provide the servicer — Blink makes the BlobRegistry.Register [Sync] call
+  itself (as in production), so the friend-gated ScopedAllowSyncCall (unusable) is a non-issue and
+  the standalone validation experiment can be DROPPED. Net: the 6-step plan collapses to "bind a
+  real BlobRegistry/Blob on io_thread_ (inline embedded_data) -> ReadAll via data pipe -> blob.text()
+  resolves", with the blob.text() smoke as the authoritative check of the one narrowed unknown
+  (main-thread caller + io_thread servicer). Lower risk, fewer steps. Still multi-tick (real
+  BlobRegistry/Blob + data-pipe code), so executed in a focused session, not crammed.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

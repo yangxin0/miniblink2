@@ -26,6 +26,30 @@ the dialogs. Mojo *does* support servicing a sync call from a receiver on **anot
 thread/sequence** in the same process (that is exactly how the browser process answers
 it). So the fix is a dedicated **service thread** that hosts these receivers.
 
+## Findings from investigation (2026-06-24) — these simplify the plan
+
+- **The service thread already exists.** `MbRuntime` starts `io_thread_` (`mb-io`, a
+  `base::Thread` with `MessagePumpType::IO`) and attaches `mojo::core::ScopedIPCSupport`
+  to it (mb_runtime.cc:146-151). Bind the blob receivers there — do NOT spawn a new
+  thread. Original "increment 1 (scaffold)" is therefore essentially already done.
+- **`[Sync]` servicing already works in-process.** `MimeRegistry.GetMimeTypeFromExtension`
+  is `[Sync]`, bound by `MbEmptyBroker` on the **main thread**, and a `file://`
+  stylesheet loads + applies correctly through it (verified: external CSS sets
+  `color:rgb(1,2,3)`, no hang). It doesn't deadlock because that `[Sync]` call's caller
+  is a resource-loading sequence, not the blocked main thread — i.e. the cross-sequence
+  `[Sync]` mechanism is functional in our mojo setup.
+- **We provide the servicer; Blink makes the sync call.** For the real integration we do
+  NOT make any sync call ourselves — Blink's `PublicURLManager` / blob plumbing calls
+  `BlobRegistry.Register` `[Sync]` exactly as in production. So the friend-gated
+  `mojo::SyncCallRestrictions::ScopedAllowSyncCall` (unusable outside its allowlist) is a
+  non-issue for the integration; it would only bite a *standalone* validation experiment.
+  => The standalone "increment 2" experiment can be SKIPPED; go straight to binding a real
+  `BlobRegistry` on `io_thread_` and measuring `blob.text()`.
+- **Narrowed remaining unknown:** the only unproven pairing is main-thread-CALLER +
+  io_thread-SERVICER (blob's case; MimeRegistry's caller is off-main). Standard mojo
+  services a sync call on the receiver's thread regardless of caller, so this is expected
+  to work — increment 3's `blob.text()` smoke is the authoritative check.
+
 ## Architecture
 
 ```
@@ -68,25 +92,28 @@ it). So the fix is a dedicated **service thread** that hosts these receivers.
 
 ## Increments (each ends green: build + `mb_smoke`, no survivors)
 
-1. **Service thread scaffold.** Add `MbServiceThread`, start/stop in `MbRuntime`.
-   Verify: suite still 76/76 (no behavior change yet); thread starts/joins cleanly.
-2. **Validate cross-thread `[Sync]` servicing** (de-risk the core assumption *before*
-   building BlobRegistry). Bind a tiny existing async interface on the service thread
-   and confirm a round-trip; if feasible, exercise a `[Sync]` method to prove the main
-   thread is serviced cross-thread without deadlock. (If this fails, stop — the whole
-   approach is wrong.)
-3. **`MbBlobRegistry.Register` (inline bytes only).** Route `BlobRegistry` to the
-   service thread; store `embedded_data` by uuid; bind an `MbBlob`. Verify: `new Blob`
-   still constructs, no hang, suite green. (Reads not wired yet → still pending, but no
-   regression.)
-4. **`MbBlob.ReadAll` via data pipe.** Serve stored bytes. Verify (NEW smoke):
-   `new Blob(['hello']).text()` resolves to `"hello"`; `FileReader.readAsText`
-   delivers; `arrayBuffer()` byteLength == 5. THIS is the user-visible win.
+(Revised 2026-06-24 per findings above: the service thread is `io_thread_`, and the
+standalone sync-validation experiment is dropped.)
+
+1. **~~Service thread scaffold~~ — DONE.** Reuse the existing `io_thread_`. No new code;
+   the plan binds blob receivers there.
+2. **~~Standalone cross-thread `[Sync]` validation~~ — DROPPED.** We don't make the sync
+   call (Blink does), and `[Sync]` servicing is already shown working in-process. The
+   `blob.text()` smoke in increment 4 is the real check.
+3. **`MbBlobRegistry.Register` (inline bytes only), bound on `io_thread_`.** Route
+   `BlobRegistry` (and the blob-bytes path) to the service thread via the platform
+   broker; on `Register`, copy each `DataElementBytes.embedded_data` into a store keyed
+   by uuid and bind an `MbBlob` (also on `io_thread_`). Verify: `new Blob` still
+   constructs, no hang, suite green. (Reads not wired yet → still pending, no regression.)
+4. **`MbBlob.ReadAll`/`ReadRange` via data pipe.** Serve stored bytes (chunk on
+   `MOJO_RESULT_SHOULD_WAIT` with a `SimpleWatcher` on `io_thread_`). Verify (NEW smoke):
+   `new Blob(['hello']).text()` resolves to `"hello"`; `FileReader.readAsText` delivers;
+   `arrayBuffer().byteLength == 5`. THIS is the user-visible win.
 5. **Blob-URL resolution.** Revisit `patches/0003`: with a real store + service thread,
    `BlobURLStore`/`createObjectURL` can resolve (img `src=blobURL` loads). Verify:
    a blob: URL used as an `<img>`/fetch source loads instead of failing.
-6. **BytesProvider path** for blobs > 256 KB (call back to the renderer). Verify with
-   a large blob.
+6. **BytesProvider path** for blobs > 256 KB (call back to the renderer via
+   `BytesProvider.RequestAsReply`/`RequestAsStream`). Verify with a large blob.
 
 ## Risks / open questions
 
