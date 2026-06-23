@@ -1633,13 +1633,18 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   TypeError); /response-headers?X-Smk=sv1 -> readable. Default suite 98/98. Knock-on: a 404
   navigation now commits the error page instead of blank — correct. Also made smoke case 38 match
   the header VALUE not the key (httpbin Title-Cases, postman-echo lowercases).
-- ⚠️ KNOWN REGRESSION TO FIX NEXT (2026-06-24): the document.cookie -> HTTP-jar bridge is broken —
-  gated net case 33 "cookie bridge" fails. Server Set-Cookie values ARE sent on later requests
-  (case-38 echo shows Cookie: expk=...; mbck=...), but a value set via document.cookie on an http
-  origin does NOT reach the curl jar. Most likely regressed when the cookie manager / MbAddCookieToJar
-  moved to the runtime service thread (commit 167e332) — curl COOKIELIST injection there may not land
-  in the shared jar the main-thread fetches read. Dedicated next tick: trace MbAddCookieToJar on the
-  service thread vs CookieShare.
+- ✅✅ DONE: document.cookie -> HTTP-jar bridge fixed (2026-06-24): gated net case 33 "cookie bridge"
+  now PASSES (mbGetCookies shows mbjs=fromjs). ROOT CAUSE (not the service-thread move I'd guessed —
+  that was a red herring): MbAddCookieToJar injected the cookie via CURLOPT_COOKIELIST as a
+  "Set-Cookie: name=value" line with NO domain. curl can only infer the host for such a line from an
+  ACTIVE transfer; MbAddCookieToJar does no transfer (just sets the option on a throwaway handle), so
+  the host-less cookie was silently dropped. Diagnosed via an MB_VERBOSE read-back: right after
+  injecting mbjs the handle listed only mbck (set earlier by a real Set-Cookie *response*), confirming
+  the COOKIELIST line never stored. FIX: build a Netscape TSV line with an EXPLICIT domain
+  (domain \t tailmatch \t path \t secure \t expiry \t name \t value) from the URL host + parsed
+  cookie attrs (domain/path/secure, max-age=0/1970 -> past expiry to delete). Netscape format needs
+  no transfer. Full gated net suite now 106/106 (also clears the earlier "request headers"/"custom
+  headers" host-shape flakes). Default suite 98/98.
 
 ### REMAINING ROADMAP
 - P0-history: page-driven history.back()/forward() does nothing — History::back() ->

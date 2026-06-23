@@ -286,20 +286,80 @@ const std::string& MbDefaultUserAgent() {
   return *kUa;
 }
 
+namespace {
+// Trim ASCII spaces/tabs from both ends.
+void TrimWs(std::string* s) {
+  while (!s->empty() && (s->front() == ' ' || s->front() == '\t'))
+    s->erase(s->begin());
+  while (!s->empty() && (s->back() == ' ' || s->back() == '\t'))
+    s->pop_back();
+}
+// Extract a cookie attribute's value from "; name=value; ..." (case-insensitive
+// name). Returns "" if absent; for valueless flags (e.g. "secure") use Contains.
+std::string AttrValue(const std::string& attrs_lower, const std::string& attrs,
+                      const std::string& name) {
+  const std::string key = name + "=";
+  std::string::size_type p = attrs_lower.find(key);
+  if (p == std::string::npos)
+    return {};
+  p += key.size();
+  std::string::size_type end = attrs.find(';', p);
+  std::string v = attrs.substr(p, end == std::string::npos ? end : end - p);
+  TrimWs(&v);
+  return v;
+}
+}  // namespace
+
 void MbAddCookieToJar(const std::string& url, const std::string& cookie) {
   GURL gurl(url);
   if (!gurl.SchemeIsHTTPOrHTTPS())
     return;  // cookies only make sense for network origins
+  // Split "name=value; attr; attr". document.cookie assigns one cookie.
+  std::string pair = cookie, attrs;
+  if (std::string::size_type semi = cookie.find(';'); semi != std::string::npos) {
+    pair = cookie.substr(0, semi);
+    attrs = cookie.substr(semi + 1);
+  }
+  std::string::size_type eq = pair.find('=');
+  if (eq == std::string::npos)
+    return;
+  std::string name = pair.substr(0, eq), value = pair.substr(eq + 1);
+  TrimWs(&name);
+  TrimWs(&value);
+  if (name.empty())
+    return;
+  const std::string lattrs = ToLower(attrs);
+  // domain: explicit attr (subdomain-matching) else host-only.
+  std::string domain = AttrValue(lattrs, attrs, "domain");
+  std::string tailmatch = "FALSE";
+  if (!domain.empty()) {
+    tailmatch = "TRUE";  // an explicit Domain applies to subdomains
+  } else {
+    domain = gurl.host();
+  }
+  std::string path = AttrValue(lattrs, attrs, "path");
+  if (path.empty())
+    path = "/";
+  const std::string secure =
+      lattrs.find("secure") != std::string::npos ? "TRUE" : "FALSE";
+  // Session by default (expiry 0). A deletion (max-age=0 / 1970 expiry) becomes a
+  // past expiry so curl drops it from the jar.
+  std::string expiry = "0";
+  if (lattrs.find("max-age=0") != std::string::npos ||
+      lattrs.find("expires=thu, 01 jan 1970") != std::string::npos)
+    expiry = "1";
+  // Netscape TSV (domain tailmatch path secure expiry name value) — injected via
+  // COOKIELIST with an explicit domain, so it needs no active transfer to land in
+  // the shared jar (a "Set-Cookie:"-format line without a domain is dropped).
+  const std::string ns = domain + "\t" + tailmatch + "\t" + path + "\t" + secure +
+                         "\t" + expiry + "\t" + name + "\t" + value;
   CURL* curl = curl_easy_init();
   if (!curl)
     return;
-  // Associate the cookie with this URL's domain/path, share into the global jar.
-  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");  // enable the cookie engine
   if (CURLSH* share = CookieShare())
     curl_easy_setopt(curl, CURLOPT_SHARE, share);
-  const std::string line = "Set-Cookie: " + cookie;
-  curl_easy_setopt(curl, CURLOPT_COOKIELIST, line.c_str());
+  curl_easy_setopt(curl, CURLOPT_COOKIELIST, ns.c_str());
   curl_easy_cleanup(curl);
 }
 
