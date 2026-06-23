@@ -1508,6 +1508,22 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   src body via MbFetchUrl + FillStaticResponse; and sandboxed iframes don't enforce sandbox flags
   (CreateChildFrame ignores frame_policy). Both are clean, bounded follow-ups on this working base.
 
+- ✅✅ DONE: iframe src= content loads (file/http/data children) — shipped (2026-06-24): the
+  follow-up to srcdoc. Extended MbFrameClient::BeginNavigation: for a child whose URL is neither
+  about:srcdoc nor about:* and non-empty, fetch the body via MbFetchUrl(url, &body, &content_type,
+  user_agent_, extra_headers_) [the SAME loader subresources use — file://, http(s)://, data:], use
+  the response content-type (stripped of ;params) as the commit mime, then the same
+  FillStaticResponse + transient-MbPolicyContainerHost + To<WebLocalFrameImpl>->CommitNavigation
+  path. RESULT: <iframe src=...> now fetches and commits its own document. Verified two ways:
+  (1) mb_shot probe — file:// parent + data: child read back 'data-child'; (2) smoke case 78 — a
+  data: src child under a file:// parent reads contentDocument.body.textContent == 'src-child'.
+  KEY FINDING (cost a debug cycle): the child of an about:blank (opaque-origin) parent gets a FRESH
+  opaque origin, so the parent's contentDocument read is cross-origin BLOCKED — correct browser
+  behavior, NOT a commit failure (frames.length==1, navigation committed; the parent just can't peek
+  in). The child of a file:// parent inherits file:// → same-origin → readable. So the test asserts
+  content under a file:// base. 94/94, no survivors. REMAINING from the iframe arc: sandboxed
+  iframes don't enforce sandbox flags (CreateChildFrame ignores frame_policy) — a clean follow-up.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

@@ -81,6 +81,7 @@ void MbFrameClient::BeginNavigation(
   auto params = blink::WebNavigationParams::CreateFromInfo(*info);
   blink::KURL url = info->url_request.Url();
   std::string body;  // CommitNavigation requires a body_loader (even for srcdoc)
+  std::string mime = "text/html";
   if (url.IsAboutSrcdocUrl()) {
     params->fallback_base_url = info->requestor_base_url;
     // The srcdoc text lives on the owner element, not in WebNavigationInfo.
@@ -92,11 +93,22 @@ void MbFrameClient::BeginNavigation(
                    .Utf8();
       }
     }
+  } else if (!url.IsEmpty() && !url.ProtocolIsAbout()) {
+    // src=file/http/data: fetch the body via the same loader subresources use.
+    std::string content_type;
+    if (MbFetchUrl(url.GetString().Utf8(), &body, &content_type, user_agent_,
+                   extra_headers_) &&
+        !content_type.empty()) {
+      std::string m = content_type.substr(0, content_type.find(';'));
+      while (!m.empty() && m.back() == ' ')
+        m.pop_back();
+      if (!m.empty())
+        mime = m;
+    }
   }
-  // TODO(mb): http/file/data src= — fetch the body via MbFetchUrl; for now those
-  // children commit empty (documented follow-up).
+  // (about:blank / empty children commit an empty document — correct.)
   blink::WebNavigationParams::FillStaticResponse(
-      params.get(), blink::WebString::FromUtf8("text/html"),
+      params.get(), blink::WebString::FromUtf8(mime),
       blink::WebString::FromUtf8("UTF-8"),
       base::span<const char>(body.data(), body.size()));
   // CommitNavigation requires a policy container for non-empty documents.

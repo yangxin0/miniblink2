@@ -1461,6 +1461,24 @@ int main() {
            "iframe loads: child frame created + srcdoc content commits");
   }
 
+  // 78. iframe src= loads too (not just srcdoc): the child's navigation fetches
+  // the src body via the loader (MbFetchUrl) and commits it. Uses a data: src
+  // (portable; file/http go through the same path). The parent is loaded from a
+  // file:// base so the child data: document inherits that origin (same-origin),
+  // letting the parent read contentDocument; with an opaque (about:blank) parent
+  // the child would get a fresh opaque origin and the read would be cross-origin
+  // blocked — that's correct browser behavior, not a commit failure.
+  {
+    mbLoadHTML(v,
+      "<body>p<iframe id='f' src='data:text/html,<b>src-child</b>' "
+      "width='80' height='40'></iframe></body>", "file:///tmp/p.html");
+    mbWait(v, 250);  // child navigation: fetch + commit + parse
+    Expect(Eval(v,
+        "document.getElementById('f').contentDocument.body.textContent") ==
+            "src-child",
+        "iframe src= loads: child fetches + commits its document");
+  }
+
   // 78. element.scrollIntoView() works (a common automation primitive: scroll a
   // target into view before clicking/capturing). Our non-compositing widget
   // handles scroll specially, so verify programmatic scroll-into-view actually
