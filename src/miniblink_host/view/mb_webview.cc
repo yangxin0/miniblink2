@@ -22,6 +22,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/run_loop.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "base/unguessable_token.h"
@@ -297,7 +298,15 @@ void MbWebView::RunJS(const char* utf8_script) {
     return;
   main_frame_->ExecuteScript(
       blink::WebScriptSource(blink::WebString::FromUtf8(utf8_script)));
-  base::RunLoop().RunUntilIdle();
+  // Let posted tasks (timers, async continuations) settle, but never spin forever:
+  // a bare RunUntilIdle hangs if the script keeps the task queue busy (a tight
+  // setTimeout loop, or some async APIs). Quit as soon as the loop goes idle, or at
+  // a hard 250ms cap — whichever comes first.
+  base::RunLoop loop(base::RunLoop::Type::kNestableTasksAllowed);
+  auto runner = base::SingleThreadTaskRunner::GetCurrentDefault();
+  runner->PostTask(FROM_HERE, loop.QuitWhenIdleClosure());
+  runner->PostDelayedTask(FROM_HERE, loop.QuitClosure(), base::Milliseconds(250));
+  loop.Run();
 }
 
 std::string MbWebView::EvalToString(const char* utf8_script) {

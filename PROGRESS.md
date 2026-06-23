@@ -638,6 +638,19 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   (b) re-probe wasm/SubtleCrypto/Blob one-at-a-time to find which hangs. No engine change beyond
   the test gating this tick.
 
+- ✅ RunJS bounded + Blob-hang ROOT-CAUSED (2026-06-23 18:?): RunJS now caps its post-script
+  settle — base::RunLoop with QuitWhenIdleClosure() (fast common path) OR a 250ms QuitClosure
+  (hard cap), instead of a bare unbounded RunUntilIdle. 35/35. Re-probed the advanced APIs
+  one-at-a-time: WebAssembly = ok. **Blob/URL.createObjectURL/FileReader HANGS the main thread**
+  — and bounded RunJS does NOT save it, proving the hang is a SYNCHRONOUS mojo block (the blob
+  registry / BlobURLStore interface is dropped by our broker; a [Sync] call waits forever),
+  not a RunUntilIdle spin. SubtleCrypto untested (probe hung before reaching it). HIGH-PRIORITY
+  GAP: real pages use createObjectURL/FileReader (image previews, downloads, object URLs) and
+  would hang the host — needs in-process Blob mojo services (BlobRegistry + BlobURLStore), like
+  we did for MimeRegistry/RestrictedCookieManager. Probe removed (it hangs the suite). Next:
+  implement the blob services, or at least make the broker reply-and-drop so sync blob calls
+  fail fast instead of hanging.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
