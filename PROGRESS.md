@@ -651,6 +651,22 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   implement the blob services, or at least make the broker reply-and-drop so sync blob calls
   fail fast instead of hanging.
 
+- ⚠️ BLOB HANG — fix ATTEMPTED, reverted (2026-06-23 19:?): root cause confirmed —
+  URL.createObjectURL → BlobURLStore.Register is [Sync] (blob_url_store.mojom:20); for a
+  FRAME, BlobURLStore comes via frame->GetRemoteNavigationAssociatedInterfaces() (an
+  ASSOCIATED interface from WebLocalFrameClient::GetRemoteNavigationAssociatedInterfaces),
+  NOT the BrowserInterfaceBroker. Unserviced -> main-thread sync deadlock. ATTEMPT (reverted):
+  mirror TestWebFrameClient — MbFrameClient holds a local blink::AssociatedInterfaceProvider
+  (task-runner ctor) + OverrideBinderForTesting(BlobURLStore::Name_, &MbBindBlobURLStore),
+  MbBlobURLStore answers Register() (acknowledge). It COMPILED but STILL HUNG (suite stalls at
+  the Blob case, 2min). So servicing isn't happening during the sync wait — likely the
+  self-owned associated receiver runs on a different sequence than the sync-wait pumps, or the
+  override binder isn't invoked inline. Reverted to keep the suite green (35/35) + bounded RunJS
+  intact. NEXT DEBUG: add MB_VERBOSE prints in MbBindBlobURLStore + MbBlobURLStore::Register to
+  see if the binder/receiver are hit; check the receiver's task runner vs the file-reading
+  runner PublicURLManager binds frame_url_store_ on; consider binding the receiver on the same
+  task runner. Blob/createObjectURL/FileReader remain a known host-freeze gap until then.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
