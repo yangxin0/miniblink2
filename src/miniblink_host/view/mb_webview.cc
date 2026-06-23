@@ -175,6 +175,11 @@ void MbWebView::SendMouseClick(int x, int y) {
     widget_->SendMouseClick(x, y);
 }
 
+void MbWebView::SendText(const char* utf8) {
+  if (widget_)
+    widget_->SendText(utf8);
+}
+
 void MbWebView::RunJS(const char* utf8_script) {
   if (!main_frame_ || !utf8_script)
     return;

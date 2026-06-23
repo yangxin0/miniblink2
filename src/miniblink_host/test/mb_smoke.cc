@@ -110,6 +110,13 @@ int main() {
   mbSendMouseClick(v, 80, 40);  // center of the button
   Expect(Eval(v, "String(window.__c||0)") == "1", "input: synthesized click");
 
+  // 10. Keyboard: focus an input, type, verify its value.
+  mbLoadHTML(v, "<body><input id='t'></body>", "about:blank");
+  mbRunJS(v, "document.getElementById('t').focus();");
+  mbSendText(v, "hi there");
+  Expect(Eval(v, "document.getElementById('t').value") == "hi there",
+         "input: typed text");
+
   mbDestroyView(v);
   mbShutdown();
 

@@ -8,6 +8,7 @@
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "third_party/blink/public/common/input/web_coalesced_input_event.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/common/input/web_keyboard_event.h"
 #include "third_party/blink/public/common/input/web_mouse_event.h"
 #include "third_party/blink/public/mojom/page/widget.mojom-blink.h"
 #include "third_party/blink/public/mojom/widget/platform_widget.mojom-blink.h"
@@ -73,6 +74,35 @@ void MbWidget::SendMouseClick(int x, int y) {
       make(blink::WebInputEvent::Type::kMouseDown), ui::LatencyInfo()));
   impl->HandleInputEvent(blink::WebCoalescedInputEvent(
       make(blink::WebInputEvent::Type::kMouseUp), ui::LatencyInfo()));
+}
+
+void MbWidget::SendText(const char* utf8) {
+  if (!widget_ || !utf8)
+    return;
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  for (const char* p = utf8; *p; ++p) {
+    const char16_t ch = static_cast<unsigned char>(*p);  // ASCII
+    int vk = ch;
+    if (ch >= 'a' && ch <= 'z')
+      vk = ch - 'a' + 'A';  // VK codes use uppercase letters
+    auto key = [&](blink::WebInputEvent::Type type, bool with_text) {
+      blink::WebKeyboardEvent e(type, blink::WebInputEvent::kNoModifiers,
+                                base::TimeTicks::Now());
+      e.windows_key_code = vk;
+      e.dom_key = ch;
+      if (with_text) {
+        e.text[0] = ch;
+        e.unmodified_text[0] = ch;
+      }
+      return e;
+    };
+    impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+        key(blink::WebInputEvent::Type::kRawKeyDown, false), ui::LatencyInfo()));
+    impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+        key(blink::WebInputEvent::Type::kChar, true), ui::LatencyInfo()));
+    impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+        key(blink::WebInputEvent::Type::kKeyUp, false), ui::LatencyInfo()));
+  }
 }
 
 }  // namespace mb

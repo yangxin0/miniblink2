@@ -112,7 +112,8 @@ void  mbLoadHTML(mbView*, const char* html, const char* base_url);
 void  mbLoadURL(mbView*, const char* url);          // file:// today
 void  mbRunJS(mbView*, const char* script);         // host -> page: drive it
 int   mbEvalJS(mbView*, const char* script, char* out, int cap);  // host <- page: read back
-void  mbSendMouseClick(mbView*, int x, int y);      // synthesize a click (interactivity)
+void  mbSendMouseClick(mbView*, int x, int y);      // synthesize a click
+void  mbSendText(mbView*, const char* text);        // type ASCII into the focused element
 int   mbPaintToBitmap(mbView*, void* bgra, int w, int h, int stride);
 int   mbSavePng(mbView*, const char* path, int w, int h);  // render -> PNG file
 void  mbResize(mbView*, int w, int h);

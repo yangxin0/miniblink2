@@ -52,6 +52,9 @@ MB_EXPORT void mbRunJS(mbView*, const char* utf8_script);
 // Synthesize a left mouse click (down+up) at (x,y) in the view.
 MB_EXPORT void mbSendMouseClick(mbView*, int x, int y);
 
+// Type ASCII text into the focused element (synthesized key events).
+MB_EXPORT void mbSendText(mbView*, const char* utf8_text);
+
 // Evaluate JS and write its result (coerced to string) into `out` (NUL-terminated,
 // up to out_cap bytes). Returns the full result length in bytes (may exceed out_cap-1,
 // indicating truncation). Lets the host read data back from the page (e.g. document.title).

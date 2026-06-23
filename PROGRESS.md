@@ -399,7 +399,11 @@ static_cast<WebFrameWidgetImpl*>(widget_)->HandleInputEvent(WebCoalescedInputEve
 ui::LatencyInfo())). Verified: suite case 9 clicks a button -> onclick fires -> DOM mutated
 (confirmed via mbEvalJS). NOTE: paint once before clicking so layout is current for the
 hit-test. Suite now 9/9. This crosses from "renders" to "renders + responds to input".
-NEXT interactivity: keyboard (WebKeyboardEvent), scroll/wheel, mouse move/hover.
+NEXT interactivity: scroll/wheel, mouse move/hover.
+- ✅ KEYBOARD (2026-06-23 15:56): mbSendText(view, utf8) types ASCII via per-char
+  kRawKeyDown+kChar(text[0])+kKeyUp through HandleInputEvent. Suite case 10: focus an
+  <input>, type "hi there", verify .value via mbEvalJS. 10/10. (ASCII only; UTF-8 decode TODO.)
+  => click + type = forms are fillable/submittable. Engine is interactively drivable.
 
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
@@ -646,6 +650,9 @@ signatures, do this next tick:
   mb_smoke. Bring-up reaches step 8 then SIGSEGV. Got backtrace from the .ips crash report
   (lldb perm-blocked). ROOT CAUSE: MbPlatform::GetBrowserInterfaceBroker()==nullptr,
   deref'd by TimeZoneController::Init during CoreInitializer. Next: implement empty broker.
+- 2026-06-23 15:56 — Loop tick. **🎉 KEYBOARD INPUT** — mbSendText types into focused
+  element (kRawKeyDown+kChar+kKeyUp). Suite case 10: type into <input>, verify .value. 10/10.
+  Click + type => forms fillable. Committed.
 - 2026-06-23 15:48 — Loop tick. **🎉 INPUT EVENTS** — mbSendMouseClick via
   WebFrameWidgetImpl::HandleInputEvent. Suite case 9: click button -> onclick -> DOM change
   verified. Engine is now drivable (renders + responds). Committed.
