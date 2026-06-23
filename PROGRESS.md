@@ -1228,6 +1228,28 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   canvas image export (canvas -> toBlob -> bytes) now works end to end. Smoke 67 guards it; existing
   rAF/Web-Animations cases still pass (the idle-period change is safe). 80/80, no survivors.
 
+- 🔎 INVESTIGATION: blob-adjacent gaps probed; three are deeper than one tick (2026-06-24). Probed
+  capabilities the blob work might have unlocked; found three SEPARATE gaps, none a clean single-
+  tick fix, so recorded precisely rather than shipping unverified code (reverted an attempt; tree
+  stays 80/80):
+  (1) Response.blob()/Request.blob() resolve EMPTY. It routes through
+  BlobRegistry.RegisterFromStream (fetch_data_loader.cc:84) via the Platform-broker registry — i.e.
+  our MbBlobRegistry. I implemented RegisterFromStream (DataPipeDrainer -> bytes -> MbBlob ->
+  BlobDataHandle::Create, the blink type-mapped reply) and INSTRUMENTED it: the drain callback NEVER
+  FIRED, so RegisterFromStream is not reached — the blocker is UPSTREAM body loading
+  (BodyStreamBuffer::StartLoading / the body BytesConsumer not delivering into the stream), not the
+  registry. Reverted the impl (correct but unverified/unreached). Needs a separate fetch-body
+  investigation. (2) fetch('data:...') fails "Failed to fetch" — our libcurl loader (mb_url_loader)
+  doesn't serve the data: scheme; data: URLs should be handled in-renderer / by the loader. Separate
+  loader gap. (3) blob: URL resolution (increment 5) confirmed heavy: needs MbFrameClient to override
+  GetRemoteNavigationAssociatedInterfaces returning an AssociatedInterfaceProvider with
+  OverrideBinderForTesting("blink.mojom.BlobURLStore", ...) -> service-thread MbBlobURLStore, PLUS a
+  blob: URLLoaderFactory+URLLoader (CreateLoaderAndStart -> OnReceiveResponse + a body pipe fed by
+  the existing BlobReadSession-style chunked writer) -> OnComplete, PLUS reverting patches/0003 (the
+  now-serviceable [Sync] Register). 3-4 components — a focused pass. VERIFIED WORKING this tick:
+  new Blob([Uint8Array]).text() === 'hi' (typed-array element via the inline path). No code change
+  committed; the value is the precise scoping of three independent follow-ups.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
