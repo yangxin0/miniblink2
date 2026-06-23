@@ -95,6 +95,10 @@ MB_EXPORT void mbSetDarkMode(mbView*, int dark);
 // "fr-FR,fr,en"), for JS that localizes by the user's languages. Before navigating.
 MB_EXPORT void mbSetLocale(mbView*, const char* utf8_languages);
 
+// Override the timezone for Date and Intl (an IANA id, e.g. "America/New_York"),
+// so time-dependent UIs render deterministically. Process-global.
+MB_EXPORT void mbSetTimezone(mbView*, const char* iana_tz);
+
 // Set extra HTTP request headers added to the navigation and its subresources:
 // newline-separated "Name: Value" lines. Call before mbLoadURL. (A default
 // Accept-Language is sent unless one is provided here.) Pass NULL/empty to clear.

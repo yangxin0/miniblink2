@@ -44,7 +44,9 @@
 #include "third_party/blink/public/web/web_script_source.h"
 #include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/public/web/web_view.h"
+#include "third_party/icu/source/common/unicode/unistr.h"
 #include "third_party/icu/source/common/unicode/uscript.h"
+#include "third_party/icu/source/i18n/unicode/timezone.h"
 #include "third_party/blink/renderer/core/css/media_value_change.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
@@ -245,6 +247,21 @@ void MbWebView::SetLocale(const char* langs) {
   // access, so no explicit languages-changed notification is needed.
   web_view_->GetPage()->GetSettings().SetAcceptLanguages(
       blink::String::FromUtf8(langs));
+}
+
+void MbWebView::SetTimezone(const char* tz) {
+  // Override the timezone for Date / Intl so time-dependent UIs render
+  // deterministically. Process-global (ICU default + a v8 redetect for the isolate).
+  if (!tz || !*tz)
+    return;
+  icu::TimeZone::adoptDefault(
+      icu::TimeZone::createTimeZone(icu::UnicodeString::fromUTF8(tz)));
+  if (v8::Isolate* isolate = v8::Isolate::GetCurrent()) {
+    // kSkip: invalidate v8's cached zone but keep the ICU default we just set
+    // (kRedetect would re-read the host OS zone, clobbering our override).
+    isolate->DateTimeConfigurationChangeNotification(
+        v8::Isolate::TimeZoneDetection::kSkip);
+  }
 }
 
 void MbWebView::SetDarkMode(bool dark) {

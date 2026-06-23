@@ -119,6 +119,11 @@ void mbSetLocale(mbView* v, const char* utf8_languages) {
     v->impl->SetLocale(utf8_languages);
 }
 
+void mbSetTimezone(mbView* v, const char* iana_tz) {
+  if (v && v->impl)
+    v->impl->SetTimezone(iana_tz);
+}
+
 void mbSetExtraHeaders(mbView* v, const char* utf8_headers) {
   if (v && v->impl)
     v->impl->SetExtraHeaders(utf8_headers);

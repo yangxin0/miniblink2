@@ -63,6 +63,8 @@ class MbWebView {
   void SetDarkMode(bool dark);
   // Set navigator.language(s) (comma-separated, e.g. "fr-FR,fr,en"). Before loading.
   void SetLocale(const char* langs);
+  // Override the timezone for Date/Intl (e.g. "America/New_York"). Process-global.
+  void SetTimezone(const char* tz);
   // Return captured console output ("level: text" per line) and clear the buffer.
   std::string DrainConsole();
   // Set extra request headers (newline-separated "Name: Value") for navigation +

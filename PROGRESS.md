@@ -781,6 +781,14 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   41/41, no survivors. (DOM-side locale; the network Accept-Language header is separately the
   curl default / mbSetExtraHeaders.)
 
+- ✅ TIMEZONE OVERRIDE (2026-06-23 20:?): mbSetTimezone(view,"America/New_York") + mb_shot --tz
+  via icu::TimeZone::adoptDefault(createTimeZone(id)) + isolate->DateTimeConfigurationChange
+  Notification(kSkip). KEY FIX: kSkip (use the ICU default we set), NOT kRedetect (which re-reads
+  the host OS zone and clobbers it — first attempt showed Asia/Shanghai). Process-global.
+  Smoke 38: Intl.DateTimeFormat().resolvedOptions().timeZone=='America/New_York' AND
+  new Date(1609459200000).getHours()==19 (2021-01-01T00Z -> 2020-12-31 19:00 EST). 43/43, no
+  survivors. DevTools-style emulation now: dark mode, locale, timezone, HiDPI, viewport, UA.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

@@ -22,6 +22,7 @@
 //   --no-images        disable image loading (faster text/HTML scraping).
 //   --dark             emulate prefers-color-scheme: dark (capture dark themes).
 //   --lang "L,L2,..."  set navigator.language(s) (e.g. "fr-FR,fr,en").
+//   --tz "Area/City"   override the timezone for Date/Intl (e.g. "America/New_York").
 //
 // This is the "product" the host enables: a standalone, single-process, modern-Blink
 // screenshot tool — no browser process, no CEF.
@@ -50,6 +51,7 @@ int main(int argc, char** argv) {
   bool no_images = false;
   bool dark_mode = false;
   std::string lang;  // navigator.language(s)
+  std::string tz;    // IANA timezone for Date/Intl
   float scale = 1.0f;
   std::string clip;      // "x,y,w,h"
   std::string selector;  // CSS selector -> capture that element's box
@@ -87,6 +89,8 @@ int main(int argc, char** argv) {
       dark_mode = true;
     } else if (a == "--lang" && i + 1 < argc) {
       lang = argv[++i];
+    } else if (a == "--tz" && i + 1 < argc) {
+      tz = argv[++i];
     } else if (a == "--header" && i + 1 < argc) {
       if (!headers.empty())
         headers += "\n";
@@ -128,6 +132,8 @@ int main(int argc, char** argv) {
     mbSetDarkMode(view, 1);  // emulate prefers-color-scheme: dark
   if (!lang.empty())
     mbSetLocale(view, lang.c_str());  // navigator.language(s)
+  if (!tz.empty())
+    mbSetTimezone(view, tz.c_str());  // Date/Intl timezone
   if (!headers.empty())
     mbSetExtraHeaders(view, headers.c_str());  // before load so the navigation uses them
 

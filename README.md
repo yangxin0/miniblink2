@@ -47,7 +47,7 @@ The deliverable example app — a standalone headless screenshot renderer:
 
 ```sh
 mb_shot [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
-        [--wait-selector CSS] [--wait-ms N] [--console] [--header "N: V"] [--text] [--html] [--no-images] [--dark] [--lang L,L2] \
+        [--wait-selector CSS] [--wait-ms N] [--console] [--header "N: V"] [--text] [--html] [--no-images] [--dark] [--lang L,L2] [--tz Area/City] \
         <input.html | file://URL | http(s)://URL> <out.png> [width height]
 ```
 
@@ -82,7 +82,8 @@ stderr — useful for debugging a page or scripting against its logs.
 
 `--no-images` disables network image loading (faster text/HTML scraping; inline `data:`
 images are unaffected). `--dark` emulates `prefers-color-scheme: dark` so pages render their
-dark theme. `--lang "fr-FR,fr,en"` sets `navigator.language(s)` for locale-aware pages.
+dark theme. `--lang "fr-FR,fr,en"` sets `navigator.language(s)` for locale-aware pages, and
+`--tz "America/New_York"` overrides the timezone for `Date`/`Intl`.
 
 The output format follows the file extension: `.png` (lossless, alpha) or `.jpg`/`.jpeg`
 (quality 90, much smaller) — e.g. `mb_shot https://example.com out.jpg`.
@@ -173,6 +174,7 @@ void  mbSetTransparentBackground(mbView*, int on);  // omitBackground: alpha-pre
 void  mbSetLoadImages(mbView*, int enabled);        // 0 = skip network image loads
 void  mbSetDarkMode(mbView*, int dark);             // emulate prefers-color-scheme: dark
 void  mbSetLocale(mbView*, const char* langs);      // navigator.language(s)
+void  mbSetTimezone(mbView*, const char* iana_tz);  // Date/Intl timezone
 void  mbSetExtraHeaders(mbView*, const char* headers); // extra HTTP request headers
 void  mbSendText(mbView*, const char* text);        // type UTF-8 into the focused element
 void  mbSendScroll(mbView*, int x, int y, int dx, int dy);  // scroll the page (dy>0 = down)

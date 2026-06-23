@@ -547,6 +547,20 @@ int main() {
              Eval(v, "navigator.languages.join(',')"));
   mbSetLocale(v, "en-US");  // restore for any later case
 
+  // 38. Timezone override: Date/Intl report the chosen zone deterministically.
+  mbSetTimezone(v, "America/New_York");
+  mbLoadHTML(v, "<body>x</body>", "about:blank");
+  Expect(Eval(v, "Intl.DateTimeFormat().resolvedOptions().timeZone") ==
+             "America/New_York",
+         "timezone override (Intl resolvedOptions)",
+         Eval(v, "Intl.DateTimeFormat().resolvedOptions().timeZone"));
+  // A fixed UTC instant formats to a New-York wall-clock time (EST/EDT), proving
+  // Date itself uses the zone: 2021-01-01T00:00:00Z -> 2020-12-31 19:00 EST.
+  Expect(Eval(v, "new Date(1609459200000).getHours().toString()") == "19",
+         "timezone override (Date local hours)",
+         Eval(v, "new Date(1609459200000).getHours().toString()"));
+  mbSetTimezone(v, "UTC");  // restore deterministic UTC for any later case
+
   mbDestroyView(v);
   mbShutdown();
 
