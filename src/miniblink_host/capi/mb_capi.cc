@@ -109,6 +109,20 @@ void mbSendScroll(mbView* v, int x, int y, int dx, int dy) {
     v->impl->SendScroll(x, y, dx, dy);
 }
 
+int mbDrainConsole(mbView* v, char* out, int out_cap) {
+  if (!v || !v->impl)
+    return 0;
+  std::string result = v->impl->DrainConsole();
+  if (out && out_cap > 0) {
+    int n = static_cast<int>(result.size());
+    int copy = n < out_cap - 1 ? n : out_cap - 1;
+    for (int i = 0; i < copy; ++i)
+      out[i] = result[i];
+    out[copy] = '\0';
+  }
+  return static_cast<int>(result.size());
+}
+
 int mbEvalJS(mbView* v, const char* utf8_script, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;

@@ -53,6 +53,8 @@ class MbWebView {
   // Override the User-Agent for navigator.userAgent and outgoing requests. Set
   // before LoadURL/LoadHTML to take effect for that navigation.
   void SetUserAgent(const char* utf8_ua);
+  // Return captured console output ("level: text" per line) and clear the buffer.
+  std::string DrainConsole();
   // Capture with a transparent base background (omitBackground): unpainted areas
   // keep alpha 0 instead of being filled white.
   void SetTransparentBackground(bool transparent);

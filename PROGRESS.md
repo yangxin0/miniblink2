@@ -571,6 +571,14 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   worker, IndexedDB, web fonts over network, CSS @container/@layer. Or pivot to networking
   (cookies/headers) / the wke C API / Cocoa window.
 
+- ✅ CONSOLE CAPTURE + IndexedDB probe (2026-06-23 17:?): implemented console capture —
+  MbFrameClient overrides DidAddMessageToConsole (still on WebLocalFrameClient) and buffers
+  "level: text"; MbWebView::DrainConsole + mbDrainConsole(out,cap) C ABI + mb_shot --console.
+  Verified smoke 30 (log/warn/error captured, buffer clears after drain) and mb_shot --console
+  prints them. Genuinely useful for automation/debugging. PROBE4: IndexedDB open() stays
+  'pending' forever (no backend responds) — a real gap, but fixing needs a full in-process
+  IndexedDB mojo backend (large); documented as roadmap, not attempted. 34/34.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

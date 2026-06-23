@@ -19,6 +19,30 @@ blink::WebString MbFrameClient::UserAgentOverride() {
   return blink::WebString::FromUtf8(
       user_agent_.empty() ? MbDefaultUserAgent() : user_agent_);
 }
+
+void MbFrameClient::DidAddMessageToConsole(const blink::WebConsoleMessage& msg,
+                                           const blink::WebString& /*source*/,
+                                           unsigned /*line*/,
+                                           const blink::WebString& /*stack*/) {
+  const char* level = "log";
+  switch (msg.level) {
+    case blink::mojom::ConsoleMessageLevel::kVerbose: level = "verbose"; break;
+    case blink::mojom::ConsoleMessageLevel::kInfo: level = "log"; break;
+    case blink::mojom::ConsoleMessageLevel::kWarning: level = "warn"; break;
+    case blink::mojom::ConsoleMessageLevel::kError: level = "error"; break;
+  }
+  console_.push_back(std::string(level) + ": " + msg.text.Utf8());
+}
+
+std::string MbFrameClient::DrainConsole() {
+  std::string out;
+  for (const auto& line : console_) {
+    out += line;
+    out += '\n';
+  }
+  console_.clear();
+  return out;
+}
 // TODO(mb): DidStopLoading/DidMeaningfulLayout -> notify owner to paint;
 // CreateChildFrame -> nullptr.
 }  // namespace mb

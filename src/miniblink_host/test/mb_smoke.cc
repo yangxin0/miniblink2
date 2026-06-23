@@ -358,6 +358,33 @@ int main() {
            "dynamic Image().onload + sync XHR(data:) work");
   }
 
+  // 30. Console capture: page console.log/warn/error are captured and drainable.
+  mbLoadHTML(v, "<body><script>console.log('hello');console.warn('careful');"
+                "console.error('boom');</script></body>", "about:blank");
+  mbWait(v, 20);
+  {
+    char cbuf[1024] = {0};
+    mbDrainConsole(v, cbuf, sizeof(cbuf));
+    std::string console(cbuf);
+    Expect(console.find("log: hello") != std::string::npos &&
+               console.find("warn: careful") != std::string::npos &&
+               console.find("error: boom") != std::string::npos,
+           "console capture (log/warn/error)", console);
+    // Draining clears the buffer.
+    char cbuf2[64] = {0};
+    mbDrainConsole(v, cbuf2, sizeof(cbuf2));
+    Expect(cbuf2[0] == '\0', "console buffer clears after drain");
+  }
+
+  // PROBE: IndexedDB (PWAs use it; may need a backend like DOM storage did).
+  mbLoadHTML(v, "<body>x</body>", "about:blank");
+  mbRunJS(v, "window.__idb='pending';var r=indexedDB.open('mbdb',1);"
+             "r.onsuccess=function(){window.__idb='ok';};"
+             "r.onerror=function(){window.__idb='err';};"
+             "r.onblocked=function(){window.__idb='blocked';};");
+  mbWait(v, 150);
+  std::fprintf(stderr, "PROBE4 indexedDB=%s\n", Eval(v, "String(window.__idb)").c_str());
+
   mbDestroyView(v);
   mbShutdown();
 

@@ -34,7 +34,8 @@ that satisfies modern Blink so it runs without the full browser.
 | `requestAnimationFrame` (serviced without a compositor) | ✅ |
 | Observers: Mutation, **Intersection** (forced past offscreen throttling), Resize | ✅ |
 | Web/CSS Animations advance (clock serviced); `XMLHttpRequest` + `fetch` | ✅ |
-| On-screen window, GPU compositing | ⏳ roadmap |
+| Console capture (`console.log`/`warn`/`error` → host) | ✅ |
+| On-screen window, GPU compositing, IndexedDB | ⏳ roadmap |
 
 ## Tool: `mb_shot` (headless HTML → PNG)
 
@@ -42,7 +43,7 @@ The deliverable example app — a standalone headless screenshot renderer:
 
 ```sh
 mb_shot [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
-        [--wait-selector CSS] [--wait-ms N] \
+        [--wait-selector CSS] [--wait-ms N] [--console] \
         <input.html | file://URL | http(s)://URL> <out.png> [width height]
 ```
 
@@ -67,6 +68,9 @@ the page doesn't paint keep alpha 0, so the PNG can be composited over other con
 `--wait-selector CSS` waits (driving timers/async) until an element matching the selector
 exists before capturing — for JS-rendered content (Puppeteer's `waitForSelector`); `--wait-ms
 N` just settles the page for N ms. Both compose with the capture options.
+
+`--console` prints the page's captured console output (`console.log`/`warn`/`error`) to
+stderr — useful for debugging a page or scripting against its logs.
 
 Rendered by `mb_shot` from an HTML file (gradient, CSS grid, translucent cards, a
 rotated card, and JS-injected text — all modern Blink, headless, no CEF):
@@ -143,6 +147,7 @@ void  mbWait(mbView*, int ms);                      // drive timers/async for ms
 int   mbWaitForSelector(mbView*, const char* css, int timeout_ms);  // wait for element
 void  mbRunJS(mbView*, const char* script);         // host -> page: drive it
 int   mbEvalJS(mbView*, const char* script, char* out, int cap);  // host <- page: read back
+int   mbDrainConsole(mbView*, char* out, int cap);  // drain captured console output
 void  mbSendMouseClick(mbView*, int x, int y);      // synthesize a click
 void  mbSendMouseMove(mbView*, int x, int y);       // move pointer: hover + mousemove
 void  mbSetDeviceScaleFactor(mbView*, float scale); // HiDPI: devicePixelRatio + Nx raster
@@ -173,12 +178,13 @@ Requirements: a Chromium M150 source tree with a component `out/Release`
 ./build.sh /path/to/chromium-150.x.y.z   # stages host into the tree, gn gen, ninja, runs the suite
 ```
 
-`mb_smoke` is a 32-case capability test suite (HTML/DOM, JS, CSS computed style, UA
+`mb_smoke` is a 34-case capability test suite (HTML/DOM, JS, CSS computed style, UA
 stylesheet, the `mbRunJS`+`mbEvalJS` bridge, `<canvas>` getImageData, external `<link>`
 CSS via the subresource loader, paint-to-bitmap, synthesized click, typed text (ASCII +
 UTF-8 accent/CJK/emoji), programmatic scroll, mouse-move/hover, embedded-NUL document
 integrity, full-page capture (resize → reflow → render below the fold), HiDPI
 (devicePixelRatio + resolution media queries), User-Agent (default + override), clip/
 region capture, transparent background, wait-for-selector, DOM storage
-(`localStorage`/`sessionStorage`), `requestAnimationFrame`, observer delivery (Mutation & Intersection & Resize), and time-based animation (WAAPI/XHR)) — it prints PASS/FAIL per
-case and exits non-zero on any failure, so it doubles as a regression test.
+(`localStorage`/`sessionStorage`), `requestAnimationFrame`, observer delivery (Mutation & Intersection & Resize), time-based animation (WAAPI/XHR), and
+console capture) — it prints PASS/FAIL per case and exits non-zero on any failure, so it
+doubles as a regression test.

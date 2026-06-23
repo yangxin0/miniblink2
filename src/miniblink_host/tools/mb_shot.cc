@@ -15,6 +15,7 @@
 //   --wait-selector S  before capturing, wait until an element matching S exists
 //                      (timeout = --wait-ms or 5000ms). For JS-rendered content.
 //   --wait-ms N        before capturing, drive the engine for N ms (settle timers/async).
+//   --console          print the page's console output (console.log/warn/error) to stderr.
 //
 // This is the "product" the host enables: a standalone, single-process, modern-Blink
 // screenshot tool — no browser process, no CEF.
@@ -36,6 +37,7 @@ constexpr int kMaxFullPageHeight = 20000;
 int main(int argc, char** argv) {
   bool full_page = false;
   bool transparent = false;
+  bool print_console = false;
   float scale = 1.0f;
   std::string clip;      // "x,y,w,h"
   std::string selector;  // CSS selector -> capture that element's box
@@ -60,6 +62,8 @@ int main(int argc, char** argv) {
       wait_selector = argv[++i];
     } else if (a == "--wait-ms" && i + 1 < argc) {
       wait_ms = std::atoi(argv[++i]);
+    } else if (a == "--console") {
+      print_console = true;
     } else {
       pos.push_back(argv[i]);
     }
@@ -137,6 +141,13 @@ int main(int argc, char** argv) {
     }
   } else if (wait_ms > 0) {
     mbWait(view, wait_ms);
+  }
+
+  if (print_console) {
+    char cbuf[8192] = {0};
+    mbDrainConsole(view, cbuf, sizeof(cbuf));
+    if (cbuf[0])
+      std::fprintf(stderr, "---- page console ----\n%s----------------------\n", cbuf);
   }
 
   // Clip / element capture: resolve a logical rectangle and shoot just that. We

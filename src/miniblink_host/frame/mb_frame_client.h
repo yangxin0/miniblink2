@@ -16,8 +16,10 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "third_party/blink/public/platform/web_string.h"
+#include "third_party/blink/public/web/web_console_message.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
 
 namespace mb {
@@ -41,11 +43,21 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   void SetUserAgent(const std::string& ua) { user_agent_ = ua; }
   const std::string& user_agent() const { return user_agent_; }
 
+  // Capture page console output (console.log/warn/error) so a host or automation
+  // script can read it back. Each entry is "level: text".
+  void DidAddMessageToConsole(const blink::WebConsoleMessage&,
+                              const blink::WebString& source_name,
+                              unsigned source_line,
+                              const blink::WebString& stack_trace) override;
+  // Return all captured console lines joined by '\n' and clear the buffer.
+  std::string DrainConsole();
+
   // TODO(mb): DidStopLoading/DidMeaningfulLayout (paint signal), CreateChildFrame.
 
  private:
   [[maybe_unused]] MbWebView* owner_;  // not owned (used once handshake bodies land)
   std::string user_agent_;  // empty -> MbDefaultUserAgent() (resolved at use)
+  std::vector<std::string> console_;  // captured console messages
 };
 
 }  // namespace mb

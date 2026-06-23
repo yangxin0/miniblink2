@@ -221,6 +221,10 @@ void MbWebView::SetUserAgent(const char* utf8_ua) {
     frame_client_->SetUserAgent(utf8_ua ? utf8_ua : "");
 }
 
+std::string MbWebView::DrainConsole() {
+  return frame_client_ ? frame_client_->DrainConsole() : std::string();
+}
+
 void MbWebView::SetTransparentBackground(bool transparent) {
   transparent_bg_ = transparent;
   if (!web_view_)

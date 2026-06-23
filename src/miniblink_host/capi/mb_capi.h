@@ -84,6 +84,11 @@ MB_EXPORT void mbSendText(mbView*, const char* utf8_text);
 // the page downward (toward larger window.scrollY), matching natural intent.
 MB_EXPORT void mbSendScroll(mbView*, int x, int y, int dx, int dy);
 
+// Drain captured page console output (console.log/warn/error) into `out`
+// (NUL-terminated, up to out_cap bytes; one "level: text" line per message), and
+// clear the buffer. Returns the full output length in bytes.
+MB_EXPORT int mbDrainConsole(mbView*, char* out, int out_cap);
+
 // Evaluate JS and write its result (coerced to string) into `out` (NUL-terminated,
 // up to out_cap bytes). Returns the full result length in bytes (may exceed out_cap-1,
 // indicating truncation). Lets the host read data back from the page (e.g. document.title).
