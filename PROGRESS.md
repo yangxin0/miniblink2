@@ -1017,6 +1017,17 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   only crashes were the null-Platform-method class (Worker, SubtleCrypto, AudioContext, all fixed)
   and the [Sync]-mojo hangs (dialogs/Blob, all fixed). Nothing probed since hangs or crashes.
 
+- ✅ RENDERING CORRECTNESS verified (2026-06-23): shifted from "doesn't crash / non-blank" to
+  "produces the RIGHT pixels", the actual point of a modern engine. LAYOUT (exact, via
+  getBoundingClientRect): flexbox justify-content:space-between -> children at x=0 and x=300 in a
+  400px row; CSS grid repeat(3,1fr) in 300px -> 3rd cell x=200; transform:translateX(50px) ->
+  bounding rect x=50 (transform reflected). PAINT (exact pixel sampling via mbPaintToBitmap, BGRA):
+  solid #00ff00 -> pure green (0,255,0); rgba(0,0,255,0.5) over white -> correct alpha composite
+  ~(128,128,255); two absolutely-positioned boxes -> later (blue) stacks over earlier (red) at the
+  overlap; horizontal linear-gradient(#f00->#00f) -> red-ish at left edge, blue-ish at right. So
+  the engine lays out modern CSS and rasterizes color/alpha/stacking/gradients CORRECTLY, not just
+  without crashing. Smoke 51-52 lock in flexbox + solid + alpha + stacking + gradient. 65/65.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

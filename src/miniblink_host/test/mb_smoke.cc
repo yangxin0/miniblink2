@@ -910,6 +910,75 @@ int main() {
   }
   Expect(drew, "form controls paint via WebThemeEngine (non-blank output)");
 
+  // 51. Paint correctness: a renderer must produce the RIGHT pixels, not just
+  // non-blank ones. Verify exact layout (getBoundingClientRect) AND exact paint:
+  //  (a) flexbox space-between positions children at 0 and 300 in a 400px row;
+  //  (b) a solid #00ff00 fill rasterizes to pure green;
+  //  (c) rgba(0,0,255,0.5) over white composites to ~(128,128,255).
+  // px is BGRA: [0]=B [1]=G [2]=R. Sample interior points to avoid AA edges.
+  {
+    Expect(Eval(v,
+      "(function(){document.body.style.margin='0';"
+      "document.body.innerHTML="
+      "\"<div style='display:flex;justify-content:space-between;width:400px'>\"+"
+      "\"<i id=a style=\\\"width:100px;height:20px;display:block\\\"></i>\"+"
+      "\"<i id=b style=\\\"width:100px;height:20px;display:block\\\"></i></div>\";"
+      "var a=document.getElementById('a').getBoundingClientRect(),"
+      "b=document.getElementById('b').getBoundingClientRect();"
+      "return a.x+','+b.x;})()") == "0,300",
+      "layout: flexbox space-between (children at 0 and 300)");
+
+    mbLoadHTML(v,
+      "<body style='margin:0;background:#fff'>"
+      "<div style='width:80px;height:80px;background:#00ff00'></div></body>",
+      "about:blank");
+    std::vector<uint8_t> g(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, g.data(), W, H, W * 4);
+    size_t i = (40u * W + 40u) * 4;  // inside the green box
+    Expect(g[i + 2] == 0 && g[i + 1] == 255 && g[i] == 0,
+           "paint: solid #00ff00 rasterizes to pure green");
+
+    mbLoadHTML(v,
+      "<body style='margin:0;background:#fff'>"
+      "<div style='width:80px;height:80px;background:rgba(0,0,255,0.5)'></div></body>",
+      "about:blank");
+    std::vector<uint8_t> a2(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, a2.data(), W, H, W * 4);
+    size_t j = (40u * W + 40u) * 4;
+    int R = a2[j + 2], G = a2[j + 1], B = a2[j];
+    auto near = [](int x, int t) { return x >= t - 4 && x <= t + 4; };
+    Expect(near(R, 128) && near(G, 128) && B == 255,
+           "paint: rgba(0,0,255,.5) over white composites to ~(128,128,255)");
+  }
+
+  // 52. Stacking + gradient paint. z-index/DOM order: a blue box painted over a
+  // red box wins at the overlap. And a horizontal red->blue linear-gradient is
+  // red-ish at the left edge and blue-ish at the right.
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0'>"
+      "<div style='position:absolute;left:0;top:0;width:60px;height:60px;background:#ff0000'></div>"
+      "<div style='position:absolute;left:0;top:0;width:60px;height:60px;background:#0000ff'></div>"
+      "</body>", "about:blank");
+    std::vector<uint8_t> s(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, s.data(), W, H, W * 4);
+    size_t k = (30u * W + 30u) * 4;
+    Expect(s[k] == 255 && s[k + 2] == 0,  // B=255, R=0 -> blue on top
+           "paint: later box stacks over earlier (blue over red)");
+
+    mbLoadHTML(v,
+      "<body style='margin:0'>"
+      "<div style='width:200px;height:40px;"
+      "background:linear-gradient(to right,#ff0000,#0000ff)'></div></body>",
+      "about:blank");
+    std::vector<uint8_t> gr(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, gr.data(), W, H, W * 4);
+    size_t L = (20u * W + 6u) * 4, Rt = (20u * W + 193u) * 4;
+    Expect(gr[L + 2] > 200 && gr[L] < 60 &&        // left: red-ish
+               gr[Rt] > 200 && gr[Rt + 2] < 60,    // right: blue-ish
+           "paint: horizontal linear-gradient is red->blue across width");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
