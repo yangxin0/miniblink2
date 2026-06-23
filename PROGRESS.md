@@ -1200,6 +1200,21 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   effort, not the broker-routing pattern used for blob data. Both remain focused follow-ups; the
   common blob-data case is shipped and guarded.
 
+- ✅✅ DONE: large blobs (>256KB) — Blob DATA now complete for ALL sizes (2026-06-24): executed
+  increment 6. Reworked MbBlob around ordered Parts (inline bytes OR a bound BytesProvider remote):
+  Register replies immediately (unblocking the main thread), then Materialize() walks parts in
+  order appending inline bytes synchronously and fetching provider parts via RequestAsReply (async,
+  serviced by the now-unblocked main thread); reads arriving before materialization are queued and
+  drained when ready. Capturing `this` in the reply callback is safe — the provider Remote is a
+  member, so destroying MbBlob cancels the pending reply. Added BlobReadSession: a self-owned,
+  CHUNKED data-pipe writer driven by a mojo::SimpleWatcher (WriteData loop; ArmOrNotify on
+  SHOULD_WAIT) so blobs larger than the pipe buffer stream correctly; it also replaced the old
+  WriteAllData path for small blobs (unified). RESULT: new Blob(['q'.repeat(500000)]).text().length
+  === 500000 and arrayBuffer().byteLength === 500000 — confirmed by smoke 66 AND mb_shot
+  (bigtext-len=500000, was 0). 79/79, exit 0, no survivors (no hang from the watcher/provider).
+  Blob data is now correct for any size; remaining blob work is only increment 5 (blob: URL
+  resolution via the navigation-associated channel + a blob: URLLoaderFactory).
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

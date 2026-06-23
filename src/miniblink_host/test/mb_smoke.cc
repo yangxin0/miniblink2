@@ -1215,6 +1215,23 @@ int main() {
            "Blob data round-trips at 100 KB (realistic size, not just bytes)");
   }
 
+  // 66. Large blobs (>256 KB) resolve too: no inline embedded_data, so the bytes
+  // come via the BytesProvider (fetched after Register replies), and the read
+  // streams over the pipe in chunks (SimpleWatcher). Verifies the full data path
+  // for any size. 500 KB exceeds both the 256 KB inline cap and the pipe buffer.
+  {
+    mbLoadHTML(v, "<body>bigblob</body>", "about:blank");
+    mbRunJS(v,
+      "window.__big=-1;window.__bab=-1;"
+      "var b=new Blob(['q'.repeat(500000)]);"
+      "b.text().then(function(s){window.__big=s.length;});"
+      "b.arrayBuffer().then(function(a){window.__bab=a.byteLength;});");
+    mbWait(v, 500);  // BytesProvider fetch + chunked write
+    Expect(Eval(v, "String(window.__big)") == "500000" &&
+               Eval(v, "String(window.__bab)") == "500000",
+           "Blob >256KB resolves via BytesProvider + chunked pipe write");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
