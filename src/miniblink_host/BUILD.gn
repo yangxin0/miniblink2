@@ -20,6 +20,8 @@ component("miniblink_host") {
   include_dirs = [ "//third_party/blink/renderer" ]
 
   sources = [
+    "blob/mb_blob_registry.cc",
+    "blob/mb_blob_registry.h",
     "capi/mb_capi.cc",
     "capi/mb_capi.h",
     "frame/mb_frame_broker.cc",

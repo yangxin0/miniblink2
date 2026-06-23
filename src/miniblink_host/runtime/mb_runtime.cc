@@ -207,4 +207,11 @@ void MbRuntime::PumpOnce() {
   base::RunLoop().RunUntilIdle();
 }
 
+// static
+scoped_refptr<base::SingleThreadTaskRunner> MbRuntime::ServiceTaskRunner() {
+  if (g_runtime && g_runtime->io_thread_)
+    return g_runtime->io_thread_->task_runner();
+  return nullptr;
+}
+
 }  // namespace mb

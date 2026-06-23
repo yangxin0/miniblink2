@@ -20,6 +20,8 @@
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
+#include "miniblink_host/blob/mb_blob_registry.h"
+#include "third_party/blink/public/mojom/blob/blob_registry.mojom-blink.h"
 #include "third_party/blink/public/mojom/mime/mime_registry.mojom-blink.h"
 #include "third_party/blink/public/platform/web_data.h"
 #include "third_party/blink/public/platform/web_dedicated_worker_host_factory_client.h"
@@ -63,6 +65,12 @@ class MbEmptyBroker : public blink::ThreadSafeBrowserInterfaceBrokerProxy {
     if (auto r = receiver.As<blink::mojom::blink::MimeRegistry>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbMimeRegistry>(),
                                   std::move(r));
+      return;
+    }
+    // Blob bytes: route to the service thread so the [Sync] Register the main
+    // thread makes is answered off-thread (instead of dropped -> reads hang).
+    if (auto r = receiver.As<blink::mojom::blink::BlobRegistry>()) {
+      BindBlobRegistryOnServiceThread(std::move(r));
       return;
     }
     // Drop everything else.

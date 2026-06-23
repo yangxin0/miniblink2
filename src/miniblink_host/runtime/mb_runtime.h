@@ -19,6 +19,9 @@
 
 #include <memory>
 
+#include "base/memory/scoped_refptr.h"
+#include "base/task/single_thread_task_runner.h"
+
 namespace base {
 class AtExitManager;
 class DiscardableMemoryAllocator;
@@ -53,6 +56,12 @@ class MbRuntime {
   void PumpOnce();
 
   MbPlatform* platform() { return platform_.get(); }
+
+  // Task runner of the IO/service thread (mb-io). In-process mojo services that
+  // must answer [Sync] calls the main thread makes (e.g. BlobRegistry) bind their
+  // receivers here, so the call is serviced off-thread instead of deadlocking.
+  // Null before Initialize().
+  static scoped_refptr<base::SingleThreadTaskRunner> ServiceTaskRunner();
 
  private:
   MbRuntime();

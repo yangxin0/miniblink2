@@ -1170,6 +1170,23 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   the planning was warranted because it's the only remaining heavy item and cramming risks broken
   state, but it is now fully scoped and the next step is code.
 
+- ✅✅ DONE: Blob data resolves — first heavy capability shipped; service-host validated (2026-06-24):
+  executed increments 3+4. New blob/mb_blob_registry.{h,cc}: MbBlobRegistry + MbBlob (blink mojom
+  variant) bound on the IO/service thread via MbRuntime::ServiceTaskRunner() (new accessor =
+  io_thread_->task_runner()); MbEmptyBroker now routes blink::mojom::blink::BlobRegistry there
+  instead of dropping it. Register concatenates each DataElementBytes.embedded_data (inline for
+  <=256KB) and binds an MbBlob(uuid,bytes); the RegisterCallback Run() sends the () reply that
+  unblocks Blink's [Sync] Register. Blob.ReadAll fires BlobReaderClient.OnCalculatedSize, writes
+  the bytes (WriteAllData, one shot for small blobs), then OnComplete(0,size); GetInternalUUID/
+  Clone/CaptureSnapshot real, the rest stubbed. RESULT: new Blob(['hello']).text()==='hello',
+  arrayBuffer().byteLength===5, FileReader.readAsText delivers — confirmed by smoke 64 AND mb_shot
+  (blob-text=hello, fr-result=hello, previously never resolved). 77/77, exit 0, NO SURVIVORS — the
+  main thread's [Sync] Register is serviced by the io_thread receiver without deadlocking (the
+  whole premise), and reads stream over a data pipe. This PROVES the cross-thread service-host
+  architecture works in-process; the same foundation now unblocks blob: URL resolution (revisit
+  patches/0003) and, later, real worker execution. Honest scope: small blobs only (inline bytes);
+  >256KB needs the BytesProvider callback (increment 6); blob: URL load is increment 5.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

@@ -1178,6 +1178,27 @@ int main() {
            "mbWaitForFunction: resolves when predicate turns truthy; times out otherwise");
   }
 
+  // 64. Blob DATA now resolves (in-process BlobRegistry/Blob on the service
+  // thread). Previously blob reads stayed pending forever; now blob.text(),
+  // arrayBuffer() and FileReader deliver the bytes. This exercises the [Sync]
+  // BlobRegistry.Register serviced off the main thread + Blob.ReadAll over a
+  // data pipe — the payoff of the service-host work.
+  {
+    mbLoadHTML(v, "<body>blob-data</body>", "about:blank");
+    mbRunJS(v,
+      "window.__t='pending';window.__ab=-1;window.__fr='pending';"
+      "var b=new Blob(['hello'],{type:'text/plain'});"
+      "b.text().then(function(s){window.__t=s;});"
+      "b.arrayBuffer().then(function(a){window.__ab=a.byteLength;});"
+      "var fr=new FileReader();fr.onload=function(){window.__fr=fr.result;};"
+      "fr.readAsText(new Blob(['world']));");
+    mbWait(v, 300);  // drive the async reads to completion
+    Expect(Eval(v, "window.__t") == "hello" &&
+               Eval(v, "String(window.__ab)") == "5" &&
+               Eval(v, "window.__fr") == "world",
+           "Blob data resolves: text()/arrayBuffer()/FileReader deliver bytes");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
