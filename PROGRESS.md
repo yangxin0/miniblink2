@@ -970,6 +970,22 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   beforeunload, clipboard (gated), and now Blob. No known JS API can hang or crash the host now;
   unbacked services degrade gracefully (inert / reject / pending-promise / event-based failure).
 
+- ✅ FIX + capability: Web Crypto (crypto.subtle.*) now WORKS (2026-06-23): swept compute-heavy
+  APIs; found crypto.subtle SIGSEGVs (the rest — WebAssembly compile/instantiate/call,
+  structuredClone incl. Map, TextEncoder/TextDecoder UTF-8, crypto.getRandomValues — all already
+  work). Root cause (same family as the worker crash): SubtleCrypto derefs
+  Platform::Current()->Crypto() unconditionally (subtle_crypto.cc, every op), and base
+  blink::Platform::Crypto() returns nullptr (platform.h:741) -> null deref on any crypto.subtle
+  call. FIX: MbPlatform::Crypto() now returns a real BoringSSL-backed webcrypto::WebCryptoImpl
+  (the same impl content's BlinkPlatformImpl uses); added //components/webcrypto to the GN deps,
+  member is a std::unique_ptr<webcrypto::WebCryptoImpl> constructed in the ctor. Unlike the other
+  fixes this is not just crash-safety — it ENABLES the feature: verified the async digest actually
+  computes (SHA-256("abc") = ba7816bf...:32, the correct value), so the full WebCryptoImpl surface
+  (encrypt/decrypt/sign/verify/generateKey/import/export/digest/HMAC/AES/RSA/EC) is now live in-
+  process. Web Crypto requires a secure context, so the guard loads from an https origin. Smoke 47
+  guards getRandomValues + subtle.digest. 57/57, no survivors. Confirmed-working compute set now:
+  WASM, structuredClone, Text{Encoder,Decoder}, getRandomValues, and full SubtleCrypto.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

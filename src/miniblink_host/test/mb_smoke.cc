@@ -841,6 +841,24 @@ int main() {
              Eval(v, "String(window.__rev)") == "true",
          "URL.createObjectURL/revokeObjectURL no longer hang (blob: URL returned)");
 
+  // 47. Web Crypto works. crypto.subtle.* used to SIGSEGV: SubtleCrypto derefs
+  // Platform::Current()->Crypto() unconditionally, and base Platform returns
+  // null — so any crypto.subtle call crashed the host. MbPlatform now returns a
+  // real BoringSSL-backed webcrypto::WebCryptoImpl. Verify the async digest
+  // actually computes (SHA-256("abc") has a known value) and getRandomValues
+  // fills bytes. (Secure origin: Web Crypto requires a secure context.)
+  mbLoadHTML(v, "<body>crypto</body>", "https://miniblink.test/");
+  mbRunJS(v,
+    "window.__d='pending';var r=new Uint8Array(16);crypto.getRandomValues(r);"
+    "window.__rnd=r.some(function(x){return x!==0;});"
+    "crypto.subtle.digest('SHA-256',new TextEncoder().encode('abc')).then(function(h){"
+    "var b=new Uint8Array(h),s='';for(var i=0;i<4;i++)s+=('0'+b[i].toString(16)).slice(-2);"
+    "window.__d=s+':'+b.length;},function(e){window.__d='REJ:'+e.name;});");
+  mbWait(v, 250);
+  Expect(Eval(v, "String(window.__rnd)") == "true" &&
+             Eval(v, "window.__d") == "ba7816bf:32",  // SHA-256("abc") prefix + len
+         "Web Crypto: getRandomValues + subtle.digest(SHA-256) compute");
+
   mbDestroyView(v);
   mbShutdown();
 

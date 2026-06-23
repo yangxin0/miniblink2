@@ -51,6 +51,7 @@ component("miniblink_host") {
     # Substrate.
     "//base",
     "//cc",
+    "//components/webcrypto",  # WebCrypto impl for Platform::Crypto() (SubtleCrypto)
     "//cc/paint",
     "//gin",
     "//mojo/core/embedder",

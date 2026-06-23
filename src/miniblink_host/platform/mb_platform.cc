@@ -9,8 +9,11 @@
 
 #include "miniblink_host/platform/mb_platform.h"
 
+#include <memory>
+
 #include "base/containers/span.h"
 #include "base/memory/scoped_refptr.h"
+#include "components/webcrypto/webcrypto_impl.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
@@ -99,8 +102,13 @@ class MbDedicatedWorkerHostFactoryClient
 }  // namespace
 
 MbPlatform::MbPlatform()
-    : broker_(base::MakeRefCounted<MbEmptyBroker>()) {}
+    : broker_(base::MakeRefCounted<MbEmptyBroker>()),
+      web_crypto_(std::make_unique<webcrypto::WebCryptoImpl>()) {}
 MbPlatform::~MbPlatform() = default;
+
+blink::WebCrypto* MbPlatform::Crypto() {
+  return web_crypto_.get();  // BoringSSL-backed; never null (see header note)
+}
 
 blink::WebString MbPlatform::DefaultLocale() {
   // Must be non-empty: layout/font selection reads DefaultLanguage() from this and

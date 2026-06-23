@@ -17,6 +17,10 @@
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/public/platform/platform.h"
 
+namespace webcrypto {
+class WebCryptoImpl;
+}
+
 namespace mb {
 
 class MbPlatform : public blink::Platform {
@@ -31,6 +35,11 @@ class MbPlatform : public blink::Platform {
   blink::ThreadSafeBrowserInterfaceBrokerProxy* GetBrowserInterfaceBroker()
       override;
   bool IsThreadedAnimationEnabled() override;
+
+  // WebCrypto (crypto.subtle.*): base Platform returns nullptr and SubtleCrypto
+  // derefs it unconditionally (Platform::Current()->Crypto()->Digest(...)),
+  // crashing on any crypto.subtle call. Return a real BoringSSL-backed impl.
+  blink::WebCrypto* Crypto() override;
 
   // Worker bring-up: base Platform returns nullptr here and DedicatedWorker
   // derefs it (null-deref SIGSEGV on `new Worker`). We have no worker-thread
@@ -56,6 +65,8 @@ class MbPlatform : public blink::Platform {
   // (TimeZoneController etc.) calls GetInterface() during startup and crashes on a
   // null broker, so this must be a real ref-counted object, not nullptr.
   scoped_refptr<blink::ThreadSafeBrowserInterfaceBrokerProxy> broker_;
+  // BoringSSL-backed WebCrypto impl returned from Crypto(); threadsafe.
+  std::unique_ptr<webcrypto::WebCryptoImpl> web_crypto_;
 };
 
 }  // namespace mb
