@@ -633,6 +633,27 @@ int main() {
              Eval(v, "String(document.querySelector('#s'))") == "null",  // encapsulated
          "Web Components: custom element upgrade + shadow DOM encapsulation");
 
+  // 37. Worker spawn must not crash the host. We have no worker-thread
+  // infrastructure, so a dedicated Worker is INERT (never runs) — but a page
+  // that does `new Worker(...)` must degrade gracefully, not SIGSEGV (it used
+  // to: factory_client_ was null and DedicatedWorker::Start derefs it). The
+  // guard: construct a Worker, pump, and confirm the host is still alive and
+  // scripting after (a crash would never reach the assert). The worker itself
+  // is expected to be inert, so we only assert survival + a live main frame.
+  mbLoadHTML(v, "<body>worker-guard</body>", "about:blank");
+  mbRunJS(v,
+    "try{window.__w=new Worker('data:text/javascript,'+"
+    "encodeURIComponent('onmessage=function(e){postMessage(e.data*2)}'));"
+    "window.__w.postMessage(21);window.__wok=true;}"
+    "catch(e){window.__wok=false;window.__werr=String(e);}");
+  mbWait(v, 60);
+  // Host survived the worker spawn (we got here at all) and JS still runs:
+  Expect(Eval(v, "1+1") == "2" &&
+             Eval(v, "document.body.textContent") == "worker-guard" &&
+             (Eval(v, "String(typeof window.__w)") == "object" ||
+              Eval(v, "String(window.__wok)") == "false"),
+         "Worker spawn degrades gracefully (no crash; host still scriptable)");
+
   mbDestroyView(v);
   mbShutdown();
 

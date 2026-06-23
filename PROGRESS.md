@@ -828,14 +828,22 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   querySelector can't see it (encapsulated). Smoke 36 asserts all three. 46/46, no survivors.
   Another on-theme M150 marker (M47 had only the v0 prototype). Pure-DOM, offline-verifiable.
 
-- 🔴 WEB WORKERS CRASH (2026-06-23 21:?): probed `new Worker("data:text/javascript,...")` — it
-  SIGSEGVs the host (exit 139, raw null-deref, no DCHECK), right after the page-level cases.
-  The minimal host has no worker-thread infrastructure (WorkerThread / WorkerGlobalScope need
-  their own Platform/scheduler/loader/broker bring-up, none of which we provide). A real site
-  spawning a dedicated/shared/service worker would crash the process. HEAVY GAP (comparable to
-  IndexedDB): not a shim — needs real worker bring-up. Probe removed (it crashes the suite);
-  46/46 restored. HIGH-PRIORITY among the heavy items since workers are common (and the crash
-  is worse than a hang). Same family as the other browser-process-service gaps (Blob, IndexedDB).
+- ✅ WORKER CRASH HARDENED -> graceful degradation (2026-06-23): the `new Worker(...)` SIGSEGV
+  is FIXED. Root cause: `DedicatedWorker`'s ctor calls
+  `Platform::CreateDedicatedWorkerHostFactoryClient()`; base Platform returns nullptr, and
+  `DedicatedWorker::Start()` then derefs it unconditionally (`factory_client_->CreateWorkerHost`,
+  dedicated_worker.cc:312) — a hard null-deref the moment any page spawns a worker. Fix: override
+  that Platform method in MbPlatform to return an inert stub (mb_platform.cc
+  MbDedicatedWorkerHostFactoryClient): CreateWorkerHost is a no-op (the script-load callback
+  never fires, so the worker never runs) and CloneWorkerFetchContext returns null. The main
+  thread is NOT blocked — `new Worker` returns a valid object, the page keeps running, the
+  worker is simply inert. So a worker-using site DEGRADES (worker doesn't execute) instead of
+  crashing the host. Smoke 37 is the regression guard: spawn a Worker, pump, assert the host is
+  still alive + scriptable. 47/47, no survivors.
+  NOTE: this is hardening, NOT worker support. Workers still don't RUN — full support remains a
+  HEAVY item (real WorkerThread/WorkerGlobalScope bring-up: own Platform/scheduler/loader/broker),
+  same family as the other browser-process-service gaps (Blob sync-deadlock, IndexedDB). But a
+  crash is no longer in that family: the process now survives worker spawns.
 
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).

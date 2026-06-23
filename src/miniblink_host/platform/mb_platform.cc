@@ -17,6 +17,8 @@
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/mime/mime_registry.mojom-blink.h"
 #include "third_party/blink/public/platform/web_data.h"
+#include "third_party/blink/public/platform/web_dedicated_worker_host_factory_client.h"
+#include "third_party/blink/public/platform/web_worker_fetch_context.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -65,6 +67,35 @@ class MbEmptyBroker : public blink::ThreadSafeBrowserInterfaceBrokerProxy {
   ~MbEmptyBroker() override = default;
 };
 
+// Graceful no-op for Worker creation. blink::DedicatedWorker's ctor calls
+// Platform::CreateDedicatedWorkerHostFactoryClient(); base Platform returns
+// nullptr, and DedicatedWorker::Start() then dereferences it unconditionally
+// (factory_client_->CreateWorkerHost) — a hard null-deref SIGSEGV whenever a
+// page does `new Worker(...)`. We have no browser process to host a real worker
+// thread, so instead of crashing we hand back a stub: CreateWorkerHost does
+// nothing (the script-load callback never fires, so the worker simply never
+// runs), and the main thread is not blocked. A worker-using page degrades —
+// the worker is inert — rather than taking the whole host down.
+class MbDedicatedWorkerHostFactoryClient
+    : public blink::WebDedicatedWorkerHostFactoryClient {
+ public:
+  void CreateWorkerHost(
+      const blink::DedicatedWorkerToken&,
+      const blink::WebURL&,
+      network::mojom::CredentialsMode,
+      const blink::WebFetchClientSettingsObject&,
+      blink::CrossVariantMojoRemote<blink::mojom::BlobURLTokenInterfaceBase>,
+      net::StorageAccessApiStatus) override {
+    // No worker-thread infrastructure: intentionally inert (see class comment).
+  }
+
+  scoped_refptr<blink::WebWorkerFetchContext> CloneWorkerFetchContext(
+      blink::WebWorkerFetchContext*,
+      scoped_refptr<base::SingleThreadTaskRunner>) override {
+    return nullptr;  // nested workers unsupported
+  }
+};
+
 }  // namespace
 
 MbPlatform::MbPlatform()
@@ -84,6 +115,14 @@ MbPlatform::GetBrowserInterfaceBroker() {
 
 bool MbPlatform::IsThreadedAnimationEnabled() {
   return false;  // synchronous single-threaded compositing in P1
+}
+
+std::unique_ptr<blink::WebDedicatedWorkerHostFactoryClient>
+MbPlatform::CreateDedicatedWorkerHostFactoryClient(
+    blink::WebDedicatedWorker*,
+    const blink::BrowserInterfaceBrokerProxy&) {
+  // Return a non-null stub so DedicatedWorker::Start() does not deref nullptr.
+  return std::make_unique<MbDedicatedWorkerHostFactoryClient>();
 }
 
 blink::WebData MbPlatform::GetDataResource(int resource_id,

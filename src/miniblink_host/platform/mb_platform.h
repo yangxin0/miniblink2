@@ -32,6 +32,15 @@ class MbPlatform : public blink::Platform {
       override;
   bool IsThreadedAnimationEnabled() override;
 
+  // Worker bring-up: base Platform returns nullptr here and DedicatedWorker
+  // derefs it (null-deref SIGSEGV on `new Worker`). We have no worker-thread
+  // infrastructure, so return an inert stub — the worker never runs, but the
+  // host does not crash. See mb_platform.cc for the full rationale.
+  std::unique_ptr<blink::WebDedicatedWorkerHostFactoryClient>
+  CreateDedicatedWorkerHostFactoryClient(
+      blink::WebDedicatedWorker*,
+      const blink::BrowserInterfaceBrokerProxy&) override;
+
   // Resource bundle: Blink asks for built-in resources (UA stylesheet, etc.).
   // P1: back with a real bundle / packed file. TODO(mb): wire resource pak.
   blink::WebData GetDataResource(
