@@ -1402,6 +1402,11 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   style applies (rgb(7,8,9)); uses a file:// base so it's same-origin (opaque about:blank -> file://
   is separately policy-blocked — noted). 90/90, no survivors. Real bug fix, found by probing.
 
+- ✅ CSS background-image (data: SVG) paints (2026-06-24): a distinct path from <img> — the CSS
+  background paint pipeline + a data: URL image + SVG-as-image. A 30x30 div with a green-SVG
+  background-image (data:image/svg+xml,...) paints green at its center (pixel check). Works; common
+  pattern (inline SVG backgrounds, icons). Smoke 76. 91/91, no survivors.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

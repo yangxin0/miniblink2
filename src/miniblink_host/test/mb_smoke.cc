@@ -1424,6 +1424,25 @@ int main() {
     std::remove(css_path);
   }
 
+  // 76. CSS background-image renders (data: SVG). Distinct from <img>: exercises
+  // the CSS background paint path + a data: URL image + SVG-as-image. A 30x30 div
+  // with a green-SVG background should paint green at its center.
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0;background:#fff'>"
+      "<div style='width:30px;height:30px;background-image:url("
+      "\"data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 "
+      "width=%2230%22 height=%2230%22><rect width=%2230%22 height=%2230%22 "
+      "fill=%22%2300ff00%22/></svg>\")'></div></body>",
+      "about:blank");
+    mbWait(v, 80);  // background image decode + paint
+    std::vector<uint8_t> bg(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, bg.data(), W, H, W * 4);
+    size_t mid = (15u * W + 15u) * 4;  // center of the div
+    Expect(bg[mid] == 0 && bg[mid + 1] == 255 && bg[mid + 2] == 0,  // green
+           "CSS background-image (data: SVG) paints");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
