@@ -35,6 +35,7 @@
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/platform/scheduler/web_agent_group_scheduler.h"
 #include "third_party/blink/public/platform/web_string.h"
+#include "third_party/blink/public/mojom/css/preferred_color_scheme.mojom-shared.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_local_frame.h"
@@ -232,6 +233,16 @@ void MbWebView::SetLoadImages(bool enabled) {
   // decode). Set before navigating to apply to that load.
   if (web_view_ && web_view_->GetSettings())
     web_view_->GetSettings()->SetLoadsImagesAutomatically(enabled);
+}
+
+void MbWebView::SetDarkMode(bool dark) {
+  // Drive the prefers-color-scheme media feature so a page renders its dark (or
+  // light) theme. Set before navigating to apply to that load.
+  if (web_view_ && web_view_->GetSettings()) {
+    web_view_->GetSettings()->SetPreferredColorScheme(
+        dark ? blink::mojom::PreferredColorScheme::kDark
+             : blink::mojom::PreferredColorScheme::kLight);
+  }
 }
 
 std::string MbWebView::DrainConsole() {

@@ -520,6 +520,23 @@ int main() {
   Expect(Eval(v, "document.body.getAttribute('data-s')") == "shared",
          "isolated world: shares the DOM with main world");
 
+  // 36. Dark mode: prefers-color-scheme media query + a responsive CSS rule flip
+  // when dark mode is emulated.
+  {
+    const char* page =
+        "<style>#d{color:rgb(1,1,1)}"
+        "@media (prefers-color-scheme:dark){#d{color:rgb(2,2,2)}}</style>"
+        "<body><b id='d'>x</b></body>";
+    mbSetDarkMode(v, 1);
+    mbLoadHTML(v, page, "about:blank");
+    bool mm = Eval(v, "String(matchMedia('(prefers-color-scheme:dark)').matches)") ==
+              "true";
+    bool css = Eval(v, "getComputedStyle(document.getElementById('d')).color") ==
+               "rgb(2, 2, 2)";
+    Expect(mm && css, "dark mode: prefers-color-scheme dark applies");
+    mbSetDarkMode(v, 0);  // restore light for any later case
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

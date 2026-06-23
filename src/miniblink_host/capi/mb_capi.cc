@@ -109,6 +109,11 @@ void mbSetLoadImages(mbView* v, int enabled) {
     v->impl->SetLoadImages(enabled != 0);
 }
 
+void mbSetDarkMode(mbView* v, int dark) {
+  if (v && v->impl)
+    v->impl->SetDarkMode(dark != 0);
+}
+
 void mbSetExtraHeaders(mbView* v, const char* utf8_headers) {
   if (v && v->impl)
     v->impl->SetExtraHeaders(utf8_headers);

@@ -767,6 +767,12 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   default. No survivors (bounded self-killing run). Lesson reinforced: pick test image type to
   match what the setting actually gates.
 
+- ✅ DARK MODE (2026-06-23 20:?): mbSetDarkMode(view, 1) + mb_shot --dark emulates
+  prefers-color-scheme: dark via settings->SetPreferredColorScheme(mojom::PreferredColorScheme::
+  kDark/kLight). Set before load. Smoke 36: matchMedia('(prefers-color-scheme:dark)').matches
+  == true AND an @media(prefers-color-scheme:dark) CSS rule applies (color rgb(2,2,2)). 40/40,
+  verified first try, no survivors. DevTools-style dark-theme capture.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

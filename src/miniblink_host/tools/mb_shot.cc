@@ -20,6 +20,7 @@
 //   --text             print the page's visible text (document.body.innerText) to stdout.
 //   --html             print the rendered (post-JS) DOM as serialized HTML to stdout.
 //   --no-images        disable image loading (faster text/HTML scraping).
+//   --dark             emulate prefers-color-scheme: dark (capture dark themes).
 //
 // This is the "product" the host enables: a standalone, single-process, modern-Blink
 // screenshot tool — no browser process, no CEF.
@@ -46,6 +47,7 @@ int main(int argc, char** argv) {
   bool print_text = false;
   bool print_html = false;
   bool no_images = false;
+  bool dark_mode = false;
   float scale = 1.0f;
   std::string clip;      // "x,y,w,h"
   std::string selector;  // CSS selector -> capture that element's box
@@ -79,6 +81,8 @@ int main(int argc, char** argv) {
       print_html = true;
     } else if (a == "--no-images") {
       no_images = true;
+    } else if (a == "--dark") {
+      dark_mode = true;
     } else if (a == "--header" && i + 1 < argc) {
       if (!headers.empty())
         headers += "\n";
@@ -116,6 +120,8 @@ int main(int argc, char** argv) {
     mbSetTransparentBackground(view, 1);
   if (no_images)
     mbSetLoadImages(view, 0);  // skip image fetch/decode for faster scraping
+  if (dark_mode)
+    mbSetDarkMode(view, 1);  // emulate prefers-color-scheme: dark
   if (!headers.empty())
     mbSetExtraHeaders(view, headers.c_str());  // before load so the navigation uses them
 

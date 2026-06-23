@@ -87,6 +87,10 @@ MB_EXPORT void mbSetTransparentBackground(mbView*, int transparent);
 // text/HTML scraping. Call before mbLoadURL/mbLoadHTML.
 MB_EXPORT void mbSetLoadImages(mbView*, int enabled);
 
+// Emulate the prefers-color-scheme media feature: dark (1) or light (0, default),
+// so pages render their dark theme. Call before mbLoadURL/mbLoadHTML.
+MB_EXPORT void mbSetDarkMode(mbView*, int dark);
+
 // Set extra HTTP request headers added to the navigation and its subresources:
 // newline-separated "Name: Value" lines. Call before mbLoadURL. (A default
 // Accept-Language is sent unless one is provided here.) Pass NULL/empty to clear.

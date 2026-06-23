@@ -59,6 +59,8 @@ class MbWebView {
   void SetUserAgent(const char* utf8_ua);
   // Enable/disable automatic image loading (off = faster text/HTML scraping).
   void SetLoadImages(bool enabled);
+  // Emulate prefers-color-scheme: dark (true) or light (false). Set before loading.
+  void SetDarkMode(bool dark);
   // Return captured console output ("level: text" per line) and clear the buffer.
   std::string DrainConsole();
   // Set extra request headers (newline-separated "Name: Value") for navigation +
