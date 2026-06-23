@@ -1577,7 +1577,29 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   (location.href= → new document commits, navB-here). 98/98, no survivors. LIMITATION: GET only
   (MbFetchUrl is GET) — POST form submit would fetch as GET; documented follow-up.
 
+- ✅✅ DONE: POST form submission — shipped (2026-06-24): the documented follow-up to main-frame
+  navigation. A method=post form was fetched as GET (body lost). FIX: MbFetchUrl/FetchHttp gained
+  optional post_body + post_content_type params (curl CURLOPT_COPYPOSTFIELDS + Content-Type header;
+  defaults to application/x-www-form-urlencoded); DoCommit detects HttpMethod()=="POST", extracts
+  the body from info->url_request.HttpBody() (concatenating kTypeData elements via Element.data.Copy())
+  and the content type, and passes them through. VERIFIED end-to-end: mb_shot --click submit on a
+  form posting to https://postman-echo.com/post echoed {"form":{"user":"alice","x":"42"}} with the
+  right content-type; smoke case 36 (gated MB_NET_TESTS) posts to <host>/post and confirms the field
+  comes back — PASS against postman-echo. Default suite still 98/98 (POST path is isolated; no
+  regression). LIMITATION: only kTypeData body elements (urlencoded/text forms) — multipart file
+  uploads (kTypeFile/kTypeBlob) aren't assembled; documented follow-up.
+- ⚠️ ENV FINDING (2026-06-24): mb's libcurl reaches REAL public hosts fine (example.com,
+  postman-echo.com, httpbin.org) but TIMES OUT (curl=28) connecting to 127.0.0.1/localhost in this
+  environment — a loopback-connect quirk of this sandbox/build, NOT a code bug. So network features
+  must be verified against a public host (mb_shot or MB_NET_TESTS with the default
+  MB_NET_HOST=https://httpbin.org), never a local echo_server. (The 127.0.0.1 echo_server path in
+  the docs won't connect here.) Worth remembering before chasing "http hangs" again.
+
 ### REMAINING ROADMAP
+- P0-history: page-driven history.back()/forward() does nothing — History::back() ->
+  LocalFrameClientImpl::NavigateBackForward -> LocalFrameHost.GoToEntryAtOffset (mojo to the absent
+  browser), and it's gated on WebViewImpl::HistoryBackListCount() (0 here). Needs an in-renderer
+  session-history controller + intercepting the browser-owned LocalFrameHost — sizable, deferred.
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
   (Cocoa window) -> real sites in a window. JS is free (V8 isolate already up).

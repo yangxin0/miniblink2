@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "base/containers/span.h"
 #include "base/functional/bind.h"
@@ -17,7 +18,10 @@
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "services/network/public/cpp/web_sandbox_flags.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-shared.h"
+#include "third_party/blink/public/common/loader/http_body_element_type.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
+#include "third_party/blink/public/platform/web_http_body.h"
+#include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/mojom/frame/policy_container.mojom-blink.h"
 #include "third_party/blink/public/platform/web_policy_container.h"
 #include "third_party/blink/public/web/web_local_frame.h"
@@ -130,10 +134,28 @@ void MbFrameClient::DoCommit(std::unique_ptr<blink::WebNavigationInfo> info) {
       }
     }
   } else if (!url.IsEmpty() && !url.ProtocolIsAbout()) {
-    // src=file/http/data: fetch the body via the same loader subresources use.
+    // src=file/http/data, link click, location=, or form submit: fetch the body
+    // via the same loader subresources use. For an HTTP POST (form submission)
+    // pull the request body + content-type off the navigation and POST them.
     std::string content_type;
+    std::string post_body, post_ct;
+    if (info->url_request.HttpMethod().Utf8() == "POST") {
+      blink::WebHTTPBody http_body = info->url_request.HttpBody();
+      if (!http_body.IsNull()) {
+        for (size_t i = 0; i < http_body.ElementCount(); ++i) {
+          blink::WebHTTPBody::Element el;
+          if (http_body.ElementAt(i, el) &&
+              el.type == blink::HTTPBodyElementType::kTypeData) {
+            std::vector<uint8_t> bytes = el.data.Copy();
+            post_body.append(reinterpret_cast<const char*>(bytes.data()),
+                             bytes.size());
+          }
+        }
+      }
+      post_ct = info->url_request.HttpContentType().Utf8();
+    }
     if (MbFetchUrl(url.GetString().Utf8(), &body, &content_type, user_agent_,
-                   extra_headers_) &&
+                   extra_headers_, post_body, post_ct) &&
         !content_type.empty()) {
       std::string m = content_type.substr(0, content_type.find(';'));
       while (!m.empty() && m.back() == ' ')

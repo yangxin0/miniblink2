@@ -493,6 +493,26 @@ int main() {
       std::fprintf(stderr, "  [SKIP] cookie export (host unreachable)\n");
     }
   }
+  // 36. POST form submission: a method=post form's body must reach the server.
+  // The form auto-submits via JS (same BeginNavigation path as a click); the
+  // echo host returns the posted fields as JSON, so ours must come back. This
+  // exercises the POST path in DoCommit (extract WebHTTPBody) + MbFetchUrl POST.
+  {
+    const std::string page =
+        "<body><form id='f' method='post' action='" + host + "/post'>"
+        "<input name='user' value='mbpost'></form>"
+        "<script>document.getElementById('f').submit();</script></body>";
+    mbLoadHTML(v, page.c_str(), (host + "/").c_str());
+    mbWait(v, 900);  // submit -> POST -> commit the echo response
+    std::string r = Eval(v, "document.body?document.body.innerText:''");
+    if (r.find("\"form\"") != std::string::npos ||
+        r.find("\"user\"") != std::string::npos) {  // host echoed
+      Expect(r.find("mbpost") != std::string::npos,
+             "POST form submission: posted body reaches the server");
+    } else {
+      std::fprintf(stderr, "  [SKIP] POST form (host unreachable)\n");
+    }
+  }
   }  // MB_NET_TESTS
 
   // 33. document.cookie (JS): write then read round-trips through the in-process

@@ -114,11 +114,20 @@ std::string ToLower(const std::string& s) {
 }
 
 bool FetchHttp(const std::string& url, std::string* body, std::string* content_type,
-               const std::string& user_agent, const std::string& extra_headers) {
+               const std::string& user_agent, const std::string& extra_headers,
+               const std::string& post_body = "",
+               const std::string& post_content_type = "") {
   CURL* curl = curl_easy_init();
   if (!curl)
     return false;
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  if (!post_body.empty()) {
+    // HTTP POST (form submission). COPYPOSTFIELDS copies the body so it survives
+    // retries; setting it makes the request a POST automatically.
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE,
+                     static_cast<long>(post_body.size()));
+    curl_easy_setopt(curl, CURLOPT_COPYPOSTFIELDS, post_body.c_str());
+  }
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CurlWrite);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, body);
   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
@@ -153,6 +162,14 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   }
   if (!has_accept_language)
     header_list = curl_slist_append(header_list, "Accept-Language: en-US,en;q=0.9");
+  if (!post_body.empty()) {
+    // Forms default to urlencoded; honor an explicit type (e.g. text/plain).
+    const std::string ct_line =
+        "Content-Type: " +
+        (post_content_type.empty() ? std::string("application/x-www-form-urlencoded")
+                                   : post_content_type);
+    header_list = curl_slist_append(header_list, ct_line.c_str());
+  }
   if (header_list)
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
 
@@ -299,7 +316,8 @@ std::string MbGetCookiesForUrl(const std::string& url) {
 
 bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* content_type, const std::string& user_agent,
-                const std::string& extra_headers) {
+                const std::string& extra_headers, const std::string& post_body,
+                const std::string& post_content_type) {
   GURL url(url_spec);
   if (url.SchemeIsFile()) {
     // Convert via net (percent-decodes the path; "Andale%20Mono.ttf" -> a space)
@@ -309,7 +327,8 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
            base::ReadFileToString(fp, body);
   }
   if (url.SchemeIsHTTPOrHTTPS())
-    return FetchHttp(url_spec, body, content_type, user_agent, extra_headers);
+    return FetchHttp(url_spec, body, content_type, user_agent, extra_headers,
+                     post_body, post_content_type);
   if (url.SchemeIs("data")) {
     std::string mime, charset;
     if (!net::DataURL::Parse(url, &mime, &charset, body))
