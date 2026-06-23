@@ -1309,6 +1309,23 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   mojo URLLoaderFactory surface) — a focused pass, not an end-of-tick cram; the spec makes it
   mechanical. This is the LAST blob item; everything else in the blob subsystem is shipped.
 
+- 🔬 Increment 5 ATTEMPTED -> deadlock; reverted to 82/82 (2026-06-24): built the full blob: URL
+  feature (MbBlobURLStore + URLLoaderFactory/Loader + MbFrameClient associated-provider override +
+  reverted patch 0003) and it DEADLOCKED — createObjectURL hung on [Sync] BlobURLStore.Register.
+  ROOT CAUSE (instrumented: GetRemoteNavAssoc fired but the OverrideBinderForTesting binder NEVER
+  did): the testing AssociatedInterfaceProvider's LocalProvider invokes the override binder only
+  when its receiver dispatches the queued GetAssociatedInterface message — on the provider's task
+  runner (main thread). PublicURLManager binds frame_url_store_ then immediately makes the [Sync]
+  Register on the main thread, blocking it before that dispatch runs -> binder never fires ->
+  Register waits forever. The bind HANDSHAKE needs the main thread that the [Sync] call has
+  blocked. Reverted cleanly (restored patch 0003, removed the new code, deleted mb_blob_url_store.*),
+  rebuilt -> 82/82, no survivors. Finding recorded in docs/design-blob-service-host.md with three
+  next-attempt options (real pre-bound associated remote on the service thread; eager bind at
+  frame creation; directly-bound endpoint). blob: URL is harder than the signatures implied — the
+  associated-binding handshake races the [Sync] call. All blob DATA paths remain shipped + working;
+  this is only the blob:-URL-as-loadable-resource piece. Discipline: attempted, found the real
+  blocker, reverted rather than ship a hanging build.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

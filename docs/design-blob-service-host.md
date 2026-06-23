@@ -229,6 +229,37 @@ URLLoaderFactory/URLLoader wiring are new; execute in a focused pass, revert if 
 be made clean in-tick (do NOT leave patches/0003 reverted without a working store, or
 createObjectURL hangs again).
 
+## Increment 5 — ATTEMPTED, hit a binding deadlock (2026-06-24)
+
+Implemented the full spec above (MbBlobURLStore + MbBlobURLLoaderFactory/Loader +
+MbFrameClient::GetRemoteNavigationAssociatedInterfaces returning an
+AssociatedInterfaceProvider with OverrideBinderForTesting + reverted patch 0003) and it
+DEADLOCKED: createObjectURL hung on the [Sync] BlobURLStore.Register. Reverted to 82/82.
+
+Root cause (the scope missed this; only visible at runtime + reading the provider impl):
+the testing `AssociatedInterfaceProvider` created via the local/task-runner ctor routes
+GetInterface through a `LocalProvider` whose remote_/receiver_ run on the GIVEN task
+runner. OverrideBinderForTesting's binder is NOT called synchronously at GetInterface
+time — it fires when the LocalProvider's receiver dispatches the queued
+GetAssociatedInterface message. PublicURLManager binds frame_url_store_ then immediately
+makes the [Sync] Register on the MAIN thread; that blocks the main thread, so the queued
+GetAssociatedInterface (which would invoke our binder and bind MbBlobURLStore) never runs
+-> the binder never fires -> Register waits forever. I.e. the bind HANDSHAKE itself needs
+the main thread, which the [Sync] call has blocked. Giving the provider the service-thread
+runner doesn't obviously help (associated endpoints created on the main thread's group;
+cross-thread associated binding is its own problem).
+
+Implication: blob: URL needs a binding path where the BlobURLStore receiver is bound
+WITHOUT a main-thread round-trip during a [Sync] call. Options to explore next time:
+(a) bind frame_url_store_ via a REAL associated remote whose receiver is pre-bound on the
+service thread (not the OverrideBinderForTesting local-loopback), so no main-thread
+dispatch is needed mid-[Sync]; (b) provide the BlobURLStore through a different seam that
+binds eagerly at frame-creation time (before any createObjectURL), so the receiver is
+already live when Register is called; (c) investigate whether AssociatedInterfaceProvider
+can be given a directly-bound endpoint. The data-path blob work is unaffected and shipped;
+this is purely the blob:-URL-as-loadable-resource piece. Patch 0003 (skip Register ->
+createObjectURL returns a non-resolving URL, no hang) remains in place.
+
 ## Risks / open questions
 
 - IO-pump thread + Blink's mojo core: confirm `mojo::core` is initialized in a mode
