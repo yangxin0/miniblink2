@@ -4,7 +4,7 @@
 #   /cookies              -> {"cookies": {<from request Cookie header>}}
 #   /headers              -> {"headers": {<request headers, original case>}}
 import json
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 class H(BaseHTTPRequestHandler):
@@ -41,4 +41,7 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 if __name__ == '__main__':
-    HTTPServer(('127.0.0.1', 8899), H).serve_forever()
+    ThreadingHTTPServer.allow_reuse_address = True
+    srv = ThreadingHTTPServer(('127.0.0.1', 8899), H)
+    print('listening on 127.0.0.1:8899', flush=True)
+    srv.serve_forever()

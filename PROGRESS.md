@@ -726,6 +726,21 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   unverified feature, now confirmed end-to-end. 39/39 with network on (36 default). Network
   tests no longer hostage to httpbin uptime.
 
+- ⚠️ REVERSE COOKIE BRIDGE — attempted, HANGS, reverted (2026-06-23 19:?): tried to unify
+  http cookies on the curl jar (GetCookiesString reads the jar via MbGetCookiesForUrl /
+  CURLINFO_COOKIELIST; SetCookieFromString writes jar-only for http). It COMPILED and the
+  default suite stayed 36/36, but the network suite HUNG at the reverse-bridge case (cut off
+  at 60s and 100s watchdogs) — reading the curl jar from inside the [Sync] GetCookiesString on
+  the main thread stalls (same family as the Blob same-thread sync issue). Reverted the 4
+  code/test files to HEAD; the FORWARD bridge (JS document.cookie -> curl jar) stays and was
+  RE-VERIFIED PASS this tick against the local echo server (also cookie jar + headers PASS).
+  Reverse direction (network Set-Cookie -> document.cookie) left as a known gap. KEPT:
+  echo_server.py upgraded to ThreadingHTTPServer + listen log (more robust local verification).
+  PROCESS LESSON: build.sh runs mb_smoke at the end; when a run hangs (network/blob) the 2-min
+  Bash timeout kills the foreground grep but leaves mb_smoke detached -> they piled up (user
+  flagged 5+ stray shells). Cleaned all. Going forward: run mb_smoke directly with a bounded
+  self-kill watchdog + explicit pkill, never via repeated timing-out build pipelines.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
