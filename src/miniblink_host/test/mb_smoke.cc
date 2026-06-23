@@ -1443,6 +1443,25 @@ int main() {
            "CSS background-image (data: SVG) paints");
   }
 
+  // 77. iframes degrade GRACEFULLY (no crash). The host has no child-frame
+  // bring-up (CreateChildFrame is unimplemented), so an <iframe>'s content does
+  // NOT load — but a page with an iframe must not crash or hang: the element
+  // exists, contentWindow is an object, the parent stays fully scriptable and
+  // renders. (Full child-frame support is a heavy item; see PROGRESS.) This
+  // guards the robustness invariant, like the worker/dialog guards.
+  {
+    mbLoadHTML(v,
+      "<body><b id='p'>parent</b>"
+      "<iframe id='f' srcdoc='<b>child</b>' width='80' height='40'></iframe>"
+      "</body>", "about:blank");
+    mbWait(v, 60);
+    Expect(Eval(v, "1+1") == "2" &&
+               Eval(v, "document.getElementById('p').textContent") == "parent" &&
+               Eval(v, "String(typeof document.getElementById('f').contentWindow)")
+                   == "object",
+           "iframe present degrades gracefully (no crash; parent scriptable)");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

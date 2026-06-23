@@ -1407,6 +1407,18 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   background-image (data:image/svg+xml,...) paints green at its center (pixel check). Works; common
   pattern (inline SVG backgrounds, icons). Smoke 76. 91/91, no survivors.
 
+- 🔎 IFRAMES degrade gracefully (content doesn't load); CreateChildFrame is a heavy gap (2026-06-24):
+  probed <iframe srcdoc/src>. No crash (exit 0) and the <iframe> element exists (contentWindow is an
+  object, parent stays fully scriptable + renders), BUT the child frame is NOT created — window.
+  frames.length===0 and f.contentDocument===null, so iframe content does NOT load. Cause: the host
+  doesn't implement WebLocalFrameClient::CreateChildFrame (the documented TODO), so Blink never
+  instantiates the child WebLocalFrame/document/widget/loader. This is a HEAVY gap (a whole child-
+  frame lifecycle, like real workers / blob: URL) — not a single-tick fix; full support needs
+  CreateChildFrame to build a child frame + frame client + commit its srcdoc/src via a child loader,
+  and a widget to paint it. But it's robustness-safe: iframe-using pages don't crash or hang, they
+  just show an empty subframe. Smoke 77 guards the no-crash/parent-scriptable invariant (like the
+  worker/dialog guards). 92/92, no survivors. Added to the heavy-roadmap items.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
