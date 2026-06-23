@@ -1462,6 +1462,25 @@ int main() {
            "iframe present degrades gracefully (no crash; parent scriptable)");
   }
 
+  // 78. element.scrollIntoView() works (a common automation primitive: scroll a
+  // target into view before clicking/capturing). Our non-compositing widget
+  // handles scroll specially, so verify programmatic scroll-into-view actually
+  // moves the viewport and lands the element on-screen.
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0'><div style='height:1500px'></div>"
+      "<b id='t'>T</b><div style='height:400px'></div></body>", "about:blank");
+    std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // force layout for scroll
+    Expect(Eval(v,
+        "(function(){window.scrollTo(0,0);var t=document.getElementById('t');"
+        "var b=window.scrollY;t.scrollIntoView();var a=window.scrollY;"
+        "var top=t.getBoundingClientRect().top;"
+        "return (a>b && top>=0 && top<window.innerHeight)?'ok'"
+        ":(a+'/'+b+'/'+Math.round(top));})()") == "ok",
+        "scrollIntoView scrolls the target into the viewport");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

@@ -1419,6 +1419,12 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   just show an empty subframe. Smoke 77 guards the no-crash/parent-scriptable invariant (like the
   worker/dialog guards). 92/92, no survivors. Added to the heavy-roadmap items.
 
+- ✅ element.scrollIntoView() works (2026-06-24): a common automation primitive (scroll a target
+  into view before click/capture). Our non-compositing widget handles scroll specially, so verified
+  programmatic scroll-into-view actually moves the viewport: a target at 1500px down -> scrollY
+  jumps from 0, and the target's getBoundingClientRect().top lands within [0, innerHeight). Smoke 78
+  (paint first to force layout, then assert scrolled + on-screen). 93/93, no survivors.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
