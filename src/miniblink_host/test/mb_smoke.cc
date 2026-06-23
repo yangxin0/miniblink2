@@ -175,6 +175,23 @@ int main() {
            "load: embedded NUL does not truncate document");
   }
 
+  // 14. Full-page mechanism: after resizing the view taller, a re-render must
+  // capture content below the original fold (this is what mb_shot --full relies on).
+  // Blue 0..1000px, green 1000..1200px; resize to 1200 tall and read a pixel at y=1100.
+  mbLoadHTML(v,
+             "<body style='margin:0'>"
+             "<div style='height:1000px;background:#0000ff'></div>"
+             "<div style='height:200px;background:#00ff00'></div></body>",
+             "about:blank");
+  mbResize(v, W, 1200);
+  {
+    std::vector<uint8_t> tall(static_cast<size_t>(W) * 1200 * 4, 0);
+    mbPaintToBitmap(v, tall.data(), W, 1200, W * 4);
+    const size_t at = (static_cast<size_t>(1100) * W + 10) * 4;  // y=1100 (green band)
+    Expect(tall[at + 2] == 0 && tall[at + 1] == 255 && tall[at + 0] == 0,
+           "full-page: resize captures below-the-fold");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

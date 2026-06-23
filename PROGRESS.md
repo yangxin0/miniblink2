@@ -464,6 +464,16 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   (file with embedded NUL, assert post-NUL element parses). rust-lang is a 301 (we follow),
   stackoverflow 403 anti-bot (genuine, not our bug). 14/14 suite.
 
+- ✅ FULL-PAGE SCREENSHOT (2026-06-23 16:?): mb_shot now takes `--full` — after load it
+  queries max(documentElement.scrollHeight, body.scrollHeight), mbResize(view, w, that)
+  (capped 20000px so infinite-scroll can't OOM), then shoots at the full height. Verified:
+  go.dev viewport 1200x900 vs --full 1200x3969 (whole page); deterministic file:// tall page
+  800x600 vs 800x2000. Engine-level mechanism locked by smoke case 14: load blue(1000)+
+  green(200) stack, mbResize to 1200 tall, paint, assert pixel at y=1100 is green (i.e.
+  resize -> reflow -> paint captures below-the-fold). 15/15. This is the #1 product feature
+  of a headless screenshot tool (cf. Puppeteer fullPage) and it builds on the scroll/viewport
+  work. Flag parsing also generalized (flags filtered from positionals).
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

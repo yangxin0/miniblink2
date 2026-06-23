@@ -1,7 +1,10 @@
 // mb_shot — headless renderer CLI. Renders an HTML file (or file:// URL) to a PNG using
 // modern Blink via the miniblink_host C ABI.
 //
-//   mb_shot <input.html | file://URL> <out.png> [width height]
+//   mb_shot [--full] <input.html | file://URL | http(s)://URL> <out.png> [width height]
+//
+//   --full   capture the entire document height, not just the viewport (resizes the
+//            view to the page's scrollHeight before rendering — like Puppeteer fullPage).
 //
 // This is the "product" the host enables: a standalone, single-process, modern-Blink
 // screenshot tool — no browser process, no CEF.
@@ -10,20 +13,37 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "miniblink_host/capi/mb_capi.h"
 
+namespace {
+// Cap full-page height so a runaway/infinite-scroll page can't request a
+// multi-gigabyte bitmap.
+constexpr int kMaxFullPageHeight = 20000;
+}  // namespace
+
 int main(int argc, char** argv) {
-  if (argc < 3) {
-    std::fprintf(stderr,
-                 "usage: %s <input.html|file://URL> <out.png> [width height]\n",
-                 argv[0]);
+  bool full_page = false;
+  std::vector<const char*> pos;  // positional args, flags filtered out
+  for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) == "--full")
+      full_page = true;
+    else
+      pos.push_back(argv[i]);
+  }
+  if (pos.size() < 2) {
+    std::fprintf(
+        stderr,
+        "usage: %s [--full] <input.html|file://URL|http(s)://URL> <out.png> "
+        "[width height]\n",
+        argv[0]);
     return 2;
   }
-  const std::string input = argv[1];
-  const char* out = argv[2];
-  const int w = argc > 3 ? std::atoi(argv[3]) : 1200;
-  const int h = argc > 4 ? std::atoi(argv[4]) : 800;
+  const std::string input = pos[0];
+  const char* out = pos[1];
+  const int w = pos.size() > 2 ? std::atoi(pos[2]) : 1200;
+  const int h = pos.size() > 3 ? std::atoi(pos[3]) : 800;
 
   if (!mbInitialize()) {
     std::fprintf(stderr, "mb_shot: engine init failed\n");
@@ -69,9 +89,25 @@ int main(int argc, char** argv) {
     }
   }
 
-  const int ok = mbSavePng(view, out, w, h);
-  std::fprintf(stderr, "mb_shot: %s -> %s (%dx%d) %s\n", input.c_str(), out, w, h,
-               (ok && load_ok) ? "OK" : "FAILED");
+  // Full-page capture: grow the view to the document's content height so the
+  // render covers everything below the fold, then shoot at that height. We query
+  // after the load so layout reflects the real content.
+  int shot_h = h;
+  if (full_page) {
+    char buf[64] = {0};
+    mbEvalJS(view,
+             "String(Math.max(document.documentElement.scrollHeight,"
+             "document.body?document.body.scrollHeight:0))",
+             buf, sizeof(buf));
+    const int page_h = std::atoi(buf);
+    if (page_h > h)
+      shot_h = page_h < kMaxFullPageHeight ? page_h : kMaxFullPageHeight;
+    mbResize(view, w, shot_h);  // reflow to the taller viewport; SavePng repaints
+  }
+
+  const int ok = mbSavePng(view, out, w, shot_h);
+  std::fprintf(stderr, "mb_shot: %s -> %s (%dx%d) %s\n", input.c_str(), out, w,
+               shot_h, (ok && load_ok) ? "OK" : "FAILED");
 
   mbDestroyView(view);
   mbShutdown();
