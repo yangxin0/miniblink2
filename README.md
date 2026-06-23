@@ -79,6 +79,9 @@ stderr — useful for debugging a page or scripting against its logs.
 `mb_shot` doubles as a simple scraper/text extractor. `--html` prints the rendered
 (post-JS) DOM as serialized HTML — useful for SPAs whose fetched source is near-empty.
 
+The output format follows the file extension: `.png` (lossless, alpha) or `.jpg`/`.jpeg`
+(quality 90, much smaller) — e.g. `mb_shot https://example.com out.jpg`.
+
 Rendered by `mb_shot` from an HTML file (gradient, CSS grid, translucent cards, a
 rotated card, and JS-injected text — all modern Blink, headless, no CEF):
 

@@ -6,6 +6,7 @@
 
 #include "miniblink_host/view/mb_webview.h"
 
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -59,6 +60,7 @@
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
+#include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/geometry/rect.h"
 #include "v8/include/v8-context.h"
@@ -464,6 +466,26 @@ bool MbWebView::PaintRectToBitmap(void* out_bgra, int x, int y, int w, int h,
   return PaintInto(canvas, x, y);
 }
 
+namespace {
+bool EndsWith(const std::string& s, const char* suffix) {
+  std::string suf(suffix);
+  return s.size() >= suf.size() && s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
+}
+// Encode `bitmap` to disk, choosing the format by the path's extension: .jpg/.jpeg
+// -> JPEG (quality 90; smaller, no alpha), anything else -> PNG (lossless, alpha).
+bool EncodeBitmapToPath(const SkBitmap& bitmap, const char* path) {
+  std::string p(path ? path : "");
+  for (char& c : p)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  std::optional<std::vector<uint8_t>> data;
+  if (EndsWith(p, ".jpg") || EndsWith(p, ".jpeg"))
+    data = gfx::JPEGCodec::Encode(bitmap, /*quality=*/90);
+  else
+    data = gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, /*discard_transparency=*/false);
+  return data && base::WriteFile(base::FilePath(path), *data);
+}
+}  // namespace
+
 bool MbWebView::SavePngRect(const char* path, int x, int y, int w, int h) {
   if (w <= 0 || h <= 0)
     return false;
@@ -479,9 +501,7 @@ bool MbWebView::SavePngRect(const char* path, int x, int y, int w, int h) {
   SkCanvas canvas(bitmap);
   if (!PaintInto(canvas, x, y))
     return false;
-  std::optional<std::vector<uint8_t>> png =
-      gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, /*discard_transparency=*/false);
-  return png && base::WriteFile(base::FilePath(path), *png);
+  return EncodeBitmapToPath(bitmap, path);
 }
 
 bool MbWebView::SavePng(const char* path, int w, int h) {
@@ -493,9 +513,7 @@ bool MbWebView::SavePng(const char* path, int w, int h) {
   SkCanvas canvas(bitmap);
   if (!PaintInto(canvas))
     return false;
-  std::optional<std::vector<uint8_t>> png =
-      gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, /*discard_transparency=*/false);
-  return png && base::WriteFile(base::FilePath(path), *png);
+  return EncodeBitmapToPath(bitmap, path);
 }
 
 }  // namespace mb

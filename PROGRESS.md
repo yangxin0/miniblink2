@@ -741,6 +741,14 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   flagged 5+ stray shells). Cleaned all. Going forward: run mb_smoke directly with a bounded
   self-kill watchdog + explicit pkill, never via repeated timing-out build pipelines.
 
+- ✅ JPEG OUTPUT (2026-06-23 20:?): SavePng/SavePngRect now pick the image codec by the output
+  path's extension via a shared EncodeBitmapToPath helper — .jpg/.jpeg -> gfx::JPEGCodec::Encode
+  (quality 90, //ui/gfx/codec already dep'd), else PNG. mbSavePng/mbSavePngRect + mb_shot infer
+  format from the extension (no new flag). Verified: out.jpg = FFD8 magic, 3.8KB (vs PNG 14KB),
+  `file` confirms valid JPEG 400x300; out.png unchanged. Clean low-risk tick; 36/36; no stray
+  processes (ran the build directly, checked survivors). Used the disciplined process pattern
+  after last tick's leak.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

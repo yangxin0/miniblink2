@@ -113,7 +113,8 @@ MB_EXPORT int mbPaintToBitmap(mbView*,
                               int height,
                               int stride);
 
-// Render the current frame and encode it to a PNG file. Returns 1 on success.
+// Render the current frame and encode it to `path`. The image format follows the
+// extension: .jpg/.jpeg -> JPEG (quality 90), anything else -> PNG. Returns 1 on success.
 MB_EXPORT int mbSavePng(mbView*, const char* path, int width, int height);
 
 // Render just the logical rect (x,y,w,h) of the page to a PNG (e.g. an element
