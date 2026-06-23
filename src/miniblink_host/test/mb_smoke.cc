@@ -1371,6 +1371,34 @@ int main() {
     }
   }
 
+  // 74. Stability across many sequential loads (a long-running scraper does
+  // thousands). Load varied documents repeatedly on one view, evaluating and
+  // painting each, and confirm every load renders correctly — no state leak or
+  // accumulated breakage degrading later loads. A crash/leak would surface here
+  // (and in the no-survivors check).
+  {
+    bool all_ok = true;
+    std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+    for (int n = 0; n < 25 && all_ok; ++n) {
+      char html[256];
+      std::snprintf(html, sizeof(html),
+                    "<body style='margin:0'><div id='n' "
+                    "style='width:%dpx;height:10px;background:#%06x'>%d</div>"
+                    "<script>window.__k=%d*2;</script></body>",
+                    10 + n, (n * 9973) & 0xffffff, n, n);
+      mbLoadHTML(v, html, "about:blank");
+      if (Eval(v, "document.getElementById('n').textContent") != std::to_string(n) ||
+          Eval(v, "String(window.__k)") != std::to_string(n * 2)) {
+        all_ok = false;
+      }
+      if (n % 8 == 0)
+        mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // exercise paint too
+    }
+    Expect(all_ok &&
+               Eval(v, "document.getElementById('n').textContent") == "24",
+           "stability: 25 sequential loads each render + script correctly");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

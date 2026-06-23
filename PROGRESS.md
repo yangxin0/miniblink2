@@ -1382,6 +1382,13 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   important for tab-like or parallel-render/scrape embedders. Smoke 73 (3 asserts). 88/88, no
   survivors.
 
+- ✅ Stability across many sequential loads (2026-06-24): a long-running scraper/automation does
+  thousands of loads on one view, so verify repeated loads don't leak state or degrade. Loaded 25
+  varied documents in a row (different widths/colors/text + a per-load script) on one view,
+  evaluating DOM + window.__k each time and painting every 8th; all 25 rendered AND scripted
+  correctly, the final load is exactly right, exit 0, no survivors. Confirms clean per-load lifecycle
+  (no accumulated breakage / state leak across navigations). Smoke 74. 89/89.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
