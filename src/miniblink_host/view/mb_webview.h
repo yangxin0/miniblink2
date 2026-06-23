@@ -18,6 +18,8 @@
 #include <memory>
 #include <string>
 
+#include "base/functional/callback.h"
+
 class SkCanvas;  // global scope (skia is not namespaced)
 
 namespace blink {
@@ -98,6 +100,14 @@ class MbWebView {
   // frame's content and drive parsing to quiescence. Both LoadHTML and the network
   // LoadURL funnel through here so neither truncates the body at a NUL.
   void CommitHtml(const char* data, size_t len, const char* base_url);
+  // Run `body` inside a scheduler task (so subsystems that require task bracketing
+  // — e.g. CanvasPerformanceMonitor around canvas draws — are satisfied), blocking
+  // until it has executed. Host-driven JS must run here, not via a bare synchronous
+  // ExecuteScript, or a canvas draw outside any task scope trips a FATAL NOTREACHED.
+  // settle=true also drains async continuations (timers/microtasks) until idle,
+  // capped at 250ms (RunJS semantics); settle=false runs just the one task then
+  // returns (Eval's synchronous-read semantics).
+  void RunInFrameTask(base::OnceClosure body, bool settle);
   // Run requestAnimationFrame callbacks (no compositor drives them otherwise).
   void ServiceAnimations();
   // Settle async loads, run lifecycle, and play the frame's paint record into `canvas`.

@@ -356,33 +356,44 @@ void MbWebView::SendScroll(int x, int y, int dx, int dy) {
                                          static_cast<double>(dy));
 }
 
+void MbWebView::RunInFrameTask(base::OnceClosure body, bool settle) {
+  // Host-driven JS must execute within a scheduler task. Page scripts always do
+  // (bracketed by WillProcessTask/DidProcessTask), and engine subsystems rely on
+  // that bracketing: a canvas draw (CanvasRenderingContext::DidDraw) made outside
+  // any task scope trips a FATAL NOTREACHED in CanvasPerformanceMonitor. A bare
+  // synchronous ExecuteScript would draw outside a task, so host-injected canvas
+  // drawing would crash. Posting `body` as a task fixes that; loop.Run() blocks
+  // until it has run, so callers still observe DOM effects (and read back results)
+  // synchronously.
+  base::RunLoop loop(base::RunLoop::Type::kNestableTasksAllowed);
+  auto runner = base::SingleThreadTaskRunner::GetCurrentDefault();
+  runner->PostTask(FROM_HERE, std::move(body));
+  if (settle) {
+    // RunJS semantics: let async continuations (timers, microtasks) settle, but
+    // never spin forever — quit when idle, or at a hard 250ms cap.
+    runner->PostTask(FROM_HERE, loop.QuitWhenIdleClosure());
+    runner->PostDelayedTask(FROM_HERE, loop.QuitClosure(),
+                            base::Milliseconds(250));
+  } else {
+    // Eval semantics: run exactly the one task (so the script is task-bracketed),
+    // then return — no extra async progress beyond the body's own microtasks.
+    runner->PostTask(FROM_HERE, loop.QuitClosure());
+  }
+  loop.Run();
+}
+
 void MbWebView::RunJS(const char* utf8_script) {
   if (!main_frame_ || !utf8_script)
     return;
-  base::RunLoop loop(base::RunLoop::Type::kNestableTasksAllowed);
-  auto runner = base::SingleThreadTaskRunner::GetCurrentDefault();
-  // Run the script INSIDE a task, not synchronously here. Page scripts always
-  // execute within a scheduler task (bracketed by WillProcessTask/DidProcessTask),
-  // and some engine subsystems require that bracketing: in particular a canvas
-  // draw (CanvasRenderingContext::DidDraw) made outside any task scope trips a
-  // FATAL NOTREACHED in CanvasPerformanceMonitor. A synchronous ExecuteScript
-  // here would draw outside a task, so host-driven canvas drawing (mbRunJS) would
-  // crash. Posting the script as a task fixes that and matches page-script timing
-  // (loop.Run() below still blocks until it has executed, so callers see its DOM
-  // effects synchronously). Then let async continuations settle, but never spin
-  // forever: quit when idle, or at a hard 250ms cap — whichever comes first.
   blink::WebLocalFrame* frame = main_frame_;
-  runner->PostTask(
-      FROM_HERE,
+  RunInFrameTask(
       base::BindOnce(
           [](blink::WebLocalFrame* f, std::string s) {
             f->ExecuteScript(
                 blink::WebScriptSource(blink::WebString::FromUtf8(s)));
           },
-          frame, std::string(utf8_script)));
-  runner->PostTask(FROM_HERE, loop.QuitWhenIdleClosure());
-  runner->PostDelayedTask(FROM_HERE, loop.QuitClosure(), base::Milliseconds(250));
-  loop.Run();
+          frame, std::string(utf8_script)),
+      /*settle=*/true);
 }
 
 void MbWebView::SetInitScript(const char* utf8_script) {
@@ -401,51 +412,74 @@ void MbWebView::RunDocumentStartScript() {
 std::string MbWebView::EvalToString(const char* utf8_script) {
   if (!main_frame_ || !utf8_script)
     return {};
-  v8::Isolate* isolate = v8::Isolate::GetCurrent();
-  if (!isolate)
-    return {};
-  v8::HandleScope handle_scope(isolate);
-  v8::Local<v8::Context> context = main_frame_->MainWorldScriptContext();
-  if (context.IsEmpty())
-    return {};
-  v8::Context::Scope context_scope(context);
-  v8::Local<v8::Value> value = main_frame_->ExecuteScriptAndReturnValue(
-      blink::WebScriptSource(blink::WebString::FromUtf8(utf8_script)));
-  if (value.IsEmpty())
-    return {};
-  v8::Local<v8::String> str;
-  if (!value->ToString(context).ToLocal(&str))
-    return {};
-  v8::String::Utf8Value utf8(isolate, str);
-  return *utf8 ? std::string(*utf8, utf8.length()) : std::string();
+  // Run inside a task (see RunInFrameTask) so an eval that draws to a canvas does
+  // not trip CanvasPerformanceMonitor. loop.Run() blocks until the body has run,
+  // so writing the result into this stack-local is safe.
+  std::string result;
+  blink::WebLocalFrame* frame = main_frame_;
+  RunInFrameTask(
+      base::BindOnce(
+          [](blink::WebLocalFrame* f, std::string s, std::string* out) {
+            v8::Isolate* isolate = v8::Isolate::GetCurrent();
+            if (!isolate)
+              return;
+            v8::HandleScope handle_scope(isolate);
+            v8::Local<v8::Context> context = f->MainWorldScriptContext();
+            if (context.IsEmpty())
+              return;
+            v8::Context::Scope context_scope(context);
+            v8::Local<v8::Value> value = f->ExecuteScriptAndReturnValue(
+                blink::WebScriptSource(blink::WebString::FromUtf8(s)));
+            if (value.IsEmpty())
+              return;
+            v8::Local<v8::String> str;
+            if (!value->ToString(context).ToLocal(&str))
+              return;
+            v8::String::Utf8Value utf8(isolate, str);
+            if (*utf8)
+              out->assign(*utf8, utf8.length());
+          },
+          frame, std::string(utf8_script), &result),
+      /*settle=*/false);
+  return result;
 }
 
 std::string MbWebView::EvalIsolated(const char* utf8_script) {
   if (!main_frame_ || !utf8_script)
     return {};
-  v8::Isolate* isolate = v8::Isolate::GetCurrent();
-  if (!isolate)
-    return {};
-  v8::HandleScope handle_scope(isolate);
-  // Run in a dedicated isolated world: separate JS globals from the page (and from
-  // each other run), but the SAME DOM — the content-script execution model.
-  constexpr int32_t kIsolatedWorldId = 1;  // any id > main-world (0), < embedder limit
-  v8::Local<v8::Value> value =
-      main_frame_->ExecuteScriptInIsolatedWorldAndReturnValue(
-          kIsolatedWorldId,
-          blink::WebScriptSource(blink::WebString::FromUtf8(utf8_script)),
-          blink::BackForwardCacheAware::kAllow);
-  if (value.IsEmpty())
-    return {};
-  // Stringify the (primitive) result; the main-world context suffices for that.
-  v8::Local<v8::Context> context = main_frame_->MainWorldScriptContext();
-  if (context.IsEmpty())
-    return {};
-  v8::Local<v8::String> str;
-  if (!value->ToString(context).ToLocal(&str))
-    return {};
-  v8::String::Utf8Value utf8(isolate, str);
-  return *utf8 ? std::string(*utf8, utf8.length()) : std::string();
+  std::string result;
+  blink::WebLocalFrame* frame = main_frame_;
+  RunInFrameTask(
+      base::BindOnce(
+          [](blink::WebLocalFrame* f, std::string s, std::string* out) {
+            v8::Isolate* isolate = v8::Isolate::GetCurrent();
+            if (!isolate)
+              return;
+            v8::HandleScope handle_scope(isolate);
+            // A dedicated isolated world: JS globals separate from the page (and
+            // each run), but the SAME DOM — the content-script execution model.
+            constexpr int32_t kIsolatedWorldId = 1;  // > main-world (0)
+            v8::Local<v8::Value> value =
+                f->ExecuteScriptInIsolatedWorldAndReturnValue(
+                    kIsolatedWorldId,
+                    blink::WebScriptSource(blink::WebString::FromUtf8(s)),
+                    blink::BackForwardCacheAware::kAllow);
+            if (value.IsEmpty())
+              return;
+            // Stringify the (primitive) result; the main-world context suffices.
+            v8::Local<v8::Context> context = f->MainWorldScriptContext();
+            if (context.IsEmpty())
+              return;
+            v8::Local<v8::String> str;
+            if (!value->ToString(context).ToLocal(&str))
+              return;
+            v8::String::Utf8Value utf8(isolate, str);
+            if (*utf8)
+              out->assign(*utf8, utf8.length());
+          },
+          frame, std::string(utf8_script), &result),
+      /*settle=*/false);
+  return result;
 }
 
 void MbWebView::WaitMs(int ms) {

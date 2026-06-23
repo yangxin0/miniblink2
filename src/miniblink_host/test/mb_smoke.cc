@@ -741,6 +741,31 @@ int main() {
              Eval(v, "String(window.__gl)") == "true",
          "Canvas 2D round-trip (draw/getImageData/toDataURL); WebGL null");
 
+  // 42. Drawing to a canvas via mbEvalJS (not just mbRunJS) must also be
+  // crash-safe. EvalToString/EvalIsolated used to run ExecuteScript
+  // synchronously, so a draw inside an eval expression hit the same
+  // CanvasPerformanceMonitor NOTREACHED as the old RunJS path. Both now run the
+  // script inside a scheduler task. This eval draws green and reads the pixel
+  // back in one expression: if the eval-draw path regressed it would SIGABRT
+  // before returning; success returns the green channel (255).
+  mbLoadHTML(v, "<body>eval-draw</body>", "about:blank");
+  Expect(Eval(v,
+              "(function(){var c=document.createElement('canvas');"
+              "c.width=4;c.height=4;var x=c.getContext('2d');"
+              "x.fillStyle='#00ff00';x.fillRect(0,0,4,4);"
+              "return x.getImageData(1,1,1,1).data[1];})()") == "255" &&
+             Eval(v, "document.body.textContent") == "eval-draw",
+         "canvas draw via mbEvalJS is crash-safe (task-bracketed)");
+
+  // 43. Same guard in the ISOLATED world (mbEvalJSIsolated shares the DOM but
+  // has its own globals; it routes through the same task-bracketing fix).
+  Expect(EvalIso(v,
+                 "(function(){var c=document.createElement('canvas');"
+                 "c.width=2;c.height=2;var x=c.getContext('2d');"
+                 "x.fillStyle='#0000ff';x.fillRect(0,0,2,2);"
+                 "return x.getImageData(0,0,1,1).data[2];})()") == "255",
+         "canvas draw via mbEvalJSIsolated is crash-safe (task-bracketed)");
+
   mbDestroyView(v);
   mbShutdown();
 

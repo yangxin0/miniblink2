@@ -892,12 +892,26 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   FIX (mb_webview.cc RunJS): post the script as a TASK and run it inside the nested RunLoop, so it
   is bracketed exactly like a page script; loop.Run() still blocks until it executed, so callers
   still see DOM effects synchronously. Page-script canvas draws were always fine (case 6) — only
-  host-injected draws were affected. CAVEAT: EvalToString/EvalIsolated still call ExecuteScript
-  synchronously (they are for READING values, where DidDraw doesn't fire); drawing via mbEvalJS
-  would hit the same NOTREACHED — use mbRunJS for draws. Also confirmed: Canvas 2D full round-trip
+  host-injected draws were affected. [CAVEAT below CLOSED 2026-06-23 — see next entry.] Also
+  confirmed: Canvas 2D full round-trip
   works offline (getContext('2d') -> fillRect -> getImageData reads back 255,0,0,255 -> toDataURL
   emits data:image/png), so chart/image-processing libs function; WebGL getContext('webgl')
   returns null (no GPU) gracefully, not a crash. Smoke 41 guards all of it. 51/51, no survivors.
+
+- ✅ FIX: ALL host-driven JS now task-bracketed (mbEvalJS/mbEvalJSIsolated too) (2026-06-23):
+  closed the caveat from the previous entry. EvalToString and EvalIsolated still ran
+  ExecuteScript(...AndReturnValue) SYNCHRONOUSLY, so a draw inside an eval expression
+  (mbEvalJS("...fillRect...; getImageData...")) hit the same CanvasPerformanceMonitor NOTREACHED.
+  Factored a shared MbWebView::RunInFrameTask(body, settle) helper: posts `body` as a scheduler
+  task and runs a nested RunLoop so the script is bracketed by WillProcessTask/DidProcessTask
+  exactly like a page script. settle=true keeps RunJS's drain-to-idle/250ms-cap behavior;
+  settle=false runs just the one task (Eval's synchronous-read semantics, no extra async
+  progress). Eval still returns synchronously — the v8 work writes the stringified result into a
+  stack-local std::string, valid because loop.Run() blocks until the body has executed. RunJS,
+  EvalToString, EvalIsolated now all funnel through it. Verified: drawing via mbEvalJS AND
+  mbEvalJSIsolated no longer crashes (smoke 42/43 draw + read back the pixel in one eval expr),
+  and ALL pre-existing Eval-driven cases still pass (no regression from task-wrapping reads).
+  So host-driven canvas drawing is fully crash-safe through every JS entry point now. 53/53.
 
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
