@@ -18,6 +18,7 @@
 //   --console          print the page's console output (console.log/warn/error) to stderr.
 //   --header "N: V"    add an HTTP request header (repeatable) to the navigation + subresources.
 //   --text             print the page's visible text (document.body.innerText) to stdout.
+//   --html             print the rendered (post-JS) DOM as serialized HTML to stdout.
 //
 // This is the "product" the host enables: a standalone, single-process, modern-Blink
 // screenshot tool — no browser process, no CEF.
@@ -42,6 +43,7 @@ int main(int argc, char** argv) {
   bool transparent = false;
   bool print_console = false;
   bool print_text = false;
+  bool print_html = false;
   float scale = 1.0f;
   std::string clip;      // "x,y,w,h"
   std::string selector;  // CSS selector -> capture that element's box
@@ -71,6 +73,8 @@ int main(int argc, char** argv) {
       print_console = true;
     } else if (a == "--text") {
       print_text = true;
+    } else if (a == "--html") {
+      print_html = true;
     } else if (a == "--header" && i + 1 < argc) {
       if (!headers.empty())
         headers += "\n";
@@ -170,6 +174,16 @@ int main(int argc, char** argv) {
     mbEvalJS(view, "document.body ? document.body.innerText : ''", tbuf.data(),
              static_cast<int>(tbuf.size()));
     std::fwrite(tbuf.data(), 1, std::strlen(tbuf.data()), stdout);
+    std::fputc('\n', stdout);
+  }
+
+  // --html: dump the rendered (post-JS) DOM as serialized HTML to stdout — useful
+  // for scraping SPAs whose fetched source is near-empty but render content.
+  if (print_html) {
+    std::vector<char> hbuf(1 << 21, 0);  // 2 MiB
+    mbEvalJS(view, "document.documentElement ? document.documentElement.outerHTML : ''",
+             hbuf.data(), static_cast<int>(hbuf.size()));
+    std::fwrite(hbuf.data(), 1, std::strlen(hbuf.data()), stdout);
     std::fputc('\n', stdout);
   }
 

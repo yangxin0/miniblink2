@@ -46,7 +46,7 @@ The deliverable example app — a standalone headless screenshot renderer:
 
 ```sh
 mb_shot [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
-        [--wait-selector CSS] [--wait-ms N] [--console] [--header "N: V"] [--text] \
+        [--wait-selector CSS] [--wait-ms N] [--console] [--header "N: V"] [--text] [--html] \
         <input.html | file://URL | http(s)://URL> <out.png> [width height]
 ```
 
@@ -76,7 +76,8 @@ N` just settles the page for N ms. Both compose with the capture options.
 stderr — useful for debugging a page or scripting against its logs.
 
 `--text` prints the page's visible text (post-JS `document.body.innerText`) to stdout, so
-`mb_shot` doubles as a simple scraper/text extractor.
+`mb_shot` doubles as a simple scraper/text extractor. `--html` prints the rendered
+(post-JS) DOM as serialized HTML — useful for SPAs whose fetched source is near-empty.
 
 Rendered by `mb_shot` from an HTML file (gradient, CSS grid, translucent cards, a
 rotated card, and JS-injected text — all modern Blink, headless, no CEF):

@@ -708,6 +708,14 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   SKIPPED this run (httpbin down). Reverse direction (network Set-Cookie -> document.cookie read)
   is a noted follow-up.
 
+- ✅ mb_shot --html (2026-06-23 19:?): dumps the rendered (post-JS) DOM via
+  document.documentElement.outerHTML (2 MiB buffer) — scraping complement to --text for SPAs
+  whose fetched source is near-empty. Verified: a JS-injected <p id=dyn>JS-ADDED</p> appears
+  in the output (proves post-render serialization, not raw source). Also confirmed the network
+  stack handles a real httpbin 503 correctly (curl=0 http=503 -> retried as transient -> on
+  persistent 503 reported FAILED, not a silent blank); the cookie-bridge/jar/header network
+  tests SKIP cleanly while httpbin is 503'ing (verify when it recovers). 36/36.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
