@@ -1071,6 +1071,26 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   jump/no-op) — complements the existing rAF / Web Animations coverage with declarative CSS
   animation. Smoke 58-59 lock these in. 72/72, no survivors.
 
+- 📌 SCOPING (corrects earlier note): Blob DATA resolution needs a SERVICE THREAD, not bounded.
+  blob_registry.mojom marks `BlobRegistry.Register` as [Sync]. `new Blob()` constructs without
+  hanging today ONLY because MbEmptyBroker DROPS the BlobRegistry receiver -> the pipe closes ->
+  the [Sync] Register returns fast (failed) rather than registering, so reads (text/arrayBuffer/
+  FileReader) stay pending. To actually serve blob bytes we must bind a real in-process
+  BlobRegistry — but binding it on the MAIN THREAD would deadlock exactly like the JS dialogs did
+  (a [Sync] call serviced by a same-thread receiver whose binder is delivered async). So Blob data
+  (and by extension blob: URL resolution, FileReader results) requires a dedicated mojo SERVICE
+  THREAD to host BlobRegistry/Blob receivers off the main thread. This is the same shared
+  infrastructure real worker execution would want. Confirmed heavy; correctly deferred. (Earlier I
+  speculated blob reads were "async so main-thread-serviceable" — true for the READS, but the
+  Register gateway is [Sync], so the whole thing still needs the off-thread servicer.)
+
+- ✅ Holistic integration test (2026-06-23): added a single realistic composed page exercising
+  several subsystems at once — a flex header containing an inline SVG icon + bold text, over a CSS
+  grid body — and asserted both exact geometry (grid columns at x=0 and x=150) AND paint (the SVG
+  icon rasterizes greenish at its position; the header text produces dark glyph pixels) in one
+  render. This catches cross-subsystem composition bugs that the isolated unit checks miss. Smoke
+  60. 73/73, no survivors.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

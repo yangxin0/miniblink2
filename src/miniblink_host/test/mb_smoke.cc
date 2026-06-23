@@ -1097,6 +1097,38 @@ int main() {
            "CSS transition: width animates to its target when the clock advances");
   }
 
+  // 60. Holistic integration: a realistic composed page exercising several
+  // subsystems together (flex header + CSS grid body + inline SVG + text), to
+  // catch cross-subsystem bugs that isolated unit checks miss. Assert exact grid
+  // layout (geometry) AND that both the SVG icon and the text actually painted
+  // (pixels) in one render.
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0;background:#fff;font:16px monospace;color:#000'>"
+      "<header style='display:flex;align-items:center;height:40px'>"
+      "<svg width='30' height='30' xmlns='http://www.w3.org/2000/svg'>"
+      "<rect width='30' height='30' fill='#008000'/></svg><b>Title</b></header>"
+      "<main style='display:grid;grid-template-columns:repeat(2,150px)'>"
+      "<section id='c0'>Left</section><section id='c1'>Right</section></main>"
+      "</body>", "about:blank");
+    // Geometry: grid columns at x=0 and x=150.
+    bool grid_ok = Eval(v,
+      "(function(){var a=document.getElementById('c0').getBoundingClientRect(),"
+      "b=document.getElementById('c1').getBoundingClientRect();"
+      "return a.x+','+b.x;})()") == "0,150";
+    // Paint: SVG icon green at ~(15,15); some dark text pixels in the header band.
+    std::vector<uint8_t> p(static_cast<size_t>(W) * H * 4, 255);
+    mbPaintToBitmap(v, p.data(), W, H, W * 4);
+    size_t icon = (15u * W + 15u) * 4;
+    bool icon_ok = p[icon + 1] >= 100 && p[icon + 2] < 80 && p[icon] < 80;  // greenish
+    int darktext = 0;
+    for (int y = 0; y < 40; ++y)
+      for (int x = 40; x < 260; ++x)
+        if (p[(static_cast<size_t>(y) * W + x) * 4 + 2] < 80) ++darktext;
+    Expect(grid_ok && icon_ok && darktext > 20,
+           "integration: flex+grid layout + SVG icon + text compose in one page");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
