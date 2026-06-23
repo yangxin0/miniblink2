@@ -986,6 +986,23 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   guards getRandomValues + subtle.digest. 57/57, no survivors. Confirmed-working compute set now:
   WASM, structuredClone, Text{Encoder,Decoder}, getRandomValues, and full SubtleCrypto.
 
+- ✅ FIX: `new AudioContext()` no longer crashes (silent audio device) (2026-06-23): continued the
+  API sweep. Confirmed working (no change needed): new Audio()/<video>, OffscreenCanvas + 2D,
+  createImageBitmap, navigator.geolocation, navigator.gpu (WebGPU present), speechSynthesis,
+  mediaDevices.getUserMedia, history.pushState/replaceState, performance + marks/measures, Intl
+  (NumberFormat/DateTimeFormat), Notification, sendBeacon, requestIdleCallback, DOMParser/
+  XMLSerializer, OfflineAudioContext. CRASH found: realtime `new AudioContext()` SIGSEGVs.
+  Root cause (worker-pattern): base Platform::CreateAudioDevice returns nullptr, and
+  AudioDestination's ctor derefs it UNGUARDED at audio_destination.cc:458
+  (web_audio_device_->SampleRate()) — some sibling initializers are null-guarded, but not all.
+  FIX: MbPlatform::CreateAudioDevice returns a silent stub WebAudioDevice (MbSilentAudioDevice):
+  valid params (48k / 128-frame quantum / 2ch / OUTPUT_DEVICE_STATUS_OK), no-op Start/Stop/Pause/
+  Resume so the render callback is never pulled (no sound, nothing to drive on a thread). Added
+  //media to GN deps for media::AudioRendererSink / OutputDeviceStatus. Verified: `new
+  AudioContext()` -> state 'running', sampleRate 48000, oscillator connects/starts; mb_shot exit 0
+  (was 139). Graceful: AudioContext is fully constructible/wirable, just silent. OfflineAudioContext
+  (which renders to a buffer) already worked and still does. Smoke 48 guards both. 58/58.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

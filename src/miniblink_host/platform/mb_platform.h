@@ -12,10 +12,18 @@
 #define MINIBLINK_HOST_PLATFORM_MB_PLATFORM_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "base/memory/scoped_refptr.h"
+#include "media/base/audio_renderer_sink.h"  // for media::AudioRendererSink::RenderCallback
 #include "third_party/blink/public/platform/platform.h"
+
+namespace blink {
+class WebAudioDevice;
+class WebAudioLatencyHint;
+class WebAudioSinkDescriptor;
+}  // namespace blink
 
 namespace webcrypto {
 class WebCryptoImpl;
@@ -40,6 +48,19 @@ class MbPlatform : public blink::Platform {
   // derefs it unconditionally (Platform::Current()->Crypto()->Digest(...)),
   // crashing on any crypto.subtle call. Return a real BoringSSL-backed impl.
   blink::WebCrypto* Crypto() override;
+
+  // Web Audio: base Platform::CreateAudioDevice returns nullptr, but
+  // AudioDestination's ctor derefs the result unguarded (web_audio_device_->
+  // SampleRate()), so `new AudioContext()` crashes. Return a silent stub device
+  // (valid params, no-op control, no rendering) so AudioContext constructs
+  // without crashing — audio just doesn't play. (OfflineAudioContext already
+  // works; it needs no device.)
+  std::unique_ptr<blink::WebAudioDevice> CreateAudioDevice(
+      const blink::WebAudioSinkDescriptor& sink_descriptor,
+      unsigned number_of_output_channels,
+      const blink::WebAudioLatencyHint& latency_hint,
+      std::optional<float> context_sample_rate,
+      media::AudioRendererSink::RenderCallback*) override;
 
   // Worker bring-up: base Platform returns nullptr here and DedicatedWorker
   // derefs it (null-deref SIGSEGV on `new Worker`). We have no worker-thread

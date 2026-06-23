@@ -859,6 +859,27 @@ int main() {
              Eval(v, "window.__d") == "ba7816bf:32",  // SHA-256("abc") prefix + len
          "Web Crypto: getRandomValues + subtle.digest(SHA-256) compute");
 
+  // 48. Web Audio must not crash. `new AudioContext()` used to SIGSEGV: base
+  // Platform::CreateAudioDevice returns null and AudioDestination's ctor derefs
+  // it unguarded. MbPlatform now returns a silent stub device, so a realtime
+  // AudioContext constructs and a graph can be wired (no sound, but no crash).
+  // Also exercise OfflineAudioContext (always worked — renders to a buffer).
+  // A regression would crash the suite before the assert.
+  mbLoadHTML(v, "<body>audio</body>", "about:blank");
+  mbRunJS(v,
+    "window.__ok=false;"
+    "var ac=new AudioContext();var o=ac.createOscillator();var g=ac.createGain();"
+    "o.connect(g);g.connect(ac.destination);o.start();"
+    "window.__sr=ac.sampleRate;window.__st=ac.state;"
+    "var oc=new OfflineAudioContext(1,128,44100);window.__osr=oc.sampleRate;"
+    "window.__ok=true;");
+  mbWait(v, 40);
+  Expect(Eval(v, "String(window.__ok)") == "true" &&
+             Eval(v, "String(window.__sr)") == "48000" &&
+             Eval(v, "String(window.__osr)") == "44100" &&
+             Eval(v, "1+1") == "2",
+         "Web Audio: AudioContext + OfflineAudioContext construct, no crash");
+
   mbDestroyView(v);
   mbShutdown();
 

@@ -14,6 +14,8 @@
 #include "base/containers/span.h"
 #include "base/memory/scoped_refptr.h"
 #include "components/webcrypto/webcrypto_impl.h"
+#include "media/base/output_device_info.h"
+#include "third_party/blink/public/platform/web_audio_device.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
@@ -70,6 +72,28 @@ class MbEmptyBroker : public blink::ThreadSafeBrowserInterfaceBrokerProxy {
   ~MbEmptyBroker() override = default;
 };
 
+// Silent Web Audio output device. We have no audio backend; base
+// Platform::CreateAudioDevice returns nullptr, but AudioDestination's ctor
+// dereferences the result unguarded (web_audio_device_->SampleRate()), so
+// `new AudioContext()` would crash. This provides valid parameters and no-op
+// control so an AudioContext constructs and runs without producing sound:
+// Start() never pulls the render callback, so nothing is rendered, but the
+// graph is fully usable and the host does not crash.
+class MbSilentAudioDevice : public blink::WebAudioDevice {
+ public:
+  void Start() override {}
+  void Stop() override {}
+  void Pause() override {}
+  void Resume() override {}
+  double SampleRate() override { return 48000.0; }
+  int FramesPerBuffer() override { return 128; }  // Web Audio render quantum
+  int MaxChannelCount() override { return 2; }
+  void SetDetectSilence(bool) override {}
+  media::OutputDeviceStatus MaybeCreateSinkAndGetStatus() override {
+    return media::OUTPUT_DEVICE_STATUS_OK;
+  }
+};
+
 // Graceful no-op for Worker creation. blink::DedicatedWorker's ctor calls
 // Platform::CreateDedicatedWorkerHostFactoryClient(); base Platform returns
 // nullptr, and DedicatedWorker::Start() then dereferences it unconditionally
@@ -108,6 +132,16 @@ MbPlatform::~MbPlatform() = default;
 
 blink::WebCrypto* MbPlatform::Crypto() {
   return web_crypto_.get();  // BoringSSL-backed; never null (see header note)
+}
+
+std::unique_ptr<blink::WebAudioDevice> MbPlatform::CreateAudioDevice(
+    const blink::WebAudioSinkDescriptor&,
+    unsigned /*number_of_output_channels*/,
+    const blink::WebAudioLatencyHint&,
+    std::optional<float> /*context_sample_rate*/,
+    media::AudioRendererSink::RenderCallback*) {
+  // Non-null silent device (base returns nullptr, which AudioDestination derefs).
+  return std::make_unique<MbSilentAudioDevice>();
 }
 
 blink::WebString MbPlatform::DefaultLocale() {

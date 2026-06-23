@@ -52,6 +52,7 @@ component("miniblink_host") {
     "//base",
     "//cc",
     "//components/webcrypto",  # WebCrypto impl for Platform::Crypto() (SubtleCrypto)
+    "//media",  # media::AudioRendererSink / OutputDeviceStatus for CreateAudioDevice
     "//cc/paint",
     "//gin",
     "//mojo/core/embedder",
