@@ -979,6 +979,55 @@ int main() {
            "paint: horizontal linear-gradient is red->blue across width");
   }
 
+  // 53. CSS filter: grayscale(1) on a red box must desaturate it to gray
+  // (R==G==B), exercising the filter paint pipeline (SkImageFilter). A
+  // non-modern/!filter engine would leave it red.
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0;background:#fff'>"
+      "<div style='width:80px;height:80px;background:#ff0000;filter:grayscale(1)'></div>"
+      "</body>", "about:blank");
+    std::vector<uint8_t> f(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, f.data(), W, H, W * 4);
+    size_t i = (40u * W + 40u) * 4;
+    int R = f[i + 2], G = f[i + 1], B = f[i];
+    Expect(std::abs(R - G) <= 4 && std::abs(G - B) <= 4 && R > 20 && R < 200,
+           "paint: filter:grayscale(1) desaturates red to gray (R==G==B)");
+  }
+
+  // 54. border-radius clipping: a 50% radius makes a circle; the corner is
+  // clipped to the page background while the center is the box color. Proves
+  // rounded-corner clipping actually rasterizes (not just a layout attribute).
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0;background:#ffffff'>"
+      "<div style='width:80px;height:80px;border-radius:50%;background:#0000ff'></div>"
+      "</body>", "about:blank");
+    std::vector<uint8_t> c(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, c.data(), W, H, W * 4);
+    size_t ctr = (40u * W + 40u) * 4, corner = (3u * W + 3u) * 4;
+    Expect(c[ctr] == 255 && c[ctr + 2] == 0 &&          // center: blue
+               c[corner] == 255 && c[corner + 1] == 255 && c[corner + 2] == 255,  // corner: white
+           "paint: border-radius:50% clips corners to background (circle)");
+  }
+
+  // 55. box-shadow paints outside the border box. A solid 10px spread (no blur,
+  // no offset) draws a black ring around a white box; a pixel in the ring is
+  // black, a pixel inside the box is white.
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0;background:#fff'>"
+      "<div style='margin:40px;width:60px;height:60px;background:#fff;"
+      "box-shadow:0 0 0 10px #000'></div></body>", "about:blank");
+    std::vector<uint8_t> sh(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, sh.data(), W, H, W * 4);
+    size_t ring = (70u * W + 35u) * 4;   // x=35 in [30,40): inside the 10px ring
+    size_t box = (70u * W + 70u) * 4;    // inside the white box
+    Expect(sh[ring] < 40 && sh[ring + 1] < 40 && sh[ring + 2] < 40 &&  // ring: black
+               sh[box] == 255 && sh[box + 1] == 255 && sh[box + 2] == 255,  // box: white
+           "paint: box-shadow spread draws a ring outside the border box");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

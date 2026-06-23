@@ -1028,6 +1028,16 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   the engine lays out modern CSS and rasterizes color/alpha/stacking/gradients CORRECTLY, not just
   without crashing. Smoke 51-52 lock in flexbox + solid + alpha + stacking + gradient. 65/65.
 
+- ✅ ADVANCED paint correctness (filters/clip/shadow) (2026-06-23): verified the modern paint
+  features that distinguish M150 from the old ~2015 engine, with exact pixel checks. CSS
+  filter:grayscale(1) on a red box -> desaturated gray (R==G==B, ±4) — exercises the SkImageFilter
+  pipeline; a !filter engine would leave it red. border-radius:50% -> a circle that CLIPS: center
+  pixel is the box color, corner pixel is page background (rounded-corner rasterization, not just a
+  layout attr). box-shadow:0 0 0 10px #000 (solid spread) -> a black ring OUTSIDE the border box
+  (shadow paints beyond the box), with the box interior still white. All exact. Smoke 53-55 lock
+  in grayscale-filter + border-radius-clip + box-shadow. So the engine renders filters, clipping
+  and shadows correctly, not merely without crashing. 68/68, no survivors.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
