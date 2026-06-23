@@ -1,10 +1,12 @@
 // mb_shot — headless renderer CLI. Renders an HTML file (or file:// URL) to a PNG using
 // modern Blink via the miniblink_host C ABI.
 //
-//   mb_shot [--full] <input.html | file://URL | http(s)://URL> <out.png> [width height]
+//   mb_shot [--full] [--scale N] <input.html | file://URL | http(s)://URL> <out.png> [width height]
 //
-//   --full   capture the entire document height, not just the viewport (resizes the
-//            view to the page's scrollHeight before rendering — like Puppeteer fullPage).
+//   --full     capture the entire document height, not just the viewport (resizes the
+//              view to the page's scrollHeight before rendering — like Puppeteer fullPage).
+//   --scale N  device pixel ratio: lay out at [width height] CSS px but render at Nx
+//              (window.devicePixelRatio == N). The PNG is width*N x height*N — retina-crisp.
 //
 // This is the "product" the host enables: a standalone, single-process, modern-Blink
 // screenshot tool — no browser process, no CEF.
@@ -25,12 +27,19 @@ constexpr int kMaxFullPageHeight = 20000;
 
 int main(int argc, char** argv) {
   bool full_page = false;
+  float scale = 1.0f;
   std::vector<const char*> pos;  // positional args, flags filtered out
   for (int i = 1; i < argc; ++i) {
-    if (std::string(argv[i]) == "--full")
+    const std::string a = argv[i];
+    if (a == "--full") {
       full_page = true;
-    else
+    } else if (a == "--scale" && i + 1 < argc) {
+      scale = static_cast<float>(std::atof(argv[++i]));
+      if (scale <= 0.0f)
+        scale = 1.0f;
+    } else {
       pos.push_back(argv[i]);
+    }
   }
   if (pos.size() < 2) {
     std::fprintf(
@@ -54,6 +63,8 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "mb_shot: view creation failed\n");
     return 1;
   }
+  if (scale != 1.0f)
+    mbSetDeviceScaleFactor(view, scale);  // before load so DPR-aware content responds
 
   const bool is_http = input.rfind("http", 0) == 0;
   if (input.rfind("file://", 0) == 0 || is_http) {
@@ -105,9 +116,13 @@ int main(int argc, char** argv) {
     mbResize(view, w, shot_h);  // reflow to the taller viewport; SavePng repaints
   }
 
-  const int ok = mbSavePng(view, out, w, shot_h);
-  std::fprintf(stderr, "mb_shot: %s -> %s (%dx%d) %s\n", input.c_str(), out, w,
-               shot_h, (ok && load_ok) ? "OK" : "FAILED");
+  // Physical output dimensions: logical size times the device pixel ratio. The
+  // view stays sized in logical (CSS) px; PaintInto scales the canvas by the DSF.
+  const int out_w = static_cast<int>(w * scale);
+  const int out_h = static_cast<int>(shot_h * scale);
+  const int ok = mbSavePng(view, out, out_w, out_h);
+  std::fprintf(stderr, "mb_shot: %s -> %s (%dx%d) %s\n", input.c_str(), out, out_w,
+               out_h, (ok && load_ok) ? "OK" : "FAILED");
 
   mbDestroyView(view);
   mbShutdown();

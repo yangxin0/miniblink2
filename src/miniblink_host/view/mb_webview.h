@@ -46,6 +46,10 @@ class MbWebView {
   void SendMouseClick(int x, int y);
   void SendMouseMove(int x, int y);
   void SendText(const char* utf8);
+  // Set the device pixel ratio (HiDPI). The page lays out in CSS px but reports
+  // window.devicePixelRatio == scale and rasterizes at `scale`x in PaintInto, so
+  // captures are retina-crisp. Caller sizes the output bitmap to logical*scale.
+  void SetDeviceScaleFactor(float scale);
   void SendScroll(int x, int y, int dx, int dy);
   std::string EvalToString(const char* utf8_script);  // eval JS -> string result
   bool PaintToBitmap(void* out_bgra, int w, int h, int stride);
@@ -67,6 +71,7 @@ class MbWebView {
   // [[maybe_unused]] until the handshake bodies (currently scaffolded) use them.
   [[maybe_unused]] blink::WebViewImpl* web_view_ = nullptr;     // owned by blink; Close() in dtor
   [[maybe_unused]] blink::WebLocalFrame* main_frame_ = nullptr; // owned by blink
+  float dsf_ = 1.0f;  // device pixel ratio; PaintInto scales the canvas by it
 };
 
 }  // namespace mb

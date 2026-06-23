@@ -192,6 +192,20 @@ int main() {
            "full-page: resize captures below-the-fold");
   }
 
+  // 15. HiDPI: setting device scale factor makes window.devicePixelRatio report it
+  // and resolution media queries re-evaluate (without zooming layout).
+  mbSetDeviceScaleFactor(v, 2.0f);
+  mbLoadHTML(v,
+             "<style>#x{color:rgb(0,0,0)}"
+             "@media (min-resolution:1.5dppx){#x{color:rgb(1,2,3)}}</style>"
+             "<body><b id='x'>x</b></body>",
+             "about:blank");
+  Expect(Eval(v, "String(window.devicePixelRatio)") == "2",
+         "HiDPI: devicePixelRatio", Eval(v, "String(window.devicePixelRatio)"));
+  Expect(Eval(v, "getComputedStyle(document.getElementById('x')).color") ==
+             "rgb(1, 2, 3)",
+         "HiDPI: min-resolution media query matches");
+
   mbDestroyView(v);
   mbShutdown();
 

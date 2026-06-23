@@ -55,6 +55,11 @@ MB_EXPORT void mbSendMouseClick(mbView*, int x, int y);
 // Move the mouse pointer to (x,y): updates :hover state, fires mouseover/mousemove.
 MB_EXPORT void mbSendMouseMove(mbView*, int x, int y);
 
+// Set the device pixel ratio (HiDPI / retina). The view keeps laying out in CSS px
+// but window.devicePixelRatio reports `scale` and paint output is rasterized at
+// `scale`x. Allocate paint/PNG buffers at logical_width*scale x logical_height*scale.
+MB_EXPORT void mbSetDeviceScaleFactor(mbView*, float scale);
+
 // Type ASCII text into the focused element (synthesized key events).
 MB_EXPORT void mbSendText(mbView*, const char* utf8_text);
 

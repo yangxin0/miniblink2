@@ -36,13 +36,18 @@ that satisfies modern Blink so it runs without the full browser.
 The deliverable example app — a standalone headless screenshot renderer:
 
 ```sh
-mb_shot [--full] <input.html | file://URL | http(s)://URL> <out.png> [width height]
+mb_shot [--full] [--scale N] <input.html | file://URL | http(s)://URL> <out.png> [width height]
 ```
 
 `--full` captures the entire document height (the view is resized to the page's
 `scrollHeight` before rendering, capped at 20000px), like Puppeteer's `fullPage` — e.g.
 `mb_shot --full https://go.dev out.png` produces a 1200×3969 image of the whole page
 instead of just the 1200×900 viewport.
+
+`--scale N` renders at a device pixel ratio of N: the page lays out at `[width height]`
+CSS px but `window.devicePixelRatio == N` and the PNG is `width*N × height*N` — retina-crisp
+text and 2x `srcset`/`min-resolution` media-query selection. The flags compose, e.g.
+`mb_shot --full --scale 2 https://go.dev out.png` → a 2400×7938 whole-page @2x capture.
 
 Rendered by `mb_shot` from an HTML file (gradient, CSS grid, translucent cards, a
 rotated card, and JS-injected text — all modern Blink, headless, no CEF):
@@ -119,6 +124,7 @@ void  mbRunJS(mbView*, const char* script);         // host -> page: drive it
 int   mbEvalJS(mbView*, const char* script, char* out, int cap);  // host <- page: read back
 void  mbSendMouseClick(mbView*, int x, int y);      // synthesize a click
 void  mbSendMouseMove(mbView*, int x, int y);       // move pointer: hover + mousemove
+void  mbSetDeviceScaleFactor(mbView*, float scale); // HiDPI: devicePixelRatio + Nx raster
 void  mbSendText(mbView*, const char* text);        // type UTF-8 into the focused element
 void  mbSendScroll(mbView*, int x, int y, int dx, int dy);  // scroll the page (dy>0 = down)
 int   mbPaintToBitmap(mbView*, void* bgra, int w, int h, int stride);
@@ -142,9 +148,10 @@ Requirements: a Chromium M150 source tree with a component `out/Release`
 ./build.sh /path/to/chromium-150.x.y.z   # stages host into the tree, gn gen, ninja, runs the suite
 ```
 
-`mb_smoke` is a 15-case capability test suite (HTML/DOM, JS, CSS computed style, UA
+`mb_smoke` is a 17-case capability test suite (HTML/DOM, JS, CSS computed style, UA
 stylesheet, the `mbRunJS`+`mbEvalJS` bridge, `<canvas>` getImageData, external `<link>`
 CSS via the subresource loader, paint-to-bitmap, synthesized click, typed text (ASCII +
 UTF-8 accent/CJK/emoji), programmatic scroll, mouse-move/hover, embedded-NUL document
-integrity, and full-page capture (resize → reflow → render below the fold)) — it prints
-PASS/FAIL per case and exits non-zero on any failure, so it doubles as a regression test.
+integrity, full-page capture (resize → reflow → render below the fold), and HiDPI
+(devicePixelRatio + resolution media queries)) — it prints PASS/FAIL per case and exits
+non-zero on any failure, so it doubles as a regression test.

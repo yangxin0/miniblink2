@@ -474,6 +474,17 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   of a headless screenshot tool (cf. Puppeteer fullPage) and it builds on the scroll/viewport
   work. Flag parsing also generalized (flags filtered from positionals).
 
+- ✅ HIDPI / DEVICE SCALE FACTOR (2026-06-23 16:?): mbSetDeviceScaleFactor(view, N) +
+  mb_shot --scale N. The compositor path SetZoomFactorForDeviceScaleFactor DCHECKs
+  does_composite_ (false for us) — blocked. Used the DevTools override route instead:
+  Page::SetInspectorDeviceScaleFactorOverride(N) (DevicePixelRatio = override * zoom, so DPR
+  reports N WITHOUT zooming layout), + Document::MediaQueryAffectingValueChanged(kOther) so
+  resolution MQs / srcset re-evaluate, + canvas.scale(N,N) in PaintInto so skia re-rasters
+  glyphs/vectors crisply into the (logical*N) bitmap. Verified: smoke 16 devicePixelRatio==2,
+  smoke 17 @media(min-resolution:1.5dppx) matches; mb_shot --scale 2 of 400x300 -> 800x600;
+  --full --scale 2 of go.dev -> 2400x7938 (flags compose). 17/17. Another "non-compositing
+  hits compositor-assumption API" solved WITHOUT a blink patch, via the override route.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

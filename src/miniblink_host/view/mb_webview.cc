@@ -37,6 +37,8 @@
 #include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/public/web/web_view.h"
 #include "third_party/icu/source/common/unicode/uscript.h"
+#include "third_party/blink/renderer/core/css/media_value_change.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -194,6 +196,28 @@ void MbWebView::SendMouseMove(int x, int y) {
     widget_->SendMouseMove(x, y);
 }
 
+void MbWebView::SetDeviceScaleFactor(float scale) {
+  dsf_ = scale > 0.0f ? scale : 1.0f;
+  if (!web_view_ || !web_view_->GetPage())
+    return;
+  // DevicePixelRatio = InspectorDeviceScaleFactorOverride * LayoutZoomFactor, so
+  // this makes window.devicePixelRatio report `scale` without zooming layout. The
+  // compositor-based SetZoomFactorForDeviceScaleFactor path DCHECKs does_composite_,
+  // which is false for our non-compositing widget — this override route avoids it.
+  web_view_->GetPage()->SetInspectorDeviceScaleFactorOverride(dsf_);
+  // The setter only stores the value; nudge media queries so min-resolution /
+  // -webkit-device-pixel-ratio (and srcset selection) re-evaluate on next lifecycle.
+  if (main_frame_) {
+    auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
+    if (blink::LocalFrame* frame = impl->GetFrame()) {
+      if (frame->GetDocument()) {
+        frame->GetDocument()->MediaQueryAffectingValueChanged(
+            blink::MediaValueChange::kOther);
+      }
+    }
+  }
+}
+
 void MbWebView::SendText(const char* utf8) {
   if (widget_)
     widget_->SendText(utf8);
@@ -269,6 +293,10 @@ bool MbWebView::PaintInto(SkCanvas& canvas) {
 
   // Replay Blink's recorded paint ops straight into the canvas (no compositor).
   canvas.clear(SK_ColorWHITE);
+  // HiDPI: the paint record is in CSS px; scaling the canvas makes skia re-raster
+  // glyphs/vectors crisply at the device pixel ratio into the (logical*dsf) bitmap.
+  if (dsf_ != 1.0f)
+    canvas.scale(dsf_, dsf_);
   frame->View()->GetPaintRecord().Playback(&canvas);
   return true;
 }

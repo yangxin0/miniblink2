@@ -73,6 +73,11 @@ void mbSendMouseMove(mbView* v, int x, int y) {
     v->impl->SendMouseMove(x, y);
 }
 
+void mbSetDeviceScaleFactor(mbView* v, float scale) {
+  if (v && v->impl)
+    v->impl->SetDeviceScaleFactor(scale);
+}
+
 void mbSendText(mbView* v, const char* utf8_text) {
   if (v && v->impl)
     v->impl->SendText(utf8_text);
