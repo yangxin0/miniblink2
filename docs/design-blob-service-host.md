@@ -298,6 +298,33 @@ attempt were CORRECT (only the binding mechanism was wrong) — reconstruct them
 proxy approach and re-bind MbBlobURLStore via MakeSelfOwnedAssociatedReceiver on the service
 thread. Then revert patch 0003. This is one focused execution pass.
 
+## Increment 5 — deadlock SOLVED; a 2nd barrier found (2026-06-24, attempt 2)
+
+Option (a) WORKS for the deadlock: a real blink::mojom::AssociatedInterfaceProvider proxy
+(regular variant — the blink::AssociatedInterfaceProvider ctor takes the non-WTF variant)
+created via PendingAssociatedRemote::InitWithNewEndpointAndPassReceiver() +
+EnableUnassociatedUsage(), with its receiver bound on the service thread (MbAssocProvider),
+which on GetAssociatedInterface(name==BlobURLStore::Name_) binds MbBlobURLStore. With this,
+createObjectURL NO LONGER HANGS — instrumentation confirmed Register fires, the url->blob
+map is populated, and on fetch the store's ResolveAsURLLoaderFactory runs (found=1) and
+binds MbBlobURLLoaderFactory. (EnableUnassociatedUsage only on the remote sufficed.)
+
+BUT a SECOND barrier blocks end-to-end: after Resolve binds the factory, Blink calls
+Factory.Clone (its SharedURLLoaderFactory wrapper) but NEVER calls CreateLoaderAndStart,
+and fetch(blobURL) rejects "Failed to fetch" — even on a stable https origin
+(blob:https://miniblink.test/uuid, same-origin as the page). So it is NOT the factory and
+NOT a file://-origin quirk; it is a fetch-level rejection of the blob: request that happens
+after the factory is obtained but before any load starts. Likely our minimal host's
+SecurityOrigin / blob-URL-origin bookkeeping (BlobURLNullOriginMap, or the request's
+origin/response-tainting checks) rejects the blob: response. NEXT investigation: trace why
+the blob: ResourceRequest is aborted post-resolve (e.g. add logging in the fetch/CORS/
+response path, or check SecurityOrigin::CanRequest for blob: in this host); the loader side
+is proven correct and reached up to Clone. Reverted to 82/82 (patch 0003 restored) since the
+feature isn't end-to-end and there was no passing test for the new code.
+
+Net: the [Sync] associated-binding deadlock (the hard, known blocker) is SOLVED and the
+mechanism is confirmed; blob: URL now hinges on a separate fetch-security/origin barrier.
+
 ## Risks / open questions
 
 - IO-pump thread + Blink's mojo core: confirm `mojo::core` is initialized in a mode

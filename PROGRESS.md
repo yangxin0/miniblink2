@@ -1340,6 +1340,22 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   EnableUnassociatedUsage is needed on both the remote and the receiver. blob: URL is now a fully
   mechanical plan; deferred to a focused pass (not crammed end-of-tick). Tree stays 82/82.
 
+- 🔬 Increment 5 attempt 2: DEADLOCK SOLVED, but a 2nd barrier found; reverted to 82/82 (2026-06-24):
+  executed option (a) and it FIXED the deadlock — a real blink::mojom::AssociatedInterfaceProvider
+  proxy (regular non-WTF variant, the ctor's type) via InitWithNewEndpointAndPassReceiver() +
+  EnableUnassociatedUsage() (remote only), receiver bound on the service thread (MbAssocProvider),
+  binding MbBlobURLStore on GetAssociatedInterface(BlobURLStore::Name_). Instrumented + confirmed:
+  createObjectURL NO LONGER HANGS, Register fires, the url->blob map populates, and on fetch
+  ResolveAsURLLoaderFactory runs (found=1) and binds the factory. SECOND BARRIER: Blink then calls
+  Factory.Clone but NEVER CreateLoaderAndStart, and fetch(blobURL) rejects "Failed to fetch" even on
+  a stable https origin (same-origin blob:https://...) — so it is NOT the factory and NOT a file://
+  quirk; it's a fetch-level rejection of the blob: request AFTER the factory is obtained, before any
+  load. Likely the minimal host's SecurityOrigin / blob-URL-origin bookkeeping (BlobURLNullOriginMap
+  / SecurityOrigin::CanRequest for blob:). Reverted (no passing test for not-end-to-end code; patch
+  0003 restored). NEXT: trace why the blob: ResourceRequest is aborted post-resolve (fetch/CORS/
+  response path). The hard known blocker (the [Sync] associated-binding deadlock) is SOLVED + the
+  mechanism captured; blob: URL now hinges on this separate, narrower fetch-security barrier.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
