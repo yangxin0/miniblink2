@@ -1865,6 +1865,32 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   real-site + API probing keeps confirming only the heavy items (blob: URLs, Workers, WebGL,
   page-driven history.back) remain, each with a documented de-risked plan for a focused session.
 
+- 🔬🔬 fetch(blob:) — MAJOR diagnostic progress (2026-06-24): implemented the full subsystem in a
+  branch, VERIFIED two of three stages work, pinpointed the exact remaining wall, then reverted to
+  stay end-clean (feature doesn't work yet). EMPIRICALLY PROVEN this tick:
+  * THREADING SOLVED (the historical deadlock fear): bind the frame's nav-associated-interface
+    provider as a service-thread PROXY — a dedicated mojo::AssociatedRemote<mojom::Associated-
+    InterfaceProvider> whose receiver (MbNavAssociatedInterfaceProvider) is bound on the service
+    thread; its GetAssociatedInterface binds MbBlobURLStore there too. Then createObjectURL's [Sync]
+    BlobURLStore.Register is serviced off the (blocked) main thread → Register fires, NO deadlock.
+    (A LOCAL AssociatedInterfaceProvider + OverrideBinderForTesting does NOT work: it binds the
+    receiver via a main-thread task that can't run during the main-thread sync wait → deadlock. This
+    was the precise reason it was reverted before.) Wired via MbFrameClient::
+    GetRemoteNavigationAssociatedInterfaces() override.
+  * RESOLUTION WORKS: re-enabling GetBlobURLStore().Register (patch 0003) + a process-global url->Blob
+    map, fetch(blob:) calls MbBlobURLStore::ResolveAsURLLoaderFactory and the URL is FOUND; a thin
+    MbBlobURLLoaderFactory (CreateLoaderAndStart -> Blob::Load) is bound and even Cloned by fetch.
+    MbBlob::Load delivery (URLResponseHead 200 + body pipe via BlobReadSession + OnComplete) is
+    implemented and compiles.
+  * THE WALL (unchanged historical "second barrier", now precise): fetch RESOLVES + CLONES the
+    factory but NEVER calls CreateLoaderAndStart on it (factory ctor + Clone fire; CreateLoaderAndStart
+    does not; factory stays alive). So fetch bails between cloning the factory and starting the load —
+    a fetch-side CORS / URLLoader-creation check (loader_factory_for_frame -> WrapperSharedURLLoader-
+    Factory -> URLLoaderFactory::CreateURLLoader -> the CORS/throttle loader) drops the blob load with
+    "Failed to fetch". NEXT: instrument CorsURLLoader / the request-mode + blob-URL partition/origin
+    checks to find which one rejects before CreateLoaderAndStart. This is a focused-session task
+    (needs iterative core-Blink debugging); the subsystem code is written + working up to this point.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.
