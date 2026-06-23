@@ -789,6 +789,14 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   new Date(1609459200000).getHours()==19 (2021-01-01T00Z -> 2020-12-31 19:00 EST). 43/43, no
   survivors. DevTools-style emulation now: dark mode, locale, timezone, HiDPI, viewport, UA.
 
+- ✅ CONSOLIDATION / FULL-SUITE VERIFY (2026-06-23 20:?): after a long feature run, confirmed
+  no integration regression. Full suite with network on (local echo server, bounded run):
+  47/47 (43 default + 4 network), no FAIL/SKIP, no stray processes. Verified all emulation +
+  capture flags COMPOSE: `mb_shot --dark --scale 2 --lang ja-JP --tz Asia/Tokyo --full` -> valid
+  800x400 PNG, and --text confirms the simultaneous runtime state "ja-JP | Asia/Tokyo | dpr=2".
+  Engine + mb_shot healthy across the whole surface. (Known gaps unchanged: Blob sync-deadlock,
+  reverse cookie bridge, IndexedDB, on-screen window — all documented above.)
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
