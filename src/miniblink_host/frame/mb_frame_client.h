@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "services/network/public/mojom/web_sandbox_flags.mojom-shared.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_console_message.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
@@ -68,6 +69,11 @@ class MbFrameClient : public blink::WebLocalFrameClient {
     self_owned_ = std::move(self_owned);
   }
 
+  // Sandbox flags for this (child) frame, captured from the owner's FramePolicy
+  // in the parent's CreateChildFrame and applied to the document at commit (see
+  // BeginNavigation). Without this, <iframe sandbox> would not be enforced.
+  void SetSandboxFlags(network::mojom::WebSandboxFlags f) { sandbox_flags_ = f; }
+
   // Fires when the document element exists but before the page's own scripts run
   // (and may execute JS). We use it to run the host's init script first, so it can
   // set globals / override APIs the page then observes (cf. evaluateOnNewDocument).
@@ -102,6 +108,9 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   std::vector<std::string> console_;  // captured console messages
   blink::WebLocalFrame* web_frame_ = nullptr;       // this client's frame
   std::unique_ptr<MbFrameClient> self_owned_;        // set for child frames only
+  network::mojom::WebSandboxFlags sandbox_flags_ =
+      network::mojom::WebSandboxFlags::kNone;        // child <iframe sandbox>
+
 };
 
 }  // namespace mb

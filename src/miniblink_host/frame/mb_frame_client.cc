@@ -11,6 +11,8 @@
 #include "miniblink_host/view/mb_webview.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "services/network/public/cpp/web_sandbox_flags.h"
+#include "services/network/public/mojom/web_sandbox_flags.mojom-shared.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/frame/policy_container.mojom-blink.h"
 #include "third_party/blink/public/platform/web_policy_container.h"
@@ -21,6 +23,7 @@
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
+#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace mb {
 namespace {
@@ -51,7 +54,7 @@ blink::WebLocalFrame* MbFrameClient::CreateChildFrame(
     blink::mojom::TreeScopeType scope,
     const blink::WebString& /*name*/,
     const blink::WebString& /*fallback_name*/,
-    const blink::FramePolicy& /*frame_policy*/,
+    const blink::FramePolicy& frame_policy,
     const blink::WebFrameOwnerProperties&,
     blink::FrameOwnerElementType,
     blink::WebPolicyContainerBindParams /*policy_container_bind_params*/,
@@ -67,6 +70,10 @@ blink::WebLocalFrame* MbFrameClient::CreateChildFrame(
   blink::WebLocalFrame* child = web_frame_->CreateLocalChild(
       scope, child_ptr, /*interface_registry=*/nullptr,
       blink::LocalFrameToken());
+  // Carry the owner's sandbox flags (<iframe sandbox>) onto the child client so
+  // its commit enforces them — normally the browser computes these and ships
+  // them in the WebNavigationParams; here we apply them in BeginNavigation.
+  child_ptr->SetSandboxFlags(frame_policy.sandbox_flags);
   child_ptr->Bind(child, std::move(child_client));
   finish_creation(child, blink::DocumentToken(), /*browser_broker=*/{},
                   std::make_unique<base::UnguessableToken>(
@@ -115,6 +122,17 @@ void MbFrameClient::BeginNavigation(
   MbPolicyContainerHost policy_host;
   params->policy_container = std::make_unique<blink::WebPolicyContainer>(
       blink::WebPolicyContainerPolicies(), policy_host.BindRemote());
+  // Enforce the owner's sandbox flags (<iframe sandbox>). Normally the browser
+  // folds these into the committed policy container; we do it here. If the
+  // kOrigin bit is set (no allow-same-origin), force a fresh opaque origin so
+  // the child is cross-origin to its parent — mirrors frame_test_helpers.
+  params->policy_container->policies.sandbox_flags |= sandbox_flags_;
+  if ((params->policy_container->policies.sandbox_flags &
+       network::mojom::WebSandboxFlags::kOrigin) !=
+      network::mojom::WebSandboxFlags::kNone) {
+    params->origin_to_commit =
+        blink::SecurityOrigin::Create(url)->DeriveNewOpaqueOrigin();
+  }
   blink::To<blink::WebLocalFrameImpl>(web_frame_)->CommitNavigation(
       std::move(params), /*extra_data=*/nullptr);
 }

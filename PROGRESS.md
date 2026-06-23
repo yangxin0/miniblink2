@@ -1524,6 +1524,24 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   content under a file:// base. 94/94, no survivors. REMAINING from the iframe arc: sandboxed
   iframes don't enforce sandbox flags (CreateChildFrame ignores frame_policy) — a clean follow-up.
 
+- ✅✅ DONE: <iframe sandbox> flags enforced — shipped (2026-06-24): the last queued item of the
+  iframe arc. CreateChildFrame now captures the owner's frame_policy.sandbox_flags onto the child
+  MbFrameClient (SetSandboxFlags); BeginNavigation folds them into the committed policy container
+  (params->policy_container->policies.sandbox_flags |= sandbox_flags_) and, if the kOrigin bit is
+  set (sandbox w/o allow-same-origin), forces a fresh opaque origin
+  (params->origin_to_commit = SecurityOrigin::Create(url)->DeriveNewOpaqueOrigin()) — exactly
+  frame_test_helpers' BeginNavigation tail (lines 951-957). Header: new member
+  network::mojom::WebSandboxFlags sandbox_flags_ + SetSandboxFlags; .cc includes
+  services/network/public/cpp/web_sandbox_flags.h (bitwise operators) + .../mojom-shared.h +
+  platform/weborigin/security_origin.h. VERIFIED: the document_loader.cc CalculateOrigin kOrigin
+  block applies our origin (postcommit debug showed the sandboxed srcdoc child origin=[null]
+  opaque=1, while a non-sandboxed sibling = file://). KEY FINDING: a cross-origin parent READ can't
+  observe this here — the file:// parent has universal access (web-security-off / file-access
+  settings), so it can read even an opaque child; origin enforcement still happens, just isn't
+  observable that way. So smoke case 79 asserts the origin-INDEPENDENT signal: a sandboxed child's
+  inline <script> does NOT run (kScripts), while a non-sandboxed sibling's does (data-ran probe).
+  96/96, no survivors. The iframe arc (create -> srcdoc -> src= -> sandbox) is now complete.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

@@ -1479,6 +1479,38 @@ int main() {
         "iframe src= loads: child fetches + commits its document");
   }
 
+  // 79. <iframe sandbox> is enforced: the owner's FramePolicy sandbox flags
+  // reach the committed child document (CreateChildFrame -> BeginNavigation
+  // applies them). The cleanest origin-independent signal is script blocking:
+  // a sandboxed child (no allow-scripts) must NOT run its inline script, while
+  // a non-sandboxed sibling does. Each child's script tags its own <body> with
+  // data-ran; we read it back from the parent. (We avoid asserting via a
+  // cross-origin read because the file:// parent has universal access here, so
+  // it can read even an opaque-origin child — origin enforcement still happens,
+  // but isn't observable that way.)
+  {
+    mbLoadHTML(v,
+      "<body>"
+      "<iframe id='sb' sandbox srcdoc=\"<body><script>"
+      "document.body.setAttribute('data-ran','yes')</scr" "ipt></body>\">"
+      "</iframe>"
+      "<iframe id='op' srcdoc=\"<body><script>"
+      "document.body.setAttribute('data-ran','yes')</scr" "ipt></body>\">"
+      "</iframe>"
+      "</body>", "file:///tmp/p.html");
+    mbWait(v, 200);
+    // Sandboxed (no allow-scripts): inline script must not run.
+    Expect(Eval(v,
+        "''+document.getElementById('sb').contentDocument.body"
+        ".getAttribute('data-ran')") == "null",
+        "iframe sandbox enforced: sandboxed child's script is blocked");
+    // Non-sandboxed sibling: its script runs.
+    Expect(Eval(v,
+        "''+document.getElementById('op').contentDocument.body"
+        ".getAttribute('data-ran')") == "yes",
+        "iframe sandbox scoped: non-sandboxed sibling's script runs");
+  }
+
   // 78. element.scrollIntoView() works (a common automation primitive: scroll a
   // target into view before clicking/capturing). Our non-compositing widget
   // handles scroll specially, so verify programmatic scroll-into-view actually
