@@ -393,6 +393,14 @@ gradient), select + dropdown arrow, textarea, range slider, progress bar — all
 correct native theming (LayoutTheme -> skia default theme). No crash, no fix. Interactive
 form UIs work (display only; actual input event handling is P3/未).
 
+### ✅ INPUT EVENTS — engine is now DRIVABLE (2026-06-23 15:48)
+mbSendMouseClick(view,x,y) synthesizes WebMouseEvent down+up and dispatches via
+static_cast<WebFrameWidgetImpl*>(widget_)->HandleInputEvent(WebCoalescedInputEvent(e,
+ui::LatencyInfo())). Verified: suite case 9 clicks a button -> onclick fires -> DOM mutated
+(confirmed via mbEvalJS). NOTE: paint once before clicking so layout is current for the
+hit-test. Suite now 9/9. This crosses from "renders" to "renders + responds to input".
+NEXT interactivity: keyboard (WebKeyboardEvent), scroll/wheel, mouse move/hover.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
@@ -638,6 +646,9 @@ signatures, do this next tick:
   mb_smoke. Bring-up reaches step 8 then SIGSEGV. Got backtrace from the .ips crash report
   (lldb perm-blocked). ROOT CAUSE: MbPlatform::GetBrowserInterfaceBroker()==nullptr,
   deref'd by TimeZoneController::Init during CoreInitializer. Next: implement empty broker.
+- 2026-06-23 15:48 — Loop tick. **🎉 INPUT EVENTS** — mbSendMouseClick via
+  WebFrameWidgetImpl::HandleInputEvent. Suite case 9: click button -> onclick -> DOM change
+  verified. Engine is now drivable (renders + responds). Committed.
 - 2026-06-23 15:38 — Loop tick. Validated form controls + theming (input/checkbox/radio/
   button/select/textarea/range/progress all render native-styled). No code change.
   docs/demos/form-controls.png. Committed doc/demo updates.

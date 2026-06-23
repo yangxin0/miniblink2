@@ -31,6 +31,7 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   // non-compositing, and sizes it. Must be followed by web_view->DidAttachLocalMainFrame().
   void Attach(blink::WebLocalFrame* main_frame, int width, int height);
   void Resize(int width, int height);
+  void SendMouseClick(int x, int y);  // synthesize mousedown+mouseup at (x,y)
 
   blink::WebFrameWidget* widget() { return widget_; }
 

@@ -49,6 +49,9 @@ MB_EXPORT void mbLoadURL(mbView*, const char* utf8_url);
 // Execute JavaScript in the page's main frame (host-driven scripting).
 MB_EXPORT void mbRunJS(mbView*, const char* utf8_script);
 
+// Synthesize a left mouse click (down+up) at (x,y) in the view.
+MB_EXPORT void mbSendMouseClick(mbView*, int x, int y);
+
 // Evaluate JS and write its result (coerced to string) into `out` (NUL-terminated,
 // up to out_cap bytes). Returns the full result length in bytes (may exceed out_cap-1,
 // indicating truncation). Lets the host read data back from the page (e.g. document.title).

@@ -3,13 +3,19 @@
 
 #include <tuple>
 
+#include "base/time/time.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
+#include "third_party/blink/public/common/input/web_coalesced_input_event.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/common/input/web_mouse_event.h"
 #include "third_party/blink/public/mojom/page/widget.mojom-blink.h"
 #include "third_party/blink/public/mojom/widget/platform_widget.mojom-blink.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_local_frame.h"
+#include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/latency/latency_info.h"
 
 namespace mb {
 
@@ -47,6 +53,26 @@ void MbWidget::Attach(blink::WebLocalFrame* main_frame, int width, int height) {
 void MbWidget::Resize(int width, int height) {
   if (widget_)
     widget_->Resize(gfx::Size(width, height));
+}
+
+void MbWidget::SendMouseClick(int x, int y) {
+  if (!widget_)
+    return;
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  auto make = [&](blink::WebInputEvent::Type type) {
+    blink::WebMouseEvent e(type, blink::WebInputEvent::kNoModifiers,
+                           base::TimeTicks::Now());
+    e.pointer_type = blink::WebPointerProperties::PointerType::kMouse;
+    e.SetPositionInWidget(x, y);
+    e.SetPositionInScreen(x, y);
+    e.button = blink::WebMouseEvent::Button::kLeft;
+    e.click_count = 1;
+    return e;
+  };
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+      make(blink::WebInputEvent::Type::kMouseDown), ui::LatencyInfo()));
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+      make(blink::WebInputEvent::Type::kMouseUp), ui::LatencyInfo()));
 }
 
 }  // namespace mb

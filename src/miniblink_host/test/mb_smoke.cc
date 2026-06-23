@@ -97,6 +97,19 @@ int main() {
   mbPaintToBitmap(v, px.data(), W, H, W * 4);
   Expect(px[2] == 255 && px[1] == 0 && px[0] == 0, "paint to bitmap (red bg)");
 
+  // 9. Input: synthesize a click on a button and verify its handler ran.
+  mbLoadHTML(v,
+             "<body style='margin:0'><button id='b' onclick='window.__c=1' "
+             "style='position:absolute;left:20px;top:20px;width:120px;height:40px'>"
+             "click</button></body>",
+             "about:blank");
+  {
+    std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // force layout for hit-testing
+  }
+  mbSendMouseClick(v, 80, 40);  // center of the button
+  Expect(Eval(v, "String(window.__c||0)") == "1", "input: synthesized click");
+
   mbDestroyView(v);
   mbShutdown();
 
