@@ -1114,6 +1114,16 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   no survivors. The Puppeteer/Playwright-style automation surface now: waitForSelector + click +
   fill + type(SendText) + eval + screenshot/pdf.
 
+- ✅ CAPABILITY: mbWaitForFunction (Puppeteer waitForFunction) (2026-06-24): general wait primitive
+  that polls a JS expression (pumping the loop, same 10ms cadence as WaitForSelector) until it
+  evaluates truthy or the timeout elapses; exceptions count as falsey. Generalizes
+  mbWaitForSelector — wait on ANY condition (window.appReady, results.length>N, a spinner gone).
+  MbWebView::WaitForFunction wraps the caller expr as (function(){try{return((EXPR)?1:0);}catch(e)
+  {return 0;}})(). Exposed as `int mbWaitForFunction(mbView*, const char* js_expr, int timeout_ms)`.
+  Smoke 63: a setTimeout flips window.__ready after 50ms -> waitForFunction returns 1; a never-true
+  predicate times out -> 0 (and does not hang past the timeout). README updated. 76/76, no
+  survivors.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

@@ -1164,6 +1164,20 @@ int main() {
            "mbFillSelector: sets value + fires input event; 0 when no match");
   }
 
+  // 63. mbWaitForFunction polls a JS predicate until truthy (general wait). A
+  // setTimeout sets a flag after 50ms; waitForFunction must return 1 once it
+  // flips. A condition that never holds must time out -> 0 (and not hang past
+  // the timeout). Generalizes waitForSelector.
+  {
+    mbLoadHTML(v, "<body>wf<script>setTimeout(function(){window.__ready=1;},50);"
+                  "</script></body>", "about:blank");
+    int got = mbWaitForFunction(v, "window.__ready===1", 2000);
+    int timedout = mbWaitForFunction(v, "window.__never", 60);
+    Expect(got == 1 && timedout == 0 &&
+               Eval(v, "String(window.__ready)") == "1",
+           "mbWaitForFunction: resolves when predicate turns truthy; times out otherwise");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

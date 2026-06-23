@@ -40,6 +40,12 @@ int mbWaitForSelector(mbView* v, const char* css_selector, int timeout_ms) {
   return v->impl->WaitForSelector(css_selector, timeout_ms) ? 1 : 0;
 }
 
+int mbWaitForFunction(mbView* v, const char* js_expr, int timeout_ms) {
+  if (!v || !v->impl || !js_expr)
+    return 0;
+  return v->impl->WaitForFunction(js_expr, timeout_ms) ? 1 : 0;
+}
+
 mbView* mbCreateView(int width, int height) {
   if (!mb::MbRuntime::Get())
     return nullptr;  // must mbInitialize() first

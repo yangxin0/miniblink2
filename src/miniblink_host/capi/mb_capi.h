@@ -43,6 +43,12 @@ MB_EXPORT void mbWait(mbView*, int ms);
 // lets a capture wait for JS-rendered / delayed content.)
 MB_EXPORT int mbWaitForSelector(mbView*, const char* css_selector, int timeout_ms);
 
+// Pump until the JS expression `js_expr` evaluates truthy, or timeout_ms elapses
+// (Puppeteer-style waitForFunction). Exceptions count as falsey. Returns 1 if it
+// became truthy, 0 on timeout. Generalizes mbWaitForSelector — wait on any
+// condition, e.g. "window.appReady" or "document.querySelectorAll('.row').length>5".
+MB_EXPORT int mbWaitForFunction(mbView*, const char* js_expr, int timeout_ms);
+
 // View lifecycle. A view owns one WebView + main LocalFrame + WebFrameWidget.
 MB_EXPORT mbView* mbCreateView(int width, int height);
 MB_EXPORT void    mbDestroyView(mbView*);

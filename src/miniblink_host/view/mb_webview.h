@@ -96,6 +96,11 @@ class MbWebView {
   void WaitMs(int ms);
   // Pump until document.querySelector(css) matches or timeout_ms elapses; true if found.
   bool WaitForSelector(const char* css, int timeout_ms);
+  // Poll a JS expression while pumping the loop until it evaluates truthy or the
+  // timeout elapses (Puppeteer's waitForFunction). Exceptions count as falsey.
+  // Generalizes WaitForSelector — wait on any condition (window.appReady,
+  // results.length>0, ...). Returns true if it became truthy, false on timeout.
+  bool WaitForFunction(const char* js_expr, int timeout_ms);
   bool PaintToBitmap(void* out_bgra, int w, int h, int stride);
   bool SavePng(const char* path, int w, int h);  // render + encode PNG to disk
   // Print the document to a multi-page PDF (US Letter) at `path` via Blink's print path.

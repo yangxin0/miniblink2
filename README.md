@@ -165,6 +165,7 @@ void  mbLoadHTML(mbView*, const char* html, const char* base_url);
 void  mbLoadURL(mbView*, const char* url);          // file:// today
 void  mbWait(mbView*, int ms);                      // drive timers/async for ms
 int   mbWaitForSelector(mbView*, const char* css, int timeout_ms);  // wait for element
+int   mbWaitForFunction(mbView*, const char* js_expr, int timeout_ms);  // wait for JS predicate
 void  mbRunJS(mbView*, const char* script);         // host -> page: drive it
 void  mbSetInitScript(mbView*, const char* script); // run before each page's own scripts
 int   mbEvalJS(mbView*, const char* script, char* out, int cap);  // host <- page: read back
