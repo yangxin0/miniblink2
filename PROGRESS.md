@@ -1542,6 +1542,26 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   inline <script> does NOT run (kScripts), while a non-sandboxed sibling's does (data-ran probe).
   96/96, no survivors. The iframe arc (create -> srcdoc -> src= -> sandbox) is now complete.
 
+- ✅✅ DONE: document.cookie read-first no longer hangs — fixed (2026-06-24): probing common web
+  APIs found document.cookie READ hung (watchdog SIGKILL) when it was the FIRST cookie op from a
+  page's inline script (the universal "read existing cookies on load" pattern). Root cause: the
+  RestrictedCookieManager (MbCookieManager in mb_frame_broker.cc) was reached via a
+  BrowserInterfaceBroker bound on the MAIN thread. GetCookiesString is a [Sync] mojo method; on a
+  read-first, the main thread blocked in the sync wait BEFORE the async broker.GetInterface that
+  binds the manager had been pumped, so the manager never bound → self-deadlock. (Case 33 passed
+  only because it WRITES first, which pumps GetInterface and binds the manager on the main thread,
+  after which a same-thread [Sync] read is serviceable.) FIX: bind the broker on the runtime
+  service thread, mirroring the blob subsystem exactly — PostTask to MbRuntime::ServiceTaskRunner()
+  and call MakeSelfOwnedReceiver INSIDE the posted task (NOT by passing a task_runner arg to
+  MakeSelfOwnedReceiver from the main thread — that created the router on the main sequence and
+  tripped interface_endpoint_client.cc:741 sequence_checker on the service thread). Now GetInterface
+  is processed off-thread and GetCookiesString is serviced off-thread; read-first works. Knock-on:
+  MbCookieManager (and its CookieStore map) now run on the service thread; the curl cookie share
+  (mb_url_loader.cc CookieShare) gained CURLSHOPT_LOCK/UNLOCKFUNC callbacks (one base::Lock,
+  NO_THREAD_SAFETY_ANALYSIS) so the document.cookie->curl-jar bridge (service thread) is safe vs
+  network reads (calling thread). Smoke case 33b added (inline read-first asserts no hang + reads
+  back the a=1/b=2 from case 33, same file:// origin). 97/97, no survivors.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

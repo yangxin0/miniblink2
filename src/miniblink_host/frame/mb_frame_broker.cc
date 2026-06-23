@@ -6,8 +6,12 @@
 #include <utility>
 #include <vector>
 
+#include "base/functional/bind.h"
+#include "base/location.h"
 #include "base/memory/read_only_shared_memory_region.h"
+#include "base/task/single_thread_task_runner.h"
 #include "miniblink_host/loader/mb_url_loader.h"
+#include "miniblink_host/runtime/mb_runtime.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/network/public/mojom/cookie_manager.mojom-blink.h"
@@ -21,7 +25,9 @@ namespace {
 
 // One process-wide in-memory cookie store, keyed by origin. document.cookie is
 // origin-scoped; the network (curl) jar is separate. Session-only (no disk), which
-// is the right default for a headless host. Single-threaded, so no lock.
+// is the right default for a headless host. Only ever touched on the runtime
+// service thread (MbCookieManager is bound there — see MakeFrameInterfaceBroker),
+// so no lock is needed.
 using CookieList = std::vector<std::pair<std::string, std::string>>;
 std::map<std::string, CookieList>& CookieStore() {
   static std::map<std::string, CookieList>* store =
@@ -175,8 +181,33 @@ class MbBrowserInterfaceBroker
 mojo::PendingRemote<blink::mojom::blink::BrowserInterfaceBroker>
 MakeFrameInterfaceBroker() {
   mojo::PendingRemote<blink::mojom::blink::BrowserInterfaceBroker> remote;
-  mojo::MakeSelfOwnedReceiver(std::make_unique<MbBrowserInterfaceBroker>(),
-                              remote.InitWithNewPipeAndPassReceiver());
+  auto receiver = remote.InitWithNewPipeAndPassReceiver();
+  // Bind the broker (and therefore the RestrictedCookieManager it hands out) on
+  // the runtime service thread, NOT the main thread. document.cookie reads call
+  // RestrictedCookieManager::GetCookiesString, which is a [Sync] mojo method: if
+  // the receiver lived on the main thread, the main thread would block waiting
+  // for a reply it must itself produce — a self-deadlock (the same hazard the
+  // blob subsystem solved this way). Off-thread, the [Sync] call is serviced
+  // while the main thread waits. The receiver must be bound *on* the service
+  // sequence (PostTask + MakeSelfOwnedReceiver inside), not merely handed a
+  // task runner from here, so its router is created on that sequence — see
+  // BindBlobRegistryOnServiceThread.
+  scoped_refptr<base::SingleThreadTaskRunner> runner =
+      MbRuntime::ServiceTaskRunner();
+  if (runner) {
+    runner->PostTask(
+        FROM_HERE,
+        base::BindOnce(
+            [](mojo::PendingReceiver<
+                blink::mojom::blink::BrowserInterfaceBroker> r) {
+              mojo::MakeSelfOwnedReceiver(
+                  std::make_unique<MbBrowserInterfaceBroker>(), std::move(r));
+            },
+            std::move(receiver)));
+  } else {
+    mojo::MakeSelfOwnedReceiver(std::make_unique<MbBrowserInterfaceBroker>(),
+                                std::move(receiver));
+  }
   return remote;
 }
 

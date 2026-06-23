@@ -14,6 +14,7 @@
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/no_destructor.h"
+#include "base/synchronization/lock.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
@@ -71,12 +72,31 @@ bool IsTransientHttpCode(long code) {
 // A process-wide in-memory cookie jar shared by every fetch, so Set-Cookie is honored
 // across a redirect chain (consent walls, login flows) AND across separate requests
 // (the main document and its subresources, or successive navigations) — i.e. the host
-// behaves like one browsing session. Single-threaded use, so no share lock callbacks.
+// behaves like one browsing session. The share is touched from more than one
+// thread now (document.cookie writes are serviced on the runtime service thread
+// — see MbCookieManager — while network fetches read it on the calling thread),
+// so it carries lock callbacks. One coarse lock is fine: cookie access is rare
+// relative to layout/paint.
+base::Lock& CookieShareLock() {
+  static base::NoDestructor<base::Lock> lock;
+  return *lock;
+}
+void CookieShareLockCb(CURL*, curl_lock_data, curl_lock_access, void*)
+    NO_THREAD_SAFETY_ANALYSIS {
+  CookieShareLock().Acquire();
+}
+void CookieShareUnlockCb(CURL*, curl_lock_data, void*)
+    NO_THREAD_SAFETY_ANALYSIS {
+  CookieShareLock().Release();
+}
 CURLSH* CookieShare() {
   static CURLSH* share = [] {
     CURLSH* s = curl_share_init();
-    if (s)
+    if (s) {
       curl_share_setopt(s, CURLSHOPT_SHARE, CURL_LOCK_DATA_COOKIE);
+      curl_share_setopt(s, CURLSHOPT_LOCKFUNC, CookieShareLockCb);
+      curl_share_setopt(s, CURLSHOPT_UNLOCKFUNC, CookieShareUnlockCb);
+    }
     return s;
   }();
   return share;

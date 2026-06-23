@@ -511,6 +511,31 @@ int main() {
            "document.cookie read/write round-trip", ck);
   }
 
+  // 33b. document.cookie READ as the first cookie op, from the page's own inline
+  // script during load (no prior write, no pump in between). This is the common
+  // "read existing cookies on load" pattern and it used to HANG: the synchronous
+  // RestrictedCookieManager.GetCookiesString blocked the main thread before the
+  // BrowserInterfaceBroker.GetInterface that binds the manager had been pumped.
+  // The broker is now bound on the runtime service thread, so the [Sync] read is
+  // serviced off-thread and returns immediately. The inline read records the jar
+  // into the DOM; reaching this assertion at all proves it didn't hang. Same
+  // file:// origin as case 33, so it reads back the a=1/b=2 set there.
+  {
+    const char* doc =
+        "<body><div id=o>x</div><script>"
+        "document.getElementById('o').textContent='ck['+document.cookie+']';"
+        "</script></body>";
+    if (FILE* f = std::fopen("/tmp/mb_jsck2.html", "wb")) {
+      std::fwrite(doc, 1, std::strlen(doc), f); std::fclose(f);
+    }
+    mbLoadURL(v, "file:///tmp/mb_jsck2.html");
+    mbWait(v, 30);
+    std::string ck2 = Eval(v, "document.getElementById('o').textContent");
+    Expect(ck2.rfind("ck[", 0) == 0 && ck2.find("a=1") != std::string::npos &&
+               ck2.find("b=2") != std::string::npos,
+           "document.cookie read-first on load does not hang", ck2);
+  }
+
   // 34. Init script (evaluateOnNewDocument): runs before the page's own scripts.
   // Set a global in the init script; the page's inline script must observe it.
   mbSetInitScript(v, "window.__early='injected';");
