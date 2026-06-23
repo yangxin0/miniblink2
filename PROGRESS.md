@@ -1492,6 +1492,22 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   in one go (not incrementally) — a focused pass. Reverted the crashing BeginNavigation; CreateChild
   Frame stays at 93/93. This is now FULLY mapped (exact CHECK sequence), just not single-tick-safe.
 
+- ✅✅ DONE: iframe srcdoc content loads — full content-commit shipped (2026-06-24): executed the
+  mapped sequence atomically and it CONVERGED (no CHECK #3). MbFrameClient::BeginNavigation (child
+  frames only, gated on self_owned_): CreateFromInfo(*info); for about:srcdoc set fallback_base_url
+  and read the srcdoc text from the owner (To<HTMLFrameOwnerElement>(child->GetFrame()->Owner())
+  ->FastGetAttribute(html_names::kSrcdocAttr)); WebNavigationParams::FillStaticResponse(params,
+  text/html, UTF-8, body) [satisfies the body_loader CHECK]; params->policy_container =
+  WebPolicyContainer(WebPolicyContainerPolicies(), transient MbPolicyContainerHost::BindRemote())
+  [satisfies the policy_container CHECK — the host is a local, like frame_test_helpers' mock]; then
+  To<WebLocalFrameImpl>(child)->CommitNavigation(params, nullptr). RESULT: <iframe srcdoc> now
+  renders — contentDocument.body.textContent is the srcdoc DOM ('child-body'), frames.length==1, no
+  crash, no regression. Smoke 77 upgraded to assert content. 93/93, no survivors. So iframes work
+  end to end for srcdoc (the common test/embed case). REMAINING: src=http/file/data children still
+  commit EMPTY (BeginNavigation fills an empty body for non-srcdoc) — the follow-up is to fetch the
+  src body via MbFetchUrl + FillStaticResponse; and sandboxed iframes don't enforce sandbox flags
+  (CreateChildFrame ignores frame_policy). Both are clean, bounded follow-ups on this working base.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

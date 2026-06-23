@@ -2,15 +2,47 @@
 #include "miniblink_host/frame/mb_frame_client.h"
 
 #include <memory>
+#include <string>
 #include <utility>
 
+#include "base/containers/span.h"
 #include "base/unguessable_token.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/view/mb_webview.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
+#include "third_party/blink/public/mojom/frame/policy_container.mojom-blink.h"
+#include "third_party/blink/public/platform/web_policy_container.h"
 #include "third_party/blink/public/web/web_local_frame.h"
+#include "third_party/blink/public/web/web_navigation_params.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+#include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
+#include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/platform/weborigin/kurl.h"
 
 namespace mb {
+namespace {
+// In-renderer PolicyContainerHost for committing child navigations (advisory
+// CSP/referrer, no-ops). Like frame_test_helpers' MockPolicyContainerHost it is
+// a transient local: the dedicated remote is handed to the WebPolicyContainer;
+// any later host calls just drop after it disconnects.
+class MbPolicyContainerHost : public blink::mojom::blink::PolicyContainerHost {
+ public:
+  mojo::PendingAssociatedRemote<blink::mojom::blink::PolicyContainerHost>
+  BindRemote() {
+    return receiver_.BindNewEndpointAndPassDedicatedRemote();
+  }
+  void SetReferrerPolicy(network::mojom::blink::ReferrerPolicy) override {}
+  void AddContentSecurityPolicies(
+      blink::Vector<network::mojom::blink::ContentSecurityPolicyPtr>) override {}
+
+ private:
+  mojo::AssociatedReceiver<blink::mojom::blink::PolicyContainerHost> receiver_{
+      this};
+};
+}  // namespace
 
 MbFrameClient::MbFrameClient(MbWebView* owner) : owner_(owner) {}
 MbFrameClient::~MbFrameClient() = default;
@@ -40,6 +72,39 @@ blink::WebLocalFrame* MbFrameClient::CreateChildFrame(
                   std::make_unique<base::UnguessableToken>(
                       base::UnguessableToken::Create()));
   return child;
+}
+
+void MbFrameClient::BeginNavigation(
+    std::unique_ptr<blink::WebNavigationInfo> info) {
+  if (!self_owned_ || !web_frame_)
+    return;  // child frames only; the main frame is driven by MbWebView
+  auto params = blink::WebNavigationParams::CreateFromInfo(*info);
+  blink::KURL url = info->url_request.Url();
+  std::string body;  // CommitNavigation requires a body_loader (even for srcdoc)
+  if (url.IsAboutSrcdocUrl()) {
+    params->fallback_base_url = info->requestor_base_url;
+    // The srcdoc text lives on the owner element, not in WebNavigationInfo.
+    auto* impl = blink::To<blink::WebLocalFrameImpl>(web_frame_);
+    if (blink::LocalFrame* lf = impl->GetFrame()) {
+      if (lf->Owner()) {
+        body = blink::To<blink::HTMLFrameOwnerElement>(lf->Owner())
+                   ->FastGetAttribute(blink::html_names::kSrcdocAttr)
+                   .Utf8();
+      }
+    }
+  }
+  // TODO(mb): http/file/data src= — fetch the body via MbFetchUrl; for now those
+  // children commit empty (documented follow-up).
+  blink::WebNavigationParams::FillStaticResponse(
+      params.get(), blink::WebString::FromUtf8("text/html"),
+      blink::WebString::FromUtf8("UTF-8"),
+      base::span<const char>(body.data(), body.size()));
+  // CommitNavigation requires a policy container for non-empty documents.
+  MbPolicyContainerHost policy_host;
+  params->policy_container = std::make_unique<blink::WebPolicyContainer>(
+      blink::WebPolicyContainerPolicies(), policy_host.BindRemote());
+  blink::To<blink::WebLocalFrameImpl>(web_frame_)->CommitNavigation(
+      std::move(params), /*extra_data=*/nullptr);
 }
 
 void MbFrameClient::FrameDetached(blink::DetachReason reason) {

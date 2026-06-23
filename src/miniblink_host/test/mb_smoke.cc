@@ -1443,23 +1443,22 @@ int main() {
            "CSS background-image (data: SVG) paints");
   }
 
-  // 77. iframes: the child frame is created (CreateChildFrame). A page with an
-  // <iframe> builds a real local child frame — window.frames.length is 1 and
-  // contentDocument is accessible (not null) — with no crash and the parent fully
-  // scriptable. (The child's srcdoc/src CONTENT does not commit yet — that needs
-  // child-navigation handling, a documented next increment; here body is empty.)
+  // 77. iframes work end to end: the child frame is created (CreateChildFrame)
+  // AND its srcdoc content commits (BeginNavigation fills the body + policy
+  // container). frames.length==1, and the child document holds the srcdoc DOM —
+  // contentDocument.body.textContent is the iframe's content. Parent unaffected.
   {
     mbLoadHTML(v,
       "<body><b id='p'>parent</b>"
-      "<iframe id='f' srcdoc='<b>child</b>' width='80' height='40'></iframe>"
+      "<iframe id='f' srcdoc='<b>child-body</b>' width='80' height='40'></iframe>"
       "</body>", "about:blank");
-    mbWait(v, 60);
+    mbWait(v, 100);  // let the child commit + parse
     Expect(Eval(v, "1+1") == "2" &&
                Eval(v, "document.getElementById('p').textContent") == "parent" &&
                Eval(v, "String(window.frames.length)") == "1" &&
-               Eval(v, "String(document.getElementById('f').contentDocument!==null)")
-                   == "true",
-           "iframe: child frame created (frames.length==1, contentDocument); no crash");
+               Eval(v, "document.getElementById('f').contentDocument.body.textContent")
+                   == "child-body",
+           "iframe loads: child frame created + srcdoc content commits");
   }
 
   // 78. element.scrollIntoView() works (a common automation primitive: scroll a

@@ -50,6 +50,11 @@ class MbFrameClient : public blink::WebLocalFrameClient {
       ukm::SourceId document_ukm_source_id,
       FinishChildFrameCreationFn complete_creation) override;
 
+  // Child-frame navigation: commit it so iframe content loads (only fires for
+  // child frames; the main frame is committed by MbWebView). Fills the srcdoc
+  // body + a policy container, both required by CommitNavigation.
+  void BeginNavigation(std::unique_ptr<blink::WebNavigationInfo>) override;
+
   // Frame lifecycle. A child client self-destructs on detach; the main frame is
   // owned by MbWebView so it does nothing here.
   void FrameDetached(blink::DetachReason) override;
