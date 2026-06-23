@@ -269,6 +269,27 @@ int main() {
   Expect(mbWaitForSelector(v, "#never", 100) == 0,
          "wait: missing selector times out");
 
+  // 23. DOM storage probe: SPAs rely on localStorage/sessionStorage. Load over a
+  // file:// origin (opaque origins deny storage) and round-trip a value.
+  {
+    const char* html = "<body>x</body>";
+    if (FILE* f = std::fopen("/tmp/mb_store.html", "wb")) {
+      std::fwrite(html, 1, std::strlen(html), f);
+      std::fclose(f);
+    }
+    mbLoadURL(v, "file:///tmp/mb_store.html");
+    Expect(Eval(v, "(function(){try{localStorage.setItem('k','v42');"
+                   "return localStorage.getItem('k');}catch(e){return 'THROW:'+e.name;}})()")
+               == "v42",
+           "DOM localStorage round-trip");
+    Expect(Eval(v, "(function(){try{sessionStorage.setItem('s','s7');"
+                   "return sessionStorage.getItem('s');}catch(e){return 'THROW:'+e.name;}})()")
+               == "s7",
+           "DOM sessionStorage round-trip",
+           Eval(v, "(function(){try{sessionStorage.setItem('s','s7');"
+                   "return sessionStorage.getItem('s');}catch(e){return 'THROW:'+e.name;}})()"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

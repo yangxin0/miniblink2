@@ -528,6 +528,17 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   own 20x RunUntilIdle spans enough wall-clock that a short timer may already fire; not a
   guarantee worth asserting.
 
+- ✅ DOM STORAGE (2026-06-23 17:?): probed and found localStorage threw TypeError (gap —
+  SPAs need it). Two fixes: (1) settings->SetLocalStorageEnabled(true) — it's off by default,
+  which made GetOrCreateLocalStorage return null; with it on, localStorage round-trips
+  IN-MEMORY even though our broker drops the DomStorage mojo backend (CachedStorageArea
+  serves reads from its local cache for the page lifetime). (2) sessionStorage also threw —
+  it needs a StorageNamespace attached to the Page; call
+  StorageNamespace::ProvideSessionStorageNamespaceTo(page, <36-char id>) in MbWebView::Create
+  after DidAttachLocalMainFrame. Verified: smoke 23/24 localStorage 'v42' + sessionStorage
+  's7' round-trip. 25/25. Storage is in-memory only (no disk persistence) — correct for a
+  headless/automation host. Methodology: probe-an-assumed-feature, fix if the guard fails.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

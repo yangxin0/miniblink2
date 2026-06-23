@@ -29,7 +29,9 @@ that satisfies modern Blink so it runs without the full browser.
 | In-process `MimeRegistry` (so `file://` stylesheets validate) | ✅ |
 | **HTTP/HTTPS loading of live websites** via system libcurl | ✅ |
 | Paint readback to a BGRA8888 bitmap + PNG | ✅ |
-| On-screen window, input events, GPU compositing | ⏳ roadmap |
+| Input events (click, move/hover, type, scroll), HiDPI, custom UA | ✅ |
+| **DOM storage** (`localStorage` / `sessionStorage`, in-memory) | ✅ |
+| On-screen window, GPU compositing | ⏳ roadmap |
 
 ## Tool: `mb_shot` (headless HTML → PNG)
 
@@ -168,11 +170,12 @@ Requirements: a Chromium M150 source tree with a component `out/Release`
 ./build.sh /path/to/chromium-150.x.y.z   # stages host into the tree, gn gen, ninja, runs the suite
 ```
 
-`mb_smoke` is a 23-case capability test suite (HTML/DOM, JS, CSS computed style, UA
+`mb_smoke` is a 25-case capability test suite (HTML/DOM, JS, CSS computed style, UA
 stylesheet, the `mbRunJS`+`mbEvalJS` bridge, `<canvas>` getImageData, external `<link>`
 CSS via the subresource loader, paint-to-bitmap, synthesized click, typed text (ASCII +
 UTF-8 accent/CJK/emoji), programmatic scroll, mouse-move/hover, embedded-NUL document
 integrity, full-page capture (resize → reflow → render below the fold), HiDPI
 (devicePixelRatio + resolution media queries), User-Agent (default + override), clip/
-region capture, and transparent background) — it prints PASS/FAIL per case and exits
-non-zero on any failure, so it doubles as a regression test.
+region capture, transparent background, wait-for-selector, and DOM storage
+(`localStorage`/`sessionStorage`)) — it prints PASS/FAIL per case and exits non-zero on any
+failure, so it doubles as a regression test.

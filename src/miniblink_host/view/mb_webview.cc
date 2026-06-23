@@ -47,6 +47,9 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+#include "third_party/blink/public/common/dom_storage/session_storage_namespace_id.h"
+#include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/modules/storage/storage_namespace.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -102,6 +105,7 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
   // Let file:// docs load file:// subresources (off by default).
   settings->SetAllowFileAccessFromFileURLs(true);
   settings->SetAllowUniversalAccessFromFileURLs(true);
+  settings->SetLocalStorageEnabled(true);  // else window.localStorage is null (TypeError)
   settings->SetStandardFontFamily(blink::WebString::FromUtf8("Times"),
                                   USCRIPT_COMMON);
   settings->SetSerifFontFamily(blink::WebString::FromUtf8("Times"),
@@ -125,6 +129,16 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
   v->widget_ = std::make_unique<MbWidget>();
   v->widget_->Attach(v->main_frame_, width, height);
   v->web_view_->DidAttachLocalMainFrame();
+
+  // 4. Attach a session-storage namespace to the page so window.sessionStorage
+  //    resolves (without it StorageNamespace::From(page) is null -> TypeError).
+  //    The id is normally a browser-assigned 36-char token; any non-empty one of
+  //    that length works for our single in-process page. localStorage needs no
+  //    such namespace (it goes through the StorageController directly).
+  if (blink::Page* page = v->web_view_->GetPage()) {
+    blink::StorageNamespace::ProvideSessionStorageNamespaceTo(
+        *page, std::string(blink::kSessionStorageNamespaceIdLength, 'm'));
+  }
 
   return v;
 }
