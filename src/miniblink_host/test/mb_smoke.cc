@@ -158,6 +158,23 @@ int main() {
   mbSendMouseMove(v, 50, 40);  // over the div
   Expect(Eval(v, "String(window.__h||0)") == "1", "input: mouse move (hover)");
 
+  // 13. Body with an embedded NUL byte must not truncate the document (the host
+  // used to commit body.c_str(), losing everything after the first NUL). Load via
+  // file:// (the length-preserving path) and verify content AFTER the NUL parsed.
+  {
+    const char doc[] =
+        "<body><div id='a'>before</div>\0<div id='b'>afternul</div></body>";
+    const size_t doc_len = sizeof(doc) - 1;  // includes the embedded NUL
+    if (FILE* f = std::fopen("/tmp/mb_nul.html", "wb")) {
+      std::fwrite(doc, 1, doc_len, f);
+      std::fclose(f);
+    }
+    mbLoadURL(v, "file:///tmp/mb_nul.html");
+    Expect(Eval(v, "var e=document.getElementById('b');e?e.textContent:''") ==
+               "afternul",
+           "load: embedded NUL does not truncate document");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

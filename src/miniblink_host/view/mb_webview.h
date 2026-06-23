@@ -53,6 +53,10 @@ class MbWebView {
 
  private:
   MbWebView();
+  // Commit an in-memory document (any bytes, including embedded NULs) as the main
+  // frame's content and drive parsing to quiescence. Both LoadHTML and the network
+  // LoadURL funnel through here so neither truncates the body at a NUL.
+  void CommitHtml(const char* data, size_t len, const char* base_url);
   // Settle async loads, run lifecycle, and play the frame's paint record into `canvas`.
   bool PaintInto(SkCanvas& canvas);
 

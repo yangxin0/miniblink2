@@ -90,11 +90,17 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
     long http_code = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
-    ok = rc == CURLE_OK && http_code >= 200 && http_code < 400 && !body->empty();
+    const bool success_code =
+        rc == CURLE_OK && http_code >= 200 && http_code < 400;
+    ok = success_code && !body->empty();
+    // An empty body on an otherwise-OK response is anomalous — it's the exact
+    // shape a throttled/half-open connection produces, and it's what made bursts
+    // of requests render blank. Treat it as transient and retry.
     const bool retryable =
         !ok && attempt < kMaxAttempts &&
         (IsTransientCurlError(rc) ||
-         (rc == CURLE_OK && IsTransientHttpCode(http_code)));
+         (rc == CURLE_OK && IsTransientHttpCode(http_code)) ||
+         (success_code && body->empty()));
     if (!retryable)
       break;
 

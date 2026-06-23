@@ -137,8 +137,9 @@ Requirements: a Chromium M150 source tree with a component `out/Release`
 ./build.sh /path/to/chromium-150.x.y.z   # stages host into the tree, gn gen, ninja, runs the suite
 ```
 
-`mb_smoke` is a 13-case capability test suite (HTML/DOM, JS, CSS computed style, UA
+`mb_smoke` is a 14-case capability test suite (HTML/DOM, JS, CSS computed style, UA
 stylesheet, the `mbRunJS`+`mbEvalJS` bridge, `<canvas>` getImageData, external `<link>`
 CSS via the subresource loader, paint-to-bitmap, synthesized click, typed text (ASCII +
-UTF-8 accent/CJK/emoji), programmatic scroll, and mouse-move/hover) — it prints PASS/FAIL
-per case and exits non-zero on any failure, so it doubles as a regression test.
+UTF-8 accent/CJK/emoji), programmatic scroll, mouse-move/hover, and embedded-NUL document
+integrity) — it prints PASS/FAIL per case and exits non-zero on any failure, so it doubles
+as a regression test.

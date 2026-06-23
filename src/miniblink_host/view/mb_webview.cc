@@ -6,6 +6,10 @@
 
 #include "miniblink_host/view/mb_webview.h"
 
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
 #include "miniblink_host/frame/mb_frame_client.h"
 #include "miniblink_host/frame/mb_view_client.h"
 #include "miniblink_host/loader/mb_url_loader.h"
@@ -131,15 +135,14 @@ void MbWebView::Resize(int width, int height) {
     widget_->Resize(width, height);
 }
 
-void MbWebView::LoadHTML(const char* utf8_html, const char* base_url) {
+void MbWebView::CommitHtml(const char* data, size_t len, const char* base_url) {
   if (!main_frame_)
     return;
-  std::string html(utf8_html ? utf8_html : "");
   // INSIDE_BLINK: WebURL is built from a KURL (the GURL ctor is non-INSIDE_BLINK only).
   blink::WebURL url{
       blink::KURL((base_url && *base_url) ? base_url : "about:blank")};
   auto params = blink::WebNavigationParams::CreateWithHTMLStringForTesting(
-      base::span<const char>(html), url);
+      base::span<const char>(data, len), url);
   auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
   impl->CommitNavigation(std::move(params), /*extra_data=*/nullptr);
   // Drive parsing + parse-time subresource loads (render-blocking <link> CSS, scripts)
@@ -147,6 +150,11 @@ void MbWebView::LoadHTML(const char* utf8_html, const char* base_url) {
   // the parser resumes — repeat until quiescent.
   for (int i = 0; i < 20; ++i)
     base::RunLoop().RunUntilIdle();
+}
+
+void MbWebView::LoadHTML(const char* utf8_html, const char* base_url) {
+  const char* html = utf8_html ? utf8_html : "";
+  CommitHtml(html, std::strlen(html), base_url);
 }
 
 void MbWebView::LoadURL(const char* utf8_url) {
@@ -158,7 +166,7 @@ void MbWebView::LoadURL(const char* utf8_url) {
     std::string contents;
     if (base::ReadFileToString(base::FilePath(url.substr(sizeof(kFile) - 1)),
                                &contents)) {
-      LoadHTML(contents.c_str(), url.c_str());
+      CommitHtml(contents.data(), contents.size(), url.c_str());
     }
     return;
   }
@@ -166,8 +174,13 @@ void MbWebView::LoadURL(const char* utf8_url) {
     // Top-level http(s): fetch via libcurl, commit with base = the URL so relative
     // subresources resolve and load through MbURLLoader.
     std::string body, content_type;
-    if (MbFetchUrl(url, &body, &content_type))
-      LoadHTML(body.c_str(), url.c_str());
+    const bool ok = MbFetchUrl(url, &body, &content_type);
+    if (std::getenv("MB_VERBOSE")) {
+      std::fprintf(stderr, "[mb_webview] main-doc %s ok=%d bytes=%zu ct='%s'\n",
+                   url.c_str(), ok, body.size(), content_type.c_str());
+    }
+    if (ok)
+      CommitHtml(body.data(), body.size(), url.c_str());
   }
 }
 

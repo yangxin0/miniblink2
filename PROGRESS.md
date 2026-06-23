@@ -451,6 +451,19 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   main thread, consistent with the existing synchronous-fetch render model (the fetch
   already blocks the main thread). 13/13 suite unaffected.
 
+- ✅ BURST-BLANK ROOT-CAUSE + TWO FIXES (2026-06-23 16:?): re-ran the 8-domain burst; still
+  intermittently blank. Instrumented the main-doc path ([mb_webview] main-doc ok=/bytes=
+  under MB_VERBOSE). Findings: (a) individual renders are perfect (go.dev ok=1 64185 bytes,
+  6/6); the blanks are TRANSIENT network throttling from hammering across ticks. (b) the
+  failure shape is rc==CURLE_OK + http 200 but EMPTY body → FetchHttp returned false with NO
+  retry (not in the transient set). FIX 1: treat empty-body-on-success as retryable (it's
+  exactly a throttled/half-open connection). (c) LATENT BUG found while reading the path:
+  LoadURL committed body.c_str() — truncating any document at its first NUL byte. FIX 2:
+  funnel LoadHTML + file + http through CommitHtml(data,len,base) using the full byte length
+  (base::span(data,len)); no more C-string truncation. Regression test = smoke case 13
+  (file with embedded NUL, assert post-NUL element parses). rust-lang is a 301 (we follow),
+  stackoverflow 403 anti-bot (genuine, not our bug). 14/14 suite.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
