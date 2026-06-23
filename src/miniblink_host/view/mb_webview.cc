@@ -64,6 +64,7 @@
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/page_animator.h"
 #include "third_party/blink/renderer/modules/storage/storage_namespace.h"
+#include "third_party/blink/renderer/platform/scheduler/public/main_thread_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -552,6 +553,15 @@ void MbWebView::WaitMs(int ms) {
     ServiceAnimations();
     widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
     base::RunLoop().RunUntilIdle();
+    // Run idle-scheduled work. Idle tasks only execute inside an idle period,
+    // which the compositor normally starts; with no compositor they would only
+    // fire via each feature's ~1s fallback timeout (e.g. canvas.toBlob encodes
+    // on an idle task, requestIdleCallback). Start an idle period explicitly so
+    // they run promptly, then drain.
+    if (auto* mts = blink::ThreadScheduler::Current()->ToMainThreadScheduler()) {
+      mts->StartIdlePeriodForTesting();
+      base::RunLoop().RunUntilIdle();
+    }
     if (base::TimeTicks::Now() >= deadline)
       break;
     base::PlatformThread::Sleep(base::Milliseconds(10));

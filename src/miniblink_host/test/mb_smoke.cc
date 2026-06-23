@@ -1232,6 +1232,26 @@ int main() {
            "Blob >256KB resolves via BytesProvider + chunked pipe write");
   }
 
+  // 67. canvas.toBlob() works end to end (canvas -> Skia encode -> blob -> read)
+  // — headless image export. toBlob encodes on an IDLE task; idle tasks now run
+  // in WaitMs (StartIdlePeriodForTesting), so the callback fires promptly instead
+  // of via the ~1s fallback. Read the blob back and check the PNG signature.
+  {
+    mbLoadHTML(v, "<body><canvas id='c' width='16' height='16'></canvas></body>",
+               "about:blank");
+    mbRunJS(v,
+      "window.__png='pending';"
+      "var cv=document.getElementById('c'),x=cv.getContext('2d');"
+      "x.fillStyle='#ff8800';x.fillRect(0,0,16,16);"
+      "cv.toBlob(function(b){if(!b){window.__png='null';return;}"
+      "b.arrayBuffer().then(function(ab){var u=new Uint8Array(ab);"
+      "window.__png=(u[0]===0x89&&u[1]===0x50&&u[2]===0x4E&&u[3]===0x47&&u.length>0)"
+      "?'PNG':'bad';});}, 'image/png');");
+    mbWait(v, 400);  // idle encode + blob read (prompt now that idle tasks run)
+    Expect(Eval(v, "window.__png") == "PNG",
+           "canvas.toBlob() -> readable PNG blob (idle-task encode runs)");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

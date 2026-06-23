@@ -1215,6 +1215,19 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   Blob data is now correct for any size; remaining blob work is only increment 5 (blob: URL
   resolution via the navigation-associated channel + a blob: URLLoaderFactory).
 
+- ✅ canvas.toBlob() works + idle tasks now run in the pump (2026-06-24): probing canvas->blob
+  (now that blob data resolves) found toBlob's callback never fired promptly. Root cause: toBlob
+  encodes on an IDLE task (CanvasAsyncBlobCreator -> ThreadScheduler::PostIdleTask), and idle tasks
+  only run inside an idle period, which the compositor starts — we have none, so idle work only
+  fired via each feature's ~1s fallback timeout. FIX: WaitMs now starts an idle period each pump
+  iteration via ThreadScheduler::Current()->ToMainThreadScheduler()->StartIdlePeriodForTesting()
+  then drains, so idle-scheduled work (canvas.toBlob, requestIdleCallback, lazy/GC idle tasks) runs
+  promptly. General improvement, not just toBlob. Verified: canvas.toBlob('image/png') -> a
+  readable PNG blob (89 50 4E 47 magic), completing within a 400ms wait instead of ~1s; the encode
+  itself was always fine (toDataURL proved it), only the async scheduling stalled. So headless
+  canvas image export (canvas -> toBlob -> bytes) now works end to end. Smoke 67 guards it; existing
+  rAF/Web-Animations cases still pass (the idle-period change is safe). 80/80, no survivors.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
