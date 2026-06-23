@@ -385,6 +385,10 @@ int main() {
   mbWait(v, 150);
   std::fprintf(stderr, "PROBE4 indexedDB=%s\n", Eval(v, "String(window.__idb)").c_str());
 
+  // Network cases (31, 32) are OPT-IN via MB_NET_TESTS=1: a dead host costs ~45s
+  // per load (connect-timeout x retries), which would make every default run crawl.
+  // They still skip gracefully if enabled but httpbin is unreachable.
+  if (std::getenv("MB_NET_TESTS")) {
   // 31. Cookie jar (network — gracefully skipped if httpbin is unreachable). Set a
   // cookie via a redirecting endpoint, then make a SEPARATE request that must still
   // send it: proves Set-Cookie survives the redirect and the in-memory jar is shared
@@ -420,6 +424,7 @@ int main() {
     }
   }
   mbSetExtraHeaders(v, "");  // reset
+  }  // MB_NET_TESTS
 
   // 33. document.cookie (JS): write then read round-trips through the in-process
   // RestrictedCookieManager wired into the frame's BrowserInterfaceBroker.

@@ -626,6 +626,18 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   NOT bridged to the curl HTTP jar — JS cookies and network cookies are separate stores for now
   (acceptable; unifying them is a future nicety).
 
+- ✅ SUITE SPEED FIX + advanced-API probe (2026-06-23 18:?): the network smoke cases
+  (cookies, headers) each cost ~45s on an unreachable host (15s connect-timeout x 3 retries x
+  multiple loads), making the default suite hang ~2min offline. Gated both behind
+  MB_NET_TESTS=1 — default run is now fast + offline-deterministic (35 passed), network checks
+  opt-in. Probed advanced APIs (wasm/SubtleCrypto/Blob/FileReader/performance) but the probe
+  itself HUNG the binary >2min: RunJS uses an unbounded base::RunLoop().RunUntilIdle(), so a
+  script that keeps the task queue non-idle (a tight setTimeout/async loop, or apparently one
+  of these APIs) spins forever. Removed the probe. FOLLOW-UPS noted: (a) bound RunJS's
+  RunUntilIdle with a deadline like WaitMs does (latent hang risk on timer-loop pages);
+  (b) re-probe wasm/SubtleCrypto/Blob one-at-a-time to find which hangs. No engine change beyond
+  the test gating this tick.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

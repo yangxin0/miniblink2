@@ -192,6 +192,7 @@ integrity, full-page capture (resize → reflow → render below the fold), HiDP
 (devicePixelRatio + resolution media queries), User-Agent (default + override), clip/
 region capture, transparent background, wait-for-selector, DOM storage
 (`localStorage`/`sessionStorage`), `requestAnimationFrame`, observer delivery (Mutation & Intersection & Resize), time-based animation (WAAPI/XHR),
-console capture, and over-the-network checks for the cookie jar and request headers, and JS document.cookie) — it
-prints PASS/FAIL per case and exits non-zero on any failure, so it doubles as a regression
-test. (The two network cases are skipped, not failed, when the network is unavailable.)
+console capture, and JS document.cookie) — it prints PASS/FAIL per case and exits non-zero
+on any failure, so it doubles as a regression test. Two additional over-the-network checks
+(the cookie jar and request headers) are opt-in via `MB_NET_TESTS=1`, kept out of the
+default run so an unreachable host can't make it crawl.
