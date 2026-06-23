@@ -134,6 +134,14 @@ MB_EXPORT void mbSendScroll(mbView*, int x, int y, int dx, int dy);
 // Returns the full length in bytes; empty for non-http(s) URLs.
 MB_EXPORT int mbGetCookies(mbView*, const char* url, char* out, int out_cap);
 
+// Write the committed main document's URL (the final URL after any redirects)
+// into `out` (NUL-terminated, up to out_cap). Returns the full length in bytes.
+MB_EXPORT int mbGetURL(mbView*, char* out, int out_cap);
+
+// Write the current document's title into `out` (NUL-terminated, up to out_cap).
+// Returns the full length in bytes.
+MB_EXPORT int mbGetTitle(mbView*, char* out, int out_cap);
+
 // Drain captured page console output (console.log/warn/error) into `out`
 // (NUL-terminated, up to out_cap bytes; one "level: text" line per message), and
 // clear the buffer. Returns the full output length in bytes.

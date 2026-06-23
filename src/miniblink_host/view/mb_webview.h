@@ -82,6 +82,10 @@ class MbWebView {
   std::string DrainConsole();
   // Return the HTTP cookie jar's cookies for `url` ("name=value; ..."), for session export.
   std::string GetCookies(const char* url);
+  // The committed main document's URL (final URL after redirects) and title,
+  // read from the frame — no JS needed. Empty before the first load.
+  std::string GetURL();
+  std::string GetTitle();
   // Set extra request headers (newline-separated "Name: Value") for navigation +
   // subresources. Set before LoadURL to apply to that navigation.
   void SetExtraHeaders(const char* utf8_headers);

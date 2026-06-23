@@ -1687,6 +1687,13 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   canvas toBlob/convertToBlob/gradient/path/createImageBitmap, MessageChannel, BroadcastChannel,
   performance marks, elementFromPoint, <base href>, <meta refresh>, DOMContentLoaded/load.
 
+- ✅ DONE: C API mbGetURL + mbGetTitle (2026-06-24): the wke/mb C surface (36 fns) lacked the
+  standard browser accessors wke has. Added MbWebView::GetURL()/GetTitle() reading the committed main
+  document straight from the frame (main_frame_->GetDocument().Url().GetString().Utf8() / .Title()),
+  exposed via mbGetURL/mbGetTitle (buffer-copy pattern like mbGetCookies). No JS needed; GetURL is the
+  FINAL URL after redirects (per the redirect fixes). Smoke case 83 verifies both. 102/102; mb_shot
+  still builds.
+
 ### REMAINING ROADMAP
 - P0-history: page-driven history.back()/forward() does nothing — History::back() ->
   LocalFrameClientImpl::NavigateBackForward -> LocalFrameHost.GoToEntryAtOffset (mojo to the absent

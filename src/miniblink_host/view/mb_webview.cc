@@ -377,6 +377,21 @@ std::string MbWebView::GetCookies(const char* url) {
   return url ? MbGetCookiesForUrl(url) : std::string();
 }
 
+std::string MbWebView::GetURL() {
+  // The committed main document's URL — this is the FINAL URL after any
+  // server/navigation redirects (see LoadURL), read straight from the frame so
+  // it is correct even with JS disabled or an unusual document.
+  if (!main_frame_)
+    return std::string();
+  return main_frame_->GetDocument().Url().GetString().Utf8();
+}
+
+std::string MbWebView::GetTitle() {
+  if (!main_frame_)
+    return std::string();
+  return main_frame_->GetDocument().Title().Utf8();
+}
+
 void MbWebView::SetExtraHeaders(const char* utf8_headers) {
   if (frame_client_)
     frame_client_->SetExtraHeaders(utf8_headers ? utf8_headers : "");

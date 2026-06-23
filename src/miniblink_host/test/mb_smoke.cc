@@ -1753,6 +1753,20 @@ int main() {
            "UTF-8 page without <meta charset> decodes (auto-detect)");
   }
 
+  // 83. mbGetURL / mbGetTitle: read the committed document's URL + title through
+  // the C API (no JS), straight from the frame.
+  {
+    mbLoadHTML(v, "<head><title>My Title</title></head><body>x</body>",
+               "file:///tmp/mb_titletest.html");
+    char ub[512] = {0}, tb[256] = {0};
+    mbGetURL(v, ub, sizeof(ub));
+    mbGetTitle(v, tb, sizeof(tb));
+    Expect(std::string(ub) == "file:///tmp/mb_titletest.html",
+           "mbGetURL returns the document URL", ub);
+    Expect(std::string(tb) == "My Title",
+           "mbGetTitle returns the document title", tb);
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
