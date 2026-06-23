@@ -773,6 +773,14 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   == true AND an @media(prefers-color-scheme:dark) CSS rule applies (color rgb(2,2,2)). 40/40,
   verified first try, no survivors. DevTools-style dark-theme capture.
 
+- ✅ LOCALE / navigator.language (2026-06-23 20:?): mbSetLocale(view,"fr-FR,fr,en") + mb_shot
+  --lang sets navigator.language/languages via Page->GetSettings().SetAcceptLanguages (core
+  blink::Settings field acceptLanguages; Navigator::GetAcceptLanguages reads it). Set before
+  load so the new document's navigator reads it fresh (Page::AcceptLanguagesChanged is private —
+  not needed pre-load). Smoke 37: navigator.language=='fr-FR', navigator.languages=='fr-FR,fr,en'.
+  41/41, no survivors. (DOM-side locale; the network Accept-Language header is separately the
+  curl default / mbSetExtraHeaders.)
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

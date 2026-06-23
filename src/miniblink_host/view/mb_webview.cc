@@ -51,6 +51,7 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/public/common/dom_storage/session_storage_namespace_id.h"
 #include "third_party/blink/renderer/core/page/page.h"
@@ -233,6 +234,17 @@ void MbWebView::SetLoadImages(bool enabled) {
   // decode). Set before navigating to apply to that load.
   if (web_view_ && web_view_->GetSettings())
     web_view_->GetSettings()->SetLoadsImagesAutomatically(enabled);
+}
+
+void MbWebView::SetLocale(const char* langs) {
+  // Drive navigator.language / navigator.languages (a comma-separated list like
+  // "fr-FR,fr,en"), so JS i18n that branches on the user's languages sees it.
+  if (!langs || !web_view_ || !web_view_->GetPage())
+    return;
+  // Set before navigating: the new document's navigator reads this fresh on first
+  // access, so no explicit languages-changed notification is needed.
+  web_view_->GetPage()->GetSettings().SetAcceptLanguages(
+      blink::String::FromUtf8(langs));
 }
 
 void MbWebView::SetDarkMode(bool dark) {

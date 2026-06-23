@@ -114,6 +114,11 @@ void mbSetDarkMode(mbView* v, int dark) {
     v->impl->SetDarkMode(dark != 0);
 }
 
+void mbSetLocale(mbView* v, const char* utf8_languages) {
+  if (v && v->impl)
+    v->impl->SetLocale(utf8_languages);
+}
+
 void mbSetExtraHeaders(mbView* v, const char* utf8_headers) {
   if (v && v->impl)
     v->impl->SetExtraHeaders(utf8_headers);

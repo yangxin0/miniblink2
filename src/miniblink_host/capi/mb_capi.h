@@ -91,6 +91,10 @@ MB_EXPORT void mbSetLoadImages(mbView*, int enabled);
 // so pages render their dark theme. Call before mbLoadURL/mbLoadHTML.
 MB_EXPORT void mbSetDarkMode(mbView*, int dark);
 
+// Set navigator.language / navigator.languages (a comma-separated list, e.g.
+// "fr-FR,fr,en"), for JS that localizes by the user's languages. Before navigating.
+MB_EXPORT void mbSetLocale(mbView*, const char* utf8_languages);
+
 // Set extra HTTP request headers added to the navigation and its subresources:
 // newline-separated "Name: Value" lines. Call before mbLoadURL. (A default
 // Accept-Language is sent unless one is provided here.) Pass NULL/empty to clear.

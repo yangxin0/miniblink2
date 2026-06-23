@@ -537,6 +537,16 @@ int main() {
     mbSetDarkMode(v, 0);  // restore light for any later case
   }
 
+  // 37. Locale: navigator.language / navigator.languages reflect the set value.
+  mbSetLocale(v, "fr-FR,fr,en");
+  mbLoadHTML(v, "<body>x</body>", "about:blank");
+  Expect(Eval(v, "navigator.language") == "fr-FR" &&
+             Eval(v, "navigator.languages.join(',')") == "fr-FR,fr,en",
+         "locale: navigator.language(s) set",
+         Eval(v, "navigator.language") + " / " +
+             Eval(v, "navigator.languages.join(',')"));
+  mbSetLocale(v, "en-US");  // restore for any later case
+
   mbDestroyView(v);
   mbShutdown();
 

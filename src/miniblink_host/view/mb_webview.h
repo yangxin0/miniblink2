@@ -61,6 +61,8 @@ class MbWebView {
   void SetLoadImages(bool enabled);
   // Emulate prefers-color-scheme: dark (true) or light (false). Set before loading.
   void SetDarkMode(bool dark);
+  // Set navigator.language(s) (comma-separated, e.g. "fr-FR,fr,en"). Before loading.
+  void SetLocale(const char* langs);
   // Return captured console output ("level: text" per line) and clear the buffer.
   std::string DrainConsole();
   // Set extra request headers (newline-separated "Name: Value") for navigation +
