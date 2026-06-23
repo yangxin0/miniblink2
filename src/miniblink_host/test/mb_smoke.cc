@@ -118,6 +118,17 @@ int main() {
   Expect(Eval(v, "document.getElementById('t').value") == "hi there",
          "input: typed text");
 
+  // 10b. Keyboard with UTF-8: accented + CJK + a supplementary (emoji) char.
+  // Verify .length (code-unit count) rather than echoing bytes through mbEvalJS.
+  mbLoadHTML(v, "<body><input id='u'></body>", "about:blank");
+  mbRunJS(v, "document.getElementById('u').focus();");
+  mbSendText(v, "café日本😀");  // 4 + 0 ... = 'c','a','f','é','日','本', emoji(2 units)
+  Expect(Eval(v, "document.getElementById('u').value.length") == "8" &&
+             Eval(v, "document.getElementById('u').value.codePointAt(4)") ==
+                 "26085",  // U+65E5 日
+         "input: typed UTF-8 (accent/CJK/emoji)",
+         Eval(v, "document.getElementById('u').value"));
+
   // 11. Scroll: a tall page, synthesize a downward gesture scroll, verify scrollY.
   mbLoadHTML(v,
              "<body style='margin:0'><div style='height:5000px'></div></body>",

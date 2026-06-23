@@ -422,6 +422,12 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   mouseover/mousemove fire without a compositor (same path as click). Suite case 12: hover
   a div -> onmouseover sets window.__h -> verified via mbEvalJS. 12/12. Mouse input now
   complete (click + move/hover). Matters for capturing real pages: hover menus, tooltips.
+- ✅ UTF-8 TYPING (2026-06-23 16:?): mbSendText now decodes UTF-8 -> UTF-16 via
+  base::UTF8ToUTF16 and types by code point (surrogate pairs travel together in one kChar
+  text[]). Removed the ASCII-only limitation. Suite case 10b: type "café日本😀", assert
+  value.length==8 and codePointAt(4)==26085 (日). 13/13. **Interactivity surface (click,
+  move/hover, UTF-8 type, scroll) is now COMPLETE.** Next focus: shift to robustness sweep
+  or the on-screen window / Windows port roadmap.
 
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).

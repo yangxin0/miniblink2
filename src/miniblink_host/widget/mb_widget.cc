@@ -1,8 +1,11 @@
 // mb_widget.cc — non-compositing frame widget. Status: Phase 1.
 #include "miniblink_host/widget/mb_widget.h"
 
+#include <string>
+#include <string_view>
 #include <tuple>
 
+#include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
@@ -97,19 +100,30 @@ void MbWidget::SendText(const char* utf8) {
   if (!widget_ || !utf8)
     return;
   auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
-  for (const char* p = utf8; *p; ++p) {
-    const char16_t ch = static_cast<unsigned char>(*p);  // ASCII
-    int vk = ch;
-    if (ch >= 'a' && ch <= 'z')
-      vk = ch - 'a' + 'A';  // VK codes use uppercase letters
+  // Decode UTF-8 to UTF-16 so non-ASCII text (accents, CJK, emoji) types
+  // correctly. Iterate by code point: a supplementary character is a UTF-16
+  // surrogate pair that must travel in one kChar event's text[] together.
+  const std::u16string u16 = base::UTF8ToUTF16(std::string_view(utf8));
+  for (size_t i = 0; i < u16.size();) {
+    const char16_t hi = u16[i];
+    const bool is_pair = hi >= 0xD800 && hi <= 0xDBFF && i + 1 < u16.size() &&
+                         u16[i + 1] >= 0xDC00 && u16[i + 1] <= 0xDFFF;
+    const size_t units = is_pair ? 2 : 1;
+
+    // windows_key_code is a VK code (ASCII letters use the uppercase form);
+    // it's only meaningful for ASCII. For non-ASCII the text[] field below is
+    // what drives insertion, so leaving the VK code as the raw unit is fine.
+    int vk = (hi >= 'a' && hi <= 'z') ? (hi - 'a' + 'A') : hi;
     auto key = [&](blink::WebInputEvent::Type type, bool with_text) {
       blink::WebKeyboardEvent e(type, blink::WebInputEvent::kNoModifiers,
                                 base::TimeTicks::Now());
       e.windows_key_code = vk;
-      e.dom_key = ch;
+      e.dom_key = hi;
       if (with_text) {
-        e.text[0] = ch;
-        e.unmodified_text[0] = ch;
+        for (size_t k = 0; k < units; ++k) {
+          e.text[k] = u16[i + k];
+          e.unmodified_text[k] = u16[i + k];
+        }
       }
       return e;
     };
@@ -119,6 +133,7 @@ void MbWidget::SendText(const char* utf8) {
         key(blink::WebInputEvent::Type::kChar, true), ui::LatencyInfo()));
     impl->HandleInputEvent(blink::WebCoalescedInputEvent(
         key(blink::WebInputEvent::Type::kKeyUp, false), ui::LatencyInfo()));
+    i += units;
   }
 }
 
