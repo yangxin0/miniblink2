@@ -716,6 +716,16 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   persistent 503 reported FAILED, not a silent blank); the cookie-bridge/jar/header network
   tests SKIP cleanly while httpbin is 503'ing (verify when it recovers). 36/36.
 
+- ✅ NETWORK TESTS VERIFIED LOCALLY + cookie bridge CONFIRMED (2026-06-23 19:?): httpbin was
+  503'ing, so made the 3 network smoke cases host-configurable via MB_NET_HOST (default
+  httpbin.org) and added test/echo_server.py (a tiny httpbin-shaped local server:
+  /cookies/set 302->/cookies, /cookies, /headers). Ran MB_NET_TESTS=1
+  MB_NET_HOST=http://127.0.0.1:8899 -> ALL 3 PASS: cookie jar (Set-Cookie across redirect +
+  shared across requests), request headers (custom + default Accept-Language), and the
+  COOKIE BRIDGE (document.cookie -> HTTP jar -> sent on next request) — the previously
+  unverified feature, now confirmed end-to-end. 39/39 with network on (36 default). Network
+  tests no longer hostage to httpbin uptime.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

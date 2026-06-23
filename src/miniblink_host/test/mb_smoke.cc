@@ -388,61 +388,65 @@ int main() {
   // Network cases (31, 32) are OPT-IN via MB_NET_TESTS=1: a dead host costs ~45s
   // per load (connect-timeout x retries), which would make every default run crawl.
   // They still skip gracefully if enabled but httpbin is unreachable.
+  // Network cases use an httpbin-shaped echo host: default httpbin.org, override
+  // with MB_NET_HOST for a deterministic local run, e.g.:
+  //   python3 src/miniblink_host/test/echo_server.py &   # serves 127.0.0.1:8899
+  //   MB_NET_TESTS=1 MB_NET_HOST=http://127.0.0.1:8899 ./mb_smoke
   if (std::getenv("MB_NET_TESTS")) {
-  // 31. Cookie jar (network — gracefully skipped if httpbin is unreachable). Set a
-  // cookie via a redirecting endpoint, then make a SEPARATE request that must still
-  // send it: proves Set-Cookie survives the redirect and the in-memory jar is shared
-  // across requests.
-  mbLoadURL(v, "https://httpbin.org/cookies/set?mbck=val99");  // 302 -> /cookies
+  const std::string host =
+      std::getenv("MB_NET_HOST") ? std::getenv("MB_NET_HOST") : "https://httpbin.org";
+  // 31. Cookie jar: set a cookie via a redirecting endpoint, then a SEPARATE request
+  // must still send it — Set-Cookie survives the redirect and the jar is shared.
+  mbLoadURL(v, (host + "/cookies/set?mbck=val99").c_str());  // 302 -> /cookies
   mbWait(v, 400);
   std::string ck1 = Eval(v, "document.body?document.body.innerText:''");
-  if (ck1.find("cookies") != std::string::npos) {  // httpbin responded
+  if (ck1.find("cookies") != std::string::npos) {  // host responded
     bool survived_redirect = ck1.find("val99") != std::string::npos;
-    mbLoadURL(v, "https://httpbin.org/cookies");  // separate request, shared jar
+    mbLoadURL(v, (host + "/cookies").c_str());  // separate request, shared jar
     mbWait(v, 400);
     std::string ck2 = Eval(v, "document.body?document.body.innerText:''");
     bool jar_persists = ck2.find("val99") != std::string::npos;
     Expect(survived_redirect && jar_persists,
            "cookie jar: survives redirect + persists across requests");
   } else {
-    std::fprintf(stderr, "  [SKIP] cookie jar (httpbin unreachable)\n");
+    std::fprintf(stderr, "  [SKIP] cookie jar (host unreachable)\n");
   }
 
-  // 32. Request headers (network — skipped if httpbin unreachable): a custom header
-  // and the default Accept-Language must reach the server (httpbin echoes headers).
+  // 32. Request headers: a custom header and the default Accept-Language must reach
+  // the server (the echo host returns the request headers).
   mbSetExtraHeaders(v, "X-Mb-Test: probe-42");
-  mbLoadURL(v, "https://httpbin.org/headers");
+  mbLoadURL(v, (host + "/headers").c_str());
   mbWait(v, 400);
   {
     std::string h = Eval(v, "document.body?document.body.innerText:''");
-    if (h.find("headers") != std::string::npos) {  // httpbin responded
+    if (h.find("headers") != std::string::npos) {  // host responded
       Expect(h.find("probe-42") != std::string::npos &&
                  h.find("Accept-Language") != std::string::npos,
              "request headers: custom header + default Accept-Language sent");
     } else {
-      std::fprintf(stderr, "  [SKIP] request headers (httpbin unreachable)\n");
+      std::fprintf(stderr, "  [SKIP] request headers (host unreachable)\n");
     }
   }
   mbSetExtraHeaders(v, "");  // reset
 
   // 33. Cookie bridge: a cookie set via document.cookie on an http origin must be
   // sent on a subsequent network request (JS jar -> HTTP jar).
-  mbLoadURL(v, "https://httpbin.org/");
+  mbLoadURL(v, (host + "/").c_str());
   mbWait(v, 400);
   if (!Eval(v, "String(document.location.host)").empty() &&
       Eval(v, "String(document.location.host)") != "undefined") {
     mbRunJS(v, "document.cookie='mbjs=fromjs';");
-    mbLoadURL(v, "https://httpbin.org/cookies");
+    mbLoadURL(v, (host + "/cookies").c_str());
     mbWait(v, 400);
     std::string c = Eval(v, "document.body?document.body.innerText:''");
     if (c.find("cookies") != std::string::npos) {
       Expect(c.find("fromjs") != std::string::npos,
              "cookie bridge: document.cookie reaches the HTTP jar");
     } else {
-      std::fprintf(stderr, "  [SKIP] cookie bridge (httpbin unreachable)\n");
+      std::fprintf(stderr, "  [SKIP] cookie bridge (host unreachable)\n");
     }
   } else {
-    std::fprintf(stderr, "  [SKIP] cookie bridge (httpbin unreachable)\n");
+    std::fprintf(stderr, "  [SKIP] cookie bridge (host unreachable)\n");
   }
   }  // MB_NET_TESTS
 
