@@ -67,6 +67,8 @@ class MbWebView {
   void SetTransparentBackground(bool transparent);
   void SendScroll(int x, int y, int dx, int dy);
   std::string EvalToString(const char* utf8_script);  // eval JS -> string result
+  // Eval JS in a dedicated isolated world: separate globals from the page, shared DOM.
+  std::string EvalIsolated(const char* utf8_script);
   // Drive the engine for ~ms of real time (lets setTimeout / async work run).
   void WaitMs(int ms);
   // Pump until document.querySelector(css) matches or timeout_ms elapses; true if found.

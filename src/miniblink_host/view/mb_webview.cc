@@ -35,6 +35,7 @@
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/platform/scheduler/web_agent_group_scheduler.h"
 #include "third_party/blink/public/platform/web_string.h"
+#include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_navigation_params.h"
@@ -338,6 +339,34 @@ std::string MbWebView::EvalToString(const char* utf8_script) {
   v8::Local<v8::Value> value = main_frame_->ExecuteScriptAndReturnValue(
       blink::WebScriptSource(blink::WebString::FromUtf8(utf8_script)));
   if (value.IsEmpty())
+    return {};
+  v8::Local<v8::String> str;
+  if (!value->ToString(context).ToLocal(&str))
+    return {};
+  v8::String::Utf8Value utf8(isolate, str);
+  return *utf8 ? std::string(*utf8, utf8.length()) : std::string();
+}
+
+std::string MbWebView::EvalIsolated(const char* utf8_script) {
+  if (!main_frame_ || !utf8_script)
+    return {};
+  v8::Isolate* isolate = v8::Isolate::GetCurrent();
+  if (!isolate)
+    return {};
+  v8::HandleScope handle_scope(isolate);
+  // Run in a dedicated isolated world: separate JS globals from the page (and from
+  // each other run), but the SAME DOM — the content-script execution model.
+  constexpr int32_t kIsolatedWorldId = 1;  // any id > main-world (0), < embedder limit
+  v8::Local<v8::Value> value =
+      main_frame_->ExecuteScriptInIsolatedWorldAndReturnValue(
+          kIsolatedWorldId,
+          blink::WebScriptSource(blink::WebString::FromUtf8(utf8_script)),
+          blink::BackForwardCacheAware::kAllow);
+  if (value.IsEmpty())
+    return {};
+  // Stringify the (primitive) result; the main-world context suffices for that.
+  v8::Local<v8::Context> context = main_frame_->MainWorldScriptContext();
+  if (context.IsEmpty())
     return {};
   v8::Local<v8::String> str;
   if (!value->ToString(context).ToLocal(&str))

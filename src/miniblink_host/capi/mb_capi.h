@@ -105,6 +105,12 @@ MB_EXPORT int mbDrainConsole(mbView*, char* out, int out_cap);
 // indicating truncation). Lets the host read data back from the page (e.g. document.title).
 MB_EXPORT int mbEvalJS(mbView*, const char* utf8_script, char* out, int out_cap);
 
+// Like mbEvalJS, but runs in a dedicated ISOLATED world: the script has its own
+// JS globals (separate from the page and from mbRunJS/mbEvalJS's main world) yet
+// shares the same DOM — the content-script model, for automation that must not
+// collide with or be observed by page script.
+MB_EXPORT int mbEvalJSIsolated(mbView*, const char* utf8_script, char* out, int out_cap);
+
 // Synchronously composite the current frame and copy pixels out as BGRA8888.
 // 'out_bgra' must hold height*stride bytes. Returns 1 on success, 0 otherwise.
 MB_EXPORT int mbPaintToBitmap(mbView*,

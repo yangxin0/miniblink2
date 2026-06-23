@@ -749,6 +749,15 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   processes (ran the build directly, checked survivors). Used the disciplined process pattern
   after last tick's leak.
 
+- ✅ ISOLATED-WORLD EVAL (2026-06-23 20:?): mbEvalJSIsolated(view, js, out, cap) runs script in
+  a dedicated isolated world (id 1) via WebLocalFrame::ExecuteScriptInIsolatedWorldAndReturnValue
+  + BackForwardCacheAware::kAllow; result stringified through the main-world context (fine for
+  primitives). Content-script semantics: own JS globals, shared DOM. Smoke 35 (3 asserts):
+  isolated eval can't see main-world window.__main (undefined), its window.__iso doesn't leak to
+  main, and a DOM attr it sets IS visible in main. 39/39, no survivors. Useful for automation
+  that must not collide with or be observed by page script. (Reverse cookie bridge + Blob remain
+  the known gaps; both are same-thread [Sync] mojo issues.)
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

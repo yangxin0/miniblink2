@@ -19,6 +19,12 @@ std::string Eval(mbView* v, const char* js) {
   return std::string(buf);
 }
 
+std::string EvalIso(mbView* v, const char* js) {
+  char buf[512];
+  mbEvalJSIsolated(v, js, buf, sizeof(buf));
+  return std::string(buf);
+}
+
 void Expect(bool ok, const char* name, const std::string& got = "") {
   std::fprintf(stderr, "  [%s] %s%s%s\n", ok ? "PASS" : "FAIL", name,
                got.empty() ? "" : " -> ", got.c_str());
@@ -475,6 +481,20 @@ int main() {
   Expect(Eval(v, "window.__pageSaw") == "injected",
          "init script runs before page scripts", Eval(v, "window.__pageSaw"));
   mbSetInitScript(v, "");  // clear so it doesn't affect any later case
+
+  // 35. Isolated-world eval: separate JS globals from the main world, shared DOM.
+  mbLoadHTML(v, "<body></body>", "about:blank");
+  mbRunJS(v, "window.__main='mainval';");
+  // In the isolated world: set its own global, touch the shared DOM, and report
+  // whether it can see the main world's global (it must NOT).
+  Expect(EvalIso(v, "window.__iso='isoval';"
+                    "document.body.setAttribute('data-s','shared');"
+                    "String(typeof window.__main);") == "undefined",
+         "isolated world: cannot see main-world globals");
+  Expect(Eval(v, "String(window.__iso)") == "undefined",
+         "isolated world: does not leak globals into main world");
+  Expect(Eval(v, "document.body.getAttribute('data-s')") == "shared",
+         "isolated world: shares the DOM with main world");
 
   mbDestroyView(v);
   mbShutdown();
