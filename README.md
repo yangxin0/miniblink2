@@ -37,6 +37,7 @@ The deliverable example app — a standalone headless screenshot renderer:
 
 ```sh
 mb_shot [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
+        [--wait-selector CSS] [--wait-ms N] \
         <input.html | file://URL | http(s)://URL> <out.png> [width height]
 ```
 
@@ -57,6 +58,10 @@ Clip/selector compose with `--scale` (the output is `w*N × h*N`).
 
 `--transparent` captures with a transparent background (Puppeteer's `omitBackground`): areas
 the page doesn't paint keep alpha 0, so the PNG can be composited over other content.
+
+`--wait-selector CSS` waits (driving timers/async) until an element matching the selector
+exists before capturing — for JS-rendered content (Puppeteer's `waitForSelector`); `--wait-ms
+N` just settles the page for N ms. Both compose with the capture options.
 
 Rendered by `mb_shot` from an HTML file (gradient, CSS grid, translucent cards, a
 rotated card, and JS-injected text — all modern Blink, headless, no CEF):
@@ -129,6 +134,8 @@ int   mbInitialize(void);                 // boot the engine (once)
 mbView* mbCreateView(int w, int h);
 void  mbLoadHTML(mbView*, const char* html, const char* base_url);
 void  mbLoadURL(mbView*, const char* url);          // file:// today
+void  mbWait(mbView*, int ms);                      // drive timers/async for ms
+int   mbWaitForSelector(mbView*, const char* css, int timeout_ms);  // wait for element
 void  mbRunJS(mbView*, const char* script);         // host -> page: drive it
 int   mbEvalJS(mbView*, const char* script, char* out, int cap);  // host <- page: read back
 void  mbSendMouseClick(mbView*, int x, int y);      // synthesize a click
@@ -161,7 +168,7 @@ Requirements: a Chromium M150 source tree with a component `out/Release`
 ./build.sh /path/to/chromium-150.x.y.z   # stages host into the tree, gn gen, ninja, runs the suite
 ```
 
-`mb_smoke` is a 21-case capability test suite (HTML/DOM, JS, CSS computed style, UA
+`mb_smoke` is a 23-case capability test suite (HTML/DOM, JS, CSS computed style, UA
 stylesheet, the `mbRunJS`+`mbEvalJS` bridge, `<canvas>` getImageData, external `<link>`
 CSS via the subresource loader, paint-to-bitmap, synthesized click, typed text (ASCII +
 UTF-8 accent/CJK/emoji), programmatic scroll, mouse-move/hover, embedded-NUL document

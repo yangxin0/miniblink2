@@ -58,6 +58,10 @@ class MbWebView {
   void SetTransparentBackground(bool transparent);
   void SendScroll(int x, int y, int dx, int dy);
   std::string EvalToString(const char* utf8_script);  // eval JS -> string result
+  // Drive the engine for ~ms of real time (lets setTimeout / async work run).
+  void WaitMs(int ms);
+  // Pump until document.querySelector(css) matches or timeout_ms elapses; true if found.
+  bool WaitForSelector(const char* css, int timeout_ms);
   bool PaintToBitmap(void* out_bgra, int w, int h, int stride);
   bool SavePng(const char* path, int w, int h);  // render + encode PNG to disk
   // Render just the logical rect (x,y,w,h) to a PNG (output is w*dsf x h*dsf px).

@@ -21,6 +21,8 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/run_loop.h"
+#include "base/threading/platform_thread.h"
+#include "base/time/time.h"
 #include "base/unguessable_token.h"
 #include "cc/paint/paint_record.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
@@ -292,6 +294,43 @@ std::string MbWebView::EvalToString(const char* utf8_script) {
     return {};
   v8::String::Utf8Value utf8(isolate, str);
   return *utf8 ? std::string(*utf8, utf8.length()) : std::string();
+}
+
+void MbWebView::WaitMs(int ms) {
+  // Drive the engine for ~ms of real time so delayed timers (setTimeout) and async
+  // work (fetch microtasks) run. RunUntilIdle alone won't advance to a not-yet-due
+  // delayed task, so interleave short real sleeps with task draining + lifecycle.
+  if (!widget_ || !widget_->widget())
+    return;
+  const base::TimeTicks deadline =
+      base::TimeTicks::Now() + base::Milliseconds(ms > 0 ? ms : 0);
+  do {
+    widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
+    base::RunLoop().RunUntilIdle();
+    if (base::TimeTicks::Now() >= deadline)
+      break;
+    base::PlatformThread::Sleep(base::Milliseconds(10));
+  } while (true);
+}
+
+bool MbWebView::WaitForSelector(const char* css, int timeout_ms) {
+  if (!main_frame_ || !css)
+    return false;
+  // Poll document.querySelector(css) while pumping the loop until it matches or the
+  // timeout elapses. Lets a capture wait for JS-rendered / delayed content (the way
+  // Puppeteer's waitForSelector does) instead of shooting the page prematurely.
+  const std::string probe =
+      std::string("(document.querySelector(\"") + css + "\")?1:0)";
+  const base::TimeTicks deadline =
+      base::TimeTicks::Now() + base::Milliseconds(timeout_ms > 0 ? timeout_ms : 0);
+  for (;;) {
+    base::RunLoop().RunUntilIdle();
+    if (EvalToString(probe.c_str()) == "1")
+      return true;
+    if (base::TimeTicks::Now() >= deadline)
+      return false;
+    base::PlatformThread::Sleep(base::Milliseconds(10));
+  }
 }
 
 bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y) {

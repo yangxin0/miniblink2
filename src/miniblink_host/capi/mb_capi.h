@@ -35,6 +35,14 @@ MB_EXPORT void mbShutdown(void);
 // load and paint, and in the host's event loop.
 MB_EXPORT void mbPumpMessages(void);
 
+// Drive the engine for ~ms of real time so setTimeout / async work runs.
+MB_EXPORT void mbWait(mbView*, int ms);
+
+// Pump until the first element matching the CSS selector exists, or timeout_ms
+// elapses. Returns 1 if it appeared, 0 on timeout. (Puppeteer-style waitForSelector;
+// lets a capture wait for JS-rendered / delayed content.)
+MB_EXPORT int mbWaitForSelector(mbView*, const char* css_selector, int timeout_ms);
+
 // View lifecycle. A view owns one WebView + main LocalFrame + WebFrameWidget.
 MB_EXPORT mbView* mbCreateView(int width, int height);
 MB_EXPORT void    mbDestroyView(mbView*);

@@ -516,6 +516,18 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   override (after DSF and... well, base color) — pattern: when does_composite_ blocks an
   override, the DevTools/inspector override twin usually doesn't.
 
+- ✅ WAIT-FOR-CONTENT (2026-06-23 17:?): mbWait(ms) + mbWaitForSelector(css,timeout) +
+  mb_shot --wait-ms / --wait-selector. Gap: PaintInto's RunUntilIdle drains READY tasks but
+  does NOT advance to a not-yet-due delayed timer, so setTimeout/async-rendered content was
+  missed. WaitMs/WaitForSelector interleave real PlatformThread::Sleep(10ms) + RunUntilIdle
+  + lifecycle so timers fire as wall-clock passes; WaitForSelector polls
+  document.querySelector(css) until match or timeout. Verified: smoke 22 — a 300ms
+  setTimeout-injected #ready is caught (returns 1, textContent correct), #never times out
+  (0); mb_shot --wait-selector '#late' then --selector '#late' captured the delayed element
+  150x60. 23/23. NOTE dropped a flaky "absent immediately after load" assertion — the load's
+  own 20x RunUntilIdle spans enough wall-clock that a short timer may already fire; not a
+  guarantee worth asserting.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

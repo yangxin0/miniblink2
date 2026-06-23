@@ -12,6 +12,9 @@
 //                      (an element screenshot). Overrides --clip.
 //   --transparent      capture with a transparent background (omitBackground) — areas the
 //                      page doesn't paint keep alpha 0 in the PNG.
+//   --wait-selector S  before capturing, wait until an element matching S exists
+//                      (timeout = --wait-ms or 5000ms). For JS-rendered content.
+//   --wait-ms N        before capturing, drive the engine for N ms (settle timers/async).
 //
 // This is the "product" the host enables: a standalone, single-process, modern-Blink
 // screenshot tool — no browser process, no CEF.
@@ -36,6 +39,8 @@ int main(int argc, char** argv) {
   float scale = 1.0f;
   std::string clip;      // "x,y,w,h"
   std::string selector;  // CSS selector -> capture that element's box
+  std::string wait_selector;  // wait for this selector before capture
+  int wait_ms = 0;            // fixed wait before capture
   std::vector<const char*> pos;  // positional args, flags filtered out
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
@@ -51,6 +56,10 @@ int main(int argc, char** argv) {
       clip = argv[++i];
     } else if (a == "--selector" && i + 1 < argc) {
       selector = argv[++i];
+    } else if (a == "--wait-selector" && i + 1 < argc) {
+      wait_selector = argv[++i];
+    } else if (a == "--wait-ms" && i + 1 < argc) {
+      wait_ms = std::atoi(argv[++i]);
     } else {
       pos.push_back(argv[i]);
     }
@@ -115,6 +124,19 @@ int main(int argc, char** argv) {
                    input.c_str(), html_len);
       load_ok = false;
     }
+  }
+
+  // Wait for dynamic content before capturing: a selector to appear and/or a fixed
+  // delay (lets JS-rendered / setTimeout content settle).
+  if (!wait_selector.empty()) {
+    if (!mbWaitForSelector(view, wait_selector.c_str(),
+                           wait_ms > 0 ? wait_ms : 5000)) {
+      std::fprintf(stderr,
+                   "mb_shot: WARNING — --wait-selector '%s' never appeared\n",
+                   wait_selector.c_str());
+    }
+  } else if (wait_ms > 0) {
+    mbWait(view, wait_ms);
   }
 
   // Clip / element capture: resolve a logical rectangle and shoot just that. We

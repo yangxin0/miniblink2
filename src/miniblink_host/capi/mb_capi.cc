@@ -29,6 +29,17 @@ void mbPumpMessages(void) {
     rt->PumpOnce();
 }
 
+void mbWait(mbView* v, int ms) {
+  if (v && v->impl)
+    v->impl->WaitMs(ms);
+}
+
+int mbWaitForSelector(mbView* v, const char* css_selector, int timeout_ms) {
+  if (!v || !v->impl || !css_selector)
+    return 0;
+  return v->impl->WaitForSelector(css_selector, timeout_ms) ? 1 : 0;
+}
+
 mbView* mbCreateView(int width, int height) {
   if (!mb::MbRuntime::Get())
     return nullptr;  // must mbInitialize() first

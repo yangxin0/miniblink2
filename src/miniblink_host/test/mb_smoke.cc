@@ -252,6 +252,23 @@ int main() {
   }
   mbSetTransparentBackground(v, 0);  // restore default for any later use
 
+  // 22. Wait-for-selector: content injected by a setTimeout must be caught by
+  // mbWaitForSelector (which advances real time so the timer fires), and a selector
+  // that never appears must time out returning 0. (We don't assert the element is
+  // absent immediately after load — the load's own pumping spans enough wall-clock
+  // that a short timer may already have fired; that timing isn't a guarantee.)
+  mbSetTransparentBackground(v, 0);
+  mbLoadHTML(v,
+             "<body><script>setTimeout(function(){var d=document.createElement('div');"
+             "d.id='ready';d.textContent='late';document.body.appendChild(d);},300);"
+             "</script></body>",
+             "about:blank");
+  Expect(mbWaitForSelector(v, "#ready", 4000) == 1 &&
+             Eval(v, "document.getElementById('ready').textContent") == "late",
+         "wait: mbWaitForSelector catches setTimeout content");
+  Expect(mbWaitForSelector(v, "#never", 100) == 0,
+         "wait: missing selector times out");
+
   mbDestroyView(v);
   mbShutdown();
 
