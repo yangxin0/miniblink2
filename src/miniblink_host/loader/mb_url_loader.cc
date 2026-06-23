@@ -17,6 +17,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
+#include "net/base/data_url.h"
 #include "net/base/net_errors.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "third_party/blink/public/platform/web_string.h"
@@ -283,6 +284,14 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
     return base::ReadFileToString(base::FilePath(std::string(url.path())), body);
   if (url.SchemeIsHTTPOrHTTPS())
     return FetchHttp(url_spec, body, content_type, user_agent, extra_headers);
+  if (url.SchemeIs("data")) {
+    std::string mime, charset;
+    if (!net::DataURL::Parse(url, &mime, &charset, body))
+      return false;
+    if (content_type)
+      *content_type = mime;
+    return true;
+  }
   return false;
 }
 
@@ -319,6 +328,11 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   } else if (url.SchemeIsHTTPOrHTTPS()) {
     ok = FetchHttp(url.spec(), &contents, &http_content_type, user_agent_,
                    extra_headers_);
+  } else if (url.SchemeIs("data")) {
+    // Decode the data: URL in-process (libcurl doesn't serve it); the parsed
+    // mime flows into the response Content-Type below via http_content_type.
+    std::string charset;
+    ok = net::DataURL::Parse(url, &http_content_type, &charset, &contents);
   }
   if (std::getenv("MB_VERBOSE")) {
     std::fprintf(stderr, "[mb_url_loader] %s -> %s (%zu bytes)\n", url.spec().c_str(),

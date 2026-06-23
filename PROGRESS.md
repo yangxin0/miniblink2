@@ -1266,6 +1266,20 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   the earlier instrumentation showed it isn't reached for these; the wrapper-blob route is. The
   fetch(data:) loader gap and blob: URL increment 5 remain separate follow-ups.)
 
+- ✅ FIX: fetch('data:...') / data: subresources now load (2026-06-24): MbURLLoader handled only
+  file: and http(s):, so data: URLs failed ("Failed to fetch") for fetch/XHR (note: data: IMAGES
+  already worked via the image pipeline; only the loader path was missing). FIX: both MbFetchUrl
+  (navigation) and MbURLLoader::Deliver (subresource/fetch) now decode data: in-process via
+  net::DataURL::Parse(url, &mime, &charset, &bytes), feeding the parsed mime into the response
+  Content-Type. //net was already linked (net_errors). Verified: fetch('data:text/plain,hello-data')
+  .text() === 'hello-data' and fetch('data:application/octet-stream,abcd').arrayBuffer().byteLength
+  === 4 (smoke 69; mb_shot confirmed ft=hello-data). 82/82, no survivors. KNOWN REMAINING GAP:
+  fetch(dataUrl).blob() still rejects "Failed to fetch" — a fetch/blob-RESPONSE interaction (the
+  Response.blob() of a *fetched* response), distinct from data: decoding and from the direct
+  Response.blob() path that now works (smoke 68). Direct new Response(...).blob() and
+  new Blob(...) reads work; only the fetched-response->blob combination remains. Separate follow-up
+  alongside blob: URL (increment 5).
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
