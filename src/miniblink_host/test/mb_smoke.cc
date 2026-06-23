@@ -1911,6 +1911,28 @@ int main() {
                " red=" + (red ? "1" : "0"));
   }
 
+  // 91. mbHoverSelector fires mouseover and applies :hover. A target with a
+  // mouseover handler (sets a flag) and a :hover rule (changes color); hovering
+  // must trigger both.
+  {
+    mbLoadHTML(v,
+        "<style>#t{color:rgb(1,2,3)} #t:hover{color:rgb(9,8,7)}</style>"
+        "<body style='margin:0'><div id='t' style='width:100px;height:40px' "
+        "onmouseover='window.__h=1'>hover me</div></body>", "about:blank");
+    std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // force layout for hit-testing
+    const bool hovered = mbHoverSelector(v, "#t") == 1;
+    mbWait(v, 30);
+    const bool handler = Eval(v, "String(window.__h||0)") == "1";
+    const bool css_hover =
+        Eval(v, "getComputedStyle(document.getElementById('t')).color") ==
+        "rgb(9, 8, 7)";
+    Expect(hovered && handler && css_hover,
+           "mbHoverSelector fires mouseover + applies :hover",
+           std::string("handler=") + (handler ? "1" : "0") + " css=" +
+               (css_hover ? "1" : "0"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

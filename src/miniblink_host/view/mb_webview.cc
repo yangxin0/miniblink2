@@ -304,6 +304,18 @@ bool MbWebView::ClickSelector(const char* css_selector) {
   return true;
 }
 
+bool MbWebView::HoverSelector(const char* css_selector) {
+  // Move the pointer to the first match's center, generating mousemove +
+  // mouseover/mouseenter and applying :hover — for dropdown menus, tooltips, and
+  // hover-revealed controls. Returns false if there's no match or no box.
+  int x = 0, y = 0, w = 0, h = 0;
+  if (!widget_ || !GetElementRect(css_selector, &x, &y, &w, &h) ||
+      (w <= 0 && h <= 0))
+    return false;
+  SendMouseMove(x + w / 2, y + h / 2);
+  return true;
+}
+
 bool MbWebView::GetElementRect(const char* css_selector, int* x, int* y, int* w,
                                int* h) {
   if (!css_selector)

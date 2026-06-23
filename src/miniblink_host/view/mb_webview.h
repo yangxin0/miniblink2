@@ -57,6 +57,8 @@ class MbWebView {
   // / zero-size). Puppeteer-style page.click(selector) — saves callers computing
   // coordinates by hand.
   bool ClickSelector(const char* css_selector);
+  // Move the pointer to the first match's center (mousemove + mouseover + :hover).
+  bool HoverSelector(const char* css_selector);
   // First match's viewport-relative bounding box (logical px) via out-params;
   // false if no element matches. Composes with PaintRectToBitmap (element shot).
   bool GetElementRect(const char* css_selector, int* x, int* y, int* w, int* h);

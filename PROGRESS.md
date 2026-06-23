@@ -1765,6 +1765,13 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   now 52 fns. (Also confirmed via real-site mb_shot — Wikipedia/react.dev/HN/vuejs all render with
   content + zero console errors; engine is solid on real pages.)
 
+- ✅ DONE: mbHoverSelector — hover automation (2026-06-24): the standard automation hover() primitive
+  (Playwright/Puppeteer have it), previously missing. MbWebView::HoverSelector resolves the element
+  box (GetElementRect from last tick) and SendMouseMoves to its center, generating
+  mousemove/mouseover/mouseenter and applying :hover — for dropdown menus, tooltips, hover-revealed
+  controls. Smoke case 91 verifies BOTH effects: a target's onmouseover handler fires AND its :hover
+  CSS rule applies (color rgb(9,8,7)). 112/112. C API now 53 fns.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.
