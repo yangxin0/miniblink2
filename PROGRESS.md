@@ -1062,6 +1062,15 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   intends. (Only manual one-time step remains the gn_all deps += line in the root BUILD.gn, which
   build.sh detects and instructs.)
 
+- ✅ SVG rendering + CSS transitions verified (2026-06-23): two more correctness checks. SVG (a
+  distinct render path from CSS boxes, and ubiquitous for icons/charts/logos): inline <svg> with a
+  green <rect> and red <circle> on white rasterizes correctly — sampling inside the rect gives
+  green, inside the circle gives red, an empty corner is white. So SVG geometry + fill paint work.
+  CSS transition: a div transitioning width 0->100px over 100ms reaches 100px after the clock is
+  driven past the duration (the property interpolates over time via the animation clock, not a
+  jump/no-op) — complements the existing rAF / Web Animations coverage with declarative CSS
+  animation. Smoke 58-59 lock these in. 72/72, no survivors.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

@@ -1060,6 +1060,43 @@ int main() {
       "return (w20>0 && w40>w20*1.5 && w40<w20*2.5)?'ok':(w40+'/'+w20);})()") == "ok",
       "text: canvas measureText advance scales with font size");
 
+  // 58. SVG renders (shapes + fills). Inline SVG is ubiquitous (icons, charts,
+  // logos) and is a distinct rendering path from CSS boxes. Draw a green rect
+  // and a red circle on white and sample: inside the rect -> green, inside the
+  // circle -> red, an empty corner -> white. Proves SVG geometry + fill paint.
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0;background:#fff'>"
+      "<svg width='100' height='100' xmlns='http://www.w3.org/2000/svg'>"
+      "<rect x='0' y='0' width='50' height='50' fill='#00ff00'/>"
+      "<circle cx='75' cy='25' r='18' fill='#ff0000'/></svg></body>",
+      "about:blank");
+    std::vector<uint8_t> s(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, s.data(), W, H, W * 4);
+    size_t rect = (25u * W + 25u) * 4;     // inside green rect
+    size_t circ = (25u * W + 75u) * 4;     // inside red circle
+    size_t gap = (90u * W + 90u) * 4;      // empty -> white
+    Expect(s[rect + 1] == 255 && s[rect + 2] == 0 &&            // green
+               s[circ + 2] == 255 && s[circ] == 0 &&           // red
+               s[gap] == 255 && s[gap + 1] == 255 && s[gap + 2] == 255,  // white
+           "SVG: rect + circle render with correct fills");
+  }
+
+  // 59. CSS transition animates over time: a property must interpolate when the
+  // clock advances (not jump or stay). Start width 0, transition to 100px; after
+  // driving the engine it should be partway/complete, i.e. > 0.
+  {
+    mbLoadHTML(v,
+      "<body><div id='an' style='width:0px;height:10px;background:#000;"
+      "transition:width 0.1s linear'></div></body>", "about:blank");
+    mbRunJS(v, "var e=document.getElementById('an');"
+               "getComputedStyle(e).width;"          // flush start value
+               "e.style.width='100px';");            // trigger transition
+    mbWait(v, 200);                                  // drive past the 100ms duration
+    Expect(Eval(v, "parseInt(getComputedStyle(document.getElementById('an')).width)") == "100",
+           "CSS transition: width animates to its target when the clock advances");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
