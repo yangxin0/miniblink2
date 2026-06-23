@@ -173,6 +173,7 @@ int   mbGetCookies(mbView*, const char* url, char* out, int cap);  // export the
 int   mbDrainConsole(mbView*, char* out, int cap);  // drain captured console output
 void  mbSendMouseClick(mbView*, int x, int y);      // synthesize a click
 int   mbClickSelector(mbView*, const char* css);    // click element by selector (page.click)
+int   mbFillSelector(mbView*, const char* css, const char* text);  // fill input by selector (fill)
 void  mbSendMouseMove(mbView*, int x, int y);       // move pointer: hover + mousemove
 void  mbSetDeviceScaleFactor(mbView*, float scale); // HiDPI: devicePixelRatio + Nx raster
 void  mbSetUserAgent(mbView*, const char* ua);      // navigator.userAgent + HTTP requests

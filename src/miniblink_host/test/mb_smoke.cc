@@ -1146,6 +1146,24 @@ int main() {
            "mbClickSelector: clicks element by selector; 0 when no match");
   }
 
+  // 62. mbFillSelector fills a field by selector and fires events (Playwright
+  // fill). Fill an input, then confirm its .value updated AND an 'input' event
+  // was observed (frameworks rely on the event, not just the value). Also a
+  // non-matching selector returns 0.
+  {
+    mbLoadHTML(v,
+      "<body><input id='name' value=''>"
+      "<script>window.__ev=0;document.getElementById('name')"
+      ".addEventListener('input',function(){window.__ev++;});</script></body>",
+      "about:blank");
+    int ok = mbFillSelector(v, "#name", "Ada Lovelace");
+    int miss = mbFillSelector(v, "#missing", "x");
+    Expect(ok == 1 && miss == 0 &&
+               Eval(v, "document.getElementById('name').value") == "Ada Lovelace" &&
+               Eval(v, "String(window.__ev>0)") == "true",
+           "mbFillSelector: sets value + fires input event; 0 when no match");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

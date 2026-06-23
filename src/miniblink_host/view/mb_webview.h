@@ -56,6 +56,11 @@ class MbWebView {
   // / zero-size). Puppeteer-style page.click(selector) — saves callers computing
   // coordinates by hand.
   bool ClickSelector(const char* css_selector);
+  // Fill the first <input>/<textarea> matching `css_selector` with `text`:
+  // focuses it, sets the value through the native value setter (so frameworks
+  // like React observe it), and fires input+change. Playwright-style fill().
+  // Returns false if the selector matches nothing.
+  bool FillSelector(const char* css_selector, const char* text);
   void SendMouseMove(int x, int y);
   void SendText(const char* utf8);
   // Set the device pixel ratio (HiDPI). The page lays out in CSS px but reports

@@ -85,6 +85,24 @@
 
 namespace mb {
 
+namespace {
+// Escape a C string so it can be embedded inside a double-quoted JS string
+// literal (selectors, fill text). Handles backslash, quote, and newlines.
+std::string JsEscape(const char* s) {
+  std::string out;
+  for (const char* p = s; p && *p; ++p) {
+    switch (*p) {
+      case '\\': out += "\\\\"; break;
+      case '"': out += "\\\""; break;
+      case '\n': out += "\\n"; break;
+      case '\r': out += "\\r"; break;
+      default: out.push_back(*p);
+    }
+  }
+  return out;
+}
+}  // namespace
+
 // static
 std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
   auto v = std::unique_ptr<MbWebView>(new MbWebView());
@@ -233,17 +251,10 @@ void MbWebView::SendMouseClick(int x, int y) {
 bool MbWebView::ClickSelector(const char* css_selector) {
   if (!css_selector || !widget_)
     return false;
-  // Embed the selector as a JS string literal (escape backslash and quote), ask
-  // the page for the element's center, then click there. Returns "" if there is
-  // no match or no box.
-  std::string sel;
-  for (const char* p = css_selector; *p; ++p) {
-    if (*p == '\\' || *p == '"')
-      sel.push_back('\\');
-    sel.push_back(*p);
-  }
+  // Embed the selector as a JS string literal, ask the page for the element's
+  // center, then click there. Returns "" if there is no match or no box.
   std::string js =
-      "(function(){var e=document.querySelector(\"" + sel +
+      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
       "\");if(!e)return '';var r=e.getBoundingClientRect();"
       "if(r.width<=0&&r.height<=0)return '';"
       "return Math.round(r.left+r.width/2)+','+Math.round(r.top+r.height/2);})()";
@@ -255,6 +266,26 @@ bool MbWebView::ClickSelector(const char* css_selector) {
   int y = std::atoi(center.substr(comma + 1).c_str());
   SendMouseClick(x, y);
   return true;
+}
+
+bool MbWebView::FillSelector(const char* css_selector, const char* text) {
+  if (!css_selector || !main_frame_)
+    return false;
+  // Focus the field and set its value through the prototype's native value
+  // setter, so frameworks that wrap the setter (React's value tracker) observe
+  // the change; then fire input + change (bubbling) like real typing. Falls back
+  // to a direct assignment for non-input/textarea elements. Returns "1" on
+  // success, "0" if the selector matches nothing.
+  std::string js =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+      "\");if(!e)return '0';e.focus();var t=\"" + JsEscape(text ? text : "") +
+      "\";var proto=(e instanceof HTMLTextAreaElement)?HTMLTextAreaElement.prototype"
+      ":(e instanceof HTMLInputElement)?HTMLInputElement.prototype:null;"
+      "var d=proto&&Object.getOwnPropertyDescriptor(proto,'value');"
+      "if(d&&d.set){d.set.call(e,t);}else{try{e.value=t;}catch(ex){return '0';}}"
+      "e.dispatchEvent(new Event('input',{bubbles:true}));"
+      "e.dispatchEvent(new Event('change',{bubbles:true}));return '1';})()";
+  return EvalToString(js.c_str()) == "1";
 }
 
 void MbWebView::SendMouseMove(int x, int y) {

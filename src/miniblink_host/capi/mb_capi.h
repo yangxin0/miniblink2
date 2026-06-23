@@ -72,6 +72,12 @@ MB_EXPORT void mbSendMouseClick(mbView*, int x, int y);
 // (display:none / zero-size). Pair with mbWaitForSelector for dynamic content.
 MB_EXPORT int mbClickSelector(mbView*, const char* css_selector);
 
+// Fill the first <input>/<textarea> matching `css_selector` with `utf8_text`
+// (Playwright-style fill): focuses it, sets the value via the native setter so
+// frameworks like React observe it, and fires input+change. Returns 1 on
+// success, 0 if nothing matches. Pair with mbWaitForSelector for dynamic forms.
+MB_EXPORT int mbFillSelector(mbView*, const char* css_selector, const char* utf8_text);
+
 // Move the mouse pointer to (x,y): updates :hover state, fires mouseover/mousemove.
 MB_EXPORT void mbSendMouseMove(mbView*, int x, int y);
 

@@ -1102,6 +1102,18 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   a non-matching selector returns 0; mb_shot --click toggled a page's DOM to 'CLICKED' before
   capture. README C-ABI list + mb_shot usage updated. 74/74, no survivors.
 
+- ✅ CAPABILITY: mbFillSelector (Playwright-style fill) (2026-06-24): added form-fill by selector,
+  the natural companion to mbClickSelector. MbWebView::FillSelector(css,text) focuses the matched
+  <input>/<textarea>, sets .value through the prototype's NATIVE value setter (so frameworks that
+  wrap it — React's value tracker — observe the change), then dispatches bubbling input+change
+  events like real typing; returns false on no match. Factored a shared JsEscape() helper (escapes
+  \ " \n \r) now used by both ClickSelector and FillSelector for safe selector/text embedding.
+  Exposed as `int mbFillSelector(mbView*, const char* css, const char* text)`. Smoke 62 fills an
+  input and asserts both .value updated AND an 'input' listener fired (frameworks depend on the
+  event, not just the value), and that a non-match returns 0. README C-ABI list updated. 75/75,
+  no survivors. The Puppeteer/Playwright-style automation surface now: waitForSelector + click +
+  fill + type(SendText) + eval + screenshot/pdf.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
