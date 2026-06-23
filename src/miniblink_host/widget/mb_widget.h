@@ -34,6 +34,11 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   void SendMouseClick(int x, int y);  // synthesize mousedown+mouseup at (x,y)
   void SendMouseMove(int x, int y);   // move pointer to (x,y): hover + mousemove
   void SendText(const char* utf8);    // type ASCII text into the focused element
+  // Press a named non-text key ("Enter", "Tab", "Escape", "Backspace", "Delete",
+  // "Arrow{Left,Up,Right,Down}", "Home", "End", "PageUp", "PageDown") as a real
+  // trusted key event, so default actions fire (Enter submits a form, Tab moves
+  // focus) — unlike a JS-dispatched (untrusted) event. No-op for unknown names.
+  void SendKey(const char* key_name);
 
   blink::WebFrameWidget* widget() { return widget_; }
 

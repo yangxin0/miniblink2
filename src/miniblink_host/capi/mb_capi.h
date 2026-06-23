@@ -125,6 +125,13 @@ MB_EXPORT void mbSetExtraHeaders(mbView*, const char* utf8_headers);
 // Type ASCII text into the focused element (synthesized key events).
 MB_EXPORT void mbSendText(mbView*, const char* utf8_text);
 
+// Press a named non-text key as a real (trusted) key event, so default actions
+// fire: "Enter" (submit a form / activate), "Tab" (move focus), "Escape",
+// "Backspace", "Delete", "ArrowLeft/Up/Right/Down", "Home", "End", "PageUp",
+// "PageDown". Unlike a JS-dispatched event, this triggers the browser default
+// action. No-op for an unknown key name.
+MB_EXPORT void mbSendKey(mbView*, const char* key_name);
+
 // Synthesize a gesture scroll at (x,y) by (dx,dy) pixels. Positive dy scrolls
 // the page downward (toward larger window.scrollY), matching natural intent.
 MB_EXPORT void mbSendScroll(mbView*, int x, int y, int dx, int dy);

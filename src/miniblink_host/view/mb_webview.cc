@@ -501,6 +501,11 @@ void MbWebView::SetDeviceScaleFactor(float scale) {
   }
 }
 
+void MbWebView::SendKey(const char* key_name) {
+  if (widget_)
+    widget_->SendKey(key_name);
+}
+
 void MbWebView::SendText(const char* utf8) {
   if (widget_)
     widget_->SendText(utf8);

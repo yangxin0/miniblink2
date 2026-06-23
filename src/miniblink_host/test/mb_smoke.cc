@@ -1852,6 +1852,20 @@ int main() {
            "mbClearCookies empties the jar", cb2);
   }
 
+  // 88. mbSendKey("Enter") submits a form — a TRUSTED default action that a
+  // JS-dispatched (untrusted) KeyboardEvent cannot trigger. Fill+focus the input,
+  // press Enter; the form's submit handler runs.
+  {
+    mbLoadHTML(v,
+        "<body><form id='f' onsubmit='window.__s=1;return false;'>"
+        "<input id='inp' name='q'></form></body>", "about:blank");
+    mbFillSelector(v, "#inp", "hello");  // also focuses the input
+    mbSendKey(v, "Enter");
+    mbWait(v, 50);
+    Expect(Eval(v, "String(window.__s||0)") == "1",
+           "mbSendKey Enter triggers form submission (trusted default action)");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

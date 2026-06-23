@@ -1730,7 +1730,21 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   nothing to implement) + WebView::SetHistoryListFromNavigation for the counts. Not a bounded tick;
   firmly deferred.
 
+- ✅ DONE: mbSendKey — trusted special-key input (2026-06-24): SendText could only type printable
+  text; pressing Enter/Tab/Escape/Backspace/Delete/Arrows/Home/End/PageUp/PageDown wasn't possible,
+  and a JS-dispatched KeyboardEvent can't trigger default actions (untrusted). Added MbWidget::SendKey
+  (raw VK windows_key_code + ui::DomKey numeric dom_key, kRawKeyDown [+kChar for Enter/Tab] +kKeyUp
+  through the widget) -> MbWebView::SendKey -> mbSendKey. VERIFIED: smoke case 88 — Enter in a single
+  -input form fires the submit handler (a trusted default action a JS dispatch can't). C API now 50
+  fns. PARTIAL/FOLLOW-UP: Tab focus-advance does NOT work — FocusController::AdvanceFocus is gated on
+  page-focus state; setting WebFrameWidgetImpl::SetFocus(true) at widget init did not enable it
+  (likely reset per document commit), so it needs proper focus-controller wiring (deferred). Also
+  could not cleanly observe non-Enter keys via a JS keydown listener in the smoke harness (focus/
+  world timing) though they go through the identical trusted path as the verified Enter.
+
 ### REMAINING ROADMAP
+- P2-focus: page focus-controller wiring so Tab advances focus + non-Enter key default actions /
+  autofocus / :focus work (WebFrameWidget SetFocus persisted across commits + WebView SetIsActive).
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).

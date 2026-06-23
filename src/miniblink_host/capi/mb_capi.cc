@@ -152,6 +152,11 @@ void mbSendText(mbView* v, const char* utf8_text) {
     v->impl->SendText(utf8_text);
 }
 
+void mbSendKey(mbView* v, const char* key_name) {
+  if (v && v->impl)
+    v->impl->SendKey(key_name);
+}
+
 void mbSendScroll(mbView* v, int x, int y, int dx, int dy) {
   if (v && v->impl)
     v->impl->SendScroll(x, y, dx, dy);

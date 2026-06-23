@@ -1,6 +1,7 @@
 // mb_widget.cc — non-compositing frame widget. Status: Phase 1.
 #include "miniblink_host/widget/mb_widget.h"
 
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -135,6 +136,58 @@ void MbWidget::SendText(const char* utf8) {
         key(blink::WebInputEvent::Type::kKeyUp, false), ui::LatencyInfo()));
     i += units;
   }
+}
+
+void MbWidget::SendKey(const char* key_name) {
+  if (!widget_ || !key_name)
+    return;
+  // Raw numeric values: vk = a Windows VK code (drives default actions like form
+  // submit / focus move), dom_key = the ui::DomKey value (drives JS event.key).
+  // ch != 0 means the key also produces a kChar (Enter -> '\r', Tab -> '\t').
+  struct KeyDef {
+    const char* name;
+    int vk;
+    uint32_t dom_key;
+    char16_t ch;
+  };
+  static const KeyDef kKeys[] = {
+      {"Enter", 0x0D, 0x000D, u'\r'},   {"Tab", 0x09, 0x0009, u'\t'},
+      {"Escape", 0x1B, 0x001B, 0},      {"Backspace", 0x08, 0x0008, 0},
+      {"Delete", 0x2E, 0x007F, 0},      {"ArrowLeft", 0x25, 0x0302, 0},
+      {"ArrowUp", 0x26, 0x0304, 0},     {"ArrowRight", 0x27, 0x0303, 0},
+      {"ArrowDown", 0x28, 0x0301, 0},   {"Home", 0x24, 0x0306, 0},
+      {"End", 0x23, 0x0305, 0},         {"PageUp", 0x21, 0x0308, 0},
+      {"PageDown", 0x22, 0x0307, 0},
+  };
+  const KeyDef* k = nullptr;
+  for (const auto& e : kKeys) {
+    if (std::strcmp(e.name, key_name) == 0) {
+      k = &e;
+      break;
+    }
+  }
+  if (!k)
+    return;
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  auto make = [&](blink::WebInputEvent::Type type, bool with_text) {
+    blink::WebKeyboardEvent e(type, blink::WebInputEvent::kNoModifiers,
+                              base::TimeTicks::Now());
+    e.windows_key_code = k->vk;
+    e.dom_key = k->dom_key;
+    if (with_text && k->ch) {
+      e.text[0] = k->ch;
+      e.unmodified_text[0] = k->ch;
+    }
+    return e;
+  };
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+      make(blink::WebInputEvent::Type::kRawKeyDown, false), ui::LatencyInfo()));
+  if (k->ch) {
+    impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+        make(blink::WebInputEvent::Type::kChar, true), ui::LatencyInfo()));
+  }
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+      make(blink::WebInputEvent::Type::kKeyUp, false), ui::LatencyInfo()));
 }
 
 }  // namespace mb

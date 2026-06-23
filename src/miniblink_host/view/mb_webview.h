@@ -64,6 +64,7 @@ class MbWebView {
   bool FillSelector(const char* css_selector, const char* text);
   void SendMouseMove(int x, int y);
   void SendText(const char* utf8);
+  void SendKey(const char* key_name);  // press a named non-text key (Enter, Tab, ...)
   // Set the device pixel ratio (HiDPI). The page lays out in CSS px but reports
   // window.devicePixelRatio == scale and rasterizes at `scale`x in PaintInto, so
   // captures are retina-crisp. Caller sizes the output bitmap to logical*scale.
