@@ -1,12 +1,15 @@
 #include "miniblink_host/blob/mb_blob_registry.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
 
 #include "base/containers/span.h"
 #include "base/functional/bind.h"
+#include "base/memory/weak_ptr.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
 #include "miniblink_host/runtime/mb_runtime.h"
@@ -14,6 +17,7 @@
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "mojo/public/cpp/system/data_pipe.h"
+#include "mojo/public/cpp/system/data_pipe_drainer.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
 #include "third_party/blink/public/mojom/blob/blob.mojom-blink.h"
 #include "third_party/blink/public/mojom/blob/data_element.mojom-blink.h"
@@ -107,16 +111,81 @@ class BlobReadSession {
   mojo::SimpleWatcher watcher_;
 };
 
+// Reads another Blob fully (ReadAll into a pipe, drained), then hands back the
+// bytes — used to resolve is_blob DataElements (a blob composed of / slicing
+// another blob, e.g. Response.blob(), Blob.slice()). Self-owned on the service
+// thread; deletes itself when the read completes.
+class BlobRefReader : public mojo::DataPipeDrainer::Client {
+ public:
+  static void Read(mojo::Remote<blink::mojom::blink::Blob> blob,
+                   uint64_t offset,
+                   uint64_t length,
+                   base::OnceCallback<void(std::vector<uint8_t>)> done) {
+    auto* r = new BlobRefReader(std::move(blob), offset, length,
+                                std::move(done));
+    r->Begin();
+  }
+
+ private:
+  BlobRefReader(mojo::Remote<blink::mojom::blink::Blob> blob,
+                uint64_t offset,
+                uint64_t length,
+                base::OnceCallback<void(std::vector<uint8_t>)> done)
+      : blob_(std::move(blob)),
+        offset_(offset),
+        length_(length),
+        done_(std::move(done)) {}
+
+  void Begin() {
+    mojo::ScopedDataPipeProducerHandle producer;
+    mojo::ScopedDataPipeConsumerHandle consumer;
+    if (mojo::CreateDataPipe(nullptr, producer, consumer) != MOJO_RESULT_OK) {
+      Finish();
+      return;
+    }
+    blob_->ReadAll(std::move(producer), /*client=*/mojo::NullRemote());
+    drainer_ = std::make_unique<mojo::DataPipeDrainer>(this, std::move(consumer));
+  }
+
+  void OnDataAvailable(base::span<const uint8_t> data) override {
+    bytes_.insert(bytes_.end(), data.begin(), data.end());
+  }
+  void OnDataComplete() override { Finish(); }
+
+  void Finish() {
+    // Apply the element's [offset, offset+length) slice.
+    std::vector<uint8_t> out;
+    if (offset_ < bytes_.size()) {
+      size_t end = length_ == std::numeric_limits<uint64_t>::max()
+                       ? bytes_.size()
+                       : std::min<size_t>(bytes_.size(), offset_ + length_);
+      out.assign(bytes_.begin() + offset_, bytes_.begin() + end);
+    }
+    std::move(done_).Run(std::move(out));
+    delete this;
+  }
+
+  mojo::Remote<blink::mojom::blink::Blob> blob_;
+  uint64_t offset_;
+  uint64_t length_;
+  base::OnceCallback<void(std::vector<uint8_t>)> done_;
+  std::vector<uint8_t> bytes_;
+  std::unique_ptr<mojo::DataPipeDrainer> drainer_;
+};
+
 // In-process Blob. Holds the bytes; serves reads. Lives on the service thread.
-// Bytes may arrive inline (embedded_data) or via a BytesProvider (>256 KB),
-// which is fetched asynchronously AFTER Register replies (the main thread must
-// be unblocked first, since the provider lives there). Reads that arrive before
-// the bytes are materialized are queued and drained when ready.
+// Bytes may arrive inline (embedded_data), via a BytesProvider (>256 KB), or by
+// reading another blob (is_blob elements) — all fetched asynchronously AFTER
+// Register replies. Reads arriving before the bytes are materialized are queued
+// and drained when ready.
 class MbBlob : public blink::mojom::blink::Blob {
  public:
   struct Part {
-    std::vector<uint8_t> inline_bytes;  // used when no provider
-    mojo::Remote<blink::mojom::blink::BytesProvider> provider;  // else fetch
+    std::vector<uint8_t> inline_bytes;                          // inline
+    mojo::Remote<blink::mojom::blink::BytesProvider> provider;  // or fetch
+    mojo::Remote<blink::mojom::blink::Blob> blob_ref;           // or read a blob
+    uint64_t offset = 0;
+    uint64_t length = std::numeric_limits<uint64_t>::max();
   };
 
   MbBlob(blink::String uuid, std::vector<Part> parts)
@@ -173,25 +242,37 @@ class MbBlob : public blink::mojom::blink::Blob {
   };
 
   // Walk parts in order, appending bytes to data_. Inline parts append
-  // synchronously; provider parts fetch via RequestAsReply (async). Capturing
-  // `this` is safe: parts_[i].provider is a member, so destroying this cancels
-  // the pending reply.
+  // synchronously; provider parts fetch via BytesProvider.RequestAsReply and
+  // blob_ref parts read the referenced blob (both async). WeakPtr guards the
+  // callbacks so a destroyed MbBlob is handled safely (a self-owned BlobRefReader
+  // may outlive it).
   void Materialize(size_t i) {
-    while (i < parts_.size() && !parts_[i].provider) {
-      const auto& b = parts_[i].inline_bytes;
-      data_.insert(data_.end(), b.begin(), b.end());
+    while (i < parts_.size()) {
+      Part& p = parts_[i];
+      if (p.provider) {
+        p.provider->RequestAsReply(base::BindOnce(
+            &MbBlob::OnProviderBytes, weak_factory_.GetWeakPtr(), i));
+        return;
+      }
+      if (p.blob_ref) {
+        BlobRefReader::Read(
+            std::move(p.blob_ref), p.offset, p.length,
+            base::BindOnce(&MbBlob::OnBlobRefBytes,
+                           weak_factory_.GetWeakPtr(), i));
+        return;
+      }
+      data_.insert(data_.end(), p.inline_bytes.begin(), p.inline_bytes.end());
       ++i;
     }
-    if (i >= parts_.size()) {
-      ready_ = true;
-      DrainPending();
-      return;
-    }
-    parts_[i].provider->RequestAsReply(
-        base::BindOnce(&MbBlob::OnProviderBytes, base::Unretained(this), i));
+    ready_ = true;
+    DrainPending();
   }
 
   void OnProviderBytes(size_t i, const blink::Vector<uint8_t>& bytes) {
+    data_.insert(data_.end(), bytes.begin(), bytes.end());
+    Materialize(i + 1);
+  }
+  void OnBlobRefBytes(size_t i, std::vector<uint8_t> bytes) {
     data_.insert(data_.end(), bytes.begin(), bytes.end());
     Materialize(i + 1);
   }
@@ -207,6 +288,7 @@ class MbBlob : public blink::mojom::blink::Blob {
   std::vector<uint8_t> data_;
   bool ready_ = false;
   std::vector<PendingRead> pending_reads_;
+  base::WeakPtrFactory<MbBlob> weak_factory_{this};
 };
 
 // In-process BlobRegistry. Lives on the service thread; turns Register's
@@ -221,15 +303,26 @@ class MbBlobRegistry : public blink::mojom::blink::BlobRegistry {
                 RegisterCallback callback) override {
     std::vector<MbBlob::Part> parts;
     for (auto& el : elements) {
-      if (!el || !el->is_bytes())
+      if (!el)
         continue;
-      auto& b = el->get_bytes();
       MbBlob::Part p;
-      if (b->embedded_data) {
-        const auto& ed = *b->embedded_data;
-        p.inline_bytes.assign(ed.begin(), ed.end());
-      } else if (b->data) {
-        p.provider.Bind(std::move(b->data));  // fetched lazily, post-reply
+      if (el->is_bytes()) {
+        auto& b = el->get_bytes();
+        if (b->embedded_data) {
+          const auto& ed = *b->embedded_data;
+          p.inline_bytes.assign(ed.begin(), ed.end());
+        } else if (b->data) {
+          p.provider.Bind(std::move(b->data));  // fetched lazily, post-reply
+        }
+      } else if (el->is_blob()) {
+        // A blob composed of / slicing another blob (Response.blob(),
+        // Blob.slice()): read the referenced blob's [offset,offset+length).
+        auto& eb = el->get_blob();
+        p.blob_ref.Bind(std::move(eb->blob));
+        p.offset = eb->offset;
+        p.length = eb->length;
+      } else {
+        continue;  // is_file: unsupported (no filesystem)
       }
       parts.push_back(std::move(p));
     }

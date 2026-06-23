@@ -1252,6 +1252,24 @@ int main() {
            "canvas.toBlob() -> readable PNG blob (idle-task encode runs)");
   }
 
+  // 68. Blobs that REFERENCE other blobs resolve (is_blob DataElements). A
+  // blob composed of another blob registers an is_blob element holding a Blob
+  // remote + offset/length; reading it must read through to the referenced
+  // blob. Covers Response.blob() (wraps the body blob) and Blob.slice() (an
+  // offset/length view). Previously these read empty (is_blob was ignored).
+  {
+    mbLoadHTML(v, "<body>blobref</body>", "about:blank");
+    mbRunJS(v,
+      "window.__resp='pending';window.__slice='pending';"
+      "new Response('hello-resp').blob().then(function(b){return b.text();})"
+      ".then(function(t){window.__resp=t;});"
+      "new Blob(['0123456789']).slice(2,5).text().then(function(t){window.__slice=t;});");
+    mbWait(v, 300);
+    Expect(Eval(v, "window.__resp") == "hello-resp" &&
+               Eval(v, "window.__slice") == "234",
+           "Blob-of-blob resolves: Response.blob() + Blob.slice() read through");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

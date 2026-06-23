@@ -1250,6 +1250,22 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   new Blob([Uint8Array]).text() === 'hi' (typed-array element via the inline path). No code change
   committed; the value is the precise scoping of three independent follow-ups.
 
+- ✅ FIX: blob-of-blob (is_blob elements) now read through — Response.blob()/Blob.slice() work
+  (2026-06-24): pinned finding #1 from above. Instrumented Register: Response.blob() registers TWO
+  blobs — an inner one (is_bytes, the body) and an OUTER wrapper (is_blob, a reference to the
+  inner). My Register only handled is_bytes, so the wrapper had no bytes (blob.size was right, from
+  Blink's record, but ReadAll returned empty). FIX: handle is_blob DataElements — DataElementBlob
+  carries a PendingRemote<Blob> + offset/length; added a third MbBlob::Part variant (blob_ref +
+  offset/length) and a self-owned BlobRefReader (ReadAll the referenced blob into a pipe, drain via
+  DataPipeDrainer, slice [offset,offset+length)), materialized like the BytesProvider path. Added a
+  WeakPtrFactory so the async read-through callback is safe if the MbBlob dies (BlobRefReader is
+  self-owned and may outlive it). Verified: new Response('hello-resp').blob().text() ==='hello-resp'
+  and new Blob(['0123456789']).slice(2,5).text() ==='234' — smoke 68 AND mb_shot (resp-blob was
+  empty, now 'hello-resp'). 81/81, no survivors. So fetch(httpUrl).blob(), Response/Request.blob(),
+  and Blob.slice() reads now resolve. (RegisterFromStream remains stubbed but is not on this path —
+  the earlier instrumentation showed it isn't reached for these; the wrapper-blob route is. The
+  fetch(data:) loader gap and blob: URL increment 5 remain separate follow-ups.)
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
