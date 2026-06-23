@@ -1155,6 +1155,21 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   (main-thread caller + io_thread servicer). Lower risk, fewer steps. Still multi-tick (real
   BlobRegistry/Blob + data-pipe code), so executed in a focused session, not crammed.
 
+- 📝 PLAN now EXECUTION-READY: increment 3+4 fully specified (2026-06-24). Final code-inspection
+  resolved every unknown (in docs/design-blob-service-host.md "Implementation notes"): BlobRegistry
+  comes via the PLATFORM broker (blob_data.cc:93 -> Platform::GetBrowserInterfaceBroker), so route
+  it in MbEmptyBroker; add MbRuntime::ServiceTaskRunner() (= io_thread_->task_runner()) and
+  MakeSelfOwnedReceiver(MbBlobRegistry) there; blink variant (WTF types); Register appends each
+  DataElementBytes.embedded_data (inline for <=256KB) and binds MbBlob(uuid,bytes); the read path
+  is Blob.ReadAll(pipe, BlobReaderClient) (file_reader_loader.cc:102) -> OnCalculatedSize, write
+  bytes (one WriteData for small blobs), OnComplete(0,size); other Blob methods stubbed; new
+  blob/mb_blob_registry.{h,cc} into the GN sources; smoke = new Blob(['hello']).text()=='hello'.
+  >>> NEXT TICK SHOULD EXECUTE increment 3+4 atomically (implement -> build -> verify blob.text(),
+  or revert if it can't be made clean in-tick). The spec makes it mechanical. This concludes the
+  de-risking phase (3 investigation ticks: plan -> io_thread/[Sync]-works findings -> full spec);
+  the planning was warranted because it's the only remaining heavy item and cramming risks broken
+  state, but it is now fully scoped and the next step is code.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

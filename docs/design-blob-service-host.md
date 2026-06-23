@@ -115,6 +115,44 @@ standalone sync-validation experiment is dropped.)
 6. **BytesProvider path** for blobs > 256 KB (call back to the renderer via
    `BytesProvider.RequestAsReply`/`RequestAsStream`). Verify with a large blob.
 
+## Implementation notes — ready to execute (confirmed 2026-06-24)
+
+All unknowns resolved by code inspection; increment 3+4 is now mechanical:
+
+- **Broker:** `BlobRegistry` is requested through the **Platform** broker —
+  `blob_data.cc:93` does `Platform::Current()->GetBrowserInterfaceBroker()
+  ->GetInterface(BlobRegistry receiver)` (a thread-specific remote). So route it in
+  `MbEmptyBroker::GetInterfaceImpl` (mb_platform.cc), matching
+  `mojom::blink::BlobRegistry`. (NOT the frame broker; that's BlobURLStore, increment 5.)
+- **Get the service runner to the broker:** add `MbRuntime::ServiceTaskRunner()`
+  returning `io_thread_->task_runner()`; `MbEmptyBroker` posts the bind there:
+  `runner->PostTask(FROM_HERE, BindOnce([](PendingReceiver<BlobRegistry> r){
+  MakeSelfOwnedReceiver(make_unique<MbBlobRegistry>(), std::move(r)); }, std::move(r)))`.
+  Everything blob (registry + every `MbBlob`) lives on `io_thread_`.
+- **Variant:** blink variant (`...mojom-blink.h`) — `WTF::String` uuid, `WTF::Vector<
+  DataElementPtr>` elements, `WTF::Vector<uint8_t>` embedded_data.
+- **`MbBlobRegistry::Register(receiver, uuid, type, disposition, elements)`:** for each
+  `element` with `element->is_bytes()`, append `element->get_bytes()->embedded_data`
+  (present for ≤256 KB) to a `Vector<uint8_t>`; `MakeSelfOwnedReceiver(make_unique<MbBlob>
+  (uuid, bytes), std::move(receiver))`; the `=> ()` reply is sent automatically when the
+  handler returns (this is what unblocks Blink's `[Sync]` Register). `RegisterFromStream`:
+  minimal / `NOTIMPLEMENTED` initially.
+- **`MbBlob` (holds uuid + bytes):**
+  - `ReadAll(producer_handle, client)` — **the read path** (`file_reader_loader.cc:102`).
+    Bind `mojo::Remote<BlobReaderClient>` from `client` (on io_thread); call
+    `client->OnCalculatedSize(size, size)`; write bytes to `producer_handle`
+    (small blobs fit one `WriteData`; chunk via `SimpleWatcher` later); call
+    `client->OnComplete(/*net::OK=*/0, size)`; drop the producer (EOF). `client` is
+    optional (may be null) — guard it.
+  - `GetInternalUUID(cb)` → `cb.Run(uuid)`. `Clone(receiver)` → new `MbBlob` same bytes.
+  - `CaptureSnapshot(cb)` `[Sync]` → `cb.Run(size, std::nullopt)`.
+  - `ReadRange`, `AsDataPipeGetter`, `ReadSideData`, `Load` → `NOTIMPLEMENTED`/no-op first.
+- **Smoke (the win):** `new Blob(['hello']).text()` → `"hello"`;
+  `new Blob([...]).arrayBuffer().byteLength`; `FileReader.readAsText`. Bounded-pump,
+  watchdog, no survivors. THIS proves the main-thread-caller + io_thread-servicer pairing.
+- **GN:** new `blob/mb_blob_registry.{h,cc}` added to `miniblink_host` sources; deps already
+  cover `//third_party/blink/public:blink` (mojom-blink) and mojo bindings.
+
 ## Risks / open questions
 
 - IO-pump thread + Blink's mojo core: confirm `mojo::core` is initialized in a mode
