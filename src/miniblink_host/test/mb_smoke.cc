@@ -679,6 +679,26 @@ int main() {
              Eval(v, "String(window.__done)") == "true",
          "SharedWorker + ServiceWorker spawn are crash-safe (host scriptable)");
 
+  // 39. IndexedDB fails GRACEFULLY (not a hang, not a crash). We bind no IDB
+  // backend, so the frame broker drops network::...IDBFactory; the receiver
+  // pipe closes, the remote disconnects, and Blink surfaces that to the open()
+  // request as a clean `onerror` — async, deterministic, host stays live. (Use
+  // a real http origin via the base URL: indexedDB is unavailable on the opaque
+  // about:blank origin.) Asserts the error fired and the host is still
+  // scriptable; corrects the old "open() hangs pending" note.
+  mbLoadHTML(v, "<body>idb-guard</body>", "https://miniblink.test/");
+  mbRunJS(v,
+    "window.__idb='pending';"
+    "try{var r=indexedDB.open('mb-probe',1);"
+    "r.onerror=function(){window.__idb='error';};"
+    "r.onsuccess=function(){window.__idb='success';};"
+    "}catch(e){window.__idb='threw:'+e.name;}");
+  mbWait(v, 200);
+  Expect(Eval(v, "1+1") == "2" &&
+             Eval(v, "document.body.textContent") == "idb-guard" &&
+             Eval(v, "String(window.__idb)") == "error",
+         "IndexedDB open() fails gracefully via onerror (no hang/crash)");
+
   mbDestroyView(v);
   mbShutdown();
 

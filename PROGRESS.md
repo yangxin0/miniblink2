@@ -578,6 +578,8 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   prints them. Genuinely useful for automation/debugging. PROBE4: IndexedDB open() stays
   'pending' forever (no backend responds) — a real gap, but fixing needs a full in-process
   IndexedDB mojo backend (large); documented as roadmap, not attempted. 34/34.
+  [CORRECTION 2026-06-23: re-probed — open() does NOT hang. See the IndexedDB-graceful entry
+  below; it fails fast via onerror. The 'pending forever' read here was wrong.]
 
 - ✅ COOKIES (2026-06-23 17:?): added a process-wide in-memory cookie jar in the loader —
   CookieShare() lazily makes a CURLSH(CURL_LOCK_DATA_COOKIE); every FetchHttp handle sets
@@ -854,6 +856,20 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   ENTIRE worker family (dedicated/shared/service) now degrades gracefully instead of crashing.
   No code change needed for shared/service — already safe; smoke 38 guards the regression
   (spawn both inside try/catch on an opaque origin, assert the host stays scriptable). 48/48.
+
+- ✅ INDEXEDDB fails gracefully via onerror — NOT a hang (2026-06-23, re-probed + corrected): an
+  earlier note (PROBE4 above) claimed `indexedDB.open()` hangs 'pending forever'. Re-probed: it
+  does NOT. open() returns a request, and `onerror` FIRES promptly. Mechanism: we bind no IDB
+  backend, so the frame broker (MbBrowserInterfaceBroker) drops the IDBFactory interface ->
+  IDBFactory pulls its connector from GetBrowserInterfaceBroker().GetInterface() (idb_factory.cc
+  ~128), the unbound receiver pipe closes, the remote disconnects, and Blink delivers that to the
+  request as a clean async error. So IndexedDB is in the SAME graceful-degradation bucket as the
+  worker family: non-functional (no storage) but safe — no host hang, no crash, and a page that
+  feature-uses IDB gets a normal onerror it can branch on. Smoke 39 guards it (open on a real
+  http origin, assert window.__idb=='error' + host scriptable). 49/49.
+  Net: of the three documented "browser-process-service" gaps, two (Workers, IndexedDB) are now
+  confirmed graceful. Only Blob's [Sync] BlobURLStore.Register remains a true HANG (sync mojo on
+  the main thread, no servicing thread) — the last hard hazard in this family.
 
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
