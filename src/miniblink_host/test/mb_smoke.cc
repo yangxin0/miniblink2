@@ -2053,6 +2053,26 @@ int main() {
                (no_overflow ? "1" : "0") + " complete=" + (complete ? "1" : "0"));
   }
 
+  // 97. mbFocusSelector / mbBlurSelector fire focus/blur and update activeElement.
+  // Blur is the validation trigger (the handler reads the field's value).
+  {
+    mbLoadHTML(v,
+        "<body><input id='i' onfocus='window.__f=1' "
+        "onblur='window.__b=this.value'><button id='other'>o</button></body>",
+        "about:blank");
+    const bool foc = mbFocusSelector(v, "#i") == 1;
+    const bool focused = Eval(v, "document.activeElement.id") == "i" &&
+                         Eval(v, "String(window.__f||0)") == "1";
+    mbRunJS(v, "document.getElementById('i').value='typed';");
+    const bool blr = mbBlurSelector(v, "#i") == 1;
+    const bool blurred = Eval(v, "document.activeElement.id") != "i" &&
+                         Eval(v, "String(window.__b||'')") == "typed";
+    Expect(foc && focused && blr && blurred,
+           "mbFocusSelector/mbBlurSelector fire focus/blur (blur = validation)",
+           std::string("foc=") + (focused ? "1" : "0") + " blur=" +
+               (blurred ? "1" : "0"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

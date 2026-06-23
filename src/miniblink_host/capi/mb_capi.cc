@@ -114,6 +114,18 @@ int mbRightClickSelector(mbView* v, const char* css_selector) {
   return v->impl->RightClickSelector(css_selector) ? 1 : 0;
 }
 
+int mbFocusSelector(mbView* v, const char* css_selector) {
+  if (!v || !v->impl || !css_selector)
+    return 0;
+  return v->impl->FocusSelector(css_selector) ? 1 : 0;
+}
+
+int mbBlurSelector(mbView* v, const char* css_selector) {
+  if (!v || !v->impl || !css_selector)
+    return 0;
+  return v->impl->BlurSelector(css_selector) ? 1 : 0;
+}
+
 int mbGetContentSize(mbView* v, int* w, int* h) {
   if (!v || !v->impl)
     return 0;

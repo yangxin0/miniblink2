@@ -93,6 +93,12 @@ MB_EXPORT int mbDoubleClickSelector(mbView*, const char* css_selector);
 // contextmenu event — for right-click menus. Returns 1 on success, 0 otherwise.
 MB_EXPORT int mbRightClickSelector(mbView*, const char* css_selector);
 
+// Focus / blur the first element matching `css_selector` (HTMLElement.focus() /
+// .blur()), firing focus/focusin or blur/focusout. Blur is commonly what
+// triggers form-field validation. Returns 1 on success, 0 if nothing matches.
+MB_EXPORT int mbFocusSelector(mbView*, const char* css_selector);
+MB_EXPORT int mbBlurSelector(mbView*, const char* css_selector);
+
 // Write the full scrollable document size (logical px; >= the viewport) into
 // *w/*h (either may be NULL). For a full-page screenshot: mbGetContentSize ->
 // mbResize(view, w, h) -> mbPaintToBitmap. Returns 1 on success.

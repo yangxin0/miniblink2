@@ -371,6 +371,28 @@ bool MbWebView::HoverSelector(const char* css_selector) {
   return true;
 }
 
+bool MbWebView::FocusSelector(const char* css_selector) {
+  // Focus the first match (HTMLElement.focus()), firing focus/focusin — for
+  // focusing non-clickable focusables before key input. False if no match.
+  if (!css_selector)
+    return false;
+  std::string js = "(function(){var e=document.querySelector(\"" +
+                   JsEscape(css_selector) +
+                   "\");if(!e||!e.focus)return '0';e.focus();return '1';})()";
+  return EvalToString(js.c_str()) == "1";
+}
+
+bool MbWebView::BlurSelector(const char* css_selector) {
+  // Blur the first match (HTMLElement.blur()), firing blur/focusout — commonly
+  // what triggers form-field validation. False if no match.
+  if (!css_selector)
+    return false;
+  std::string js = "(function(){var e=document.querySelector(\"" +
+                   JsEscape(css_selector) +
+                   "\");if(!e||!e.blur)return '0';e.blur();return '1';})()";
+  return EvalToString(js.c_str()) == "1";
+}
+
 bool MbWebView::GetElementRect(const char* css_selector, int* x, int* y, int* w,
                                int* h) {
   if (!css_selector)

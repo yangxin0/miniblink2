@@ -63,6 +63,10 @@ class MbWebView {
   bool DoubleClickSelector(const char* css_selector);
   // Right-click the first match's center (fires contextmenu).
   bool RightClickSelector(const char* css_selector);
+  // Focus / blur the first match (HTMLElement.focus()/blur()). Blur commonly
+  // triggers form-field validation.
+  bool FocusSelector(const char* css_selector);
+  bool BlurSelector(const char* css_selector);
   // Full scrollable document size (logical px), >= viewport — for full-page
   // capture (resize to this height, then paint).
   bool GetContentSize(int* w, int* h);

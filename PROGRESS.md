@@ -1841,6 +1841,12 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   two-call pattern captures the whole document. Locks in a critical safety property (a buffer
   overflow here would be a security bug). 117/117.
 
+- ✅ DONE: mbFocusSelector + mbBlurSelector (2026-06-24): focus/blur an arbitrary element
+  (HTMLElement.focus()/blur()) firing focus/focusin and blur/focusout. Blur is the common
+  form-field validation trigger (validators run on blur), which the click/fill suite couldn't
+  invoke standalone. Smoke case 97: focus sets activeElement + fires onfocus; blur fires onblur
+  (reading the typed value) + moves focus away. 118/118. C API now 59 fns.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.
