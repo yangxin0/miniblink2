@@ -1356,6 +1356,17 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   response path). The hard known blocker (the [Sync] associated-binding deadlock) is SOLVED + the
   mechanism captured; blob: URL now hinges on this separate, narrower fetch-security barrier.
 
+- ✅ Advanced CSS paint verified: ::before generated content + clip-path polygon (2026-06-24):
+  diversified off blob: URL (deadlock solved + documented; the fetch-security barrier is a dedicated
+  session, not worth more circling). Two more modern-CSS paint-correctness guards: (1) CSS generated
+  content — #g::before{content:'';...background:#00ff00} paints a green box (pixel check at (10,10))
+  AND getComputedStyle(el,'::before').backgroundColor reads rgb(0,255,0); ubiquitous (icons/badges/
+  numbering). (2) clip-path:polygon(0 0,100% 0,0 100%) clips a blue box to a top-left triangle —
+  inside (8,8) is blue, the clipped corner (70,70) is page background; a distinct clip mechanism from
+  border-radius (smoke 54). Smoke 70-71. 84/84, no survivors. The rendering-correctness suite now
+  spans layout, basic + advanced paint (filters/clip/shadow/gradient/blend-adjacent), text/glyphs,
+  SVG, generated content, and clip-path — all asserting CORRECT output.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

@@ -1292,6 +1292,42 @@ int main() {
            "fetch('data:...') resolves: .text(), .arrayBuffer(), .blob()");
   }
 
+  // 70. CSS generated content (::before) renders. Ubiquitous (icons, badges,
+  // quotes, numbering). Assert both the computed-style content and that the
+  // generated box actually paints (a green ::before block at top-left).
+  {
+    mbLoadHTML(v,
+      "<style>#g::before{content:'';display:block;width:50px;height:50px;"
+      "background:#00ff00}</style><body style='margin:0;background:#fff'>"
+      "<div id='g'>x</div></body>", "about:blank");
+    std::vector<uint8_t> bpx(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, bpx.data(), W, H, W * 4);
+    size_t bi = (10u * W + 10u) * 4;  // inside the ::before box
+    bool painted = bpx[bi + 1] == 255 && bpx[bi + 2] == 0 && bpx[bi] == 0;  // green
+    bool computed =
+        Eval(v, "getComputedStyle(document.getElementById('g'),'::before')"
+                ".backgroundColor") == "rgb(0, 255, 0)";
+    Expect(painted && computed,
+           "CSS ::before generated content paints + computed style reads it");
+  }
+
+  // 71. clip-path polygon clips paint to an arbitrary shape (distinct from
+  // border-radius). A top-left triangle: inside it paints, the clipped corner
+  // shows the page background.
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0;background:#ffffff'>"
+      "<div style='width:80px;height:80px;background:#0000ff;"
+      "clip-path:polygon(0 0,100% 0,0 100%)'></div></body>", "about:blank");
+    std::vector<uint8_t> clp(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, clp.data(), W, H, W * 4);
+    size_t tin = (8u * W + 8u) * 4;        // inside the triangle -> blue
+    size_t tout = (70u * W + 70u) * 4;     // clipped corner -> white
+    Expect(clp[tin] == 255 && clp[tin + 2] == 0 &&                         // blue
+               clp[tout] == 255 && clp[tout + 1] == 255 && clp[tout + 2] == 255,
+           "clip-path: polygon() clips paint to the shape");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
