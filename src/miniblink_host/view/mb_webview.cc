@@ -349,6 +349,16 @@ bool MbWebView::DoubleClickSelector(const char* css_selector) {
   return true;
 }
 
+bool MbWebView::RightClickSelector(const char* css_selector) {
+  // Right-click the first match's center (fires contextmenu — right-click menus).
+  int x = 0, y = 0, w = 0, h = 0;
+  if (!widget_ || !GetElementRect(css_selector, &x, &y, &w, &h) ||
+      (w <= 0 && h <= 0))
+    return false;
+  widget_->SendRightClick(x + w / 2, y + h / 2);
+  return true;
+}
+
 bool MbWebView::HoverSelector(const char* css_selector) {
   // Move the pointer to the first match's center, generating mousemove +
   // mouseover/mouseenter and applying :hover — for dropdown menus, tooltips, and

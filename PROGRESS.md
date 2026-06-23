@@ -1812,6 +1812,26 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   double-click does. 115/115. C API now 56 fns. Interaction set: click/dblclick/fill/select/hover/
   key/text — complete.
 
+- ✅ DONE: mbRightClickSelector — contextmenu automation (2026-06-24): MbWidget::SendRightClick
+  sends a right mousedown+up so Blink fires contextmenu (right-click menus). Smoke case 95 verifies
+  the handler fires. 116/116. C API now 57 fns. Interaction set: click/dblclick/rightclick/fill/
+  select/hover/key/text — fully complete.
+- 🔑 fetch(blob:) NOW DE-RISKED — both enablers found this tick (the plan is fully actionable for a
+  dedicated session; ~250 lines, deferred only because it's too big for one end-clean tick):
+  1. INTERCEPTION: MbFrameClient can OVERRIDE WebLocalFrameClient::GetRemoteNavigationAssociated
+     Interfaces() to return our own blink::AssociatedInterfaceProvider, on which we register a
+     BlobURLStore binder (AssociatedInterfaceProvider::OverrideBinderForTesting exists). When
+     PublicURLManager calls frame->GetRemoteNavigationAssociatedInterfaces()->GetInterface(BlobURLStore),
+     it hits OUR provider -> binds MbBlobURLStore (on the service thread; Register is [Sync]).
+  2. BYTE DELIVERY: MbBlob ALREADY has a Load(URLLoader, method, headers, URLLoaderClient) override
+     (currently a stub) — blink::mojom::Blob::Load is the blob's own URL-load entry point. So the
+     URLLoaderFactory from ResolveAsURLLoaderFactory is a THIN shim whose CreateLoaderAndStart just
+     forwards to blob->Load(loader, request.method, headers, client). Implement MbBlob::Load to
+     deliver: build a network::mojom::URLResponseHead (mime), OnReceiveResponse(head, consumer),
+     stream data_ via the existing BlobReadSession into the producer, OnComplete(net::OK).
+  COMPONENTS: MbBlobURLStore (4 methods) + MbBlobURLLoaderFactory (2-method shim) + MbBlob::Load
+  impl + the AssociatedInterfaceProvider wiring. No remaining unknowns.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

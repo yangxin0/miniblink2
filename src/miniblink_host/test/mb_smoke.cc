@@ -2005,6 +2005,20 @@ int main() {
                (dbl ? "1" : "0") + " dc=" + (dc ? "1" : "0"));
   }
 
+  // 95. mbRightClickSelector fires contextmenu (preventDefault to keep it inert).
+  {
+    mbLoadHTML(v,
+        "<body style='margin:0'><div id='r' style='width:100px;height:40px' "
+        "oncontextmenu='window.__cm=1;return false'>x</div></body>",
+        "about:blank");
+    std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // layout for hit-testing
+    const bool rc = mbRightClickSelector(v, "#r") == 1;
+    mbWait(v, 30);
+    Expect(rc && Eval(v, "String(window.__cm||0)") == "1",
+           "mbRightClickSelector fires contextmenu");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

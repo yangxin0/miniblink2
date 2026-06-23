@@ -107,6 +107,27 @@ void MbWidget::SendDoubleClick(int x, int y) {
       make(blink::WebInputEvent::Type::kMouseUp, 2), ui::LatencyInfo()));
 }
 
+void MbWidget::SendRightClick(int x, int y) {
+  if (!widget_)
+    return;
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  auto make = [&](blink::WebInputEvent::Type type) {
+    blink::WebMouseEvent e(type, blink::WebInputEvent::kNoModifiers,
+                           base::TimeTicks::Now());
+    e.pointer_type = blink::WebPointerProperties::PointerType::kMouse;
+    e.SetPositionInWidget(x, y);
+    e.SetPositionInScreen(x, y);
+    e.button = blink::WebMouseEvent::Button::kRight;
+    e.click_count = 1;
+    return e;
+  };
+  // Right mousedown+up; Blink fires `contextmenu` (right-click menus).
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+      make(blink::WebInputEvent::Type::kMouseDown), ui::LatencyInfo()));
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+      make(blink::WebInputEvent::Type::kMouseUp), ui::LatencyInfo()));
+}
+
 void MbWidget::SendMouseMove(int x, int y) {
   if (!widget_)
     return;

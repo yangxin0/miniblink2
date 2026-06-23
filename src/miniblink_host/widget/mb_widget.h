@@ -33,6 +33,7 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   void Resize(int width, int height);
   void SendMouseClick(int x, int y);  // synthesize mousedown+mouseup at (x,y)
   void SendDoubleClick(int x, int y); // two clicks (count 1 then 2) -> dblclick
+  void SendRightClick(int x, int y);  // right mousedown+up -> contextmenu
   void SendMouseMove(int x, int y);   // move pointer to (x,y): hover + mousemove
   void SendText(const char* utf8);    // type ASCII text into the focused element
   // Press a named non-text key ("Enter", "Tab", "Escape", "Backspace", "Delete",

@@ -61,6 +61,8 @@ class MbWebView {
   bool HoverSelector(const char* css_selector);
   // Double-click the first match's center (fires dblclick).
   bool DoubleClickSelector(const char* css_selector);
+  // Right-click the first match's center (fires contextmenu).
+  bool RightClickSelector(const char* css_selector);
   // Full scrollable document size (logical px), >= viewport — for full-page
   // capture (resize to this height, then paint).
   bool GetContentSize(int* w, int* h);
