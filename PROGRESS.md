@@ -1620,6 +1620,27 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   LIMITATION: still no multipart file upload (kFile/kDataPipe body elements). The fetch/XHR network
   surface (method + body + headers) is now complete for the common JSON/urlencoded API case.
 
+- ✅✅ DONE: HTTP response status + headers exposed to JS — shipped (2026-06-24): MbURLLoader
+  hardcoded SetHttpStatusCode(200) and only set Content-Type, and FetchHttp turned any non-2xx/3xx
+  into a failure. So fetch saw a 404/500 as a rejected TypeError (not a Response with .status/.ok),
+  and Response.headers.get()/XHR getResponseHeader returned nothing. FIX: (1) FetchHttp captures the
+  final response's header block (CURLOPT_HEADERFUNCTION + a callback that resets on each HTTP/ status
+  line, so redirects/retries leave only the last response) and the status code, via new out params;
+  it now returns true for ANY complete HTTP response (incl. 4xx/5xx) — only a transport error (no
+  response) is a failure. (2) MbURLLoader::Deliver sets response.SetHttpStatusCode(real) and parses
+  the header block to SetHttpHeaderField each (skipping content-length/transfer-encoding which Blink
+  derives). VERIFIED vs httpbin (mb_shot + smoke case 39): fetch /status/404 -> 404/ok=false (was
+  TypeError); /response-headers?X-Smk=sv1 -> readable. Default suite 98/98. Knock-on: a 404
+  navigation now commits the error page instead of blank — correct. Also made smoke case 38 match
+  the header VALUE not the key (httpbin Title-Cases, postman-echo lowercases).
+- ⚠️ KNOWN REGRESSION TO FIX NEXT (2026-06-24): the document.cookie -> HTTP-jar bridge is broken —
+  gated net case 33 "cookie bridge" fails. Server Set-Cookie values ARE sent on later requests
+  (case-38 echo shows Cookie: expk=...; mbck=...), but a value set via document.cookie on an http
+  origin does NOT reach the curl jar. Most likely regressed when the cookie manager / MbAddCookieToJar
+  moved to the runtime service thread (commit 167e332) — curl COOKIELIST injection there may not land
+  in the shared jar the main-thread fetches read. Dedicated next tick: trace MbAddCookieToJar on the
+  service thread vs CookieShare.
+
 ### REMAINING ROADMAP
 - P0-history: page-driven history.back()/forward() does nothing — History::back() ->
   LocalFrameClientImpl::NavigateBackForward -> LocalFrameHost.GoToEntryAtOffset (mojo to the absent

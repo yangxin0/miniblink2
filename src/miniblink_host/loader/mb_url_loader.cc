@@ -50,6 +50,18 @@ size_t CurlWrite(char* ptr, size_t size, size_t nmemb, void* userdata) {
   return size * nmemb;
 }
 
+// Captures the response header block. Resets on each "HTTP/..." status line so
+// that after retries and redirects the buffer holds only the FINAL response's
+// headers (the ones the caller should expose to JS).
+size_t CurlHeaderWrite(char* ptr, size_t size, size_t nmemb, void* userdata) {
+  const size_t n = size * nmemb;
+  std::string* buf = static_cast<std::string*>(userdata);
+  if (std::string_view(ptr, n).rfind("HTTP/", 0) == 0)
+    buf->clear();
+  buf->append(ptr, n);
+  return n;
+}
+
 // A transient failure is worth retrying: it's a network-layer hiccup (DNS/TLS/
 // connect/timeout/dropped-connection) or a server backpressure code (429/5xx),
 // not a deterministic answer like 404/403 that a retry can't change.
@@ -121,11 +133,15 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
                const std::string& user_agent, const std::string& extra_headers,
                const std::string& post_body = "",
                const std::string& post_content_type = "",
-               const std::string& http_method = "") {
+               const std::string& http_method = "", int* out_status = nullptr,
+               std::string* out_headers = nullptr) {
   CURL* curl = curl_easy_init();
   if (!curl)
     return false;
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  std::string header_block;  // final response's raw header lines (for the caller)
+  curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, CurlHeaderWrite);
+  curl_easy_setopt(curl, CURLOPT_HEADERDATA, &header_block);
   // Method + body. A non-GET verb (form submit, fetch/XHR POST/PUT/DELETE…) or a
   // non-empty body makes this a write request. COPYPOSTFIELDS copies the body so
   // it survives retries; CUSTOMREQUEST sets the exact verb (POST is otherwise
@@ -188,16 +204,17 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
 
   constexpr int kMaxAttempts = 3;
-  bool ok = false;
+  CURLcode rc = CURLE_OK;
+  long http_code = 0;
   for (int attempt = 1; attempt <= kMaxAttempts; ++attempt) {
     body->clear();  // CurlWrite appends; start each attempt fresh
-    const CURLcode rc = curl_easy_perform(curl);
-    long http_code = 0;
+    rc = curl_easy_perform(curl);
+    http_code = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
     const bool success_code =
         rc == CURLE_OK && http_code >= 200 && http_code < 400;
-    ok = success_code && !body->empty();
+    const bool ok = success_code && !body->empty();
     // An empty body on an otherwise-OK response is anomalous — it's the exact
     // shape a throttled/half-open connection produces, and it's what made bursts
     // of requests render blank. Treat it as transient and retry.
@@ -224,10 +241,18 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   curl_easy_getinfo(curl, CURLINFO_CONTENT_TYPE, &ct);
   if (ct)
     *content_type = ct;
+  if (out_status)
+    *out_status = static_cast<int>(http_code);
+  if (out_headers)
+    *out_headers = std::move(header_block);
   curl_easy_cleanup(curl);
   if (header_list)
     curl_slist_free_all(header_list);
-  return ok;
+  // Success means we got a complete HTTP response — ANY status, incl. 4xx/5xx.
+  // Those are real answers the caller must deliver (fetch needs response.status
+  // and the error body; a 404 page should render), NOT network failures. Only a
+  // transport error (no response at all) returns false.
+  return rc == CURLE_OK && http_code > 0;
 }
 }  // namespace
 
@@ -382,6 +407,8 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
 
   std::string contents;
   std::string http_content_type;  // from the server, may be "text/html; charset=..."
+  int http_status = 0;            // real HTTP status (0 -> treat as 200)
+  std::string resp_headers;       // raw final-response header block (http only)
   bool ok = false;
   if (url.SchemeIsFile()) {
     base::FilePath fp;  // net path conversion percent-decodes (spaces etc.)
@@ -414,7 +441,8 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
       req_headers += kv.key + ": " + kv.value;
     }
     ok = FetchHttp(url.spec(), &contents, &http_content_type, user_agent_,
-                   req_headers, post_body, post_ct, request->method);
+                   req_headers, post_body, post_ct, request->method,
+                   &http_status, &resp_headers);
   } else if (url.SchemeIs("data")) {
     // Decode the data: URL in-process (libcurl doesn't serve it); the parsed
     // mime flows into the response Content-Type below via http_content_type.
@@ -449,10 +477,38 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   blink::WebURLResponse response;
   response.SetCurrentRequestUrl(ToWebURL(url));
   response.SetMimeType(blink::WebString::FromUtf8(mime_str));
+  // Expose the server's response headers to JS (fetch Response.headers.get(),
+  // XHR getResponseHeader) — set them before Content-Type so the explicit one
+  // below wins, and skip headers Blink derives from the delivered bytes.
+  if (!resp_headers.empty()) {
+    std::string hline;
+    std::string hbuf = resp_headers;
+    hbuf.push_back('\n');  // flush sentinel
+    for (char c : hbuf) {
+      if (c == '\n' || c == '\r') {
+        std::string::size_type colon = hline.find(':');
+        if (colon != std::string::npos && hline.rfind("HTTP/", 0) != 0) {
+          std::string name = hline.substr(0, colon);
+          std::string value = hline.substr(colon + 1);
+          while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+            value.erase(value.begin());
+          const std::string lname = ToLower(name);
+          if (lname != "content-length" && lname != "transfer-encoding") {
+            response.SetHttpHeaderField(blink::WebString::FromUtf8(name),
+                                        blink::WebString::FromUtf8(value));
+          }
+        }
+        hline.clear();
+      } else {
+        hline.push_back(c);
+      }
+    }
+  }
   // Stylesheets validate the Content-Type *header* (CSSStyleSheetResource::CanUseSheet).
   response.SetHttpHeaderField(blink::WebString::FromUtf8("Content-Type"),
                               blink::WebString::FromUtf8(content_type_header));
-  response.SetHttpStatusCode(200);
+  // Real HTTP status (so fetch sees 404/500 + response.ok); file/data -> 200.
+  response.SetHttpStatusCode(http_status > 0 ? http_status : 200);
   response.SetExpectedContentLength(static_cast<int64_t>(contents.size()));
 
   // Deliver the body via a real Mojo data pipe (the production path). This is required

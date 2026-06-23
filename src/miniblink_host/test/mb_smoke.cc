@@ -548,7 +548,9 @@ int main() {
         ("window.__fh='';fetch('" + host +
          "/headers',{headers:{'X-Mb-Tok':'mbtok7'}})"
          ".then(function(r){return r.json();}).then(function(j){"
-         "var h=j.headers||{};window.__fh=h['x-mb-tok']||'MISSING';})"
+         // Match the value, not the key: echo hosts differ on header-name case
+         // (httpbin Title-Cases, postman-echo lowercases).
+         "window.__fh=JSON.stringify(j.headers||{});})"
          ".catch(function(e){window.__fh='ERR:'+e.name;});").c_str());
     mbWait(v, 1500);  // async fetch round-trip
     std::string r = Eval(v, "String(window.__fh)");
@@ -558,6 +560,34 @@ int main() {
     } else {
       std::fprintf(stderr, "  [SKIP] fetch headers (host unreachable: %s)\n",
                    r.c_str());
+    }
+  }
+
+  // 39. Response status + headers: an HTTP error (404) must resolve as a real
+  // Response (status 404, ok=false), NOT a rejected fetch — and a server
+  // response header must be readable. Previously 4xx/5xx were turned into
+  // network failures (TypeError) and only Content-Type was exposed. (httpbin
+  // shapes: /status/404 and /response-headers?k=v.)
+  {
+    mbLoadHTML(v, "<body>x</body>", (host + "/").c_str());
+    mbRunJS(v,
+        ("window.__rs='';fetch('" + host +
+         "/status/404').then(function(r){window.__rs=r.status+'/'+r.ok;})"
+         ".catch(function(e){window.__rs='ERR:'+e.name;});"
+         "window.__rh='';fetch('" + host +
+         "/response-headers?X-Smk=sv1').then(function(r){"
+         "window.__rh=r.headers.get('X-Smk')||'MISSING';})"
+         ".catch(function(e){window.__rh='ERR:'+e.name;});").c_str());
+    mbWait(v, 1800);  // two async round-trips
+    std::string st = Eval(v, "String(window.__rs)");
+    std::string hd = Eval(v, "String(window.__rh)");
+    if (!st.empty() && st.rfind("ERR:", 0) != 0) {  // host responded
+      Expect(st == "404/false" && hd == "sv1",
+             "fetch sees real HTTP status (404, !ok) + response headers",
+             st + " hdr=" + hd);
+    } else {
+      std::fprintf(stderr, "  [SKIP] response status/headers (unreachable: %s)\n",
+                   st.c_str());
     }
   }
   }  // MB_NET_TESTS
