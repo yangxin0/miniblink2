@@ -65,6 +65,10 @@ MB_EXPORT void mbSetDeviceScaleFactor(mbView*, float scale);
 // restore the built-in default.
 MB_EXPORT void mbSetUserAgent(mbView*, const char* utf8_ua);
 
+// Capture with a transparent background (1) or opaque white (0, default). With
+// transparency on, areas the page does not paint keep alpha 0 in the output.
+MB_EXPORT void mbSetTransparentBackground(mbView*, int transparent);
+
 // Type ASCII text into the focused element (synthesized key events).
 MB_EXPORT void mbSendText(mbView*, const char* utf8_text);
 

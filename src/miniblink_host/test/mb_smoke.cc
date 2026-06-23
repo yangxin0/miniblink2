@@ -233,6 +233,25 @@ int main() {
            "clip: region capture lands on the element");
   }
 
+  // 21. Transparent background (omitBackground): a page with no opaque body bg and a
+  // single opaque green box. Outside the box must be alpha 0; inside, opaque green.
+  mbSetTransparentBackground(v, 1);
+  mbLoadHTML(v,
+             "<body style='margin:0;background:transparent'>"
+             "<div style='position:absolute;left:0;top:0;width:30px;height:30px;"
+             "background:#00ff00'></div></body>",
+             "about:blank");
+  {
+    std::vector<uint8_t> tpx(static_cast<size_t>(W) * H * 4, 0xAB);
+    mbPaintToBitmap(v, tpx.data(), W, H, W * 4);
+    const size_t inside = (static_cast<size_t>(10) * W + 10) * 4;  // in the box
+    const size_t outside = (static_cast<size_t>(200) * W + 300) * 4;  // empty area
+    Expect(tpx[inside + 3] == 255 && tpx[inside + 1] == 255 &&
+               tpx[outside + 3] == 0,
+           "transparent background (omitBackground)");
+  }
+  mbSetTransparentBackground(v, 0);  // restore default for any later use
+
   mbDestroyView(v);
   mbShutdown();
 

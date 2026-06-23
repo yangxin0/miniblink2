@@ -10,6 +10,8 @@
 //   --clip x,y,w,h     capture only that logical rectangle of the page.
 //   --selector CSS     capture only the bounding box of the first element matching CSS
 //                      (an element screenshot). Overrides --clip.
+//   --transparent      capture with a transparent background (omitBackground) — areas the
+//                      page doesn't paint keep alpha 0 in the PNG.
 //
 // This is the "product" the host enables: a standalone, single-process, modern-Blink
 // screenshot tool — no browser process, no CEF.
@@ -30,6 +32,7 @@ constexpr int kMaxFullPageHeight = 20000;
 
 int main(int argc, char** argv) {
   bool full_page = false;
+  bool transparent = false;
   float scale = 1.0f;
   std::string clip;      // "x,y,w,h"
   std::string selector;  // CSS selector -> capture that element's box
@@ -38,6 +41,8 @@ int main(int argc, char** argv) {
     const std::string a = argv[i];
     if (a == "--full") {
       full_page = true;
+    } else if (a == "--transparent") {
+      transparent = true;
     } else if (a == "--scale" && i + 1 < argc) {
       scale = static_cast<float>(std::atof(argv[++i]));
       if (scale <= 0.0f)
@@ -54,7 +59,8 @@ int main(int argc, char** argv) {
     std::fprintf(
         stderr,
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
-        "<input.html|file://URL|http(s)://URL> <out.png> [width height]\n",
+        "[--transparent] <input.html|file://URL|http(s)://URL> <out.png> "
+        "[width height]\n",
         argv[0]);
     return 2;
   }
@@ -74,6 +80,8 @@ int main(int argc, char** argv) {
   }
   if (scale != 1.0f)
     mbSetDeviceScaleFactor(view, scale);  // before load so DPR-aware content responds
+  if (transparent)
+    mbSetTransparentBackground(view, 1);
 
   const bool is_http = input.rfind("http", 0) == 0;
   if (input.rfind("file://", 0) == 0 || is_http) {

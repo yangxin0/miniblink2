@@ -505,6 +505,17 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   --selector --scale 2 -> 600x360 (composes with HiDPI); no-match -> message + rc=1. Smoke
   20: green box at (50,60,100,40), clip exactly to it, assert all-green. 20/20.
 
+- ✅ TRANSPARENT BACKGROUND / omitBackground (2026-06-23 16:?): mbSetTransparentBackground +
+  mb_shot --transparent. The compositor API SetBaseBackgroundColorOverrideTransparent
+  DCHECKs does_composite_ (blocked); used SetBaseBackgroundColorOverrideForInspector(
+  SK_ColorTRANSPARENT) instead — no composite check, feeds the same BaseBackgroundColor()
+  which returns transparent when the inspector override is set. PaintInto also clears to
+  SK_ColorTRANSPARENT so unpainted areas keep alpha 0. Verified: opaque PNG hasAlpha=no,
+  --transparent PNG hasAlpha=yes; smoke 21: opaque green box -> inside alpha 255 + green,
+  empty area alpha 0. 21/21. THIRD compositor-assumption API routed via the inspector
+  override (after DSF and... well, base color) — pattern: when does_composite_ blocks an
+  override, the DevTools/inspector override twin usually doesn't.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 
 #include "miniblink_host/frame/mb_frame_client.h"
 #include "miniblink_host/frame/mb_view_client.h"
@@ -203,6 +204,18 @@ void MbWebView::SetUserAgent(const char* utf8_ua) {
     frame_client_->SetUserAgent(utf8_ua ? utf8_ua : "");
 }
 
+void MbWebView::SetTransparentBackground(bool transparent) {
+  transparent_bg_ = transparent;
+  if (!web_view_)
+    return;
+  // The compositor path (SetBaseBackgroundColorOverrideTransparent) DCHECKs
+  // does_composite_; the inspector base-color override has no such check and feeds
+  // the same BaseBackgroundColor(), so use it. PaintInto also clears to transparent
+  // so areas the document doesn't paint keep alpha 0.
+  web_view_->SetBaseBackgroundColorOverrideForInspector(
+      transparent ? std::optional<SkColor>(SK_ColorTRANSPARENT) : std::nullopt);
+}
+
 void MbWebView::SetDeviceScaleFactor(float scale) {
   dsf_ = scale > 0.0f ? scale : 1.0f;
   if (!web_view_ || !web_view_->GetPage())
@@ -299,7 +312,9 @@ bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y) {
     return false;
 
   // Replay Blink's recorded paint ops straight into the canvas (no compositor).
-  canvas.clear(SK_ColorWHITE);
+  // Transparent capture (omitBackground): clear to 0 alpha so unpainted areas
+  // stay transparent; otherwise an opaque white base like a normal screenshot.
+  canvas.clear(transparent_bg_ ? SK_ColorTRANSPARENT : SK_ColorWHITE);
   // HiDPI: the paint record is in CSS px; scaling the canvas makes skia re-raster
   // glyphs/vectors crisply at the device pixel ratio into the (logical*dsf) bitmap.
   if (dsf_ != 1.0f)

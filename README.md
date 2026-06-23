@@ -36,7 +36,7 @@ that satisfies modern Blink so it runs without the full browser.
 The deliverable example app — a standalone headless screenshot renderer:
 
 ```sh
-mb_shot [--full] [--scale N] [--clip x,y,w,h | --selector CSS] \
+mb_shot [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
         <input.html | file://URL | http(s)://URL> <out.png> [width height]
 ```
 
@@ -54,6 +54,9 @@ text and 2x `srcset`/`min-resolution` media-query selection. The flags compose, 
 bounding box of the first element matching the selector (an element screenshot) — e.g.
 `mb_shot --selector "#card" page.html card.png` writes a PNG sized exactly to that element.
 Clip/selector compose with `--scale` (the output is `w*N × h*N`).
+
+`--transparent` captures with a transparent background (Puppeteer's `omitBackground`): areas
+the page doesn't paint keep alpha 0, so the PNG can be composited over other content.
 
 Rendered by `mb_shot` from an HTML file (gradient, CSS grid, translucent cards, a
 rotated card, and JS-injected text — all modern Blink, headless, no CEF):
@@ -132,6 +135,7 @@ void  mbSendMouseClick(mbView*, int x, int y);      // synthesize a click
 void  mbSendMouseMove(mbView*, int x, int y);       // move pointer: hover + mousemove
 void  mbSetDeviceScaleFactor(mbView*, float scale); // HiDPI: devicePixelRatio + Nx raster
 void  mbSetUserAgent(mbView*, const char* ua);      // navigator.userAgent + HTTP requests
+void  mbSetTransparentBackground(mbView*, int on);  // omitBackground: alpha-preserving capture
 void  mbSendText(mbView*, const char* text);        // type UTF-8 into the focused element
 void  mbSendScroll(mbView*, int x, int y, int dx, int dy);  // scroll the page (dy>0 = down)
 int   mbPaintToBitmap(mbView*, void* bgra, int w, int h, int stride);
@@ -157,11 +161,11 @@ Requirements: a Chromium M150 source tree with a component `out/Release`
 ./build.sh /path/to/chromium-150.x.y.z   # stages host into the tree, gn gen, ninja, runs the suite
 ```
 
-`mb_smoke` is a 20-case capability test suite (HTML/DOM, JS, CSS computed style, UA
+`mb_smoke` is a 21-case capability test suite (HTML/DOM, JS, CSS computed style, UA
 stylesheet, the `mbRunJS`+`mbEvalJS` bridge, `<canvas>` getImageData, external `<link>`
 CSS via the subresource loader, paint-to-bitmap, synthesized click, typed text (ASCII +
 UTF-8 accent/CJK/emoji), programmatic scroll, mouse-move/hover, embedded-NUL document
 integrity, full-page capture (resize → reflow → render below the fold), HiDPI
-(devicePixelRatio + resolution media queries), User-Agent (default + override), and clip/
-region capture) — it prints PASS/FAIL per case and exits non-zero on any failure, so it
-doubles as a regression test.
+(devicePixelRatio + resolution media queries), User-Agent (default + override), clip/
+region capture, and transparent background) — it prints PASS/FAIL per case and exits
+non-zero on any failure, so it doubles as a regression test.

@@ -83,6 +83,11 @@ void mbSetUserAgent(mbView* v, const char* utf8_ua) {
     v->impl->SetUserAgent(utf8_ua);
 }
 
+void mbSetTransparentBackground(mbView* v, int transparent) {
+  if (v && v->impl)
+    v->impl->SetTransparentBackground(transparent != 0);
+}
+
 void mbSendText(mbView* v, const char* utf8_text) {
   if (v && v->impl)
     v->impl->SendText(utf8_text);

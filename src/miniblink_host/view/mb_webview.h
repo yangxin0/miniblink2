@@ -53,6 +53,9 @@ class MbWebView {
   // Override the User-Agent for navigator.userAgent and outgoing requests. Set
   // before LoadURL/LoadHTML to take effect for that navigation.
   void SetUserAgent(const char* utf8_ua);
+  // Capture with a transparent base background (omitBackground): unpainted areas
+  // keep alpha 0 instead of being filled white.
+  void SetTransparentBackground(bool transparent);
   void SendScroll(int x, int y, int dx, int dy);
   std::string EvalToString(const char* utf8_script);  // eval JS -> string result
   bool PaintToBitmap(void* out_bgra, int w, int h, int stride);
@@ -81,6 +84,7 @@ class MbWebView {
   [[maybe_unused]] blink::WebViewImpl* web_view_ = nullptr;     // owned by blink; Close() in dtor
   [[maybe_unused]] blink::WebLocalFrame* main_frame_ = nullptr; // owned by blink
   float dsf_ = 1.0f;  // device pixel ratio; PaintInto scales the canvas by it
+  bool transparent_bg_ = false;  // omitBackground: clear to alpha 0
 };
 
 }  // namespace mb
