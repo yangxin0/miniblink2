@@ -59,6 +59,9 @@ class MbWebView {
   bool ClickSelector(const char* css_selector);
   // Move the pointer to the first match's center (mousemove + mouseover + :hover).
   bool HoverSelector(const char* css_selector);
+  // Full scrollable document size (logical px), >= viewport — for full-page
+  // capture (resize to this height, then paint).
+  bool GetContentSize(int* w, int* h);
   // First match's viewport-relative bounding box (logical px) via out-params;
   // false if no element matches. Composes with PaintRectToBitmap (element shot).
   bool GetElementRect(const char* css_selector, int* x, int* y, int* w, int* h);

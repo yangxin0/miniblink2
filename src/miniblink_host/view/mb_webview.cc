@@ -304,6 +304,22 @@ bool MbWebView::ClickSelector(const char* css_selector) {
   return true;
 }
 
+bool MbWebView::GetContentSize(int* w, int* h) {
+  // The full scrollable document size (logical px), >= the viewport. For
+  // full-page screenshots: mbResize to this height, then paint — content below
+  // the original fold gets laid out and rendered.
+  std::string s = EvalToString(
+      "(function(){var d=document.documentElement,b=document.body;"
+      "return Math.max(d.scrollWidth,d.clientWidth,b?b.scrollWidth:0)+','+"
+      "Math.max(d.scrollHeight,d.clientHeight,b?b.scrollHeight:0);})()");
+  std::string::size_type comma = s.find(',');
+  if (comma == std::string::npos)
+    return false;
+  if (w) *w = std::atoi(s.substr(0, comma).c_str());
+  if (h) *h = std::atoi(s.substr(comma + 1).c_str());
+  return true;
+}
+
 bool MbWebView::HoverSelector(const char* css_selector) {
   // Move the pointer to the first match's center, generating mousemove +
   // mouseover/mouseenter and applying :hover — for dropdown menus, tooltips, and

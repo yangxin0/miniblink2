@@ -84,6 +84,11 @@ MB_EXPORT int mbClickSelector(mbView*, const char* css_selector);
 // or the element has no box.
 MB_EXPORT int mbHoverSelector(mbView*, const char* css_selector);
 
+// Write the full scrollable document size (logical px; >= the viewport) into
+// *w/*h (either may be NULL). For a full-page screenshot: mbGetContentSize ->
+// mbResize(view, w, h) -> mbPaintToBitmap. Returns 1 on success.
+MB_EXPORT int mbGetContentSize(mbView*, int* w, int* h);
+
 // Fill the first <input>/<textarea> matching `css_selector` with `utf8_text`
 // (Playwright-style fill): focuses it, sets the value via the native setter so
 // frameworks like React observe it, and fires input+change. Returns 1 on

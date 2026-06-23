@@ -1772,6 +1772,26 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   controls. Smoke case 91 verifies BOTH effects: a target's onmouseover handler fires AND its :hover
   CSS rule applies (color rgb(9,8,7)). 112/112. C API now 53 fns.
 
+- ✅ DONE: mbGetContentSize + full-page capture (2026-06-24): full-page screenshot was composable
+  (eval scrollHeight -> mbResize -> paint, as mb_shot --full does) but not discoverable from the C
+  API. mbGetContentSize(&w,&h) returns the full scrollable document size (max of
+  documentElement/body scroll+client w/h). Smoke case 92 verifies the workflow end-to-end: a marker
+  at top:500 (below the 300px viewport) -> mbGetContentSize reports h=540 (the content, NOT the
+  viewport — tightened bound 540..600 after the first run exposed leftover-viewport contamination
+  from an earlier full-page test, fixed by resetting the viewport first) -> resize to 540 + paint ->
+  the marker's pixel at y=520 is blue. 113/113. C API now 54 fns.
+- 🔬 SCOPED (deferred, for a future dedicated effort): fetch(blob:) — concretely mapped this tick.
+  blob: URL registration goes through BlobURLStore, a SMALL 4-method mojom interface
+  (Register[Sync]/Revoke/ResolveAsURLLoaderFactory/ResolveAsBlobURLToken), bound for a frame via
+  frame->GetRemoteNavigationAssociatedInterfaces()->GetInterface — interceptable with
+  OverrideBinderForTesting (the hook the reverted attempt used). Plan: bind MbBlobURLStore on the
+  service thread (Register is [Sync] -> same deadlock class as cookies, solved by off-thread), store
+  url->Blob remote; for fetch, ResolveAsURLLoaderFactory must hand back a URLLoaderFactory that
+  serves the Blob bytes (reuse the MbBlob/MbBlobRegistry data-pipe reader). THE CRUX (why it was
+  reverted): a fetch-side security check appeared to block before CreateLoaderAndStart was called on
+  the returned factory — needs live debugging of the blob-URL origin/security path. Real multi-tick
+  risk; NOT a bounded single tick.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

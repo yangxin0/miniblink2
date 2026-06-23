@@ -1933,6 +1933,39 @@ int main() {
                (css_hover ? "1" : "0"));
   }
 
+  // 92. mbGetContentSize + full-page capture: a page taller than the viewport.
+  // mbGetContentSize reports the full height; resizing to it and painting renders
+  // a marker that sits below the original fold (its pixel becomes its color).
+  {
+    mbResize(v, W, H);  // reset viewport (a prior test may have grown it)
+    // Viewport is H=300; place a blue marker at top:500 (below the fold).
+    mbLoadHTML(v,
+        "<body style='margin:0'><div style='height:500px'></div>"
+        "<div id='m' style='height:40px;background:rgb(0,0,255)'></div></body>",
+        "about:blank");
+    std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // initial layout
+    int cw = 0, ch = 0;
+    const bool got = mbGetContentSize(v, &cw, &ch) == 1;
+    // ~540 content (500+40), NOT the 300 viewport — verifies it's the document
+    // size; the upper bound guards against leftover-viewport contamination.
+    const bool tall = ch >= 540 && ch <= 600;
+    // Full-page capture: grow to content height and paint; the marker (at y~500)
+    // is now in-view and rendered blue (BGRA: B=255,G=0,R=0).
+    bool blue = false;
+    if (got && tall) {
+      mbResize(v, W, ch);
+      std::vector<uint8_t> full(static_cast<size_t>(W) * ch * 4, 0);
+      mbPaintToBitmap(v, full.data(), W, ch, W * 4);
+      const size_t ci = (static_cast<size_t>(520) * W + W / 2) * 4;  // y=520, BGRA
+      blue = full[ci] > 200 && full[ci + 1] < 60 && full[ci + 2] < 60;
+      mbResize(v, W, H);  // restore
+    }
+    Expect(got && tall && blue,
+           "mbGetContentSize + full-page capture renders below-the-fold content",
+           std::string("h=") + std::to_string(ch) + " blue=" + (blue ? "1" : "0"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
