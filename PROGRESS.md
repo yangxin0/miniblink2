@@ -561,6 +561,16 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   MutationObserver + IntersectionObserver(isIntersecting) both fire. 29/29, go.dev unaffected.
   (pushState earlier showed SecurityError only because about:blank is an opaque origin.)
 
+- ✅ ANIMATION/NETWORK PROBE — all pass, hardened (2026-06-23 17:?): probed WAAPI finished
+  promise, ResizeObserver delivery, dynamic Image().onload, sync XMLHttpRequest(data:), fetch
+  — ALL WORK (no new gap). WAAPI advancing confirms the ServiceScriptedAnimations clock-drive
+  from the rAF tick is doing its job. Converted the probe to 3 regression guards (smoke 29-31)
+  so the animation-clock + observer + sync-XHR paths can't silently regress. 32/32. Web
+  platform now broadly complete: storage, rAF, all observers, animations, XHR/fetch, events.
+  Next probe categories that MIGHT find gaps: WebGL (no GPU — big lift, skip), service
+  worker, IndexedDB, web fonts over network, CSS @container/@layer. Or pivot to networking
+  (cookies/headers) / the wke C API / Cocoa window.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

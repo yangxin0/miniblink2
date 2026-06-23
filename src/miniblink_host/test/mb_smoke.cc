@@ -330,6 +330,34 @@ int main() {
            Eval(v, "String(window.__io)"));
   }
 
+  // 29. Time-based animation + networking-adjacent delivery (these guard the rAF /
+  // animation-clock + observer servicing added in recent changes):
+  //  - Web Animations API: a 100ms animation's finished promise resolves (clock advances).
+  //  - ResizeObserver delivers its initial observation.
+  //  - dynamic Image().onload fires; synchronous XHR to a data: URL returns the body.
+  {
+    mbLoadHTML(v,
+        "<body><div id='b' style='width:50px;height:50px'></div><script>"
+        "window.__waapi=0;document.getElementById('b').animate("
+        "[{opacity:0},{opacity:1}],100).finished.then(function(){window.__waapi=1;});"
+        "window.__ro=0;new ResizeObserver(function(){window.__ro=1;})"
+        ".observe(document.getElementById('b'));"
+        "window.__img=0;var im=new Image();im.onload=function(){window.__img=1;};"
+        "im.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%225%22 height=%225%22></svg>';"
+        "window.__xhr='';try{var x=new XMLHttpRequest();x.open('GET',"
+        "'data:text/plain,hello',false);x.send();window.__xhr=x.responseText;}"
+        "catch(e){window.__xhr='ERR:'+e.name;}"
+        "</script></body>",
+        "about:blank");
+    mbWait(v, 250);
+    Expect(Eval(v, "String(window.__waapi)") == "1",
+           "Web Animations API finished promise resolves (clock advances)");
+    Expect(Eval(v, "String(window.__ro)") == "1", "ResizeObserver delivers");
+    Expect(Eval(v, "String(window.__img)") == "1" &&
+               Eval(v, "window.__xhr") == "hello",
+           "dynamic Image().onload + sync XHR(data:) work");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
