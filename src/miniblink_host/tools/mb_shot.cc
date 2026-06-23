@@ -35,7 +35,8 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  if (input.rfind("file://", 0) == 0 || input.rfind("http", 0) == 0) {
+  const bool is_http = input.rfind("http", 0) == 0;
+  if (input.rfind("file://", 0) == 0 || is_http) {
     mbLoadURL(view, input.c_str());
   } else {
     // A local HTML file path: read it and commit (base URL = its file:// dir so that
@@ -47,11 +48,32 @@ int main(int argc, char** argv) {
     mbLoadHTML(view, ss.str().c_str(), base.c_str());
   }
 
+  // For network loads, detect a failed/empty navigation so we don't silently
+  // emit a blank PNG and report success. A failed fetch (DNS/TLS/HTTP error,
+  // or throttling) makes the loader call DidFail, and Blink commits a near-empty
+  // document (~tens of chars of "<html><head></head><body></body></html>"); a
+  // real page is thousands. Below the threshold we treat the load as failed.
+  bool load_ok = true;
+  if (is_http) {
+    char buf[64] = {0};
+    mbEvalJS(view, "String(document.documentElement.outerHTML.length)", buf,
+             sizeof(buf));
+    const long html_len = std::atol(buf);
+    if (html_len < 512) {
+      std::fprintf(stderr,
+                   "mb_shot: WARNING — %s loaded an empty document (HTML %ld "
+                   "bytes); the fetch likely failed (network error/throttling). "
+                   "The PNG will be blank.\n",
+                   input.c_str(), html_len);
+      load_ok = false;
+    }
+  }
+
   const int ok = mbSavePng(view, out, w, h);
   std::fprintf(stderr, "mb_shot: %s -> %s (%dx%d) %s\n", input.c_str(), out, w, h,
-               ok ? "OK" : "FAILED");
+               (ok && load_ok) ? "OK" : "FAILED");
 
   mbDestroyView(view);
   mbShutdown();
-  return ok ? 0 : 1;
+  return (ok && load_ok) ? 0 : 1;
 }

@@ -429,6 +429,18 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   move/hover, UTF-8 type, scroll) is now COMPLETE.** Next focus: shift to robustness sweep
   or the on-screen window / Windows port roadmap.
 
+- ✅ LOAD-FAILURE VISIBILITY (2026-06-23 16:?): robustness sweep found that when a
+  main-document fetch fails (DNS/TLS/HTTP error or network throttling — reproduced by
+  blasting 8 domains back-to-back), the loader correctly calls DidFail and Blink commits a
+  near-empty document, but mb_shot silently wrote a blank PNG and still printed OK / exited
+  0. Fix (mb_shot.cc): after an http(s) load, query document.documentElement.outerHTML.length
+  via mbEvalJS; a failed load yields ~39 bytes ("<html><head></head><body></body></html>")
+  vs thousands for a real page. Below 512 → print a WARNING and exit non-zero. Verified:
+  bad host -> FAILED rc=1; example.com -> OK rc=0. NOT a render regression — individual
+  renders are fine (Wikipedia 275KB, HN 230KB PNGs); the blank batch was transient network.
+  Possible follow-up: thread a real load-status through the C ABI (mbLoadURL is void), and/or
+  curl retry/backoff, so transient failures recover instead of just being reported.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
