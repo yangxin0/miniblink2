@@ -114,6 +114,12 @@ int mbFillSelector(mbView* v, const char* css_selector, const char* utf8_text) {
   return v->impl->FillSelector(css_selector, utf8_text) ? 1 : 0;
 }
 
+int mbSelectOption(mbView* v, const char* css_selector, const char* value) {
+  if (!v || !v->impl || !css_selector)
+    return 0;
+  return v->impl->SelectOption(css_selector, value) ? 1 : 0;
+}
+
 void mbSendMouseMove(mbView* v, int x, int y) {
   if (v && v->impl)
     v->impl->SendMouseMove(x, y);

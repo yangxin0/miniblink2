@@ -70,6 +70,8 @@ class MbWebView {
   // like React observe it), and fires input+change. Playwright-style fill().
   // Returns false if the selector matches nothing.
   bool FillSelector(const char* css_selector, const char* text);
+  // Select a <select> option by value or visible text, firing input+change.
+  bool SelectOption(const char* css_selector, const char* value);
   void SendMouseMove(int x, int y);
   void SendText(const char* utf8);
   void SendKey(const char* key_name);  // press a named non-text key (Enter, Tab, ...)

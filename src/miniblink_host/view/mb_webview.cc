@@ -320,6 +320,24 @@ bool MbWebView::GetContentSize(int* w, int* h) {
   return true;
 }
 
+bool MbWebView::SelectOption(const char* css_selector, const char* value) {
+  // Select a <select>'s option whose value OR visible text equals `value`, then
+  // fire input+change (so framework-bound selects react) — like Puppeteer's
+  // page.select. Returns false if no <select> matches or no option matches.
+  if (!css_selector)
+    return false;
+  std::string js =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+      "\");if(!e||e.tagName!=='SELECT')return '0';var v=\"" +
+      JsEscape(value ? value : "") +
+      "\";var hit=-1;for(var i=0;i<e.options.length;i++){"
+      "if(e.options[i].value===v||e.options[i].text===v){hit=i;break;}}"
+      "if(hit<0)return '0';e.selectedIndex=hit;"
+      "e.dispatchEvent(new Event('input',{bubbles:true}));"
+      "e.dispatchEvent(new Event('change',{bubbles:true}));return '1';})()";
+  return EvalToString(js.c_str()) == "1";
+}
+
 bool MbWebView::HoverSelector(const char* css_selector) {
   // Move the pointer to the first match's center, generating mousemove +
   // mouseover/mouseenter and applying :hover — for dropdown menus, tooltips, and

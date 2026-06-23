@@ -95,6 +95,11 @@ MB_EXPORT int mbGetContentSize(mbView*, int* w, int* h);
 // success, 0 if nothing matches. Pair with mbWaitForSelector for dynamic forms.
 MB_EXPORT int mbFillSelector(mbView*, const char* css_selector, const char* utf8_text);
 
+// Select the option of the <select> matching `css_selector` whose value OR
+// visible text equals `value`, firing input+change (Puppeteer page.select).
+// Returns 1 on success, 0 if no <select> or no matching option.
+MB_EXPORT int mbSelectOption(mbView*, const char* css_selector, const char* value);
+
 // Move the mouse pointer to (x,y): updates :hover state, fires mouseover/mousemove.
 MB_EXPORT void mbSendMouseMove(mbView*, int x, int y);
 

@@ -1792,6 +1792,19 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   the returned factory — needs live debugging of the blob-URL origin/security path. Real multi-tick
   risk; NOT a bounded single tick.
 
+- ✅ DONE: mbSelectOption — <select> dropdown automation (2026-06-24): the click/fill/hover/key suite
+  couldn't drive native <select> dropdowns cleanly. MbWebView::SelectOption matches an option by
+  value OR visible text, sets selectedIndex, and fires input+change (Puppeteer page.select). Smoke
+  case 93 verifies select-by-value, select-by-text, non-match rejection, and that change fires once
+  per successful select. 114/114. C API now 55 fns.
+- 🔬 fetch(blob:) deeper trace (still deferred): confirmed the flow — fetch/XHR resolve the blob
+  factory EARLY via window.GetPublicURLManager().Resolve -> BlobURLStore.ResolveAsURLLoaderFactory,
+  storing it in ResourceLoaderOptions.url_loader_factory (loader_factory_for_frame.cc:179). So the
+  real work isn't a "security check" — it's that ResolveAsURLLoaderFactory must hand back a
+  network::mojom::URLLoaderFactory that actually serves the Blob's bytes (a full URLLoaderFactory +
+  URLLoader mojo impl, reading via the MbBlob data pipe). That's the substantial multi-component
+  piece; bounded plan stands but it's a dedicated effort, not one tick.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

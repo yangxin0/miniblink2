@@ -1966,6 +1966,26 @@ int main() {
            std::string("h=") + std::to_string(ch) + " blue=" + (blue ? "1" : "0"));
   }
 
+  // 93. mbSelectOption: choose a <select> option by value and by visible text,
+  // and confirm select.value updates + change fires. A non-matching value fails.
+  {
+    mbLoadHTML(v,
+        "<body><select id='s' onchange='window.__c=(window.__c||0)+1'>"
+        "<option value='a'>Apple</option><option value='b'>Banana</option>"
+        "<option value='c'>Cherry</option></select></body>", "about:blank");
+    const bool by_value = mbSelectOption(v, "#s", "b") == 1 &&
+                          Eval(v, "document.getElementById('s').value") == "b";
+    const bool by_text = mbSelectOption(v, "#s", "Cherry") == 1 &&
+                         Eval(v, "document.getElementById('s').value") == "c";
+    const bool no_match = mbSelectOption(v, "#s", "nope") == 0;
+    const bool changed = Eval(v, "String(window.__c||0)") == "2";  // two selects
+    Expect(by_value && by_text && no_match && changed,
+           "mbSelectOption selects by value/text + fires change",
+           std::string("val=") + (by_value ? "1" : "0") + " text=" +
+               (by_text ? "1" : "0") + " nomatch=" + (no_match ? "1" : "0") +
+               " change=" + (changed ? "1" : "0"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
