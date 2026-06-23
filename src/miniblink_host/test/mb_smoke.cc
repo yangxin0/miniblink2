@@ -654,6 +654,31 @@ int main() {
               Eval(v, "String(window.__wok)") == "false"),
          "Worker spawn degrades gracefully (no crash; host still scriptable)");
 
+  // 38. The rest of the Worker family must also be crash-safe. SharedWorker's
+  // Connect() is a fire-and-forget mojo call our empty broker drops (inert, no
+  // crash); navigator.serviceWorker.register() either rejects cleanly or, on a
+  // real origin where we have no provider, is null-guarded (pending promise,
+  // no crash). Neither must SIGSEGV — same hazard class as case 37. We assert
+  // the host survives constructing both and stays scriptable afterward.
+  // (about:blank is an opaque origin: SharedWorker may throw SecurityError and
+  // navigator.serviceWorker may be absent — both fine. The invariant under test
+  // is crash-safety, so we wrap each attempt in try/catch and set a sentinel at
+  // the end: reaching it proves neither spawn took the host down, and the host
+  // still evaluates JS afterward.)
+  mbLoadHTML(v, "<body>family-guard</body>", "about:blank");
+  mbRunJS(v,
+    "window.__done=false;"
+    "try{new SharedWorker('data:text/javascript,onconnect=function(){}');}catch(e){}"
+    "try{if(navigator.serviceWorker)"
+    "navigator.serviceWorker.register('data:text/javascript,').then(function(){},function(){});}"
+    "catch(e){}"
+    "window.__done=true;");
+  mbWait(v, 60);
+  Expect(Eval(v, "1+1") == "2" &&
+             Eval(v, "document.body.textContent") == "family-guard" &&
+             Eval(v, "String(window.__done)") == "true",
+         "SharedWorker + ServiceWorker spawn are crash-safe (host scriptable)");
+
   mbDestroyView(v);
   mbShutdown();
 

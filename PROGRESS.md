@@ -845,6 +845,16 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   same family as the other browser-process-service gaps (Blob sync-deadlock, IndexedDB). But a
   crash is no longer in that family: the process now survives worker spawns.
 
+- ✅ WORKER FAMILY all crash-safe (2026-06-23, verified): with DedicatedWorker fixed, probed the
+  rest. SharedWorker: `new SharedWorker(...)` constructs (typeof object); Connect() is a
+  fire-and-forget mojo call our empty broker drops -> inert, NO crash. ServiceWorker:
+  `navigator.serviceWorker.register()` rejects cleanly on an unsupported origin (file:// ->
+  TypeError), and on a real origin RegisterServiceWorkerInternal has `if(!provider_) return;`
+  (service_worker_container.cc) -> with no provider the promise stays pending, NO crash. So the
+  ENTIRE worker family (dedicated/shared/service) now degrades gracefully instead of crashing.
+  No code change needed for shared/service — already safe; smoke 38 guards the regression
+  (spawn both inside try/catch on an opaque origin, assert the host stays scriptable). 48/48.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
