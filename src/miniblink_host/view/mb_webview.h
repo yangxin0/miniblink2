@@ -57,6 +57,9 @@ class MbWebView {
   // / zero-size). Puppeteer-style page.click(selector) — saves callers computing
   // coordinates by hand.
   bool ClickSelector(const char* css_selector);
+  // First match's viewport-relative bounding box (logical px) via out-params;
+  // false if no element matches. Composes with PaintRectToBitmap (element shot).
+  bool GetElementRect(const char* css_selector, int* x, int* y, int* w, int* h);
   // Fill the first <input>/<textarea> matching `css_selector` with `text`:
   // focuses it, sets the value through the native value setter (so frameworks
   // like React observe it), and fires input+change. Playwright-style fill().

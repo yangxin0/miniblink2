@@ -304,6 +304,39 @@ bool MbWebView::ClickSelector(const char* css_selector) {
   return true;
 }
 
+bool MbWebView::GetElementRect(const char* css_selector, int* x, int* y, int* w,
+                               int* h) {
+  if (!css_selector)
+    return false;
+  // The first match's viewport-relative bounding box (logical px), as
+  // "left,top,width,height". Composes with PaintRectToBitmap for an element
+  // screenshot, or with SendMouseClick for a precise click. "" if no match.
+  std::string js =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+      "\");if(!e)return '';var r=e.getBoundingClientRect();"
+      "return Math.round(r.left)+','+Math.round(r.top)+','+"
+      "Math.round(r.width)+','+Math.round(r.height);})()";
+  std::string s = EvalToString(js.c_str());
+  if (s.empty())
+    return false;
+  int vals[4] = {0, 0, 0, 0};
+  int n = 0;
+  std::string::size_type start = 0;
+  for (std::string::size_type i = 0; i <= s.size() && n < 4; ++i) {
+    if (i == s.size() || s[i] == ',') {
+      vals[n++] = std::atoi(s.substr(start, i - start).c_str());
+      start = i + 1;
+    }
+  }
+  if (n < 4)
+    return false;
+  if (x) *x = vals[0];
+  if (y) *y = vals[1];
+  if (w) *w = vals[2];
+  if (h) *h = vals[3];
+  return true;
+}
+
 bool MbWebView::FillSelector(const char* css_selector, const char* text) {
   if (!css_selector || !main_frame_)
     return false;

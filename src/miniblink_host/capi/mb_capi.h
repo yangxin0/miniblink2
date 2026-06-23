@@ -215,6 +215,13 @@ MB_EXPORT int mbSavePngRect(mbView*, const char* path, int x, int y, int w, int 
 
 // Composite the logical rect (x,y,w,h) into a caller-provided BGRA8888 buffer
 // (w x h px, `stride` bytes/row; the device scale factor is not applied here).
+// Write the first element matching `css_selector`'s viewport-relative bounding
+// box (logical px) into *x/*y/*w/*h (any may be NULL). Returns 1 if matched, else
+// 0. Compose with mbPaintRectToBitmap for an element screenshot, or with
+// mbSendMouseClick for a precise click.
+MB_EXPORT int mbGetElementRect(mbView*, const char* css_selector, int* x, int* y,
+                               int* w, int* h);
+
 MB_EXPORT int mbPaintRectToBitmap(mbView*, void* out_bgra, int x, int y, int w,
                                   int h, int stride);
 

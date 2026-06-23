@@ -1755,6 +1755,16 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   (tab=1, was tab=0 last tick). 110/110. This also resolves last tick's "couldn't observe non-Enter
   keys" — event.key is now right for Escape/Arrows/etc.
 
+- ✅ DONE: mbGetElementRect — element geometry + element screenshots (2026-06-24): a composable
+  automation/scraping primitive. MbWebView::GetElementRect(selector, &x,&y,&w,&h) returns the first
+  match's viewport-relative bounding box (querySelector + getBoundingClientRect, mirroring
+  ClickSelector); exposed as mbGetElementRect. Composes with the existing mbPaintRectToBitmap for
+  element screenshots (capture just a component/chart) and with mbSendMouseClick for precise clicks.
+  Smoke case 90 proves the full workflow: place a red div at left:20 top:30 w:40 h:50, mbGetElementRect
+  returns exactly that, paint that rect, and the captured center pixel is red (BGRA). 111/111. C API
+  now 52 fns. (Also confirmed via real-site mb_shot — Wikipedia/react.dev/HN/vuejs all render with
+  content + zero console errors; engine is solid on real pages.)
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

@@ -1884,6 +1884,33 @@ int main() {
                (autofocused ? "1" : "0") + " tab=" + (tab_advanced ? "1" : "0"));
   }
 
+  // 90. mbGetElementRect + element screenshot: get a colored div's box, paint
+  // exactly that rect, and verify the captured center pixel is the div's color.
+  {
+    mbLoadHTML(v,
+        "<body style='margin:0'><div id='box' style='position:absolute;"
+        "left:20px;top:30px;width:40px;height:50px;background:rgb(255,0,0)'>"
+        "</div></body>", "about:blank");
+    std::vector<uint8_t> full(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, full.data(), W, H, W * 4);  // force layout
+    int x = 0, y = 0, w = 0, h = 0;
+    const bool got = mbGetElementRect(v, "#box", &x, &y, &w, &h) == 1;
+    bool red = false;
+    if (got && w > 0 && h > 0) {
+      std::vector<uint8_t> el(static_cast<size_t>(w) * h * 4, 0);
+      if (mbPaintRectToBitmap(v, el.data(), x, y, w, h, w * 4) == 1) {
+        const size_t ci =
+            (static_cast<size_t>(h / 2) * w + w / 2) * 4;  // center px, BGRA
+        red = el[ci + 2] > 200 && el[ci + 1] < 60 && el[ci] < 60;
+      }
+    }
+    Expect(got && x == 20 && y == 30 && w == 40 && h == 50 && red,
+           "mbGetElementRect + element screenshot captures the element",
+           std::to_string(x) + "," + std::to_string(y) + "," +
+               std::to_string(w) + "," + std::to_string(h) +
+               " red=" + (red ? "1" : "0"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

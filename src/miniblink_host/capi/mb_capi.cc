@@ -329,6 +329,13 @@ int mbSavePngRect(mbView* v, const char* path, int x, int y, int w, int h) {
   return v->impl->SavePngRect(path, x, y, w, h) ? 1 : 0;
 }
 
+int mbGetElementRect(mbView* v, const char* css_selector, int* x, int* y, int* w,
+                     int* h) {
+  if (!v || !v->impl)
+    return 0;
+  return v->impl->GetElementRect(css_selector, x, y, w, h) ? 1 : 0;
+}
+
 int mbPaintRectToBitmap(mbView* v, void* out_bgra, int x, int y, int w, int h,
                         int stride) {
   if (!v || !v->impl)
