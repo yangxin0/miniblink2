@@ -58,6 +58,15 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // document is still committed directly by MbWebView, not here.
   void BeginNavigation(std::unique_ptr<blink::WebNavigationInfo>) override;
 
+  // Fires when this frame commits a document. For the main frame we record the
+  // navigation in MbWebView's history stack (captures host- and page-initiated
+  // navigations uniformly). Child-frame commits are ignored here.
+  void DidCommitNavigation(
+      blink::WebHistoryCommitType commit_type,
+      bool should_reset_browser_interface_broker,
+      const network::ParsedPermissionsPolicy& permissions_policy_header,
+      const blink::DocumentPolicyFeatureState& document_policy_header) override;
+
   // Frame lifecycle. A child client self-destructs on detach; the main frame is
   // owned by MbWebView so it does nothing here.
   void FrameDetached(blink::DetachReason) override;

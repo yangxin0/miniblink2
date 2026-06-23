@@ -1702,11 +1702,24 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   85 (reload re-fetches: mutate DOM -> reload -> mutation gone). 105/105; mb_shot still builds. C API
   now 41 fns.
 
+- ✅ DONE: host-driven navigation history (2026-06-24): mbCanGoBack/mbCanGoForward/mbGoBack/
+  mbGoForward + a navigation stack in MbWebView. The elegant part: a single hook,
+  MbFrameClient::DidCommitNavigation (main frame only), records EVERY main-frame commit — host
+  loads (mbLoadURL) AND page-initiated link/location/form navigations (which the embedder can't
+  easily observe) — so the stack is complete. kWebStandardCommit appends (truncating forward
+  entries); reload/initial (kWebHistoryInertCommit) and same-URL commits don't; an in_history_nav_
+  flag stops a programmatic Go{Back,Forward} (which re-navigates via LoadURL, itself a standard
+  commit) from re-appending. Smoke case 86: A --location.href--> B, back to A, forward to B, with
+  CanGo* correct throughout. 106/106. C API now 47 fns.
+  NOTE: this is the EMBEDDER's history. Page-driven history.back()/forward() (what JS calls) is
+  still separate and unhandled — History::back() -> LocalFrameClientImpl::NavigateBackForward ->
+  LocalFrameHost.GoToEntryAtOffset (mojo to the absent browser), gated on WebViewImpl::
+  HistoryBackListCount() (0 here). Wiring JS history into this stack needs intercepting the
+  browser-owned LocalFrameHost — still deferred.
+
 ### REMAINING ROADMAP
-- P0-history: page-driven history.back()/forward() does nothing — History::back() ->
-  LocalFrameClientImpl::NavigateBackForward -> LocalFrameHost.GoToEntryAtOffset (mojo to the absent
-  browser), and it's gated on WebViewImpl::HistoryBackListCount() (0 here). Needs an in-renderer
-  session-history controller + intercepting the browser-owned LocalFrameHost — sizable, deferred.
+- P1-history-js: route page-driven history.back()/forward() into the host stack (needs a
+  LocalFrameHost shim for GoToEntryAtOffset + WebView history counts).
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
   (Cocoa window) -> real sites in a window. JS is free (V8 isolate already up).

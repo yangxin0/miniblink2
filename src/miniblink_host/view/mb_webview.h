@@ -17,6 +17,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/functional/callback.h"
 
@@ -91,6 +92,21 @@ class MbWebView {
   std::string GetHTML();
   // Re-navigate to the current document URL, re-fetching it (file/http only).
   void Reload();
+
+  // Host-driven session history over the main frame's navigations (host-initiated
+  // LoadURL *and* page-initiated link/location/form commits — all captured via
+  // OnDidCommitMainFrame). Go{Back,Forward} re-navigate to the adjacent entry.
+  // (This is the embedder's history; page-driven history.back() is separate and
+  // still routes to the absent browser.)
+  bool CanGoBack() const { return history_index_ > 0; }
+  bool CanGoForward() const {
+    return history_index_ + 1 < static_cast<int>(history_.size());
+  }
+  bool GoBack();
+  bool GoForward();
+  // Called by MbFrameClient when the MAIN frame commits a document. `standard`
+  // is true for a normal (history-appending) commit, false for reload/initial.
+  void OnDidCommitMainFrame(const std::string& url, bool standard);
   // Set extra request headers (newline-separated "Name: Value") for navigation +
   // subresources. Set before LoadURL to apply to that navigation.
   void SetExtraHeaders(const char* utf8_headers);
@@ -153,6 +169,10 @@ class MbWebView {
   float dsf_ = 1.0f;  // device pixel ratio; PaintInto scales the canvas by it
   std::string init_script_;  // runs before each new document's own scripts
   bool transparent_bg_ = false;  // omitBackground: clear to alpha 0
+
+  std::vector<std::string> history_;  // main-frame navigation stack (URLs)
+  int history_index_ = -1;            // current position; -1 before first load
+  bool in_history_nav_ = false;       // a Go{Back,Forward} is in flight
 };
 
 }  // namespace mb

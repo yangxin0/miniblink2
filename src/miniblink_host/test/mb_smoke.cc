@@ -1799,6 +1799,39 @@ int main() {
            "mbReload re-fetches + re-commits the document");
   }
 
+  // 86. Host-driven history (mbGoBack/mbGoForward) over a host load + a
+  // page-initiated navigation: A --(location.href)--> B, back to A, forward to B.
+  {
+    const char* a = "<body><div id=o>histA</div></body>";
+    const char* b = "<body><div id=o>histB</div></body>";
+    if (FILE* f = std::fopen("/tmp/mb_hA.html", "wb")) {
+      std::fwrite(a, 1, std::strlen(a), f); std::fclose(f);
+    }
+    if (FILE* f = std::fopen("/tmp/mb_hB.html", "wb")) {
+      std::fwrite(b, 1, std::strlen(b), f); std::fclose(f);
+    }
+    mbLoadURL(v, "file:///tmp/mb_hA.html");          // history: [A]
+    mbRunJS(v, "location.href='file:///tmp/mb_hB.html';");  // page nav -> [A,B]
+    mbWait(v, 300);
+    const bool on_b =
+        Eval(v, "document.getElementById('o').textContent") == "histB";
+    const bool cgb = mbCanGoBack(v) == 1 && mbCanGoForward(v) == 0;
+    mbGoBack(v);
+    mbWait(v, 100);
+    const bool back_a =
+        Eval(v, "document.getElementById('o').textContent") == "histA" &&
+        mbCanGoForward(v) == 1;
+    mbGoForward(v);
+    mbWait(v, 100);
+    const bool fwd_b =
+        Eval(v, "document.getElementById('o').textContent") == "histB";
+    Expect(on_b && cgb && back_a && fwd_b,
+           "mbGoBack/mbGoForward navigate the history stack",
+           std::string("on_b=") + (on_b ? "1" : "0") + " cgb=" +
+               (cgb ? "1" : "0") + " back_a=" + (back_a ? "1" : "0") +
+               " fwd_b=" + (fwd_b ? "1" : "0"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

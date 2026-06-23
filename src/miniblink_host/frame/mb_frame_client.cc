@@ -24,6 +24,8 @@
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/mojom/frame/policy_container.mojom-blink.h"
 #include "third_party/blink/public/platform/web_policy_container.h"
+#include "third_party/blink/public/web/web_document.h"
+#include "third_party/blink/public/web/web_history_commit_type.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_navigation_params.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -186,6 +188,19 @@ void MbFrameClient::DoCommit(std::unique_ptr<blink::WebNavigationInfo> info) {
   }
   blink::To<blink::WebLocalFrameImpl>(web_frame_)->CommitNavigation(
       std::move(params), /*extra_data=*/nullptr);
+}
+
+void MbFrameClient::DidCommitNavigation(
+    blink::WebHistoryCommitType commit_type,
+    bool /*should_reset_browser_interface_broker*/,
+    const network::ParsedPermissionsPolicy& /*permissions_policy_header*/,
+    const blink::DocumentPolicyFeatureState& /*document_policy_header*/) {
+  // Only the main frame feeds the view's history (child/iframe commits don't).
+  if (self_owned_ || !web_frame_ || !owner_)
+    return;
+  owner_->OnDidCommitMainFrame(
+      web_frame_->GetDocument().Url().GetString().Utf8(),
+      commit_type == blink::kWebStandardCommit);
 }
 
 void MbFrameClient::FrameDetached(blink::DetachReason reason) {

@@ -246,6 +246,22 @@ void mbReload(mbView* v) {
     v->impl->Reload();
 }
 
+int mbCanGoBack(mbView* v) {
+  return (v && v->impl && v->impl->CanGoBack()) ? 1 : 0;
+}
+
+int mbCanGoForward(mbView* v) {
+  return (v && v->impl && v->impl->CanGoForward()) ? 1 : 0;
+}
+
+int mbGoBack(mbView* v) {
+  return (v && v->impl && v->impl->GoBack()) ? 1 : 0;
+}
+
+int mbGoForward(mbView* v) {
+  return (v && v->impl && v->impl->GoForward()) ? 1 : 0;
+}
+
 int mbEvalJSIsolated(mbView* v, const char* utf8_script, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;

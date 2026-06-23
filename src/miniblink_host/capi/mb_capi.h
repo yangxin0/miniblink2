@@ -155,6 +155,14 @@ MB_EXPORT int mbGetHTML(mbView*, char* out, int out_cap);
 // documents (about:blank, data:, mbLoadHTML content).
 MB_EXPORT void mbReload(mbView*);
 
+// Host-driven back/forward over the main frame's navigation history (captures
+// both host-initiated loads and page-initiated link/location/form navigations).
+// mbGoBack/mbGoForward return 1 if they navigated, 0 if there was no entry.
+MB_EXPORT int mbCanGoBack(mbView*);
+MB_EXPORT int mbCanGoForward(mbView*);
+MB_EXPORT int mbGoBack(mbView*);
+MB_EXPORT int mbGoForward(mbView*);
+
 // Drain captured page console output (console.log/warn/error) into `out`
 // (NUL-terminated, up to out_cap bytes; one "level: text" line per message), and
 // clear the buffer. Returns the full output length in bytes.

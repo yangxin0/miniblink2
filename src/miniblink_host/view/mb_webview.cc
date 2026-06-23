@@ -412,6 +412,45 @@ void MbWebView::Reload() {
     LoadURL(u.c_str());
 }
 
+void MbWebView::OnDidCommitMainFrame(const std::string& url, bool standard) {
+  // Maintain the back/forward stack. Only standard commits append; reloads and
+  // the initial empty document (inert commits) do not. A Go{Back,Forward}
+  // re-navigates via LoadURL (also a standard commit) — the in_history_nav_ flag
+  // distinguishes it so we move within the list instead of appending.
+  if (!standard || url.empty())
+    return;
+  if (in_history_nav_) {
+    in_history_nav_ = false;
+    return;  // position already set by GoBack/GoForward
+  }
+  if (history_index_ >= 0 &&
+      history_index_ < static_cast<int>(history_.size()) &&
+      history_[history_index_] == url) {
+    return;  // same URL (e.g. a reload committed as standard) — no new entry
+  }
+  history_.resize(history_index_ + 1);  // a new navigation truncates forward
+  history_.push_back(url);
+  history_index_ = static_cast<int>(history_.size()) - 1;
+}
+
+bool MbWebView::GoBack() {
+  if (!CanGoBack())
+    return false;
+  in_history_nav_ = true;
+  --history_index_;
+  LoadURL(history_[history_index_].c_str());
+  return true;
+}
+
+bool MbWebView::GoForward() {
+  if (!CanGoForward())
+    return false;
+  in_history_nav_ = true;
+  ++history_index_;
+  LoadURL(history_[history_index_].c_str());
+  return true;
+}
+
 void MbWebView::SetExtraHeaders(const char* utf8_headers) {
   if (frame_client_)
     frame_client_->SetExtraHeaders(utf8_headers ? utf8_headers : "");
