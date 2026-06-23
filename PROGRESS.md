@@ -1475,6 +1475,23 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   crashing BeginNavigation; CreateChildFrame (frame creation) stays shipped at 93/93. Content-commit
   is a clean next increment now that the body_loader requirement + srcdoc source are known.
 
+- 🔬 iframe content-commit attempt 2: 2 CHECKs deep, reverted to 93/93 (2026-06-24): implemented
+  BeginNavigation with body-filling. Got PAST the body_loader CHECK: for about:srcdoc, read the
+  srcdoc from the owner via To<HTMLFrameOwnerElement>(To<WebLocalFrameImpl>(child)->GetFrame()
+  ->Owner())->FastGetAttribute(html_names::kSrcdocAttr).Utf8(), then WebNavigationParams::
+  FillStaticResponse(params, "text/html", "UTF-8", span(body)). Hit the NEXT CHECK:
+  document_loader.cc:2839 "did_have_policy_container || WillLoadUrlAsEmpty(Url())" — srcdoc is NOT
+  load-as-empty, so params->policy_container MUST be set (frame_test_helpers sets it via
+  WebPolicyContainer(WebPolicyContainerPolicies(), MockPolicyContainerHost::
+  BindNewEndpointAndPassDedicatedRemote())). So content-commit needs the FULL frame_test_helpers
+  CommitNavigation port, in order: (1) FillStaticResponse with the srcdoc body [DONE/known],
+  (2) params->policy_container = WebPolicyContainer(policies, a PolicyContainerHost dedicated
+  associated remote — a small MbPolicyContainerHost with a member AssociatedReceiver, kept alive),
+  (3) likely merge sandbox flags into policy_container->policies.sandbox_flags and possibly
+  origin_to_commit for sandboxed-origin. Each missing piece is a hard CHECK, so it must be ported
+  in one go (not incrementally) — a focused pass. Reverted the crashing BeginNavigation; CreateChild
+  Frame stays at 93/93. This is now FULLY mapped (exact CHECK sequence), just not single-tick-safe.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
