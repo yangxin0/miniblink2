@@ -687,6 +687,27 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   automation: stub/override APIs, set globals, install a harness. (Moved on from the Blob
   associated-interface hang — still a documented gap.)
 
+- 🔒 BLOB HANG — DEFINITIVE conclusion (2026-06-23 19:?): not a quick fix. createObjectURL
+  does BlobURLStore.Register [Sync] on the main thread IMMEDIATELY after the async GetInterface
+  that would bind the store. Mojo's sync-wait dispatches sync responses but QUEUES async
+  messages (like the LocalProvider's GetAssociatedInterface that triggers our binder) until
+  the sync call returns — so an in-process, SAME-THREAD servicer can never run while the main
+  thread is blocked => deadlock. In production it works only because the servicer is a separate
+  process/thread. PROPER FIX = run the frame's associated-interface servicing (BlobURLStore et
+  al.) on a DEDICATED thread, like the browser process does — an architectural addition, not a
+  shim. Until then, pages calling createObjectURL/FileReader during script will freeze the host.
+  Marking settled; not to be re-attempted as a quick fix.
+
+- ✅ COOKIE BRIDGE JS->HTTP (2026-06-23 19:?): document.cookie set in JS now also lands in the
+  shared libcurl jar, so a JS-set (e.g. auth) cookie is sent on later fetches/subresources.
+  MbAddCookieToJar(url, cookie) injects via a throwaway curl handle (CURLOPT_URL=origin,
+  COOKIEFILE="" engine, SHARE=CookieShare(), COOKIELIST="Set-Cookie: <cookie>"); MbCookieManager
+  ::SetCookieFromString calls it after storing in the JS map. No-op for non-http(s). Low-risk +
+  additive (only adds to the jar; failure = JS cookie just not sent, no regression — default
+  suite 36/36 confirms). Smoke 33 (network-gated) verifies end-to-end when httpbin is reachable;
+  SKIPPED this run (httpbin down). Reverse direction (network Set-Cookie -> document.cookie read)
+  is a noted follow-up.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

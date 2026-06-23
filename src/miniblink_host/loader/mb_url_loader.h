@@ -33,6 +33,11 @@ namespace mb {
 // serve their current desktop experience (the base Platform::UserAgent() is empty).
 const std::string& MbDefaultUserAgent();
 
+// Add a cookie (a "name=value[; attrs]" string, as from document.cookie) to the
+// shared HTTP cookie jar for `url`'s origin, so JS-set cookies are sent on later
+// network requests. No-op for non-http(s) URLs. Bridges document.cookie -> fetches.
+void MbAddCookieToJar(const std::string& url, const std::string& cookie);
+
 // Fetch a file:// or http(s):// URL into `body` (+ server Content-Type if any).
 // Shared by the subresource loader and the top-level navigation in MbWebView::LoadURL.
 // `user_agent` sets the HTTP User-Agent (empty -> MbDefaultUserAgent()).

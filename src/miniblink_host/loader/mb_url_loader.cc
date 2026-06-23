@@ -207,6 +207,23 @@ const std::string& MbDefaultUserAgent() {
   return *kUa;
 }
 
+void MbAddCookieToJar(const std::string& url, const std::string& cookie) {
+  GURL gurl(url);
+  if (!gurl.SchemeIsHTTPOrHTTPS())
+    return;  // cookies only make sense for network origins
+  CURL* curl = curl_easy_init();
+  if (!curl)
+    return;
+  // Associate the cookie with this URL's domain/path, share into the global jar.
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");  // enable the cookie engine
+  if (CURLSH* share = CookieShare())
+    curl_easy_setopt(curl, CURLOPT_SHARE, share);
+  const std::string line = "Set-Cookie: " + cookie;
+  curl_easy_setopt(curl, CURLOPT_COOKIELIST, line.c_str());
+  curl_easy_cleanup(curl);
+}
+
 bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* content_type, const std::string& user_agent,
                 const std::string& extra_headers) {

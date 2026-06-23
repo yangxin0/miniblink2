@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/memory/read_only_shared_memory_region.h"
+#include "miniblink_host/loader/mb_url_loader.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/network/public/mojom/cookie_manager.mojom-blink.h"
@@ -84,6 +85,9 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
     }
     if (!deleting)
       jar.emplace_back(std::move(name), std::move(value));
+    // Bridge to the HTTP cookie jar so a cookie set via document.cookie is also
+    // sent on subsequent network requests (no-op for non-http(s) origins).
+    MbAddCookieToJar(url.GetString().Utf8(), raw);
   }
 
   void GetCookiesString(const blink::KURL& url,

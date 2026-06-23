@@ -36,7 +36,7 @@ that satisfies modern Blink so it runs without the full browser.
 | Web/CSS Animations advance (clock serviced); `XMLHttpRequest` + `fetch` | ✅ |
 | Console capture (`console.log`/`warn`/`error` → host) | ✅ |
 | Init scripts (`evaluateOnNewDocument`: run JS before page scripts) | ✅ |
-| **Cookies**: HTTP jar (Set-Cookie across redirects/requests) + JS `document.cookie` | ✅ |
+| **Cookies**: HTTP jar + JS `document.cookie`; JS-set cookies bridge to the HTTP jar | ✅ |
 | Custom request headers + default `Accept-Language` | ✅ |
 | On-screen window, GPU compositing, IndexedDB | ⏳ roadmap |
 

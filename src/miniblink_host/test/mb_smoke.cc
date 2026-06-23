@@ -424,6 +424,26 @@ int main() {
     }
   }
   mbSetExtraHeaders(v, "");  // reset
+
+  // 33. Cookie bridge: a cookie set via document.cookie on an http origin must be
+  // sent on a subsequent network request (JS jar -> HTTP jar).
+  mbLoadURL(v, "https://httpbin.org/");
+  mbWait(v, 400);
+  if (!Eval(v, "String(document.location.host)").empty() &&
+      Eval(v, "String(document.location.host)") != "undefined") {
+    mbRunJS(v, "document.cookie='mbjs=fromjs';");
+    mbLoadURL(v, "https://httpbin.org/cookies");
+    mbWait(v, 400);
+    std::string c = Eval(v, "document.body?document.body.innerText:''");
+    if (c.find("cookies") != std::string::npos) {
+      Expect(c.find("fromjs") != std::string::npos,
+             "cookie bridge: document.cookie reaches the HTTP jar");
+    } else {
+      std::fprintf(stderr, "  [SKIP] cookie bridge (httpbin unreachable)\n");
+    }
+  } else {
+    std::fprintf(stderr, "  [SKIP] cookie bridge (httpbin unreachable)\n");
+  }
   }  // MB_NET_TESTS
 
   // 33. document.cookie (JS): write then read round-trips through the in-process
