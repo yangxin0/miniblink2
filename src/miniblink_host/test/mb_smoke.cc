@@ -609,6 +609,30 @@ int main() {
                    loc.c_str());
     }
   }
+
+  // 41. fetch() redirect: a fetch that 302-redirects must resolve as a Response
+  // whose url is the FINAL URL and whose .redirected is true. The loader follows
+  // redirects manually and reports each hop via WillFollowRedirect so Blink's
+  // url list (response.url / redirected) is correct.
+  {
+    mbLoadHTML(v, "<body>x</body>", (host + "/").c_str());
+    mbRunJS(v,
+        ("window.__rr='';fetch('" + host + "/redirect-to?url=" + host +
+         "/get&status_code=302').then(function(r){"
+         "window.__rr=r.url+'|'+r.redirected;}).catch(function(e){"
+         "window.__rr='ERR:'+e.name;});").c_str());
+    mbWait(v, 1500);
+    std::string rr = Eval(v, "String(window.__rr)");
+    if (!rr.empty() && rr.rfind("ERR:", 0) != 0) {  // host responded
+      Expect(rr.find("/get") != std::string::npos &&
+                 rr.find("/redirect-to") == std::string::npos &&
+                 rr.find("|true") != std::string::npos,
+             "fetch() redirect exposes final url + redirected=true", rr);
+    } else {
+      std::fprintf(stderr, "  [SKIP] fetch redirect (host unreachable: %s)\n",
+                   rr.c_str());
+    }
+  }
   }  // MB_NET_TESTS
 
   // 33. document.cookie (JS): write then read round-trips through the in-process

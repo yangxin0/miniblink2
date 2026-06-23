@@ -1666,17 +1666,26 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   MbWebView::LoadURL commits with that final URL as the document base. VERIFIED: mb_shot nav to
   httpbin /redirect-to?url=example.com renders Example Domain; gated smoke case 40 asserts
   location.href == <host>/get after a 302 (was the /redirect-to URL). Net suite 109/109, default
-  100/100. SCOPED OUT (the harder sibling): fetch()/XHR response.url + response.redirected after a
-  redirect still report the request URL — fixing those needs the loader to follow redirects MANUALLY
-  and report each hop via WillFollowRedirect (Blink DCHECKs response.CurrentRequestUrl()==url_list_
-  .back(), so you can't just rewrite the response URL — confirmed: it aborts at fetch_manager.cc:714).
-  That's a sizable loader rework; deferred.
-- ⚠️ KNOWN GAPS (probed 2026-06-24, all the documented heavy items; everything else works): fetch(blob:)
-  fails (TypeError) — blob: URL resolution is the reverted BlobURLStore work; Web Workers are inert
-  (new Worker never fires onmessage/onerror) — "real worker execution"; fetch redirect response.url/
-  redirected (above). NOT gaps (verified working this tick): CSS calc/vw/@supports, TextDecoder,
-  AbortController fetch-abort, pseudo-elements, tables, media queries, checkbox-click+change,
-  animationend, custom elements/shadow DOM, designMode.
+  100/100.
+- ✅✅ DONE: fetch()/XHR redirects expose final url + redirected (2026-06-24): the deferred sibling
+  of the navigation-redirect fix, now landed. MbURLLoader::Deliver follows http redirects MANUALLY
+  (FetchHttp gained a follow_redirects=false mode): each hop's 3xx + Location is read, the next URL
+  resolved (GURL::Resolve), method rewritten (303 / POST-on-301-302 -> bodyless GET), and reported to
+  the client via client_->WillFollowRedirect(next, site_for_cookies, "", ReferrerPolicy::kDefault,
+  method, redirect_response, ...). That advances Blink's url_list_, so the final response's
+  SetCurrentRequestUrl(final) == url_list_.back() — satisfying the fetch_manager DCHECK that blocked
+  the naive approach — and fetch response.url (final URL) + response.redirected are correct. Capped
+  at 20 hops. VERIFIED (mb_shot + gated smoke case 41): fetch /redirect-to?url=/get -> url=/get,
+  redirected=true. The cookie-across-redirect case (31) STILL passes — each manual hop shares the
+  curl cookie jar, so Set-Cookie on a 302 is sent on the next hop. Net 110/110, default 100/100.
+- ⚠️ KNOWN GAPS (all the documented heavy items; everything else works): fetch(blob:) fails
+  (TypeError) — blob: URL resolution is the reverted BlobURLStore work; Web Workers are inert
+  (new Worker never fires onmessage/onerror) — "real worker execution"; WebGL getContext returns
+  null — needs the GPU/command-buffer pipeline (P4). NOT gaps (verified working): CSS
+  calc/vw/@supports/:has(), TextDecoder, AbortController fetch-abort, pseudo-elements, tables, media
+  queries, checkbox-click+change, animationend, custom elements/shadow DOM, designMode, OffscreenCanvas,
+  canvas toBlob/convertToBlob/gradient/path/createImageBitmap, MessageChannel, BroadcastChannel,
+  performance marks, elementFromPoint, <base href>, <meta refresh>, DOMContentLoaded/load.
 
 ### REMAINING ROADMAP
 - P0-history: page-driven history.back()/forward() does nothing — History::back() ->

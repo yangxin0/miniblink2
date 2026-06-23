@@ -23,6 +23,8 @@
 #include "net/base/data_url.h"
 #include "net/base/filename_util.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_request_headers.h"
+#include "services/network/public/mojom/referrer_policy.mojom-shared.h"
 #include "services/network/public/cpp/data_element.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/resource_request_body.h"
@@ -129,13 +131,39 @@ std::string ToLower(const std::string& s) {
   return r;
 }
 
+// Value of a header (case-insensitive `lname`) in a raw "Name: Value\r\n" block.
+std::string HeaderValueFromBlock(const std::string& block,
+                                 const std::string& lname) {
+  std::string line;
+  std::string buf = block;
+  buf.push_back('\n');  // flush sentinel
+  for (char c : buf) {
+    if (c == '\n' || c == '\r') {
+      std::string::size_type colon = line.find(':');
+      if (colon != std::string::npos && ToLower(line.substr(0, colon)) == lname) {
+        std::string v = line.substr(colon + 1);
+        while (!v.empty() && (v.front() == ' ' || v.front() == '\t'))
+          v.erase(v.begin());
+        while (!v.empty() && (v.back() == ' ' || v.back() == '\t'))
+          v.pop_back();
+        return v;
+      }
+      line.clear();
+    } else {
+      line.push_back(c);
+    }
+  }
+  return {};
+}
+
 bool FetchHttp(const std::string& url, std::string* body, std::string* content_type,
                const std::string& user_agent, const std::string& extra_headers,
                const std::string& post_body = "",
                const std::string& post_content_type = "",
                const std::string& http_method = "", int* out_status = nullptr,
                std::string* out_headers = nullptr,
-               std::string* out_final_url = nullptr) {
+               std::string* out_final_url = nullptr,
+               bool follow_redirects = true) {
   CURL* curl = curl_easy_init();
   if (!curl)
     return false;
@@ -161,7 +189,7 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   }
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CurlWrite);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, body);
-  curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+  curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, follow_redirects ? 1L : 0L);
   curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
@@ -477,6 +505,7 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   std::string http_content_type;  // from the server, may be "text/html; charset=..."
   int http_status = 0;            // real HTTP status (0 -> treat as 200)
   std::string resp_headers;       // raw final-response header block (http only)
+  std::string final_url;          // URL after manual redirect following (http)
   bool ok = false;
   if (url.SchemeIsFile()) {
     base::FilePath fp;  // net path conversion percent-decodes (spaces etc.)
@@ -508,9 +537,57 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
         req_headers += "\n";
       req_headers += kv.key + ": " + kv.value;
     }
-    ok = FetchHttp(url.spec(), &contents, &http_content_type, user_agent_,
-                   req_headers, post_body, post_ct, request->method,
-                   &http_status, &resp_headers);
+    // Follow redirects MANUALLY (curl auto-follow off) so each hop is reported to
+    // the client via WillFollowRedirect — that updates Blink's url_list_, making
+    // fetch's response.url (the final URL) and response.redirected correct. (You
+    // can't just rewrite the final response URL: fetch_manager DCHECKs that it
+    // equals url_list_.back(), which only the redirect reports advance.)
+    std::string cur = url.spec();
+    std::string cur_method = request->method;
+    std::string cur_body = post_body;
+    for (int hop = 0; hop <= 20; ++hop) {
+      contents.clear();
+      http_content_type.clear();
+      resp_headers.clear();
+      http_status = 0;
+      ok = FetchHttp(cur, &contents, &http_content_type, user_agent_, req_headers,
+                     cur_body, post_ct, cur_method, &http_status, &resp_headers,
+                     &final_url, /*follow_redirects=*/false);
+      if (!ok || http_status < 300 || http_status >= 400)
+        break;  // transport error or a final (non-3xx) response
+      const std::string loc = HeaderValueFromBlock(resp_headers, "location");
+      if (loc.empty())
+        break;  // 3xx without Location -> treat as the final response
+      const GURL next = GURL(cur).Resolve(loc);
+      if (!next.is_valid() || hop == 20) {
+        ok = false;
+        break;
+      }
+      // Method rewrite: 303 (and POST on 301/302) becomes a bodyless GET.
+      std::string new_method = cur_method;
+      if (http_status == 303 ||
+          ((http_status == 301 || http_status == 302) && cur_method == "POST")) {
+        new_method = "GET";
+        cur_body.clear();
+      }
+      blink::WebURLResponse redirect_response;
+      redirect_response.SetCurrentRequestUrl(ToWebURL(GURL(cur)));
+      redirect_response.SetHttpStatusCode(http_status);
+      bool report_raw_headers = false;
+      std::vector<std::string> removed_headers;
+      net::HttpRequestHeaders modified_headers;
+      if (!client_->WillFollowRedirect(
+              ToWebURL(next), request->site_for_cookies, blink::WebString(),
+              network::mojom::ReferrerPolicy::kDefault,
+              blink::WebString::FromUtf8(new_method), redirect_response,
+              report_raw_headers, &removed_headers, modified_headers,
+              /*insecure_scheme_was_upgraded=*/false)) {
+        ok = false;
+        break;  // client declined the redirect
+      }
+      cur = next.spec();
+      cur_method = new_method;
+    }
   } else if (url.SchemeIs("data")) {
     // Decode the data: URL in-process (libcurl doesn't serve it); the parsed
     // mime flows into the response Content-Type below via http_content_type.
@@ -543,7 +620,13 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   }
 
   blink::WebURLResponse response;
-  response.SetCurrentRequestUrl(ToWebURL(url));
+  // After manual redirect following, the response URL is the final URL — which
+  // now equals Blink's url_list_.back() (advanced by the WillFollowRedirect
+  // calls above), so fetch's response.url/redirected are correct and the
+  // fetch_manager URL DCHECK holds.
+  response.SetCurrentRequestUrl(
+      (!final_url.empty() && final_url != url.spec()) ? ToWebURL(GURL(final_url))
+                                                      : ToWebURL(url));
   response.SetMimeType(blink::WebString::FromUtf8(mime_str));
   // Expose the server's response headers to JS (fetch Response.headers.get(),
   // XHR getResponseHeader) — set them before Content-Type so the explicit one
