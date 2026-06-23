@@ -1986,6 +1986,25 @@ int main() {
                " change=" + (changed ? "1" : "0"));
   }
 
+  // 94. mbDoubleClickSelector fires dblclick (and a single click does not).
+  {
+    mbLoadHTML(v,
+        "<body style='margin:0'><div id='d' style='width:100px;height:40px' "
+        "ondblclick='window.__dc=1' onclick='window.__sc=(window.__sc||0)+1'>"
+        "x</div></body>", "about:blank");
+    std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // layout for hit-testing
+    mbClickSelector(v, "#d");  // single click: no dblclick
+    const bool no_dc_yet = Eval(v, "String(window.__dc||0)") == "0";
+    const bool dbl = mbDoubleClickSelector(v, "#d") == 1;
+    mbWait(v, 30);
+    const bool dc = Eval(v, "String(window.__dc||0)") == "1";
+    Expect(no_dc_yet && dbl && dc,
+           "mbDoubleClickSelector fires dblclick",
+           std::string("single_no_dc=") + (no_dc_yet ? "1" : "0") + " dbl=" +
+               (dbl ? "1" : "0") + " dc=" + (dc ? "1" : "0"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

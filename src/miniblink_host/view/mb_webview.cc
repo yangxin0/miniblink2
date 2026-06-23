@@ -338,6 +338,17 @@ bool MbWebView::SelectOption(const char* css_selector, const char* value) {
   return EvalToString(js.c_str()) == "1";
 }
 
+bool MbWebView::DoubleClickSelector(const char* css_selector) {
+  // Double-click the first match's center (fires dblclick — text selection,
+  // expand/collapse, inline edit). Returns false if no match / no box.
+  int x = 0, y = 0, w = 0, h = 0;
+  if (!widget_ || !GetElementRect(css_selector, &x, &y, &w, &h) ||
+      (w <= 0 && h <= 0))
+    return false;
+  widget_->SendDoubleClick(x + w / 2, y + h / 2);
+  return true;
+}
+
 bool MbWebView::HoverSelector(const char* css_selector) {
   // Move the pointer to the first match's center, generating mousemove +
   // mouseover/mouseenter and applying :hover — for dropdown menus, tooltips, and

@@ -84,6 +84,11 @@ MB_EXPORT int mbClickSelector(mbView*, const char* css_selector);
 // or the element has no box.
 MB_EXPORT int mbHoverSelector(mbView*, const char* css_selector);
 
+// Double-click the first element matching `css_selector` (its center), firing a
+// dblclick — for text selection, expand/collapse, inline edit. Returns 1 on
+// success, 0 if nothing matches or the element has no box.
+MB_EXPORT int mbDoubleClickSelector(mbView*, const char* css_selector);
+
 // Write the full scrollable document size (logical px; >= the viewport) into
 // *w/*h (either may be NULL). For a full-page screenshot: mbGetContentSize ->
 // mbResize(view, w, h) -> mbPaintToBitmap. Returns 1 on success.

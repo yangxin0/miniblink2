@@ -102,6 +102,12 @@ int mbHoverSelector(mbView* v, const char* css_selector) {
   return v->impl->HoverSelector(css_selector) ? 1 : 0;
 }
 
+int mbDoubleClickSelector(mbView* v, const char* css_selector) {
+  if (!v || !v->impl || !css_selector)
+    return 0;
+  return v->impl->DoubleClickSelector(css_selector) ? 1 : 0;
+}
+
 int mbGetContentSize(mbView* v, int* w, int* h) {
   if (!v || !v->impl)
     return 0;

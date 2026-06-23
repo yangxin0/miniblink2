@@ -1805,6 +1805,13 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   URLLoader mojo impl, reading via the MbBlob data pipe). That's the substantial multi-component
   piece; bounded plan stands but it's a dedicated effort, not one tick.
 
+- ✅ DONE: mbDoubleClickSelector — double-click automation (2026-06-24): MbWidget::SendDoubleClick
+  sends two left-click pairs, the second with click_count=2, so Blink emits dblclick (text
+  selection, expand/collapse, inline edit). MbWebView::DoubleClickSelector targets the element
+  center (via GetElementRect). Smoke case 94 verifies a single click does NOT fire dblclick but the
+  double-click does. 115/115. C API now 56 fns. Interaction set: click/dblclick/fill/select/hover/
+  key/text — complete.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.
