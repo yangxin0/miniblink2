@@ -1459,6 +1459,22 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   MbWebView::CommitHtml does for the main frame). So iframes went from "no subframe" to "real but
   empty subframe"; content-commit is the follow-up. Smoke 77 updated to assert frame creation.
 
+- 🔬 iframe content-commit attempted -> body_loader CHECK; reverted to 93/93 (2026-06-24): tried
+  the next increment — override BeginNavigation (gated to child frames via self_owned_) to commit
+  the child's navigation: WebNavigationParams::CreateFromInfo(*info), set fallback_base_url for
+  about:srcdoc, then To<WebLocalFrameImpl>(child)->CommitNavigation(params). It CRASHED:
+  FATAL frame_loader.cc:1012 "Check failed: params->body_loader" — CommitNavigation REQUIRES a body
+  loader even for srcdoc (my assumption that DocumentLoader fills srcdoc was wrong at this layer).
+  Also WebNavigationInfo carries NO srcdoc content (only url_request + requestor_base_url), so the
+  srcdoc body must be read from the iframe owner element. NEXT (precise): in BeginNavigation, fill
+  the body before committing — for about:srcdoc, get the srcdoc string from the child's owner
+  (To<WebLocalFrameImpl>(child)->GetFrame()->Owner() -> the HTMLIFrameElement's srcdoc attr; this is
+  what TestWebFrameHelper::FillStaticResponseForSrcdocNavigation does) and
+  WebNavigationParams::FillStaticResponse(params, "text/html", "UTF-8", span(srcdoc)); for http/
+  file/data src=, fetch via MbFetchUrl + FillStaticResponse (mime from the response). Reverted the
+  crashing BeginNavigation; CreateChildFrame (frame creation) stays shipped at 93/93. Content-commit
+  is a clean next increment now that the body_loader requirement + srcdoc source are known.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
