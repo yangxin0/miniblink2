@@ -416,6 +416,13 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   another instance of the "non-compositing widget hits compositor-assumption paths" theme —
   but solved without a blink patch, by using the main-thread scroll API.
 
+- ✅ MOUSE MOVE / HOVER (2026-06-23 16:?): mbSendMouseMove(view,x,y) dispatches a
+  kMouseMove WebMouseEvent (kNoButton) via HandleInputEvent. Hit-test + :hover/:active
+  recalc runs main-thread inside the event handler, so hover state updates and
+  mouseover/mousemove fire without a compositor (same path as click). Suite case 12: hover
+  a div -> onmouseover sets window.__h -> verified via mbEvalJS. 12/12. Mouse input now
+  complete (click + move/hover). Matters for capturing real pages: hover menus, tooltips.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

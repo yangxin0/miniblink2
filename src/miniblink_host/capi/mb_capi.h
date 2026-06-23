@@ -52,6 +52,9 @@ MB_EXPORT void mbRunJS(mbView*, const char* utf8_script);
 // Synthesize a left mouse click (down+up) at (x,y) in the view.
 MB_EXPORT void mbSendMouseClick(mbView*, int x, int y);
 
+// Move the mouse pointer to (x,y): updates :hover state, fires mouseover/mousemove.
+MB_EXPORT void mbSendMouseMove(mbView*, int x, int y);
+
 // Type ASCII text into the focused element (synthesized key events).
 MB_EXPORT void mbSendText(mbView*, const char* utf8_text);
 

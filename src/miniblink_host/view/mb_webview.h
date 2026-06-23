@@ -44,6 +44,7 @@ class MbWebView {
   void LoadURL(const char* utf8_url);                          // via libcurl factory
   void RunJS(const char* utf8_script);  // execute JS in the main frame
   void SendMouseClick(int x, int y);
+  void SendMouseMove(int x, int y);
   void SendText(const char* utf8);
   void SendScroll(int x, int y, int dx, int dy);
   std::string EvalToString(const char* utf8_script);  // eval JS -> string result

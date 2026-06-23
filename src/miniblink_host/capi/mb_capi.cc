@@ -68,6 +68,11 @@ void mbSendMouseClick(mbView* v, int x, int y) {
     v->impl->SendMouseClick(x, y);
 }
 
+void mbSendMouseMove(mbView* v, int x, int y) {
+  if (v && v->impl)
+    v->impl->SendMouseMove(x, y);
+}
+
 void mbSendText(mbView* v, const char* utf8_text) {
   if (v && v->impl)
     v->impl->SendText(utf8_text);

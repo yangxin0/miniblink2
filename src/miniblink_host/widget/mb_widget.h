@@ -32,6 +32,7 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   void Attach(blink::WebLocalFrame* main_frame, int width, int height);
   void Resize(int width, int height);
   void SendMouseClick(int x, int y);  // synthesize mousedown+mouseup at (x,y)
+  void SendMouseMove(int x, int y);   // move pointer to (x,y): hover + mousemove
   void SendText(const char* utf8);    // type ASCII text into the focused element
 
   blink::WebFrameWidget* widget() { return widget_; }

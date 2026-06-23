@@ -133,6 +133,20 @@ int main() {
            std::to_string(sy));
   }
 
+  // 12. Mouse move: hover over an element fires mouseover (and :hover applies).
+  mbLoadHTML(v,
+             "<body style='margin:0'>"
+             "<div id='h' onmouseover='window.__h=1' "
+             "style='position:absolute;left:10px;top:10px;width:100px;height:60px'>"
+             "hover</div></body>",
+             "about:blank");
+  {
+    std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // layout for hit-testing
+  }
+  mbSendMouseMove(v, 50, 40);  // over the div
+  Expect(Eval(v, "String(window.__h||0)") == "1", "input: mouse move (hover)");
+
   mbDestroyView(v);
   mbShutdown();
 
