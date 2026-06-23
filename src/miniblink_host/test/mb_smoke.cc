@@ -1347,6 +1347,30 @@ int main() {
              Eval(v, "getComputedStyle(document.getElementById('d')).marginLeft") == "16px",
          "CSS var()/calc()/clamp() resolve (custom properties + math)");
 
+  // 73. Multiple concurrent views are independent. A real embedder (tabs)
+  // creates several mbViews over one shared runtime; verify a second view has
+  // its own DOM/JS world and does not disturb the first. (If the host assumed a
+  // single view, this would crash or cross-contaminate.)
+  {
+    mbView* v2 = mbCreateView(W, H);
+    Expect(v2 != nullptr, "multi-view: second mbCreateView succeeds");
+    if (v2) {
+      mbLoadHTML(v2, "<body><b id='x'>view2</b></body>", "about:blank");
+      mbLoadHTML(v, "<body><b id='x'>view1</b></body>", "about:blank");
+      mbRunJS(v2, "window.__who='two';");
+      mbRunJS(v, "window.__who='one';");
+      Expect(Eval(v2, "document.getElementById('x').textContent") == "view2" &&
+                 Eval(v, "document.getElementById('x').textContent") == "view1" &&
+                 Eval(v2, "window.__who") == "two" &&
+                 Eval(v, "window.__who") == "one",
+             "multi-view: two views keep independent DOM + JS globals");
+      mbDestroyView(v2);
+      // First view still usable after the second is destroyed.
+      Expect(Eval(v, "1+1") == "2",
+             "multi-view: first view survives second view's destruction");
+    }
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

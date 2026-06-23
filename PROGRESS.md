@@ -1373,6 +1373,15 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   property cascading from :root + math composition). Smoke 72. 85/85, no survivors. Common framework/
   design-system CSS confirmed working.
 
+- ✅ MULTIPLE concurrent views work (2026-06-24): a real embedder (tabs/windows) creates several
+  mbViews over the one shared MbRuntime; verified that works rather than assuming a single view.
+  Created a 2nd view alongside the 1st, loaded different documents + set different JS globals in
+  each: each keeps its own DOM (#x -> 'view1' vs 'view2') and its own JS world (window.__who ->
+  'one' vs 'two'), no cross-contamination; destroying the 2nd leaves the 1st fully usable
+  (1+1===2 after). So the host supports concurrent views (no single-view/global-state assumption) —
+  important for tab-like or parallel-render/scrape embedders. Smoke 73 (3 asserts). 88/88, no
+  survivors.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
