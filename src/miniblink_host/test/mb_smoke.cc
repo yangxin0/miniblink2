@@ -880,6 +880,36 @@ int main() {
              Eval(v, "1+1") == "2",
          "Web Audio: AudioContext + OfflineAudioContext construct, no crash");
 
+  // 49. Streams API actually moves data (not just constructs). A ReadableStream
+  // whose source enqueues a chunk must deliver it through a reader — exercises
+  // the async stream plumbing end to end. (ReadableStream/Transform/Compression/
+  // TextDecoder streams + MessageChannel all construct without crashing too.)
+  mbLoadHTML(v, "<body>streams</body>", "about:blank");
+  mbRunJS(v,
+    "window.__s='pending';"
+    "var rs=new ReadableStream({start:function(c){c.enqueue('hello');c.close();}});"
+    "rs.getReader().read().then(function(r){window.__s=r.value+':'+r.done;});");
+  mbWait(v, 60);
+  Expect(Eval(v, "window.__s") == "hello:false",
+         "Streams: ReadableStream delivers an enqueued chunk via a reader");
+
+  // 50. Native form controls paint (the WebThemeEngine path). Painting a
+  // checkbox/button/range/progress is a distinct subsystem from text/box paint;
+  // if the theme engine were missing it would crash or paint nothing. Render on
+  // white and assert some non-white pixels exist (a control drew).
+  mbLoadHTML(v,
+    "<body style='margin:0;background:#fff'>"
+    "<input type='checkbox' checked><button>OK</button>"
+    "<input type='range'><progress value='0.6'></progress></body>",
+    "about:blank");
+  std::vector<uint8_t> fpx(static_cast<size_t>(W) * H * 4, 255);  // white
+  mbPaintToBitmap(v, fpx.data(), W, H, W * 4);
+  bool drew = false;
+  for (size_t i = 0; i + 2 < fpx.size(); i += 4) {
+    if (fpx[i] < 240 || fpx[i + 1] < 240 || fpx[i + 2] < 240) { drew = true; break; }
+  }
+  Expect(drew, "form controls paint via WebThemeEngine (non-blank output)");
+
   mbDestroyView(v);
   mbShutdown();
 

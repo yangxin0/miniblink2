@@ -1003,6 +1003,20 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   (was 139). Graceful: AudioContext is fully constructible/wirable, just silent. OfflineAudioContext
   (which renders to a buffer) already worked and still does. Smoke 48 guards both. 58/58.
 
+- ✅ Broad API sweep — NO crashes this round (2026-06-23): probed another ~16 common APIs; all
+  safe, no fix needed. Streams (ReadableStream/TransformStream/CompressionStream/TextDecoderStream),
+  MessageChannel/MessagePort, FontFace + document.fonts, CSS.registerProperty (Houdini custom
+  props), CSS.paintWorklet.addModule (no crash; promise pending — worklets aren't wired), and
+  native FORM CONTROLS painting (checkbox/radio/range/select/progress/meter/button) all work.
+  Notably Platform::ThemeEngine() has a real default (not a null-returning inline like Crypto/
+  CreateAudioDevice were), so the WebThemeEngine paint path is safe — form controls render to
+  non-blank pixels. Locked in two meaningful guards (distinct subsystems, real data/pixels, not
+  just "constructs"): smoke 49 = ReadableStream delivers an enqueued chunk through a reader (async
+  stream plumbing end-to-end); smoke 50 = form controls paint non-blank via WebThemeEngine. 60/60.
+  STATUS: the common web-platform API surface is now very broadly verified — across all sweeps the
+  only crashes were the null-Platform-method class (Worker, SubtleCrypto, AudioContext, all fixed)
+  and the [Sync]-mojo hangs (dialogs/Blob, all fixed). Nothing probed since hangs or crashes.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
