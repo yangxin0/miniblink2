@@ -949,6 +949,27 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   55/55, no survivors. So ALL four LocalFrameHost [Sync] calls are now handled and the clipboard
   [Sync] surface is confirmed gated; Blob's BlobURLStore.Register stays the one open [Sync] hang.
 
+- ✅ FIX: URL.createObjectURL no longer hangs — the LAST [Sync]-mojo hang is closed (2026-06-23):
+  precisely bisected the Blob gap with bounded probes — only createObjectURL hangs; Blob
+  construction, .size/.type, .text(), .arrayBuffer() and FileReader.readAsText all run without
+  hanging (the async reads just don't RESOLVE, since the blob data pipe is also unserviced —
+  graceful, not a hang). Root cause: PublicURLManager::RegisterURL (public_url_manager.cc:161)
+  makes the [Sync] BlobURLStore.Register call; blob_url_store.mojom marks Register as the ONLY
+  [Sync] method (Revoke/ResolveAsURLLoaderFactory/ResolveAsBlobURLToken are async). The store
+  remote is bound through the frame's navigation-associated channel
+  (GetRemoteNavigationAssociatedInterfaces, line 77) — NOT our droppable broker — so its receiver
+  is held pending-but-unserviced and the sync call blocks the main thread forever (confirmed
+  mb_shot exit 137). FIX (patches/0003-skip-blob-url-register.patch): skip the Register call.
+  createObjectURL still returns a blob: URL string (no hang); the URL won't resolve to data (the
+  async ResolveAsURLLoaderFactory just fails to load — no block), and revokeObjectURL/Revoke are
+  async so they're fine. Verified: mb_shot exit 0, createObjectURL returns "blob:...", suite 56/56,
+  no survivors; patch reproducible. LIMITATION (honest): blob: URLs and blob DATA reads (text/
+  arrayBuffer/FileReader) still don't COMPLETE — that needs an in-process blob registry/store on a
+  service thread (heavy). But nothing in the Blob path HANGS anymore.
+  >>> MILESTONE: with this, EVERY [Sync]-mojo-to-browser hang is closed — the three modal dialogs,
+  beforeunload, clipboard (gated), and now Blob. No known JS API can hang or crash the host now;
+  unbacked services degrade gracefully (inert / reject / pending-promise / event-based failure).
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

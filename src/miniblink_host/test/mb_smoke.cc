@@ -816,6 +816,31 @@ int main() {
               Eval(v, "String(window.__copy)") == "true"),
          "clipboard ops degrade gracefully, no hang (copy/paste/clipboard API)");
 
+  // 46. URL.createObjectURL must not hang. It is the last [Sync]-mojo hazard:
+  // PublicURLManager::RegisterURL makes the [Sync] BlobURLStore.Register call on
+  // a store bound through the frame's navigation-associated channel, which no
+  // browser process services — so any page calling createObjectURL() used to
+  // deadlock the host forever (confirmed: mb_shot exit 137). The
+  // 0003-skip-blob-url-register patch skips that registration: createObjectURL
+  // returns a blob: URL without blocking (the URL won't resolve to data, but the
+  // host survives). Blob data ops (size/text/arrayBuffer/FileReader) were always
+  // fine. This calls createObjectURL DURING LOAD (the realistic hang path) and
+  // also revokes; a regression would hang the whole suite (watchdog catches it).
+  mbLoadHTML(v,
+    "<body>blob<script>"
+    "var b=new Blob(['hello'],{type:'text/plain'});"
+    "window.__sz=b.size;"
+    "window.__u=URL.createObjectURL(b);"           // used to hang here
+    "window.__isblob=(window.__u.indexOf('blob:')===0);"
+    "try{URL.revokeObjectURL(window.__u);window.__rev=true;}catch(e){window.__rev=false;}"
+    "window.__done=true;"
+    "</script></body>", "about:blank");
+  Expect(Eval(v, "String(window.__done)") == "true" &&
+             Eval(v, "String(window.__sz)") == "5" &&
+             Eval(v, "String(window.__isblob)") == "true" &&
+             Eval(v, "String(window.__rev)") == "true",
+         "URL.createObjectURL/revokeObjectURL no longer hang (blob: URL returned)");
+
   mbDestroyView(v);
   mbShutdown();
 

@@ -1,0 +1,22 @@
+diff --git a/third_party/blink/renderer/core/fileapi/public_url_manager.cc b/third_party/blink/renderer/core/fileapi/public_url_manager.cc
+index 85f178d..892a484 100644
+--- a/third_party/blink/renderer/core/fileapi/public_url_manager.cc
++++ b/third_party/blink/renderer/core/fileapi/public_url_manager.cc
+@@ -158,7 +158,16 @@ String PublicURLManager::RegisterURL(URLRegistrable* registrable) {
+     mojo::PendingReceiver<mojom::blink::Blob> blob_receiver =
+         blob_remote.InitWithNewPipeAndPassReceiver();
+ 
+-    GetBlobURLStore().Register(std::move(blob_remote), url);
++    // miniblink-modern patch: BlobURLStore.Register is the ONLY [Sync] method on
++    // the store, and the store remote is bound through the frame's navigation-
++    // associated interface channel (GetRemoteNavigationAssociatedInterfaces),
++    // which no browser process services here — so this synchronous call blocks
++    // the main thread forever and any page that calls URL.createObjectURL() hangs
++    // the host. Skip the registration: createObjectURL still returns a blob: URL
++    // string, but the URL won't resolve to data (the async ResolveAsURLLoader-
++    // Factory path simply fails to load, no hang). Graceful degradation instead
++    // of a deadlock, consistent with the host's other unbacked-service behavior.
++    // (void)GetBlobURLStore().Register(std::move(blob_remote), url);
+ 
+     mojo_urls_.insert(url_string);
+     registrable->CloneMojoBlob(std::move(blob_receiver));
