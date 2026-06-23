@@ -2118,6 +2118,40 @@ int main() {
                " backC=" + (back_to_c ? "1" : "0"));
   }
 
+  // 99. HTML form constraint validation: validity states, checkValidity(), the
+  // :invalid pseudo-class, and setCustomValidity — a significant feature area
+  // that was previously uncovered (guards against a future regression).
+  {
+    mbLoadHTML(v,
+        "<body><form id='f'>"
+        "<input id='req' required value=''>"
+        "<input id='email' type='email' value='notanemail'>"
+        "<input id='num' type='number' min='5' max='10' value='3'>"
+        "<input id='ok' value='fine'></form></body>", "about:blank");
+    const bool states =
+        Eval(v, "String(document.getElementById('req').validity.valueMissing)") ==
+            "true" &&
+        Eval(v, "String(document.getElementById('email').validity.typeMismatch)") ==
+            "true" &&
+        Eval(v, "String(document.getElementById('num').validity.rangeUnderflow)") ==
+            "true";
+    const bool check =
+        Eval(v, "String(document.getElementById('f').checkValidity())") ==
+            "false" &&
+        Eval(v, "String(document.getElementById('ok').checkValidity())") == "true";
+    const bool invalid_sel =
+        Eval(v, "String(document.querySelectorAll('input:invalid').length)") == "3";
+    const bool custom = Eval(v,
+        "(function(){var o=document.getElementById('ok');o.setCustomValidity('x');"
+        "var r=!o.checkValidity();o.setCustomValidity('');return String(r);})()") ==
+            "true";
+    Expect(states && check && invalid_sel && custom,
+           "form validation: validity states + checkValidity + :invalid + custom",
+           std::string("states=") + (states ? "1" : "0") + " check=" +
+               (check ? "1" : "0") + " sel=" + (invalid_sel ? "1" : "0") +
+               " custom=" + (custom ? "1" : "0"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

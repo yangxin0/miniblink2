@@ -1857,6 +1857,14 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   the shared smoke view already has 90+ tests' worth of entries (caught + fixed during this tick).
   119/119.
 
+- ✅ DONE: form-validation coverage (2026-06-24): HTML constraint validation (validity states,
+  checkValidity, :invalid, setCustomValidity) worked but had ZERO smoke coverage — a gap in the
+  regression safety net. Smoke case 99 locks it in: valueMissing/typeMismatch(email)/rangeUnderflow
+  (number) flags, form+element checkValidity(), input:invalid count==3, and setCustomValidity flips
+  validity. 120/120 (milestone). The engine remains complete for all common web features; repeated
+  real-site + API probing keeps confirming only the heavy items (blob: URLs, Workers, WebGL,
+  page-driven history.back) remain, each with a documented de-risked plan for a focused session.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.
