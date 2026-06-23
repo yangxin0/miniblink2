@@ -57,6 +57,12 @@ MB_EXPORT void mbLoadURL(mbView*, const char* utf8_url);
 // Execute JavaScript in the page's main frame (host-driven scripting).
 MB_EXPORT void mbRunJS(mbView*, const char* utf8_script);
 
+// Set a script that runs on every new document BEFORE the page's own scripts
+// (like Puppeteer's evaluateOnNewDocument). Use it to set globals, stub or
+// override APIs, or install a harness the page then observes. Pass NULL/empty
+// to clear. Set before navigating.
+MB_EXPORT void mbSetInitScript(mbView*, const char* utf8_script);
+
 // Synthesize a left mouse click (down+up) at (x,y) in the view.
 MB_EXPORT void mbSendMouseClick(mbView*, int x, int y);
 

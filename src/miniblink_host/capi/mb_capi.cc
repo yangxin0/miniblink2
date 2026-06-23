@@ -74,6 +74,11 @@ void mbRunJS(mbView* v, const char* utf8_script) {
     v->impl->RunJS(utf8_script);
 }
 
+void mbSetInitScript(mbView* v, const char* utf8_script) {
+  if (v && v->impl)
+    v->impl->SetInitScript(utf8_script);
+}
+
 void mbSendMouseClick(mbView* v, int x, int y) {
   if (v && v->impl)
     v->impl->SendMouseClick(x, y);

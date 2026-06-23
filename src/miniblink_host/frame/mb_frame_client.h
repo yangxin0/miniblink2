@@ -35,6 +35,11 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // a non-null loader makes Blink use it for subresources. -> our file-backed loader.
   std::unique_ptr<blink::URLLoader> CreateURLLoaderForTesting() override;
 
+  // Fires when the document element exists but before the page's own scripts run
+  // (and may execute JS). We use it to run the host's init script first, so it can
+  // set globals / override APIs the page then observes (cf. evaluateOnNewDocument).
+  void RunScriptsAtDocumentElementAvailable() override;
+
   // navigator.userAgent + the value sent on every request. Blink calls this when
   // non-empty (else Platform::UserAgent(), which is empty here), so we always
   // return a real UA. Set before navigating to take effect for that load.

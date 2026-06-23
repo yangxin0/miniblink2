@@ -43,6 +43,10 @@ class MbWebView {
   void LoadHTML(const char* utf8_html, const char* base_url);  // no network
   void LoadURL(const char* utf8_url);                          // via libcurl factory
   void RunJS(const char* utf8_script);  // execute JS in the main frame
+  // Set a script to run on every new document BEFORE its own scripts (init/inject).
+  void SetInitScript(const char* utf8_script);
+  // Called by the frame client at document-element-available; runs the init script.
+  void RunDocumentStartScript();
   void SendMouseClick(int x, int y);
   void SendMouseMove(int x, int y);
   void SendText(const char* utf8);
@@ -95,6 +99,7 @@ class MbWebView {
   [[maybe_unused]] blink::WebViewImpl* web_view_ = nullptr;     // owned by blink; Close() in dtor
   [[maybe_unused]] blink::WebLocalFrame* main_frame_ = nullptr; // owned by blink
   float dsf_ = 1.0f;  // device pixel ratio; PaintInto scales the canvas by it
+  std::string init_script_;  // runs before each new document's own scripts
   bool transparent_bg_ = false;  // omitBackground: clear to alpha 0
 };
 

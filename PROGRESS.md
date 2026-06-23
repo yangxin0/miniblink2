@@ -678,6 +678,15 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   provider pipe, so whether the [Sync] Register pump services it is the open question; left as
   documented gap to avoid burning ticks on 2-min-hang iterations.)
 
+- ✅ INIT SCRIPTS / evaluateOnNewDocument (2026-06-23 19:?): mbSetInitScript(view, js) runs a
+  host script on every new document BEFORE its own scripts. MbFrameClient overrides
+  RunScriptsAtDocumentElementAvailable() (fires at <html> creation, allowed to run JS, before
+  inline <script>s) -> owner_->RunDocumentStartScript() -> main_frame_->ExecuteScript(init).
+  Verified smoke 34: init sets window.__early, the page's inline script reads it into
+  __pageSaw == 'injected' (proving inject-before-page-scripts ordering). 36/36. Useful for
+  automation: stub/override APIs, set globals, install a harness. (Moved on from the Blob
+  associated-interface hang — still a documented gap.)
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

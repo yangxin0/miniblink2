@@ -442,6 +442,16 @@ int main() {
            "document.cookie read/write round-trip", ck);
   }
 
+  // 34. Init script (evaluateOnNewDocument): runs before the page's own scripts.
+  // Set a global in the init script; the page's inline script must observe it.
+  mbSetInitScript(v, "window.__early='injected';");
+  mbLoadHTML(v,
+             "<body><script>window.__pageSaw=window.__early||'no';</script></body>",
+             "about:blank");
+  Expect(Eval(v, "window.__pageSaw") == "injected",
+         "init script runs before page scripts", Eval(v, "window.__pageSaw"));
+  mbSetInitScript(v, "");  // clear so it doesn't affect any later case
+
   mbDestroyView(v);
   mbShutdown();
 

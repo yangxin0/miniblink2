@@ -309,6 +309,19 @@ void MbWebView::RunJS(const char* utf8_script) {
   loop.Run();
 }
 
+void MbWebView::SetInitScript(const char* utf8_script) {
+  init_script_ = utf8_script ? utf8_script : "";
+}
+
+void MbWebView::RunDocumentStartScript() {
+  // Called at document-element-available (before the page's own scripts). Run the
+  // host init script so it can set globals / override APIs the page then observes.
+  if (init_script_.empty() || !main_frame_)
+    return;
+  main_frame_->ExecuteScript(
+      blink::WebScriptSource(blink::WebString::FromUtf8(init_script_)));
+}
+
 std::string MbWebView::EvalToString(const char* utf8_script) {
   if (!main_frame_ || !utf8_script)
     return {};

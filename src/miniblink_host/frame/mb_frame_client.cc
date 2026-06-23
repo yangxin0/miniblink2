@@ -4,10 +4,16 @@
 #include <memory>
 
 #include "miniblink_host/loader/mb_url_loader.h"
+#include "miniblink_host/view/mb_webview.h"
 
 namespace mb {
 MbFrameClient::MbFrameClient(MbWebView* owner) : owner_(owner) {}
 MbFrameClient::~MbFrameClient() = default;
+
+void MbFrameClient::RunScriptsAtDocumentElementAvailable() {
+  if (owner_)
+    owner_->RunDocumentStartScript();
+}
 
 std::unique_ptr<blink::URLLoader> MbFrameClient::CreateURLLoaderForTesting() {
   // Subresources use the same UA + extra headers the top-level fetch does, so the
