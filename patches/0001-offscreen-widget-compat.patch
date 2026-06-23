@@ -1,0 +1,29 @@
+diff --git a/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc b/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
+index a536e2d..3f122ea 100644
+--- a/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
++++ b/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
+@@ -1592,7 +1592,11 @@ void WebFrameWidgetImpl::RequestDecode(const cc::DrawImage& image,
+   if (auto* layer_tree_host = widget_base_->LayerTreeHost()) {
+     layer_tree_host->QueueImageDecode(image, std::move(callback), speculative);
+   } else {
+-    std::move(callback).Run(false);
++    // miniblink-modern patch: no compositor. Resolve ASYNC — callers such as
++    // ImageLoader::DispatchDecodeRequestsIfComplete invoke this while iterating their
++    // decode-request list; running the callback synchronously mutates it -> crash.
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(std::move(callback), false));
+   }
+ }
+ 
+@@ -2077,7 +2081,10 @@ void WebFrameWidgetImpl::UpdateBrowserControlsState(
+ }
+ 
+ void WebFrameWidgetImpl::SetHaveScrollEventHandlers(bool has_handlers) {
+-  widget_base_->LayerTreeHost()->SetHaveScrollEventHandlers(has_handlers);
++  // miniblink-modern patch: non-compositing offscreen widgets have no LayerTreeHost,
++  // yet a page adding a 'scroll' listener still reaches here. Guard the null deref.
++  if (widget_base_->LayerTreeHost())
++    widget_base_->LayerTreeHost()->SetHaveScrollEventHandlers(has_handlers);
+ }
+ 
+ void WebFrameWidgetImpl::SetEventListenerProperties(

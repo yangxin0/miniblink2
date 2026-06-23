@@ -1,0 +1,93 @@
+# miniblink_host — minimal in-process Blink host (the //content replacement).
+#
+# DRAFT. To iterate: copy this dir to chromium-150.../miniblink_host/, add
+#   group("gn_all") deps += [ "//miniblink_host" ]   (or build it directly),
+# then `gn gen out/Release && ninja -C out/Release miniblink_host`.
+#
+# Produces a shared library exposing the extern "C" mb_capi.h ABI. The CMake
+# outer shell (wke/mb, port/) links ONLY that.
+#
+# NOTE: this reaches into renderer-internal blink targets (web_frame_widget_impl,
+# url_loader), not just //third_party/blink/public — like blink's own test support.
+
+import("//build/config/ui.gni")
+
+component("miniblink_host") {
+  output_name = "miniblink_host"
+
+  # Donor-tree sandbox lives at //third_party/blink/renderer/miniblink_host; this
+  # makes `#include "miniblink_host/..."` resolve from there.
+  include_dirs = [ "//third_party/blink/renderer" ]
+
+  sources = [
+    "capi/mb_capi.cc",
+    "capi/mb_capi.h",
+    "frame/mb_frame_client.cc",
+    "frame/mb_frame_client.h",
+    "frame/mb_view_client.cc",
+    "frame/mb_view_client.h",
+    "loader/mb_url_loader.cc",
+    "loader/mb_url_loader.h",
+    "platform/mb_platform.cc",
+    "platform/mb_platform.h",
+    "runtime/mb_runtime.cc",
+    "runtime/mb_runtime.h",
+    "view/mb_webview.cc",
+    "view/mb_webview.h",
+    "widget/mb_sw_frame_sink.cc",
+    "widget/mb_sw_frame_sink.h",
+    "widget/mb_widget.cc",
+    "widget/mb_widget.h",
+  ]
+
+  deps = [
+    # Blink engine (public + the renderer internals the host subclasses).
+    "//third_party/blink/public:blink",
+    "//third_party/blink/renderer/controller:controller",
+    "//third_party/blink/renderer/core:core",
+    "//third_party/blink/renderer/platform:platform",
+    # Substrate.
+    "//base",
+    "//cc",
+    "//cc/paint",
+    "//gin",
+    "//mojo/core/embedder",
+    "//mojo/public/cpp/bindings",
+    "//mojo/public/cpp/system",
+    "//skia",
+    "//ui/base",
+    "//ui/gfx",
+    "//ui/gfx/codec",
+    "//ui/gfx/geometry",
+    "//v8",
+    # Networking (libcurl factory implements these mojom).
+    "//services/network/public/cpp",
+    "//services/network/public/mojom",
+    "//services/network/public/mojom:mojom_blink",
+  ]
+
+  # libcurl for mb_url_loader. TODO(mb): point at the donor's bundled curl or a
+  # vendored static lib; for now assume a system/third_party curl target.
+  # libs = [ "curl" ]
+
+  configs += [
+    "//third_party/blink/renderer:config",
+    "//v8:external_startup_data",  # defines V8_USE_EXTERNAL_STARTUP_DATA -> gin snapshot API
+  ]
+
+  libs = [ "curl" ]  # system libcurl (macOS SDK) for HTTP(S) loading
+}
+
+# Runtime smoke test: exercises mbInitialize() against the real engine.
+executable("mb_smoke") {
+  sources = [ "test/mb_smoke.cc" ]
+  include_dirs = [ "//third_party/blink/renderer" ]
+  deps = [ ":miniblink_host" ]
+}
+
+# mb_shot: headless HTML -> PNG renderer CLI (the deliverable tool).
+executable("mb_shot") {
+  sources = [ "tools/mb_shot.cc" ]
+  include_dirs = [ "//third_party/blink/renderer" ]
+  deps = [ ":miniblink_host" ]
+}

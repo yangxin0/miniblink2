@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# Editor/scratch
+*.swp
+*~
+
+# The engine is built inside a Chromium checkout (see build.sh) — no build
+# outputs live in this repo. Nothing to ignore there.
+#
+# Tracked on purpose: src/ (the host), patches/ (applied to the donor tree),
+# docs/ (specs + demo PNGs), README.md, build.sh, PROGRESS.md.
+#
+# vendor/reference/ holds copied upstream Blink files used only as a reading
+# reference while developing the host. Keep it out of the repo (it's a verbatim
+# copy of Chromium source, not our code):
+vendor/reference/

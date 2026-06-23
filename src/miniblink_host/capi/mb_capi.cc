@@ -1,0 +1,92 @@
+// mb_capi.cc — extern "C" ABI implementation. Pure forwarding to the C++ host;
+// no Blink types cross this boundary.
+
+#include "miniblink_host/capi/mb_capi.h"
+
+#include <memory>
+#include <string>
+
+#include "miniblink_host/runtime/mb_runtime.h"
+#include "miniblink_host/view/mb_webview.h"
+
+// Opaque handle: wraps the C++ view.
+struct mbView {
+  std::unique_ptr<mb::MbWebView> impl;
+};
+
+extern "C" {
+
+int mbInitialize(void) {
+  return mb::MbRuntime::Initialize() ? 1 : 0;
+}
+
+void mbShutdown(void) {
+  mb::MbRuntime::Shutdown();
+}
+
+void mbPumpMessages(void) {
+  if (auto* rt = mb::MbRuntime::Get())
+    rt->PumpOnce();
+}
+
+mbView* mbCreateView(int width, int height) {
+  if (!mb::MbRuntime::Get())
+    return nullptr;  // must mbInitialize() first
+  auto view = std::make_unique<mbView>();
+  view->impl = mb::MbWebView::Create(width, height);
+  if (!view->impl)
+    return nullptr;
+  return view.release();
+}
+
+void mbDestroyView(mbView* v) {
+  delete v;  // unique_ptr<MbWebView> dtor closes the WebView
+}
+
+void mbResize(mbView* v, int width, int height) {
+  if (v && v->impl)
+    v->impl->Resize(width, height);
+}
+
+void mbLoadHTML(mbView* v, const char* utf8_html, const char* base_url) {
+  if (v && v->impl)
+    v->impl->LoadHTML(utf8_html, base_url);
+}
+
+void mbLoadURL(mbView* v, const char* utf8_url) {
+  if (v && v->impl)
+    v->impl->LoadURL(utf8_url);
+}
+
+void mbRunJS(mbView* v, const char* utf8_script) {
+  if (v && v->impl)
+    v->impl->RunJS(utf8_script);
+}
+
+int mbEvalJS(mbView* v, const char* utf8_script, char* out, int out_cap) {
+  if (!v || !v->impl)
+    return 0;
+  std::string result = v->impl->EvalToString(utf8_script);
+  if (out && out_cap > 0) {
+    int n = static_cast<int>(result.size());
+    int copy = n < out_cap - 1 ? n : out_cap - 1;
+    for (int i = 0; i < copy; ++i)
+      out[i] = result[i];
+    out[copy] = '\0';
+  }
+  return static_cast<int>(result.size());
+}
+
+int mbPaintToBitmap(mbView* v, void* out_bgra, int width, int height, int stride) {
+  if (!v || !v->impl)
+    return 0;
+  return v->impl->PaintToBitmap(out_bgra, width, height, stride) ? 1 : 0;
+}
+
+int mbSavePng(mbView* v, const char* path, int width, int height) {
+  if (!v || !v->impl || !path)
+    return 0;
+  return v->impl->SavePng(path, width, height) ? 1 : 0;
+}
+
+}  // extern "C"
