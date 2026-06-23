@@ -1038,6 +1038,16 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   in grayscale-filter + border-radius-clip + box-shadow. So the engine renders filters, clipping
   and shadows correctly, not merely without crashing. 68/68, no survivors.
 
+- ✅ TEXT rendering + font metrics verified (2026-06-23): directly checked the thing the "fonts"
+  P1 gap worried about — that text actually rasterizes to glyphs (not tofu/blank). Rendered black
+  30px monospace on white and scanned the text band: both dark pixels (glyph strokes) AND white
+  pixels (inter/intra-glyph gaps) are present — proving real font data + shaping + rasterization
+  (all-white would mean missing fonts; all-dark would mean a solid block, not text). Font METRICS
+  scale too: canvas measureText('MMMM') at 40px is ~2x the 20px width (real shaping/advances, not a
+  stub). So base text rendering on macOS system fonts WORKS; the remaining font work is narrower
+  (web @font-face over network, full .pak coverage), not "text doesn't render". Smoke 56-57 lock
+  in glyph rasterization + measureText scaling. 70/70, no survivors.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

@@ -1028,6 +1028,38 @@ int main() {
            "paint: box-shadow spread draws a ring outside the border box");
   }
 
+  // 56. Text actually RASTERIZES to glyphs (fonts were a documented gap). Render
+  // black text on white and scan the text band: correct glyph rendering yields
+  // both dark pixels (the strokes) AND white pixels (gaps between/within glyphs).
+  // All-white => no glyphs (tofu/blank/missing fonts); all-dark => a solid block,
+  // not text. Requires real font data + shaping + rasterization.
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0;background:#fff'>"
+      "<div style='font:30px monospace;color:#000;line-height:40px'>WWWWWWWW</div>"
+      "</body>", "about:blank");
+    std::vector<uint8_t> t(static_cast<size_t>(W) * H * 4, 255);
+    mbPaintToBitmap(v, t.data(), W, H, W * 4);
+    int dark = 0, light = 0;
+    for (int y = 0; y < 40; ++y)
+      for (int x = 0; x < 220; ++x) {
+        int r = t[(static_cast<size_t>(y) * W + x) * 4 + 2];
+        if (r < 60) ++dark; else if (r > 200) ++light;
+      }
+    Expect(dark > 50 && light > 50,
+           "text: glyphs rasterize (dark strokes + white gaps present)");
+  }
+
+  // 57. Font metrics scale: canvas measureText must report a real, font-size-
+  // proportional advance width (text shaping with metrics, not a stub). 40px
+  // text is ~2x the width of the same string at 20px.
+  Expect(Eval(v,
+      "(function(){var x=document.createElement('canvas').getContext('2d');"
+      "x.font='40px monospace';var w40=x.measureText('MMMM').width;"
+      "x.font='20px monospace';var w20=x.measureText('MMMM').width;"
+      "return (w20>0 && w40>w20*1.5 && w40<w20*2.5)?'ok':(w40+'/'+w20);})()") == "ok",
+      "text: canvas measureText advance scales with font size");
+
   mbDestroyView(v);
   mbShutdown();
 
