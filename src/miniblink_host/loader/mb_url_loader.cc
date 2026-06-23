@@ -400,12 +400,21 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
         }
       }
     }
-    if (std::optional<std::string> ct =
-            request->headers.GetHeader("Content-Type")) {
-      post_ct = *ct;
+    // Forward the request's own headers (fetch headers:{}, XHR setRequestHeader)
+    // — Authorization, X-*, Accept, etc. — so API calls authenticate/negotiate.
+    // Content-Type is carried separately (post_ct) to avoid a duplicate header.
+    std::string req_headers = extra_headers_;
+    for (const auto& kv : request->headers.GetHeaderVector()) {
+      if (ToLower(kv.key) == "content-type") {
+        post_ct = kv.value;
+        continue;
+      }
+      if (!req_headers.empty())
+        req_headers += "\n";
+      req_headers += kv.key + ": " + kv.value;
     }
     ok = FetchHttp(url.spec(), &contents, &http_content_type, user_agent_,
-                   extra_headers_, post_body, post_ct, request->method);
+                   req_headers, post_body, post_ct, request->method);
   } else if (url.SchemeIs("data")) {
     // Decode the data: URL in-process (libcurl doesn't serve it); the parsed
     // mime flows into the response Content-Type below via http_content_type.

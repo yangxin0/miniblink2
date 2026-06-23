@@ -537,6 +537,29 @@ int main() {
                    r.c_str());
     }
   }
+
+  // 38. fetch() per-request headers: a custom header set on the fetch (e.g. an
+  // Authorization token or X-* header) must reach the server. The echo host
+  // returns the request headers; ours must be present. Exercises forwarding of
+  // request->headers in MbURLLoader::Deliver.
+  {
+    mbLoadHTML(v, "<body>x</body>", (host + "/").c_str());
+    mbRunJS(v,
+        ("window.__fh='';fetch('" + host +
+         "/headers',{headers:{'X-Mb-Tok':'mbtok7'}})"
+         ".then(function(r){return r.json();}).then(function(j){"
+         "var h=j.headers||{};window.__fh=h['x-mb-tok']||'MISSING';})"
+         ".catch(function(e){window.__fh='ERR:'+e.name;});").c_str());
+    mbWait(v, 1500);  // async fetch round-trip
+    std::string r = Eval(v, "String(window.__fh)");
+    if (!r.empty() && r.rfind("ERR:", 0) != 0) {  // host responded
+      Expect(r.find("mbtok7") != std::string::npos,
+             "fetch() forwards custom request headers", r);
+    } else {
+      std::fprintf(stderr, "  [SKIP] fetch headers (host unreachable: %s)\n",
+                   r.c_str());
+    }
+  }
   }  // MB_NET_TESTS
 
   // 33. document.cookie (JS): write then read round-trips through the in-process

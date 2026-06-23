@@ -1609,6 +1609,17 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   (string/urlencoded/JSON) — multipart file uploads (kFile/kDataPipe) and per-request custom headers
   beyond Content-Type aren't forwarded yet; documented follow-ups.
 
+- ✅✅ DONE: fetch()/XHR per-request headers forwarded — shipped (2026-06-24): MbURLLoader::Deliver
+  forwarded only the host-level extra_headers_ (+ Content-Type), dropping a request's own headers,
+  so fetch headers:{} / XHR setRequestHeader (Authorization, X-*, Accept, …) never reached the
+  server — breaking authenticated API calls. FIX: Deliver now iterates request->headers
+  .GetHeaderVector() and appends each "key: value" to the per-request header set passed to
+  FetchHttp (Content-Type still carried via post_ct to avoid a duplicate header). VERIFIED vs
+  postman-echo (mb_shot): a fetch with Authorization + X-Mb-Custom echoed back both (was MISSING
+  before). Gated smoke case 38 (fetch custom header -> mbtok7) PASSES. Default suite 98/98.
+  LIMITATION: still no multipart file upload (kFile/kDataPipe body elements). The fetch/XHR network
+  surface (method + body + headers) is now complete for the common JSON/urlencoded API case.
+
 ### REMAINING ROADMAP
 - P0-history: page-driven history.back()/forward() does nothing — History::back() ->
   LocalFrameClientImpl::NavigateBackForward -> LocalFrameHost.GoToEntryAtOffset (mojo to the absent
