@@ -194,14 +194,23 @@ void MbWebView::Resize(int width, int height) {
     widget_->Resize(width, height);
 }
 
-void MbWebView::CommitHtml(const char* data, size_t len, const char* base_url) {
+void MbWebView::CommitHtml(const char* data, size_t len, const char* base_url,
+                           const std::string& charset) {
   if (!main_frame_)
     return;
   // INSIDE_BLINK: WebURL is built from a KURL (the GURL ctor is non-INSIDE_BLINK only).
   blink::WebURL url{
       blink::KURL((base_url && *base_url) ? base_url : "about:blank")};
-  auto params = blink::WebNavigationParams::CreateWithHTMLStringForTesting(
-      base::span<const char>(data, len), url);
+  // Build the response ourselves instead of CreateWithHTMLStringForTesting,
+  // which hardcodes the encoding to "UTF-8" (authoritative), silently breaking
+  // any non-UTF-8 page. An empty encoding is tentative: the HTML parser then
+  // honors <meta charset>, a BOM, and UTF-8 auto-detection. A known charset
+  // (from the HTTP Content-Type) is passed through as authoritative.
+  auto params = std::make_unique<blink::WebNavigationParams>();
+  params->url = url;
+  blink::WebNavigationParams::FillStaticResponse(
+      params.get(), "text/html", blink::WebString::FromUtf8(charset),
+      base::span<const char>(data, len));
   auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
   impl->CommitNavigation(std::move(params), /*extra_data=*/nullptr);
   // Drive parsing + parse-time subresource loads (render-blocking <link> CSS, scripts)
@@ -241,8 +250,19 @@ void MbWebView::LoadURL(const char* utf8_url) {
       std::fprintf(stderr, "[mb_webview] main-doc %s ok=%d bytes=%zu ct='%s'\n",
                    url.c_str(), ok, body.size(), content_type.c_str());
     }
-    if (ok)
-      CommitHtml(body.data(), body.size(), url.c_str());
+    if (ok) {
+      // Pass the server's charset (authoritative) when present; else empty so the
+      // parser detects <meta charset>/BOM.
+      std::string charset;
+      std::string lc = content_type;
+      for (char& c : lc) c = static_cast<char>(std::tolower((unsigned char)c));
+      if (auto p = lc.find("charset="); p != std::string::npos) {
+        p += 8;
+        std::string::size_type end = content_type.find_first_of("; \t", p);
+        charset = content_type.substr(p, end == std::string::npos ? end : end - p);
+      }
+      CommitHtml(body.data(), body.size(), url.c_str(), charset);
+    }
   }
 }
 

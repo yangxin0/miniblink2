@@ -115,7 +115,10 @@ class MbWebView {
   // Commit an in-memory document (any bytes, including embedded NULs) as the main
   // frame's content and drive parsing to quiescence. Both LoadHTML and the network
   // LoadURL funnel through here so neither truncates the body at a NUL.
-  void CommitHtml(const char* data, size_t len, const char* base_url);
+  // `charset` is the authoritative text encoding (e.g. an HTTP Content-Type
+  // charset). Empty => tentative, so the HTML parser honors <meta charset>/BOM.
+  void CommitHtml(const char* data, size_t len, const char* base_url,
+                  const std::string& charset = "");
   // Run `body` inside a scheduler task (so subsystems that require task bracketing
   // — e.g. CanvasPerformanceMonitor around canvas draws — are satisfied), blocking
   // until it has executed. Host-driven JS must run here, not via a bare synchronous

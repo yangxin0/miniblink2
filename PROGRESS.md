@@ -1646,6 +1646,18 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   no transfer. Full gated net suite now 106/106 (also clears the earlier "request headers"/"custom
   headers" host-shape flakes). Default suite 98/98.
 
+- ✅✅ DONE: character-encoding / non-UTF-8 pages — shipped (2026-06-24): a page in any non-UTF-8
+  charset (latin-1, windows-1252, Shift_JIS, …) rendered as mojibake — <meta charset> was ignored
+  and every byte force-decoded as UTF-8. CAUSE: MbWebView::CommitHtml used
+  WebNavigationParams::CreateWithHTMLStringForTesting, which hardcodes FillStaticResponse(...,"UTF-8",
+  ...) — an AUTHORITATIVE encoding, so the HTML parser's <meta>/BOM detection can't override. FIX:
+  CommitHtml now builds params itself and calls FillStaticResponse with a `charset` arg that is empty
+  by default (TENTATIVE — parser honors <meta charset>, BOM, and UTF-8 auto-detection); LoadURL
+  parses the charset out of the HTTP Content-Type and passes it (authoritative when the server
+  declares one). VERIFIED (mb_shot): latin1 'café crème', win1252 'price €100 "quoted"', Shift_JIS
+  '日本' all decode; UTF-8 WITH and WITHOUT <meta> still correct (café / café 日本). Smoke cases 81
+  (ISO-8859-1 via meta) + 82 (UTF-8 no-meta auto-detect) added — 100/100, no survivors.
+
 ### REMAINING ROADMAP
 - P0-history: page-driven history.back()/forward() does nothing — History::back() ->
   LocalFrameClientImpl::NavigateBackForward -> LocalFrameHost.GoToEntryAtOffset (mojo to the absent

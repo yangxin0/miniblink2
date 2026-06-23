@@ -1678,6 +1678,38 @@ int main() {
            "page-initiated main-frame navigation (location=) commits", after);
   }
 
+  // 81. Character encoding: a non-UTF-8 page is decoded via <meta charset>.
+  // CommitHtml used to force UTF-8 (authoritative), turning latin-1/Shift_JIS
+  // bytes into mojibake. The encoding is now tentative so the parser honors the
+  // declared charset. (Eval returns the JS string as UTF-8, so 'é' compares as
+  // the 2-byte 0xC3 0xA9 sequence.)
+  {
+    // ISO-8859-1 source bytes: 0xE9='é', 0xE8='è'.
+    const char* doc =
+        "<meta charset=\"ISO-8859-1\"><body><div id=o>caf\xe9 cr\xe8me</div></body>";
+    if (FILE* f = std::fopen("/tmp/mb_latin1.html", "wb")) {
+      std::fwrite(doc, 1, std::strlen(doc), f); std::fclose(f);
+    }
+    mbLoadURL(v, "file:///tmp/mb_latin1.html");
+    mbWait(v, 50);
+    Expect(Eval(v, "document.getElementById('o').textContent") ==
+               "caf\xc3\xa9 cr\xc3\xa8me",
+           "non-UTF-8 page decodes via <meta charset> (ISO-8859-1)");
+  }
+
+  // 82. UTF-8 without a <meta charset> still decodes (auto-detection) — guards
+  // that the tentative-encoding change didn't regress the common UTF-8 default.
+  {
+    const char* doc = "<body><div id=o>caf\xc3\xa9</div></body>";  // UTF-8 'é'
+    if (FILE* f = std::fopen("/tmp/mb_utf8nm.html", "wb")) {
+      std::fwrite(doc, 1, std::strlen(doc), f); std::fclose(f);
+    }
+    mbLoadURL(v, "file:///tmp/mb_utf8nm.html");
+    mbWait(v, 50);
+    Expect(Eval(v, "document.getElementById('o').textContent") == "caf\xc3\xa9",
+           "UTF-8 page without <meta charset> decodes (auto-detect)");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
