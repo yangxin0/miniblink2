@@ -1124,6 +1124,22 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   predicate times out -> 0 (and does not hang past the timeout). README updated. 76/76, no
   survivors.
 
+- 📝 PLAN: off-main-thread mojo service host (docs/design-blob-service-host.md) (2026-06-24):
+  scoped the one remaining heavy enabler into an executable, incremental plan rather than cramming
+  it into a tick. Core insight (validated by the dialog/Blob analysis): every remaining functional
+  gap is a [Sync] mojo call the main thread makes to a browser-process service; an in-process
+  receiver on the SAME thread can't reply (deadlock), but mojo CAN service a sync call from a
+  receiver on ANOTHER thread — so a dedicated service thread (base::Thread, IO pump) hosting
+  BlobRegistry/Blob (and later worker host endpoints) is the fix. Key simplification found:
+  DataElementBytes carries embedded_data inline for blobs <=256KB (the common `new Blob(['x'])`
+  case), so the first working increment can store bytes directly and skip the BytesProvider
+  callback. Plan has 6 increments, each independently buildable + mb_smoke-verified (no broken
+  intermediate state): (1) service-thread scaffold, (2) VALIDATE cross-thread [Sync] before
+  building anything on it, (3) Register inline bytes, (4) ReadAll via data pipe -> blob.text()
+  resolves [the user-visible win], (5) blob: URL resolution, (6) BytesProvider for >256KB. Same
+  foundation later hosts the worker host. Deferred deliberately: this is multi-tick design work,
+  not a 5-minute cram; the plan de-risks it. (No code change this tick — the doc is the artifact.)
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
