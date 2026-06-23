@@ -1367,6 +1367,12 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   spans layout, basic + advanced paint (filters/clip/shadow/gradient/blend-adjacent), text/glyphs,
   SVG, generated content, and clip-path — all asserting CORRECT output.
 
+- ✅ CSS var()/calc()/clamp() verified (2026-06-24): the building blocks of modern stylesheets and
+  design systems, resolved via computed style. Custom property color var(--accent) -> rgb(10,20,30);
+  calc(100px+50px) -> 150px; clamp(10px,40px,100px) -> 40px; calc(var(--gap)*2) -> 16px (custom
+  property cascading from :root + math composition). Smoke 72. 85/85, no survivors. Common framework/
+  design-system CSS confirmed working.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

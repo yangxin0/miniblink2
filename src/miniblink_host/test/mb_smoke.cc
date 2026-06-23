@@ -1328,6 +1328,25 @@ int main() {
            "clip-path: polygon() clips paint to the shape");
   }
 
+  // 72. CSS custom properties (var()), calc(), and clamp()/min()/max() — the
+  // building blocks of modern stylesheets and design systems. All resolve via
+  // computed style. (Custom properties also cascade + inherit; checked via a
+  // child reading a property set on :root.)
+  mbLoadHTML(v,
+    "<style>:root{--accent:rgb(10,20,30);--gap:8px}"
+    "#a{color:var(--accent)} "
+    "#b{width:calc(100px + 50px)} "
+    "#c{width:clamp(10px,40px,100px)} "
+    "#d{margin-left:calc(var(--gap) * 2)}</style>"
+    "<body><i id='a'>x</i><i id='b' style='display:block'>x</i>"
+    "<i id='c' style='display:block'>x</i><i id='d' style='display:block'>x</i></body>",
+    "about:blank");
+  Expect(Eval(v, "getComputedStyle(document.getElementById('a')).color") == "rgb(10, 20, 30)" &&
+             Eval(v, "getComputedStyle(document.getElementById('b')).width") == "150px" &&
+             Eval(v, "getComputedStyle(document.getElementById('c')).width") == "40px" &&
+             Eval(v, "getComputedStyle(document.getElementById('d')).marginLeft") == "16px",
+         "CSS var()/calc()/clamp() resolve (custom properties + math)");
+
   mbDestroyView(v);
   mbShutdown();
 
