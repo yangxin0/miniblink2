@@ -213,6 +213,39 @@ int mbGetTitle(mbView* v, char* out, int out_cap) {
   return static_cast<int>(result.size());
 }
 
+int mbGetText(mbView* v, char* out, int out_cap) {
+  if (!v || !v->impl)
+    return 0;
+  std::string result = v->impl->GetText();
+  if (out && out_cap > 0) {
+    int n = static_cast<int>(result.size());
+    int copy = n < out_cap - 1 ? n : out_cap - 1;
+    for (int i = 0; i < copy; ++i)
+      out[i] = result[i];
+    out[copy] = '\0';
+  }
+  return static_cast<int>(result.size());
+}
+
+int mbGetHTML(mbView* v, char* out, int out_cap) {
+  if (!v || !v->impl)
+    return 0;
+  std::string result = v->impl->GetHTML();
+  if (out && out_cap > 0) {
+    int n = static_cast<int>(result.size());
+    int copy = n < out_cap - 1 ? n : out_cap - 1;
+    for (int i = 0; i < copy; ++i)
+      out[i] = result[i];
+    out[copy] = '\0';
+  }
+  return static_cast<int>(result.size());
+}
+
+void mbReload(mbView* v) {
+  if (v && v->impl)
+    v->impl->Reload();
+}
+
 int mbEvalJSIsolated(mbView* v, const char* utf8_script, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;

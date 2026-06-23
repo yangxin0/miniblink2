@@ -142,6 +142,19 @@ MB_EXPORT int mbGetURL(mbView*, char* out, int out_cap);
 // Returns the full length in bytes.
 MB_EXPORT int mbGetTitle(mbView*, char* out, int out_cap);
 
+// Write the page's visible text (document.body.innerText) into `out`. Returns the
+// full length in bytes (call with out=NULL/out_cap=0 first to size the buffer).
+MB_EXPORT int mbGetText(mbView*, char* out, int out_cap);
+
+// Write the rendered (post-JS) DOM as serialized HTML
+// (document.documentElement.outerHTML) into `out`. Returns the full length in
+// bytes (size first with out=NULL/out_cap=0 — pages can be large).
+MB_EXPORT int mbGetHTML(mbView*, char* out, int out_cap);
+
+// Re-navigate to the current document's URL, re-fetching it. No-op for in-memory
+// documents (about:blank, data:, mbLoadHTML content).
+MB_EXPORT void mbReload(mbView*);
+
 // Drain captured page console output (console.log/warn/error) into `out`
 // (NUL-terminated, up to out_cap bytes; one "level: text" line per message), and
 // clear the buffer. Returns the full output length in bytes.

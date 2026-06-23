@@ -392,6 +392,26 @@ std::string MbWebView::GetTitle() {
   return main_frame_->GetDocument().Title().Utf8();
 }
 
+std::string MbWebView::GetText() {
+  // The page's visible text (document.body.innerText) — the common scraping read.
+  return EvalToString("document.body ? document.body.innerText : ''");
+}
+
+std::string MbWebView::GetHTML() {
+  // The rendered, post-JS DOM serialized to HTML (document.documentElement
+  // .outerHTML) — for scraping the live document, not the original source.
+  return EvalToString(
+      "document.documentElement ? document.documentElement.outerHTML : ''");
+}
+
+void MbWebView::Reload() {
+  // Re-navigate to the committed document's URL, re-fetching it. Only meaningful
+  // for real (file/http) URLs; in-memory docs (about:blank, data:) are left as-is.
+  std::string u = GetURL();
+  if (u.rfind("file://", 0) == 0 || u.rfind("http", 0) == 0)
+    LoadURL(u.c_str());
+}
+
 void MbWebView::SetExtraHeaders(const char* utf8_headers) {
   if (frame_client_)
     frame_client_->SetExtraHeaders(utf8_headers ? utf8_headers : "");

@@ -1767,6 +1767,38 @@ int main() {
            "mbGetTitle returns the document title", tb);
   }
 
+  // 84. mbGetText / mbGetHTML scraping accessors.
+  {
+    mbLoadHTML(v, "<body><p>Alpha</p><p>Beta</p></body>", "about:blank");
+    char xb[1024] = {0};
+    mbGetText(v, xb, sizeof(xb));
+    Expect(std::string(xb).find("Alpha") != std::string::npos &&
+               std::string(xb).find("Beta") != std::string::npos,
+           "mbGetText returns visible text", xb);
+    char hb[2048] = {0};
+    int hlen = mbGetHTML(v, hb, sizeof(hb));
+    Expect(hlen > 0 && std::string(hb).find("<p>Alpha</p>") != std::string::npos,
+           "mbGetHTML returns serialized DOM", hb);
+  }
+
+  // 85. mbReload re-fetches the document: mutate the DOM, reload, the mutation is
+  // gone (the file is re-read and re-committed).
+  {
+    const char* doc = "<body><div id=o>ORIGINAL</div></body>";
+    if (FILE* f = std::fopen("/tmp/mb_reload.html", "wb")) {
+      std::fwrite(doc, 1, std::strlen(doc), f); std::fclose(f);
+    }
+    mbLoadURL(v, "file:///tmp/mb_reload.html");
+    mbRunJS(v, "document.getElementById('o').textContent='MUTATED';");
+    const bool mutated =
+        Eval(v, "document.getElementById('o').textContent") == "MUTATED";
+    mbReload(v);
+    mbWait(v, 50);
+    Expect(mutated && Eval(v, "document.getElementById('o').textContent") ==
+                          "ORIGINAL",
+           "mbReload re-fetches + re-commits the document");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

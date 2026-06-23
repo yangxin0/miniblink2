@@ -1694,6 +1694,14 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   FINAL URL after redirects (per the redirect fixes). Smoke case 83 verifies both. 102/102; mb_shot
   still builds.
 
+- ✅ DONE: C API mbGetText + mbGetHTML + mbReload (2026-06-24): rounded out the deliverable surface
+  with the core scraping/automation ops that mb_shot had only as CLI flags. MbWebView::GetText()
+  (body.innerText) + GetHTML() (documentElement.outerHTML, post-JS) via EvalToString; Reload()
+  re-navigates to GetURL() (file/http only; in-memory docs left as-is). Exposed as mbGetText/mbGetHTML
+  (buffer-copy + size-first convention for large pages) and mbReload. Smoke cases 84 (text+html) and
+  85 (reload re-fetches: mutate DOM -> reload -> mutation gone). 105/105; mb_shot still builds. C API
+  now 41 fns.
+
 ### REMAINING ROADMAP
 - P0-history: page-driven history.back()/forward() does nothing — History::back() ->
   LocalFrameClientImpl::NavigateBackForward -> LocalFrameHost.GoToEntryAtOffset (mojo to the absent

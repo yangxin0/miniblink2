@@ -86,6 +86,11 @@ class MbWebView {
   // read from the frame — no JS needed. Empty before the first load.
   std::string GetURL();
   std::string GetTitle();
+  // Scraping reads: visible text (body.innerText) and the post-JS serialized DOM.
+  std::string GetText();
+  std::string GetHTML();
+  // Re-navigate to the current document URL, re-fetching it (file/http only).
+  void Reload();
   // Set extra request headers (newline-separated "Name: Value") for navigation +
   // subresources. Set before LoadURL to apply to that navigation.
   void SetExtraHeaders(const char* utf8_headers);
