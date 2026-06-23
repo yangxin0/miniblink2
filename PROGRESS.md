@@ -1326,6 +1326,20 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   this is only the blob:-URL-as-loadable-resource piece. Discipline: attempted, found the real
   blocker, reverted rather than ship a hanging build.
 
+- 📌 Increment 5 fix CONFIRMED (option a), execution-ready (2026-06-24): investigated the deadlock
+  fix and confirmed the mechanism + primitives (in docs/design-blob-service-host.md). Replace
+  OverrideBinderForTesting (which loops the bind through the blocked main thread) with a REAL
+  blink::mojom::blink::AssociatedInterfaceProvider proxy whose RECEIVER is bound on the SERVICE
+  thread; then GetAssociatedInterface (bind) and the [Sync] Register both dispatch off the main
+  thread -> no deadlock. Primitives verified present: PendingAssociatedRemote::
+  InitWithNewEndpointAndPassReceiver() + EnableUnassociatedUsage() (dedicated standalone pair);
+  proxy's GetAssociatedInterface(name,receiver) -> MakeSelfOwnedAssociatedReceiver(MbBlobURLStore,
+  receiver.PassHandle()) when name==BlobURLStore::Name_. The store/factory/loader classes from the
+  reverted attempt were correct (only the binding was wrong) — reconstruct + swap to the proxy
+  binding + revert patch 0003 = one focused pass. One detail to confirm during execution: whether
+  EnableUnassociatedUsage is needed on both the remote and the receiver. blob: URL is now a fully
+  mechanical plan; deferred to a focused pass (not crammed end-of-tick). Tree stays 82/82.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

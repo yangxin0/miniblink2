@@ -260,6 +260,44 @@ can be given a directly-bound endpoint. The data-path blob work is unaffected an
 this is purely the blob:-URL-as-loadable-resource piece. Patch 0003 (skip Register ->
 createObjectURL returns a non-resolving URL, no hang) remains in place.
 
+## Increment 5 — confirmed fix for the deadlock (option a), execution-ready (2026-06-24)
+
+The deadlock was the OverrideBinderForTesting LocalProvider running its bind-handshake on
+the MAIN thread (which the [Sync] Register blocks). FIX: don't use OverrideBinderForTesting;
+give blink::AssociatedInterfaceProvider a REAL proxy whose receiver is bound on the SERVICE
+thread, so GetAssociatedInterface (the bind) AND the subsequent Register both dispatch off
+the blocked main thread. Confirmed the primitives exist:
+
+- `mojo::PendingAssociatedRemote<P>::InitWithNewEndpointAndPassReceiver()` +
+  `EnableUnassociatedUsage()` create a dedicated (non-master) associated pair usable
+  standalone. (P = blink::mojom::blink::AssociatedInterfaceProvider.) Verify during
+  execution whether EnableUnassociatedUsage must be called on BOTH the remote and the
+  receiver — likely yes; that is the one unconfirmed detail.
+- Proxy interface: `blink::mojom::blink::AssociatedInterfaceProvider::GetAssociatedInterface(
+  const String& name, PendingAssociatedReceiver<AssociatedInterface> receiver)`.
+
+Sequence in MbFrameClient::GetRemoteNavigationAssociatedInterfaces (once, lazy):
+```
+PendingAssociatedRemote<AssociatedInterfaceProvider> proxy;
+auto rec = proxy.InitWithNewEndpointAndPassReceiver();
+proxy.EnableUnassociatedUsage();           // (rec.EnableUnassociatedUsage() too if required)
+PostToServiceThread(bind MbAssocProvider to rec);   // MakeSelfOwnedAssociatedReceiver
+associated_interfaces_ = make_unique<blink::AssociatedInterfaceProvider>(
+    std::move(proxy), main_thread_task_runner);
+```
+MbAssocProvider (service thread): `GetAssociatedInterface(name, receiver)` -> if name ==
+BlobURLStore::Name_, `MakeSelfOwnedAssociatedReceiver(make_unique<MbBlobURLStore>(),
+PendingAssociatedReceiver<BlobURLStore>(receiver.PassHandle()))`. Now the BlobURLStore
+endpoint is associated with the proxy's dedicated pipe, serviced on the service thread:
+GetAssociatedInterface binds the store, the queued [Sync] Register is then delivered to it
+— all without the main thread, which is free to block on the sync wait.
+
+The MbBlobURLStore + MbBlobURLLoaderFactory + MbBlobURLLoader classes from the reverted
+attempt were CORRECT (only the binding mechanism was wrong) — reconstruct them as in the
+"Implementation notes"/increment-5 spec above; just swap the MbFrameClient binding to this
+proxy approach and re-bind MbBlobURLStore via MakeSelfOwnedAssociatedReceiver on the service
+thread. Then revert patch 0003. This is one focused execution pass.
+
 ## Risks / open questions
 
 - IO-pump thread + Blink's mojo core: confirm `mojo::core` is initialized in a mode
