@@ -35,6 +35,34 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // a non-null loader makes Blink use it for subresources. -> our file-backed loader.
   std::unique_ptr<blink::URLLoader> CreateURLLoaderForTesting() override;
 
+  // Child frames (<iframe>). Without this, Blink leaves subframes empty
+  // (frames.length 0, contentDocument null). We create a real local child frame
+  // with its own MbFrameClient (self-owned) so iframe content loads. Modeled on
+  // TestWebFrameClient::CreateChildFrame.
+  blink::WebLocalFrame* CreateChildFrame(
+      blink::mojom::TreeScopeType,
+      const blink::WebString& name,
+      const blink::WebString& fallback_name,
+      const blink::FramePolicy&,
+      const blink::WebFrameOwnerProperties&,
+      blink::FrameOwnerElementType,
+      blink::WebPolicyContainerBindParams policy_container_bind_params,
+      ukm::SourceId document_ukm_source_id,
+      FinishChildFrameCreationFn complete_creation) override;
+
+  // Frame lifecycle. A child client self-destructs on detach; the main frame is
+  // owned by MbWebView so it does nothing here.
+  void FrameDetached(blink::DetachReason) override;
+
+  // Associate this client with its frame. SetFrame: main frame (MbWebView-owned).
+  // Bind: child frame (takes ownership of itself, freed on FrameDetached).
+  void SetFrame(blink::WebLocalFrame* frame) { web_frame_ = frame; }
+  void Bind(blink::WebLocalFrame* frame,
+            std::unique_ptr<MbFrameClient> self_owned) {
+    web_frame_ = frame;
+    self_owned_ = std::move(self_owned);
+  }
+
   // Fires when the document element exists but before the page's own scripts run
   // (and may execute JS). We use it to run the host's init script first, so it can
   // set globals / override APIs the page then observes (cf. evaluateOnNewDocument).
@@ -67,6 +95,8 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   std::string user_agent_;  // empty -> MbDefaultUserAgent() (resolved at use)
   std::string extra_headers_;  // newline-separated "Name: Value" request headers
   std::vector<std::string> console_;  // captured console messages
+  blink::WebLocalFrame* web_frame_ = nullptr;       // this client's frame
+  std::unique_ptr<MbFrameClient> self_owned_;        // set for child frames only
 };
 
 }  // namespace mb

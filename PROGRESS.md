@@ -1445,6 +1445,20 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   {h,cc} + one MbWebView line. Heavy but mechanical with this blueprint; a focused pass, not an
   end-of-tick cram. iframes currently degrade gracefully (smoke 77), so this is additive.
 
+- ✅ PARTIAL: iframe CreateChildFrame implemented — child frames are created (2026-06-24): executed
+  the blueprint. MbFrameClient now implements CreateChildFrame (creates a local child via
+  web_frame_->CreateLocalChild with its own self-owned child MbFrameClient, calls finish_creation),
+  FrameDetached (self-destructs children; leaves the MbWebView-owned main frame alone), and SetFrame/
+  Bind for frame association; MbWebView sets the main frame's web_frame_. The PolicyContainerHost
+  receiver is left unbound (advisory; content still loads). RESULT: a page with an <iframe> now
+  builds a real child frame — window.frames.length===1 (was 0) and contentDocument is accessible
+  (was null), no crash, no regression (93/93). DetachReason is blink::DetachReason (namespace, not
+  class-nested); MakeSelfOwnedAssociatedReceiver didn't fit the policy-container receiver so it's
+  dropped. REMAINING (next increment): the child's srcdoc/src CONTENT does not commit (body empty) —
+  needs child-navigation handling (override BeginNavigation, or commit the srcdoc into the child like
+  MbWebView::CommitHtml does for the main frame). So iframes went from "no subframe" to "real but
+  empty subframe"; content-commit is the follow-up. Smoke 77 updated to assert frame creation.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

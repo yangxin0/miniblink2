@@ -162,6 +162,8 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
       MakeFrameInterfaceBroker(), blink::LocalFrameToken(), blink::DocumentToken(),
       /*policy_container=*/nullptr, /*opener=*/nullptr,
       /*name=*/blink::WebString(), network::mojom::WebSandboxFlags::kNone);
+  // Let the frame client know its frame so it can parent child frames (iframes).
+  v->frame_client_->SetFrame(v->main_frame_);
 
   // 3. Frame widget (non-compositing), attach, size, then inform the WebView.
   v->widget_ = std::make_unique<MbWidget>();

@@ -2,13 +2,53 @@
 #include "miniblink_host/frame/mb_frame_client.h"
 
 #include <memory>
+#include <utility>
 
+#include "base/unguessable_token.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/view/mb_webview.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
+#include "third_party/blink/public/web/web_local_frame.h"
 
 namespace mb {
+
 MbFrameClient::MbFrameClient(MbWebView* owner) : owner_(owner) {}
 MbFrameClient::~MbFrameClient() = default;
+
+blink::WebLocalFrame* MbFrameClient::CreateChildFrame(
+    blink::mojom::TreeScopeType scope,
+    const blink::WebString& /*name*/,
+    const blink::WebString& /*fallback_name*/,
+    const blink::FramePolicy& /*frame_policy*/,
+    const blink::WebFrameOwnerProperties&,
+    blink::FrameOwnerElementType,
+    blink::WebPolicyContainerBindParams /*policy_container_bind_params*/,
+    ukm::SourceId /*document_ukm_source_id*/,
+    FinishChildFrameCreationFn finish_creation) {
+  if (!web_frame_)
+    return nullptr;
+  // The PolicyContainerHost receiver (browser-side, advisory CSP/referrer) is
+  // left unbound — its renderer-side calls just no-op; content still loads.
+  // Create a real local child frame with its own (self-owned) client.
+  auto child_client = std::make_unique<MbFrameClient>(owner_);
+  MbFrameClient* child_ptr = child_client.get();
+  blink::WebLocalFrame* child = web_frame_->CreateLocalChild(
+      scope, child_ptr, /*interface_registry=*/nullptr,
+      blink::LocalFrameToken());
+  child_ptr->Bind(child, std::move(child_client));
+  finish_creation(child, blink::DocumentToken(), /*browser_broker=*/{},
+                  std::make_unique<base::UnguessableToken>(
+                      base::UnguessableToken::Create()));
+  return child;
+}
+
+void MbFrameClient::FrameDetached(blink::DetachReason reason) {
+  if (!self_owned_)
+    return;  // main frame: MbWebView owns teardown
+  if (web_frame_)
+    web_frame_->Close(reason);
+  self_owned_.reset();  // self-destruct — must be the last statement
+}
 
 void MbFrameClient::RunScriptsAtDocumentElementAvailable() {
   if (owner_)

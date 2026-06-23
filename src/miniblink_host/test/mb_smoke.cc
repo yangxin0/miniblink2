@@ -1443,12 +1443,11 @@ int main() {
            "CSS background-image (data: SVG) paints");
   }
 
-  // 77. iframes degrade GRACEFULLY (no crash). The host has no child-frame
-  // bring-up (CreateChildFrame is unimplemented), so an <iframe>'s content does
-  // NOT load — but a page with an iframe must not crash or hang: the element
-  // exists, contentWindow is an object, the parent stays fully scriptable and
-  // renders. (Full child-frame support is a heavy item; see PROGRESS.) This
-  // guards the robustness invariant, like the worker/dialog guards.
+  // 77. iframes: the child frame is created (CreateChildFrame). A page with an
+  // <iframe> builds a real local child frame — window.frames.length is 1 and
+  // contentDocument is accessible (not null) — with no crash and the parent fully
+  // scriptable. (The child's srcdoc/src CONTENT does not commit yet — that needs
+  // child-navigation handling, a documented next increment; here body is empty.)
   {
     mbLoadHTML(v,
       "<body><b id='p'>parent</b>"
@@ -1457,9 +1456,10 @@ int main() {
     mbWait(v, 60);
     Expect(Eval(v, "1+1") == "2" &&
                Eval(v, "document.getElementById('p').textContent") == "parent" &&
-               Eval(v, "String(typeof document.getElementById('f').contentWindow)")
-                   == "object",
-           "iframe present degrades gracefully (no crash; parent scriptable)");
+               Eval(v, "String(window.frames.length)") == "1" &&
+               Eval(v, "String(document.getElementById('f').contentDocument!==null)")
+                   == "true",
+           "iframe: child frame created (frames.length==1, contentDocument); no crash");
   }
 
   // 78. element.scrollIntoView() works (a common automation primitive: scroll a
