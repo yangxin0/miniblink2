@@ -828,6 +828,15 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   querySelector can't see it (encapsulated). Smoke 36 asserts all three. 46/46, no survivors.
   Another on-theme M150 marker (M47 had only the v0 prototype). Pure-DOM, offline-verifiable.
 
+- 🔴 WEB WORKERS CRASH (2026-06-23 21:?): probed `new Worker("data:text/javascript,...")` — it
+  SIGSEGVs the host (exit 139, raw null-deref, no DCHECK), right after the page-level cases.
+  The minimal host has no worker-thread infrastructure (WorkerThread / WorkerGlobalScope need
+  their own Platform/scheduler/loader/broker bring-up, none of which we provide). A real site
+  spawning a dedicated/shared/service worker would crash the process. HEAVY GAP (comparable to
+  IndexedDB): not a shim — needs real worker bring-up. Probe removed (it crashes the suite);
+  46/46 restored. HIGH-PRIORITY among the heavy items since workers are common (and the crash
+  is worse than a hang). Same family as the other browser-process-service gaps (Blob, IndexedDB).
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
