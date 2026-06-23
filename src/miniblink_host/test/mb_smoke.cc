@@ -513,6 +513,30 @@ int main() {
       std::fprintf(stderr, "  [SKIP] POST form (host unreachable)\n");
     }
   }
+
+  // 37. fetch()/XHR with a request body: the subresource loader (MbURLLoader)
+  // must send the method + body, not a bodyless GET. Issue a fetch POST and read
+  // the echoed field back. (The page is loaded from the host origin so the fetch
+  // is same-origin.) Exercises the method/body extraction in MbURLLoader::Deliver.
+  {
+    mbLoadHTML(v, "<body>x</body>", (host + "/").c_str());
+    mbRunJS(v,
+        ("window.__fp='';fetch('" + host +
+         "/post',{method:'POST',headers:{'Content-Type':"
+         "'application/x-www-form-urlencoded'},body:'mk=fetchmk'})"
+         ".then(function(r){return r.json();}).then(function(j){"
+         "window.__fp=(j.form&&j.form.mk)||'nofield';}).catch(function(e){"
+         "window.__fp='ERR:'+e.name;});").c_str());
+    mbWait(v, 1500);  // async fetch round-trip
+    std::string r = Eval(v, "String(window.__fp)");
+    if (!r.empty() && r.rfind("ERR:", 0) != 0) {  // host responded
+      Expect(r.find("fetchmk") != std::string::npos,
+             "fetch() POST sends the request body", r);
+    } else {
+      std::fprintf(stderr, "  [SKIP] fetch POST (host unreachable: %s)\n",
+                   r.c_str());
+    }
+  }
   }  // MB_NET_TESTS
 
   // 33. document.cookie (JS): write then read round-trips through the in-process

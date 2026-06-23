@@ -46,14 +46,17 @@ std::string MbGetCookiesForUrl(const std::string& url);
 // Shared by the subresource loader and the top-level navigation in MbWebView::LoadURL.
 // `user_agent` sets the HTTP User-Agent (empty -> MbDefaultUserAgent()).
 // `extra_headers` are newline-separated "Name: Value" lines added to every request.
-// If `post_body` is non-empty the request is an HTTP POST carrying that body with
-// `post_content_type` (default application/x-www-form-urlencoded) — used for form
-// submission. POST applies only to http(s); file/data ignore it.
+// If `post_body` is non-empty (or `http_method` is a non-GET verb) the request
+// carries that body with `post_content_type` (default urlencoded) — used for form
+// submission and fetch()/XHR with a body. `http_method` (e.g. "POST", "PUT",
+// "DELETE") sets the verb; empty means GET, or POST when a body is present. The
+// body/method apply only to http(s); file/data ignore them.
 bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* content_type, const std::string& user_agent = "",
                 const std::string& extra_headers = "",
                 const std::string& post_body = "",
-                const std::string& post_content_type = "");
+                const std::string& post_content_type = "",
+                const std::string& http_method = "");
 
 class MbURLLoader : public blink::URLLoader {
  public:

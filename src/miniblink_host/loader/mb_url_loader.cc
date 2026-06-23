@@ -6,7 +6,9 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -21,7 +23,9 @@
 #include "net/base/data_url.h"
 #include "net/base/filename_util.h"
 #include "net/base/net_errors.h"
+#include "services/network/public/cpp/data_element.h"
 #include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/cpp/resource_request_body.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/platform/web_url_error.h"
@@ -116,17 +120,27 @@ std::string ToLower(const std::string& s) {
 bool FetchHttp(const std::string& url, std::string* body, std::string* content_type,
                const std::string& user_agent, const std::string& extra_headers,
                const std::string& post_body = "",
-               const std::string& post_content_type = "") {
+               const std::string& post_content_type = "",
+               const std::string& http_method = "") {
   CURL* curl = curl_easy_init();
   if (!curl)
     return false;
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-  if (!post_body.empty()) {
-    // HTTP POST (form submission). COPYPOSTFIELDS copies the body so it survives
-    // retries; setting it makes the request a POST automatically.
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE,
-                     static_cast<long>(post_body.size()));
-    curl_easy_setopt(curl, CURLOPT_COPYPOSTFIELDS, post_body.c_str());
+  // Method + body. A non-GET verb (form submit, fetch/XHR POST/PUT/DELETE…) or a
+  // non-empty body makes this a write request. COPYPOSTFIELDS copies the body so
+  // it survives retries; CUSTOMREQUEST sets the exact verb (POST is otherwise
+  // implied by POSTFIELDS, but set it explicitly so empty-body POST and
+  // PUT/PATCH/DELETE are correct too).
+  std::string method = http_method;
+  if (method.empty() && !post_body.empty())
+    method = "POST";
+  if (!method.empty() && method != "GET" && method != "HEAD") {
+    if (!post_body.empty()) {
+      curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE,
+                       static_cast<long>(post_body.size()));
+      curl_easy_setopt(curl, CURLOPT_COPYPOSTFIELDS, post_body.c_str());
+    }
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str());
   }
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CurlWrite);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, body);
@@ -317,7 +331,8 @@ std::string MbGetCookiesForUrl(const std::string& url) {
 bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* content_type, const std::string& user_agent,
                 const std::string& extra_headers, const std::string& post_body,
-                const std::string& post_content_type) {
+                const std::string& post_content_type,
+                const std::string& http_method) {
   GURL url(url_spec);
   if (url.SchemeIsFile()) {
     // Convert via net (percent-decodes the path; "Andale%20Mono.ttf" -> a space)
@@ -328,7 +343,7 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
   }
   if (url.SchemeIsHTTPOrHTTPS())
     return FetchHttp(url_spec, body, content_type, user_agent, extra_headers,
-                     post_body, post_content_type);
+                     post_body, post_content_type, http_method);
   if (url.SchemeIs("data")) {
     std::string mime, charset;
     if (!net::DataURL::Parse(url, &mime, &charset, body))
@@ -373,8 +388,24 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
     ok = net::FileURLToFilePath(url, &fp) &&
          base::ReadFileToString(fp, &contents);
   } else if (url.SchemeIsHTTPOrHTTPS()) {
+    // Carry the request method + body so fetch()/XHR POST/PUT/etc. send their
+    // payload (the dominant API pattern), not a bodyless GET. The body's bytes
+    // live in kBytes DataElements; pull the Content-Type off the request headers.
+    std::string post_body, post_ct;
+    if (request->request_body) {
+      for (const auto& el : *request->request_body->elements()) {
+        if (el.type() == network::DataElement::Tag::kBytes) {
+          std::string_view sv = el.As<network::DataElementBytes>().AsStringView();
+          post_body.append(sv.data(), sv.size());
+        }
+      }
+    }
+    if (std::optional<std::string> ct =
+            request->headers.GetHeader("Content-Type")) {
+      post_ct = *ct;
+    }
     ok = FetchHttp(url.spec(), &contents, &http_content_type, user_agent_,
-                   extra_headers_);
+                   extra_headers_, post_body, post_ct, request->method);
   } else if (url.SchemeIs("data")) {
     // Decode the data: URL in-process (libcurl doesn't serve it); the parsed
     // mime flows into the response Content-Type below via http_content_type.

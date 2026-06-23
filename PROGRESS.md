@@ -1595,6 +1595,20 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   MB_NET_HOST=https://httpbin.org), never a local echo_server. (The 127.0.0.1 echo_server path in
   the docs won't connect here.) Worth remembering before chasing "http hangs" again.
 
+- ✅✅ DONE: fetch()/XHR request bodies (POST/PUT/etc.) — shipped (2026-06-24): MbURLLoader::Deliver
+  always fetched http(s) as a bodyless GET — it ignored request->method and request->request_body,
+  so every fetch()/XHR POST/PUT (the dominant SPA/API pattern) silently sent nothing. FIX: Deliver
+  now extracts the body from request->request_body (concatenating kBytes DataElements via
+  As<network::DataElementBytes>().AsStringView()) and the Content-Type from request->headers, and
+  passes them plus request->method to MbFetchUrl. MbFetchUrl/FetchHttp gained an http_method param:
+  a non-GET verb sets CURLOPT_CUSTOMREQUEST (so POST/PUT/PATCH/DELETE are correct, not all-POST),
+  and a body sets CURLOPT_COPYPOSTFIELDS. VERIFIED end-to-end vs postman-echo (mb_shot): fetch POST
+  JSON body echoed json.hello; XHR POST urlencoded echoed form.k; fetch PUT echoed data=putbody.
+  Gated smoke case 37 (fetch POST) PASSES. Default suite 98/98 (loader GET/file/data path
+  unchanged; method/body only engage for non-GET http). LIMITATION: only kBytes body elements
+  (string/urlencoded/JSON) — multipart file uploads (kFile/kDataPipe) and per-request custom headers
+  beyond Content-Type aren't forwarded yet; documented follow-ups.
+
 ### REMAINING ROADMAP
 - P0-history: page-driven history.back()/forward() does nothing — History::back() ->
   LocalFrameClientImpl::NavigateBackForward -> LocalFrameHost.GoToEntryAtOffset (mojo to the absent
