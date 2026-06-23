@@ -11,6 +11,7 @@
 #include <cstring>
 #include <optional>
 
+#include "miniblink_host/frame/mb_frame_broker.h"
 #include "miniblink_host/frame/mb_frame_client.h"
 #include "miniblink_host/frame/mb_view_client.h"
 #include "miniblink_host/loader/mb_url_loader.h"
@@ -122,7 +123,7 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
   //    (frame_test_helpers.cc:489).
   v->main_frame_ = blink::WebLocalFrame::CreateMainFrame(
       v->web_view_, v->frame_client_.get(), /*previous_sibling=*/nullptr,
-      mojo::NullRemote(), blink::LocalFrameToken(), blink::DocumentToken(),
+      MakeFrameInterfaceBroker(), blink::LocalFrameToken(), blink::DocumentToken(),
       /*policy_container=*/nullptr, /*opener=*/nullptr,
       /*name=*/blink::WebString(), network::mojom::WebSandboxFlags::kNone);
 

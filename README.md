@@ -35,7 +35,7 @@ that satisfies modern Blink so it runs without the full browser.
 | Observers: Mutation, **Intersection** (forced past offscreen throttling), Resize | ✅ |
 | Web/CSS Animations advance (clock serviced); `XMLHttpRequest` + `fetch` | ✅ |
 | Console capture (`console.log`/`warn`/`error` → host) | ✅ |
-| **Cookies** (shared in-memory jar: Set-Cookie across redirects + requests) | ✅ |
+| **Cookies**: HTTP jar (Set-Cookie across redirects/requests) + JS `document.cookie` | ✅ |
 | Custom request headers + default `Accept-Language` | ✅ |
 | On-screen window, GPU compositing, IndexedDB | ⏳ roadmap |
 
@@ -184,7 +184,7 @@ Requirements: a Chromium M150 source tree with a component `out/Release`
 ./build.sh /path/to/chromium-150.x.y.z   # stages host into the tree, gn gen, ninja, runs the suite
 ```
 
-`mb_smoke` is a 34-case capability test suite (HTML/DOM, JS, CSS computed style, UA
+`mb_smoke` is a 36-case capability test suite (HTML/DOM, JS, CSS computed style, UA
 stylesheet, the `mbRunJS`+`mbEvalJS` bridge, `<canvas>` getImageData, external `<link>`
 CSS via the subresource loader, paint-to-bitmap, synthesized click, typed text (ASCII +
 UTF-8 accent/CJK/emoji), programmatic scroll, mouse-move/hover, embedded-NUL document
@@ -192,6 +192,6 @@ integrity, full-page capture (resize → reflow → render below the fold), HiDP
 (devicePixelRatio + resolution media queries), User-Agent (default + override), clip/
 region capture, transparent background, wait-for-selector, DOM storage
 (`localStorage`/`sessionStorage`), `requestAnimationFrame`, observer delivery (Mutation & Intersection & Resize), time-based animation (WAAPI/XHR),
-console capture, and over-the-network checks for the cookie jar and request headers) — it
+console capture, and over-the-network checks for the cookie jar and request headers, and JS document.cookie) — it
 prints PASS/FAIL per case and exits non-zero on any failure, so it doubles as a regression
 test. (The two network cases are skipped, not failed, when the network is unavailable.)

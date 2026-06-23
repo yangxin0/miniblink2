@@ -421,6 +421,22 @@ int main() {
   }
   mbSetExtraHeaders(v, "");  // reset
 
+  // 33. document.cookie (JS): write then read round-trips through the in-process
+  // RestrictedCookieManager wired into the frame's BrowserInterfaceBroker.
+  {
+    const char* doc = "<body>x</body>";
+    if (FILE* f = std::fopen("/tmp/mb_jsck.html", "wb")) {
+      std::fwrite(doc, 1, std::strlen(doc), f); std::fclose(f);
+    }
+    mbLoadURL(v, "file:///tmp/mb_jsck.html");
+    mbRunJS(v, "document.cookie='a=1';document.cookie='b=2';");
+    mbWait(v, 20);
+    std::string ck = Eval(v, "document.cookie");
+    Expect(ck.find("a=1") != std::string::npos &&
+               ck.find("b=2") != std::string::npos,
+           "document.cookie read/write round-trip", ck);
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

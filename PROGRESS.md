@@ -614,6 +614,18 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   likely WebNavigationParams (broker-reset-on-commit). Deferred as a scoped roadmap gap (HTTP
   cookies already cover most sites). 35/36.
 
+- ✅ document.cookie (JS) NOW WORKS (2026-06-23 18:?): implemented the deferred feature from
+  last tick. New mb_frame_broker.{h,cc}: MbBrowserInterfaceBroker (GetInterface routes
+  network::mojom::blink::RestrictedCookieManager, drops the rest) + MbCookieManager (the 6
+  RCM methods, backed by a process-global per-origin in-memory store; SetCookieFromString
+  parses name=value + max-age=0/expired deletion, GetCookiesString serializes "n=v; ..."). 
+  Wired a real PendingRemote via MakeFrameInterfaceBroker() into CreateMainFrame (was
+  NullRemote). The broker SURVIVES navigation commit — the feared broker-reset-on-commit did
+  NOT nullify it (smoke 33 loads a real file:// doc then round-trips document.cookie='a=1'/'b=2'
+  -> "a=1; b=2"). 36/36. Origin-scoped, session-only (no disk). NOTE: this in-process RCM is
+  NOT bridged to the curl HTTP jar — JS cookies and network cookies are separate stores for now
+  (acceptable; unifying them is a future nicety).
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
