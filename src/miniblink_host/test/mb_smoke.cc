@@ -290,6 +290,21 @@ int main() {
                    "return sessionStorage.getItem('s');}catch(e){return 'THROW:'+e.name;}})()"));
   }
 
+  // 25. requestAnimationFrame must fire (no compositor drives it; the host services
+  // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
+  mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");
+  mbRunJS(v, "requestAnimationFrame(function(){"
+             "document.getElementById('r').textContent='raf';});");
+  mbWait(v, 50);
+  Expect(Eval(v, "document.getElementById('r').textContent") == "raf",
+         "requestAnimationFrame callback fires");
+  // A rAF chain (two frames) also advances — proves repeated servicing, not a one-shot.
+  mbRunJS(v, "window.__n=0;(function loop(){requestAnimationFrame(function(){"
+             "if(++window.__n<2)loop();});})();");
+  mbWait(v, 80);
+  Expect(Eval(v, "String(window.__n)") == "2",
+         "requestAnimationFrame chain advances", Eval(v, "String(window.__n)"));
+
   mbDestroyView(v);
   mbShutdown();
 

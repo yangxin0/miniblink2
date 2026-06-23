@@ -75,6 +75,8 @@ class MbWebView {
   // frame's content and drive parsing to quiescence. Both LoadHTML and the network
   // LoadURL funnel through here so neither truncates the body at a NUL.
   void CommitHtml(const char* data, size_t len, const char* base_url);
+  // Run requestAnimationFrame callbacks (no compositor drives them otherwise).
+  void ServiceAnimations();
   // Settle async loads, run lifecycle, and play the frame's paint record into `canvas`.
   // (origin_x, origin_y) shifts the document so that logical point lands at the canvas
   // origin — used for clip/region capture; (0,0) renders from the top-left as usual.

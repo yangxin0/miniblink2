@@ -539,6 +539,17 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   's7' round-trip. 25/25. Storage is in-memory only (no disk persistence) — correct for a
   headless/automation host. Methodology: probe-an-assumed-feature, fix if the guard fails.
 
+- ✅ requestAnimationFrame (2026-06-23 17:?): probed a batch of web APIs — all present
+  (matchMedia, crypto.getRandomValues, URL, URLSearchParams, IntersectionObserver,
+  ResizeObserver, structuredClone, TextEncoder) EXCEPT rAF callbacks never fired (compositor
+  normally drives them via BeginMainFrame; we have none). Fix: ServiceAnimations() calls
+  web_view_->GetPage()->Animator().ServiceScriptedAnimations(now), invoked each round of
+  PaintInto and each WaitMs iteration so rAF fires and rAF-chains advance. Verified: smoke 25
+  single rAF mutates DOM; smoke 26 a 2-frame rAF loop reaches __n==2. 27/27. go.dev still
+  renders (no regression). (pushState SecurityError in the probe was just about:blank's opaque
+  origin — fine on real pages, not a gap.) Another compositor-assumption gap closed by calling
+  the page-level service directly, no patch.
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

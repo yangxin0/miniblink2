@@ -49,6 +49,7 @@
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/public/common/dom_storage/session_storage_namespace_id.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/page/page_animator.h"
 #include "third_party/blink/renderer/modules/storage/storage_namespace.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -319,6 +320,7 @@ void MbWebView::WaitMs(int ms) {
   const base::TimeTicks deadline =
       base::TimeTicks::Now() + base::Milliseconds(ms > 0 ? ms : 0);
   do {
+    ServiceAnimations();
     widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
     base::RunLoop().RunUntilIdle();
     if (base::TimeTicks::Now() >= deadline)
@@ -347,13 +349,25 @@ bool MbWebView::WaitForSelector(const char* css, int timeout_ms) {
   }
 }
 
+void MbWebView::ServiceAnimations() {
+  // Run rAF callbacks. The compositor normally drives this via BeginMainFrame; with
+  // no compositor we call the page animator directly so requestAnimationFrame fires
+  // (animation libraries, framework schedulers, lazy renderers all depend on it).
+  if (web_view_ && web_view_->GetPage()) {
+    web_view_->GetPage()->Animator().ServiceScriptedAnimations(
+        base::TimeTicks::Now());
+  }
+}
+
 bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y) {
   if (!widget_ || !widget_->widget() || !main_frame_)
     return false;
   // Interleave lifecycle + task draining: layout issues subresource requests (images
   // load lazily during layout), the loads complete async, then a later lifecycle applies
-  // them. A few rounds settle CSS + images before the final paint.
+  // them. A few rounds settle CSS + images before the final paint. Service rAF each
+  // round so animation-driven DOM changes are reflected.
   for (int round = 0; round < 5; ++round) {
+    ServiceAnimations();
     widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
     base::RunLoop().RunUntilIdle();
   }
