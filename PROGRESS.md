@@ -1048,6 +1048,20 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   (web @font-face over network, full .pak coverage), not "text doesn't render". Smoke 56-57 lock
   in glyph rasterization + measureText scaling. 70/70, no survivors.
 
+- ✅ REPRODUCIBLE BUILD verified via build.sh from a clean tree (2026-06-23): validated the
+  "standalone project" claim end to end. Reverted the 3 patched donor files to pristine, then ran
+  the documented `./build.sh <chromium-tree>`: it staged src/miniblink_host, applied ALL THREE
+  patches fresh from clean (0001-offscreen-widget-compat, 0002-suppress-js-dialogs,
+  0003-skip-blob-url-register — all "applied", no WARN), ran gn gen (the new //media and
+  //components/webcrypto deps resolved), ninja-built libminiblink_host.dylib + mb_smoke + mb_shot,
+  vendored the resource paks, and ran the smoke suite: 70 passed, 0 failed, no survivors. NOTABLE:
+  build.sh runs mb_smoke UNBOUNDED at the end, and it now completes cleanly — a direct payoff of
+  closing every [Sync]-mojo hang (dialogs/Blob) and null-Platform crash (Worker/Crypto/Audio):
+  the documented build is no longer at risk of hanging. So the project builds reproducibly from a
+  donor Chromium checkout via its own patches + GN seam, exactly as the standalone-project goal
+  intends. (Only manual one-time step remains the gn_all deps += line in the root BUILD.gn, which
+  build.sh detects and instructs.)
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
