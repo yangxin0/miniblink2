@@ -397,6 +397,17 @@ void MbAddCookieToJar(const std::string& url, const std::string& cookie) {
   curl_easy_cleanup(curl);
 }
 
+void MbClearCookieJar() {
+  CURL* curl = curl_easy_init();
+  if (!curl)
+    return;
+  curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");  // enable the cookie engine
+  if (CURLSH* share = CookieShare())
+    curl_easy_setopt(curl, CURLOPT_SHARE, share);
+  curl_easy_setopt(curl, CURLOPT_COOKIELIST, "ALL");  // erase every cookie
+  curl_easy_cleanup(curl);
+}
+
 std::string MbGetCookiesForUrl(const std::string& url) {
   GURL gurl(url);
   if (!gurl.SchemeIsHTTPOrHTTPS())

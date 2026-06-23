@@ -42,6 +42,9 @@ void MbAddCookieToJar(const std::string& url, const std::string& cookie);
 // "name=value; name2=value2" string. Empty for non-http(s). For session extraction.
 std::string MbGetCookiesForUrl(const std::string& url);
 
+// Erase all cookies from the shared HTTP jar (e.g. to reset a session).
+void MbClearCookieJar();
+
 // Fetch a file:// or http(s):// URL into `body` (+ server Content-Type if any).
 // Shared by the subresource loader and the top-level navigation in MbWebView::LoadURL.
 // `user_agent` sets the HTTP User-Agent (empty -> MbDefaultUserAgent()).

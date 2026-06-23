@@ -134,6 +134,14 @@ MB_EXPORT void mbSendScroll(mbView*, int x, int y, int dx, int dy);
 // Returns the full length in bytes; empty for non-http(s) URLs.
 MB_EXPORT int mbGetCookies(mbView*, const char* url, char* out, int out_cap);
 
+// Inject a cookie ("name=value[; Path=/; Domain=...; Secure]") into the HTTP jar
+// for `url`'s origin — the inverse of mbGetCookies, for restoring a saved login
+// session before navigating. No-op for non-http(s) URLs.
+MB_EXPORT void mbSetCookie(mbView*, const char* url, const char* cookie);
+
+// Erase all cookies from the HTTP jar (reset the session).
+MB_EXPORT void mbClearCookies(mbView*);
+
 // Write the committed main document's URL (the final URL after any redirects)
 // into `out` (NUL-terminated, up to out_cap). Returns the full length in bytes.
 MB_EXPORT int mbGetURL(mbView*, char* out, int out_cap);

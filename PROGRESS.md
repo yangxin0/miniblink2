@@ -1717,9 +1717,22 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   HistoryBackListCount() (0 here). Wiring JS history into this stack needs intercepting the
   browser-owned LocalFrameHost — still deferred.
 
+- ✅ DONE: cookie session management — mbSetCookie + mbClearCookies (2026-06-24): completes the
+  cookie round-trip (export/import/clear) for session save+restore — a core automation need (log in
+  once, reinject the session next run). mbSetCookie -> MbWebView::SetCookie -> MbAddCookieToJar (the
+  Netscape-format injector fixed 2 ticks ago, now reused for host-injected cookies, not just
+  document.cookie); mbClearCookies -> new MbClearCookieJar (curl COOKIELIST "ALL"). Smoke case 87
+  round-trips locally (no network): set sid+theme on an https origin, mbGetCookies reads both back,
+  mbClearCookies empties — also the first LOCAL verification of MbAddCookieToJar+MbGetCookiesForUrl
+  (previously only via httpbin). 108/108. C API now 49 fns.
+- CHECKED + DEFERRED: P1-history-js (page-driven history.back/forward) needs intercepting
+  LocalFrameHost.GoToEntryAtOffset — but LocalFrameHost is a ~171-method mojo interface (all-or-
+  nothing to implement) + WebView::SetHistoryListFromNavigation for the counts. Not a bounded tick;
+  firmly deferred.
+
 ### REMAINING ROADMAP
-- P1-history-js: route page-driven history.back()/forward() into the host stack (needs a
-  LocalFrameHost shim for GoToEntryAtOffset + WebView history counts).
+- P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
+  ~171-method LocalFrameHost shim (see above). Heavy.
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm
   (Cocoa window) -> real sites in a window. JS is free (V8 isolate already up).

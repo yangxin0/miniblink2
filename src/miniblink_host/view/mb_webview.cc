@@ -377,6 +377,17 @@ std::string MbWebView::GetCookies(const char* url) {
   return url ? MbGetCookiesForUrl(url) : std::string();
 }
 
+void MbWebView::SetCookie(const char* url, const char* cookie) {
+  // Inject a cookie (a "name=value[; attrs]" string) into the shared HTTP jar for
+  // `url`'s origin — the inverse of GetCookies, for restoring a saved session.
+  if (url && cookie)
+    MbAddCookieToJar(url, cookie);
+}
+
+void MbWebView::ClearCookies() {
+  MbClearCookieJar();
+}
+
 std::string MbWebView::GetURL() {
   // The committed main document's URL — this is the FINAL URL after any
   // server/navigation redirects (see LoadURL), read straight from the frame so

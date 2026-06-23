@@ -1832,6 +1832,26 @@ int main() {
                " fwd_b=" + (fwd_b ? "1" : "0"));
   }
 
+  // 87. Cookie session round-trip: mbSetCookie injects into the HTTP jar and
+  // mbGetCookies reads it back; mbClearCookies empties it. (In-memory jar, so no
+  // network — exercises MbAddCookieToJar + MbGetCookiesForUrl + MbClearCookieJar.)
+  {
+    const char* kurl = "https://session-test.example/";
+    mbClearCookies(v);  // start clean (jar is process-wide)
+    mbSetCookie(v, kurl, "sid=abc123; Path=/");
+    mbSetCookie(v, kurl, "theme=dark");
+    char cb[512] = {0};
+    mbGetCookies(v, kurl, cb, sizeof(cb));
+    Expect(std::string(cb).find("sid=abc123") != std::string::npos &&
+               std::string(cb).find("theme=dark") != std::string::npos,
+           "mbSetCookie injects cookies that mbGetCookies reads back", cb);
+    mbClearCookies(v);
+    char cb2[512] = {0};
+    mbGetCookies(v, kurl, cb2, sizeof(cb2));
+    Expect(std::string(cb2).find("sid=") == std::string::npos,
+           "mbClearCookies empties the jar", cb2);
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

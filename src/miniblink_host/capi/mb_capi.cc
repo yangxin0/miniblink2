@@ -171,6 +171,16 @@ int mbGetCookies(mbView* v, const char* url, char* out, int out_cap) {
   return static_cast<int>(result.size());
 }
 
+void mbSetCookie(mbView* v, const char* url, const char* cookie) {
+  if (v && v->impl)
+    v->impl->SetCookie(url, cookie);
+}
+
+void mbClearCookies(mbView* v) {
+  if (v && v->impl)
+    v->impl->ClearCookies();
+}
+
 int mbDrainConsole(mbView* v, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;

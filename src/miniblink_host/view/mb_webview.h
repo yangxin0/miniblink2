@@ -83,6 +83,10 @@ class MbWebView {
   std::string DrainConsole();
   // Return the HTTP cookie jar's cookies for `url` ("name=value; ..."), for session export.
   std::string GetCookies(const char* url);
+  // Inject a cookie ("name=value[; attrs]") into the jar for `url`'s origin
+  // (session restore), and erase the whole jar (session reset).
+  void SetCookie(const char* url, const char* cookie);
+  void ClearCookies();
   // The committed main document's URL (final URL after redirects) and title,
   // read from the frame — no JS needed. Empty before the first load.
   std::string GetURL();
