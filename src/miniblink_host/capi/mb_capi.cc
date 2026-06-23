@@ -99,6 +99,11 @@ void mbSetTransparentBackground(mbView* v, int transparent) {
     v->impl->SetTransparentBackground(transparent != 0);
 }
 
+void mbSetExtraHeaders(mbView* v, const char* utf8_headers) {
+  if (v && v->impl)
+    v->impl->SetExtraHeaders(utf8_headers);
+}
+
 void mbSendText(mbView* v, const char* utf8_text) {
   if (v && v->impl)
     v->impl->SendText(utf8_text);

@@ -3,6 +3,7 @@
 
 #include <curl/curl.h>
 
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -82,8 +83,15 @@ CURLSH* CookieShare() {
 // Blocks the calling task; fine for the headless/synchronous render model. Retries
 // transient failures with linear backoff so a single network hiccup (which produced
 // indistinguishable blank renders before) doesn't doom the whole page.
+// Lowercase a copy for case-insensitive header-name checks.
+std::string ToLower(const std::string& s) {
+  std::string r = s;
+  for (char& c : r) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return r;
+}
+
 bool FetchHttp(const std::string& url, std::string* body, std::string* content_type,
-               const std::string& user_agent) {
+               const std::string& user_agent, const std::string& extra_headers) {
   CURL* curl = curl_easy_init();
   if (!curl)
     return false;
@@ -100,6 +108,30 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");  // enable the in-memory cookie engine
   if (CURLSH* share = CookieShare())
     curl_easy_setopt(curl, CURLOPT_SHARE, share);  // shared jar across all fetches
+
+  // Request headers: the host's extra "Name: Value" lines, plus a default
+  // Accept-Language (so sites serve localized content) unless the host set one.
+  curl_slist* header_list = nullptr;
+  bool has_accept_language = false;
+  std::string line;
+  std::string lines = extra_headers;
+  lines.push_back('\n');  // sentinel so the last line flushes
+  for (char c : lines) {
+    if (c == '\n' || c == '\r') {
+      if (!line.empty()) {
+        if (ToLower(line).rfind("accept-language:", 0) == 0)
+          has_accept_language = true;
+        header_list = curl_slist_append(header_list, line.c_str());
+        line.clear();
+      }
+    } else {
+      line.push_back(c);
+    }
+  }
+  if (!has_accept_language)
+    header_list = curl_slist_append(header_list, "Accept-Language: en-US,en;q=0.9");
+  if (header_list)
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
 
   constexpr int kMaxAttempts = 3;
   bool ok = false;
@@ -139,6 +171,8 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   if (ct)
     *content_type = ct;
   curl_easy_cleanup(curl);
+  if (header_list)
+    curl_slist_free_all(header_list);
   return ok;
 }
 }  // namespace
@@ -174,17 +208,19 @@ const std::string& MbDefaultUserAgent() {
 }
 
 bool MbFetchUrl(const std::string& url_spec, std::string* body,
-                std::string* content_type, const std::string& user_agent) {
+                std::string* content_type, const std::string& user_agent,
+                const std::string& extra_headers) {
   GURL url(url_spec);
   if (url.SchemeIsFile())
     return base::ReadFileToString(base::FilePath(std::string(url.path())), body);
   if (url.SchemeIsHTTPOrHTTPS())
-    return FetchHttp(url_spec, body, content_type, user_agent);
+    return FetchHttp(url_spec, body, content_type, user_agent, extra_headers);
   return false;
 }
 
-MbURLLoader::MbURLLoader(std::string user_agent)
-    : user_agent_(std::move(user_agent)) {}
+MbURLLoader::MbURLLoader(std::string user_agent, std::string extra_headers)
+    : user_agent_(std::move(user_agent)),
+      extra_headers_(std::move(extra_headers)) {}
 MbURLLoader::~MbURLLoader() = default;
 
 void MbURLLoader::LoadAsynchronously(
@@ -213,7 +249,8 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   if (url.SchemeIsFile()) {
     ok = base::ReadFileToString(base::FilePath(std::string(url.path())), &contents);
   } else if (url.SchemeIsHTTPOrHTTPS()) {
-    ok = FetchHttp(url.spec(), &contents, &http_content_type, user_agent_);
+    ok = FetchHttp(url.spec(), &contents, &http_content_type, user_agent_,
+                   extra_headers_);
   }
   if (std::getenv("MB_VERBOSE")) {
     std::fprintf(stderr, "[mb_url_loader] %s -> %s (%zu bytes)\n", url.spec().c_str(),

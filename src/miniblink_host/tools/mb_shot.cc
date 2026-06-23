@@ -16,6 +16,7 @@
 //                      (timeout = --wait-ms or 5000ms). For JS-rendered content.
 //   --wait-ms N        before capturing, drive the engine for N ms (settle timers/async).
 //   --console          print the page's console output (console.log/warn/error) to stderr.
+//   --header "N: V"    add an HTTP request header (repeatable) to the navigation + subresources.
 //
 // This is the "product" the host enables: a standalone, single-process, modern-Blink
 // screenshot tool — no browser process, no CEF.
@@ -41,6 +42,7 @@ int main(int argc, char** argv) {
   float scale = 1.0f;
   std::string clip;      // "x,y,w,h"
   std::string selector;  // CSS selector -> capture that element's box
+  std::string headers;   // extra request headers, "Name: Value" per line
   std::string wait_selector;  // wait for this selector before capture
   int wait_ms = 0;            // fixed wait before capture
   std::vector<const char*> pos;  // positional args, flags filtered out
@@ -64,6 +66,10 @@ int main(int argc, char** argv) {
       wait_ms = std::atoi(argv[++i]);
     } else if (a == "--console") {
       print_console = true;
+    } else if (a == "--header" && i + 1 < argc) {
+      if (!headers.empty())
+        headers += "\n";
+      headers += argv[++i];
     } else {
       pos.push_back(argv[i]);
     }
@@ -95,6 +101,8 @@ int main(int argc, char** argv) {
     mbSetDeviceScaleFactor(view, scale);  // before load so DPR-aware content responds
   if (transparent)
     mbSetTransparentBackground(view, 1);
+  if (!headers.empty())
+    mbSetExtraHeaders(view, headers.c_str());  // before load so the navigation uses them
 
   const bool is_http = input.rfind("http", 0) == 0;
   if (input.rfind("file://", 0) == 0 || is_http) {

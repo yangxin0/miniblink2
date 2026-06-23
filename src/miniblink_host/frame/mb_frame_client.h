@@ -43,6 +43,9 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   void SetUserAgent(const std::string& ua) { user_agent_ = ua; }
   const std::string& user_agent() const { return user_agent_; }
 
+  void SetExtraHeaders(const std::string& h) { extra_headers_ = h; }
+  const std::string& extra_headers() const { return extra_headers_; }
+
   // Capture page console output (console.log/warn/error) so a host or automation
   // script can read it back. Each entry is "level: text".
   void DidAddMessageToConsole(const blink::WebConsoleMessage&,
@@ -57,6 +60,7 @@ class MbFrameClient : public blink::WebLocalFrameClient {
  private:
   [[maybe_unused]] MbWebView* owner_;  // not owned (used once handshake bodies land)
   std::string user_agent_;  // empty -> MbDefaultUserAgent() (resolved at use)
+  std::string extra_headers_;  // newline-separated "Name: Value" request headers
   std::vector<std::string> console_;  // captured console messages
 };
 

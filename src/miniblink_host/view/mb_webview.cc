@@ -194,9 +194,10 @@ void MbWebView::LoadURL(const char* utf8_url) {
     // Top-level http(s): fetch via libcurl, commit with base = the URL so relative
     // subresources resolve and load through MbURLLoader.
     std::string body, content_type;
-    const bool ok = MbFetchUrl(url, &body, &content_type,
-                               frame_client_ ? frame_client_->user_agent()
-                                             : std::string());
+    const bool ok = MbFetchUrl(
+        url, &body, &content_type,
+        frame_client_ ? frame_client_->user_agent() : std::string(),
+        frame_client_ ? frame_client_->extra_headers() : std::string());
     if (std::getenv("MB_VERBOSE")) {
       std::fprintf(stderr, "[mb_webview] main-doc %s ok=%d bytes=%zu ct='%s'\n",
                    url.c_str(), ok, body.size(), content_type.c_str());
@@ -223,6 +224,11 @@ void MbWebView::SetUserAgent(const char* utf8_ua) {
 
 std::string MbWebView::DrainConsole() {
   return frame_client_ ? frame_client_->DrainConsole() : std::string();
+}
+
+void MbWebView::SetExtraHeaders(const char* utf8_headers) {
+  if (frame_client_)
+    frame_client_->SetExtraHeaders(utf8_headers ? utf8_headers : "");
 }
 
 void MbWebView::SetTransparentBackground(bool transparent) {

@@ -36,13 +36,16 @@ const std::string& MbDefaultUserAgent();
 // Fetch a file:// or http(s):// URL into `body` (+ server Content-Type if any).
 // Shared by the subresource loader and the top-level navigation in MbWebView::LoadURL.
 // `user_agent` sets the HTTP User-Agent (empty -> MbDefaultUserAgent()).
+// `extra_headers` are newline-separated "Name: Value" lines added to every request.
 bool MbFetchUrl(const std::string& url_spec, std::string* body,
-                std::string* content_type, const std::string& user_agent = "");
+                std::string* content_type, const std::string& user_agent = "",
+                const std::string& extra_headers = "");
 
 class MbURLLoader : public blink::URLLoader {
  public:
-  // `user_agent` is sent on every subresource request (empty -> default).
-  explicit MbURLLoader(std::string user_agent = "");
+  // `user_agent` is sent on every subresource request (empty -> default);
+  // `extra_headers` are newline-separated "Name: Value" lines added to each.
+  explicit MbURLLoader(std::string user_agent = "", std::string extra_headers = "");
   ~MbURLLoader() override;
 
   // blink::URLLoader:
@@ -67,6 +70,7 @@ class MbURLLoader : public blink::URLLoader {
 
   blink::URLLoaderClient* client_ = nullptr;  // not owned; valid until done/cancel
   std::string user_agent_;  // sent on each request (empty -> default)
+  std::string extra_headers_;  // newline-separated "Name: Value" added per request
   std::string body_;  // owns the bytes while the data pipe drains them
   std::unique_ptr<mojo::DataPipeProducer> data_pipe_producer_;
   base::WeakPtrFactory<MbURLLoader> weak_factory_{this};

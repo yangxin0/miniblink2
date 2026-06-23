@@ -404,6 +404,23 @@ int main() {
     std::fprintf(stderr, "  [SKIP] cookie jar (httpbin unreachable)\n");
   }
 
+  // 32. Request headers (network — skipped if httpbin unreachable): a custom header
+  // and the default Accept-Language must reach the server (httpbin echoes headers).
+  mbSetExtraHeaders(v, "X-Mb-Test: probe-42");
+  mbLoadURL(v, "https://httpbin.org/headers");
+  mbWait(v, 400);
+  {
+    std::string h = Eval(v, "document.body?document.body.innerText:''");
+    if (h.find("headers") != std::string::npos) {  // httpbin responded
+      Expect(h.find("probe-42") != std::string::npos &&
+                 h.find("Accept-Language") != std::string::npos,
+             "request headers: custom header + default Accept-Language sent");
+    } else {
+      std::fprintf(stderr, "  [SKIP] request headers (httpbin unreachable)\n");
+    }
+  }
+  mbSetExtraHeaders(v, "");  // reset
+
   mbDestroyView(v);
   mbShutdown();
 

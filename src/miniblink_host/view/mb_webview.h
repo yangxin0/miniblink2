@@ -55,6 +55,9 @@ class MbWebView {
   void SetUserAgent(const char* utf8_ua);
   // Return captured console output ("level: text" per line) and clear the buffer.
   std::string DrainConsole();
+  // Set extra request headers (newline-separated "Name: Value") for navigation +
+  // subresources. Set before LoadURL to apply to that navigation.
+  void SetExtraHeaders(const char* utf8_headers);
   // Capture with a transparent base background (omitBackground): unpainted areas
   // keep alpha 0 instead of being filled white.
   void SetTransparentBackground(bool transparent);

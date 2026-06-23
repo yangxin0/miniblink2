@@ -10,9 +10,10 @@ MbFrameClient::MbFrameClient(MbWebView* owner) : owner_(owner) {}
 MbFrameClient::~MbFrameClient() = default;
 
 std::unique_ptr<blink::URLLoader> MbFrameClient::CreateURLLoaderForTesting() {
-  // Subresources use the same UA the frame reports, so the network and DOM agree.
+  // Subresources use the same UA + extra headers the top-level fetch does, so the
+  // network identity is consistent across the document and its subresources.
   return std::make_unique<MbURLLoader>(
-      user_agent_.empty() ? MbDefaultUserAgent() : user_agent_);
+      user_agent_.empty() ? MbDefaultUserAgent() : user_agent_, extra_headers_);
 }
 
 blink::WebString MbFrameClient::UserAgentOverride() {

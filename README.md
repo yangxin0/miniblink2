@@ -36,6 +36,7 @@ that satisfies modern Blink so it runs without the full browser.
 | Web/CSS Animations advance (clock serviced); `XMLHttpRequest` + `fetch` | ✅ |
 | Console capture (`console.log`/`warn`/`error` → host) | ✅ |
 | **Cookies** (shared in-memory jar: Set-Cookie across redirects + requests) | ✅ |
+| Custom request headers + default `Accept-Language` | ✅ |
 | On-screen window, GPU compositing, IndexedDB | ⏳ roadmap |
 
 ## Tool: `mb_shot` (headless HTML → PNG)
@@ -44,7 +45,7 @@ The deliverable example app — a standalone headless screenshot renderer:
 
 ```sh
 mb_shot [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
-        [--wait-selector CSS] [--wait-ms N] [--console] \
+        [--wait-selector CSS] [--wait-ms N] [--console] [--header "N: V"] \
         <input.html | file://URL | http(s)://URL> <out.png> [width height]
 ```
 
@@ -154,6 +155,7 @@ void  mbSendMouseMove(mbView*, int x, int y);       // move pointer: hover + mou
 void  mbSetDeviceScaleFactor(mbView*, float scale); // HiDPI: devicePixelRatio + Nx raster
 void  mbSetUserAgent(mbView*, const char* ua);      // navigator.userAgent + HTTP requests
 void  mbSetTransparentBackground(mbView*, int on);  // omitBackground: alpha-preserving capture
+void  mbSetExtraHeaders(mbView*, const char* headers); // extra HTTP request headers
 void  mbSendText(mbView*, const char* text);        // type UTF-8 into the focused element
 void  mbSendScroll(mbView*, int x, int y, int dx, int dy);  // scroll the page (dy>0 = down)
 int   mbPaintToBitmap(mbView*, void* bgra, int w, int h, int stride);
@@ -187,6 +189,6 @@ integrity, full-page capture (resize → reflow → render below the fold), HiDP
 (devicePixelRatio + resolution media queries), User-Agent (default + override), clip/
 region capture, transparent background, wait-for-selector, DOM storage
 (`localStorage`/`sessionStorage`), `requestAnimationFrame`, observer delivery (Mutation & Intersection & Resize), time-based animation (WAAPI/XHR),
-console capture, and a cookie-jar check over the network) — it prints PASS/FAIL per case and
-exits non-zero on any failure, so it doubles as a regression test. (The cookie case is
-skipped, not failed, when the network is unavailable.)
+console capture, and over-the-network checks for the cookie jar and request headers) — it
+prints PASS/FAIL per case and exits non-zero on any failure, so it doubles as a regression
+test. (The two network cases are skipped, not failed, when the network is unavailable.)

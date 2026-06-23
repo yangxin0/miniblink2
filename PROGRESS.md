@@ -591,6 +591,16 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   conditional). Note: this is network-side cookies; document.cookie (JS) is separate and not
   yet wired to this jar.
 
+- ✅ REQUEST HEADERS + Accept-Language (2026-06-23 17:?): mbSetExtraHeaders(view, "Name: Value\n
+  ...") + mb_shot --header "N: V" (repeatable). Threaded like UA: frame client holds them,
+  passes to MbURLLoader (subresources) and LoadURL passes to the main-doc MbFetchUrl. FetchHttp
+  builds a curl_slist from the newline-separated lines and ALWAYS adds a default
+  Accept-Language: en-US,en;q=0.9 unless the host supplied one (case-insensitive check) — so
+  sites serve localized content (none was sent before). slist freed after each fetch. Verified
+  smoke 32 (network, graceful SKIP): httpbin /headers echoes X-Mb-Test: probe-42 + Accept-Language
+  — got a real PASS. 35/36 (two conditional network cases: cookies + headers). This subsumes
+  many needs (auth tokens, content negotiation, custom API headers).
+
 ### REMAINING ROADMAP
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).
 - P2: wire the wke/mb C API surface onto this host; drive from port/mac/minibrowser_main.mm

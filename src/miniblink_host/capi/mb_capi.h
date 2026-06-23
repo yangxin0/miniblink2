@@ -77,6 +77,11 @@ MB_EXPORT void mbSetUserAgent(mbView*, const char* utf8_ua);
 // transparency on, areas the page does not paint keep alpha 0 in the output.
 MB_EXPORT void mbSetTransparentBackground(mbView*, int transparent);
 
+// Set extra HTTP request headers added to the navigation and its subresources:
+// newline-separated "Name: Value" lines. Call before mbLoadURL. (A default
+// Accept-Language is sent unless one is provided here.) Pass NULL/empty to clear.
+MB_EXPORT void mbSetExtraHeaders(mbView*, const char* utf8_headers);
+
 // Type ASCII text into the focused element (synthesized key events).
 MB_EXPORT void mbSendText(mbView*, const char* utf8_text);
 
