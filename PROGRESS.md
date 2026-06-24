@@ -1904,8 +1904,16 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   or serialization aborts VALIDATION_ERROR_UNEXPECTED_NULL_POINTER. VERIFIED: fetch(blob:).text() ==
   the blob content, and .arrayBuffer()/.blob() both deliver the bytes. Smoke case 100 locks it in.
   **121/121, no survivors.** Patches re-captured from the live donor: 0003 now ENABLES Register (with
-  a corrected comment), new 0004 = the blob: loader bypass. (Open: <img src=blob:> for a tiny GIF
-  still errored — a separate image-decode/path item, not fetch; fetch(blob:) itself is complete.)
+  a corrected comment), new 0004 = the blob: loader bypass.
+
+- ✅ <img src=blob:> CONFIRMED WORKING (2026-06-24): the prior tick's "img errored" note was a TEST
+  BUG, not an engine gap — `new Blob([atob(b64)])` treats the DOMString as UTF-8 and mangles every
+  byte >127, corrupting the PNG. Built from a Uint8Array instead (`new Blob([bytes])`), a 1x1 PNG
+  blob loads + decodes via the SAME native blob loader path as fetch(blob:) (BlobURLStore.Resolve-
+  AsURLLoaderFactory -> Blob::Load), exercised here by the image resource loader + decoder:
+  img.onload fires, naturalWidth/Height == 1. Smoke case 101 locks it in. **122/122, no survivors.**
+  So the whole blob: consumer surface (fetch text/arrayBuffer/blob + <img>) is complete; no engine
+  change was needed — just correct blob construction.
 
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a

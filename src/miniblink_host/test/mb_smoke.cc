@@ -2170,6 +2170,30 @@ int main() {
            Eval(v, "String(window.__bf)"));
   }
 
+  // 101. <img src=blob:> decodes an image from a blob: URL. Same native blob
+  // loader path as fetch(blob:) (BlobURLStore.ResolveAsURLLoaderFactory ->
+  // Blob::Load), exercised by the image resource loader + decoder. The blob
+  // must be built from a Uint8Array (a DOMString blob would UTF-8-mangle bytes
+  // >127 and corrupt the PNG). 1x1 red PNG.
+  {
+    mbLoadHTML(v, "<body>x</body>", "about:blank");
+    mbRunJS(v,
+        "window.__bi='';"
+        "var b64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42m"
+        "Nk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';"
+        "var bin=atob(b64);var by=new Uint8Array(bin.length);"
+        "for(var i=0;i<bin.length;i++)by[i]=bin.charCodeAt(i);"
+        "var u=URL.createObjectURL(new Blob([by],{type:'image/png'}));"
+        "var im=new Image();"
+        "im.onload=function(){window.__bi='OK'+im.naturalWidth+'x'+"
+        "im.naturalHeight;};im.onerror=function(){window.__bi='ERR';};"
+        "im.src=u;");
+    mbWait(v, 500);  // async image load + decode off the blob
+    Expect(Eval(v, "String(window.__bi)") == "OK1x1",
+           "<img src=blob:> decodes an image from a blob: URL",
+           Eval(v, "String(window.__bi)"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
