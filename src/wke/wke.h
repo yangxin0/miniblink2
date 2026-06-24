@@ -161,6 +161,10 @@ WKE_API void wkeScrollTo(wkeWebView webView, int x, int y);
 // response (follow=false) so wkeGetHttpStatusCode/wkeGetResponseHeaders expose
 // the 30x + Location. Process-wide; set before navigating. Port extension.
 WKE_API void wkeSetFollowRedirects(bool follow);
+// Accept invalid TLS certificates (self-signed/expired) when ignore=true — the
+// equivalent of curl -k / Puppeteer ignoreHTTPSErrors; false restores the secure
+// default. Process-wide; set before navigating. Port extension.
+WKE_API void wkeSetIgnoreCertErrors(bool ignore);
 // Render the current frame to a width x height PNG held IN MEMORY (no temp
 // file); returns the byte length and sets *outData (0 on failure). The bytes are
 // owned by the view and valid only until the next wkeEncodePng on it or

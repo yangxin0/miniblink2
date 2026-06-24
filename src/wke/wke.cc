@@ -413,6 +413,13 @@ void wkeSetFollowRedirects(bool follow) {
   mbSetFollowRedirects(follow ? 1 : 0);
 }
 
+void wkeSetIgnoreCertErrors(bool ignore) {
+  // Accept invalid TLS certificates (self-signed/expired) — the equivalent of
+  // curl -k / Puppeteer ignoreHTTPSErrors; false restores the secure default.
+  // Process-wide; set before navigating. (Port extension.)
+  mbSetIgnoreCertErrors(ignore ? 1 : 0);
+}
+
 void wkeScrollTo(wkeWebView webView, int x, int y) {
   // Absolute scroll of the layout viewport to (x,y) in CSS px (window.scrollTo).
   // The real viewport moves, so fixed/sticky elements render correctly — pair

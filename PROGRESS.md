@@ -94,7 +94,8 @@ the deliverable surface (C API, CLI, wke layer).
   proxy (`wkeSetProxy`, HTTP/SOCKS + auth), request headers
   (`wkeSetExtraHeaders`), i18n emulation (`wkeSetLocale`/`wkeSetTimezone`),
   HTTP introspection (`wkeGetHttpStatusCode`/`wkeGetResponseHeaders`),
-  redirect control (`wkeSetFollowRedirects`), navigation history,
+  redirect control (`wkeSetFollowRedirects`), TLS-error bypass
+  (`wkeSetIgnoreCertErrors`), navigation history,
   page text (`wkeGetText`), rendering accessors
   (`wkeSetTransparent`/`wkeIsTransparent`,
   `wkeSetZoomFactor`/`wkeGetZoomFactor`, `wkeSetEditable`, `wkeSetDarkMode`,
@@ -103,10 +104,10 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **55/55**,
-  deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com cases
-  (wke_smoke up to 61; use a generous watchdog ≥180s — cumulative loads + the
-  15s failing-proxy connect; cases SKIP when a host is unreachable).
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **56/56**,
+  deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
+  cases (wke_smoke up to 63; use a generous watchdog ≥180s — cumulative loads +
+  the 15s failing-proxy connect; cases SKIP when a host is unreachable).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
 
@@ -121,6 +122,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke NETWORK: wkeSetIgnoreCertErrors (2026-06-24). Accept invalid TLS certs (self-signed/expired) — curl -k / ignoreHTTPSErrors equivalent (wraps mbSetIgnoreCertErrors; process-wide). Completes the network-config set (proxy/headers/redirects/cert). Documented PORT EXTENSION. VERIFIED offline (toggle safe + local loads work, 56/56) AND over the network this run (badssl reachable while httpbin wasn't): ignore-on loads https://self-signed.badssl.com, ignore-off REJECTS it → 58/58. mb_smoke 132/132, no survivors.
 - wke EXAMPLE: wke_demo end-to-end automation sample (2026-06-24). New runnable example + build target (src/wke/wke_demo.cc; executable("wke_demo") in miniblink_host/BUILD.gn; staged with src/wke; added to build.sh ninja line). Drives an offline form the way a real app would — fill #name, select #role, click #go, waitForSelector #out (async/SPA-like via setTimeout), scrape text ("Hello Ada (admin)") + computed color (rgb(0, 128, 0)), count options, screenshot — asserting each step (returns 0/1) so it doubles as an integration check + usage doc. VERIFIED: all 10 steps OK, no survivors. wke_smoke 55/55 + mb_smoke 132/132 unregressed. NOTE: adding a GN target requires staging miniblink_host/BUILD.gn into the tree + gn gen (build.sh does both; an in-place ninja needs the BUILD.gn re-copied first).
 - wke jsValue: jsToFloat (2026-06-24). Completes the numeric coercion set (jsToInt/jsToDouble/jsToFloat/jsToBoolean) — float cast of the stored value. Faithful wke API, offline. VERIFIED: 7/2 → jsToFloat 3.5f vs jsToInt 3. wke_smoke 55/55, mb_smoke 132/132, no survivors.
 - wke jsValue: jsToString (JSON view) (2026-06-24). Like jsToTempString but object/array values are JSON-serialized via their slot (JSON.stringify(literal)) instead of coercing to "[object Object]"; primitives return the coerced value. Separate JsStringBuf() temp. Offline + deterministic. VERIFIED: ({a:1,b:'x'})→{"a":1,"b":"x"}, [1,2,3]→[1,2,3], 42→"42", 'hi'→"hi". wke_smoke 54/54, mb_smoke 132/132, no survivors.

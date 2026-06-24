@@ -900,6 +900,17 @@ int main() {
           "wkeSetFollowRedirects toggle is safe; local loads still work");
   }
 
+  // wkeSetIgnoreCertErrors (offline): toggling is safe and leaves local loads
+  // working (the self-signed-cert proof is network-gated below).
+  {
+    wkeSetIgnoreCertErrors(true);
+    wkeSetIgnoreCertErrors(false);  // restore secure default
+    wkeLoadHTML(wv, "<title>CertOK</title><body>c</body>");
+    check(wkeIsLoadingSucceeded(wv) &&
+              std::strcmp(wkeGetTitle(wv), "CertOK") == 0,
+          "wkeSetIgnoreCertErrors toggle is safe; local loads still work");
+  }
+
   // Waits (offline): a setTimeout adds a delayed element / flag; the wait pumps
   // until it appears, and times out on a condition that never holds.
   {
@@ -1004,6 +1015,20 @@ int main() {
     } else {
       std::printf("  [SKIP] wkeSetFollowRedirects (redirect host unreachable)\n");
     }
+
+    // Cert errors: with ignoring on, a self-signed HTTPS site loads; turning it
+    // off rejects the same site. (Only asserted when the host is reachable.)
+    wkeSetIgnoreCertErrors(true);
+    wkeLoadURL(wv, "https://self-signed.badssl.com/");
+    if (wkeIsLoadingSucceeded(wv)) {
+      wkeSetIgnoreCertErrors(false);
+      wkeLoadURL(wv, "https://self-signed.badssl.com/");
+      check(!wkeIsLoadingSucceeded(wv),
+            "wkeSetIgnoreCertErrors(false) rejects a self-signed certificate");
+    } else {
+      std::printf("  [SKIP] wkeSetIgnoreCertErrors (badssl unreachable)\n");
+    }
+    wkeSetIgnoreCertErrors(false);  // restore secure default
   }
 
   wkeDestroyWebView(wv);
