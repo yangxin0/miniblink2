@@ -68,6 +68,7 @@ int main(int argc, char** argv) {
   float scale = 1.0f;
   std::string clip;      // "x,y,w,h"
   std::string selector;  // CSS selector -> capture that element's box
+  std::string require_selector;  // assert this selector matches; else exit 3
   std::string headers;   // extra request headers, "Name: Value" per line
   std::string wait_selector;  // wait for this selector before capture
   std::string wait_visible;   // wait for this selector to be VISIBLE before capture
@@ -121,6 +122,8 @@ int main(int argc, char** argv) {
       clip = argv[++i];
     } else if (a == "--selector" && i + 1 < argc) {
       selector = argv[++i];
+    } else if (a == "--require" && i + 1 < argc) {
+      require_selector = argv[++i];
     } else if (a == "--wait-selector" && i + 1 < argc) {
       wait_selector = argv[++i];
     } else if (a == "--wait-visible" && i + 1 < argc) {
@@ -251,6 +254,7 @@ int main(int argc, char** argv) {
         "[--post BODY] [--proxy URL] "
         "[--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] "
         "[--no-follow] [--block SUBSTR] [--set-cookie URL COOKIE] [--user-agent UA] "
+        "[--require CSS] "
         "<input.html|file://URL|http(s)://URL> <out.png> [width height]\n",
         argv[0]);
     return 2;
@@ -737,6 +741,22 @@ int main(int argc, char** argv) {
                    save_cookies.c_str());
   }
 
+  // --require CSS: after all waits/interaction, assert the page actually contains
+  // the scrape target — for scripting, so a pipeline can tell "the data is here"
+  // from "the page didn't load / the element never appeared" (which the warn-only
+  // waits and a successful-but-empty file load don't signal). The capture/extract
+  // still run (useful for debugging the miss); only the exit code changes -> 3.
+  int require_failed = 0;
+  if (!require_selector.empty()) {
+    int n = mbCountSelector(view, require_selector.c_str());
+    if (n <= 0) {
+      std::fprintf(stderr,
+                   "mb_shot: --require '%s' matched no element (exit 3)\n",
+                   require_selector.c_str());
+      require_failed = 1;
+    }
+  }
+
   // Clip / element capture: resolve a logical rectangle and shoot just that. We
   // first grow the view to the full document height so the region is laid out and
   // painted even if it sits below the original fold.
@@ -784,7 +804,7 @@ int main(int argc, char** argv) {
                  (ok && load_ok) ? "OK" : "FAILED");
     mbDestroyView(view);
     mbShutdown();
-    return (ok && load_ok) ? 0 : 1;
+    return require_failed ? 3 : ((ok && load_ok) ? 0 : 1);
   }
 
   // Full-page capture: grow the view to the document's content height so the
@@ -824,5 +844,5 @@ int main(int argc, char** argv) {
 
   mbDestroyView(view);
   mbShutdown();
-  return (ok && load_ok) ? 0 : 1;
+  return require_failed ? 3 : ((ok && load_ok) ? 0 : 1);
 }

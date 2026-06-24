@@ -118,6 +118,10 @@ run 40 "$URL" "$PNG" --fill "#sq" "apple" --click "#go" --wait-selector ".res" \
     --eval "JSON.stringify(Array.prototype.map.call(document.querySelectorAll('.res'),function(e){return e.textContent;}))"
 check "integration: fill->click->wait->extract JSON" '["apple-1","apple-2","apple-3"]' "$(cat "$TMP/out")"
 
+# --require: assert a scrape target is present; exit 3 when it isn't (for scripting)
+run 40 "$URL" "$PNG" --require "#msg";          check "--require present -> exit 0" "0" "$RC"
+run 40 "$URL" "$PNG" --require ".nonexistent";  check "--require absent -> exit 3" "3" "$RC"
+
 # bad-size guard: a non-numeric width positional must fail fast (exit 2), not crash
 run 40 "$URL" --out "$PNG"; check "bad-size guard exit code" "2" "$RC"
 checkc "bad-size guard message" "must be positive" "$(cat "$TMP/err")"

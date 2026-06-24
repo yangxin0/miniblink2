@@ -69,8 +69,17 @@ mb_shot \
   [--requests] [--console] [--headers] \
   # capture
   [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
+  # assert (scripting)
+  [--require CSS] \
   <input.html | file://URL | http(s)://URL> <out.png> [width height]
 ```
+
+For scripting, `--require CSS` makes the run **assert** the page contains a match for
+`CSS` after all waits/interaction — exit `3` if it doesn't (the capture is still
+written for debugging). This turns "the data is here" vs "the page didn't load / the
+element never appeared" into a reliable exit code, which the warn-only `--wait-*` flags
+and a successful-but-empty local-file load otherwise don't signal. (Exit codes: `0` ok,
+`1` load/capture failed, `2` usage error, `3` `--require` unmet.)
 
 `--full` captures the entire document height (the view is resized to the page's
 `scrollHeight` before rendering, capped at 20000px), like Puppeteer's `fullPage` — e.g.
