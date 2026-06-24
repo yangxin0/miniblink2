@@ -2150,6 +2150,20 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   field value, which wants wkeRunJS/jsValue) and right-click/wheel (no coord-based variant in mb_capi
   yet).
 
+- ✅✅ wke slice grown: SCRIPTING — wkeRunJS + jsValue readers (2026-06-24). The single most important
+  wke capability (nearly every wke app uses it) and the enabler for verifying keyboard input. Added the
+  upstream handle types (jsExecState=void*, jsValue=long long) + wkeRunJS / wkeGlobalExec / jsToInt /
+  jsToDouble / jsToBoolean / jsToTempString to wke.h, implemented in wke.cc as a STRING-BACKED jsValue:
+  wkeRunJS evals via mbEvalJS, stores the coerced-to-string result in a process-global handle->string
+  map (handles start at 0x10000 to dodge wke's reserved jsUndefined/Null/True/False; the map is capped
+  at 4096 + cleared since it isn't GC'd), and the jsToXxx readers coerce that string (atoi/atof/JS-
+  truthiness; jsToTempString returns the classic temp pointer). This covers the dominant "run JS, read
+  the result" pattern; the full V8 jsValue object model (jsObject/jsArray/jsCall, constructing values
+  to pass INTO JS) and jsTypeOf are deferred. VERIFIED in wke_smoke (now 11/11): jsToInt(1+2)==3,
+  jsToTempString('hel'+'lo')=="hello", jsToDouble(7/2)==3.5, jsToBoolean(1<2)/!( 1>2), and
+  wkeRunJS("document.title")=="JSDoc" (reads the live DOM). exit 0, no survivors; mb_smoke still 131/131
+  (additive). LIMITATION noted: a script that opens a modal dialog aborts (the mbEvalJS modal caveat).
+
 ### REMAINING ROADMAP
 - wke layer: grow the slice — keyboard input (wkeFireKey*), more accessors, then the async callback
   model, and eventually the jsValue scripting layer (wkeRunJS). Each is an incremental, testable slice.

@@ -7,8 +7,11 @@
 
 #include "wke/wke.h"
 
+#include <cstdlib>
 #include <cstring>
+#include <map>
 #include <string>
+#include <vector>
 
 #include "miniblink_host/capi/mb_capi.h"
 
@@ -182,4 +185,70 @@ void wkePaint(wkeWebView webView, void* bits, int pitch) {
     return;
   const int stride = pitch > 0 ? pitch : webView->width * 4;
   mbPaintToBitmap(webView->view, bits, webView->width, webView->height, stride);
+}
+
+// --- Scripting (string-backed jsValue) -----------------------------------------
+namespace {
+// jsValue handle -> the string result of the wkeRunJS that produced it. Heap-
+// owned with no destructor (Blink builds with -Wexit-time-destructors).
+std::map<jsValue, std::string>& JsRegistry() {
+  static auto* r = new std::map<jsValue, std::string>();
+  return *r;
+}
+std::string& JsTempBuf() {
+  static auto* s = new std::string();
+  return *s;
+}
+// Start above wke's small reserved constants (jsUndefined/jsNull/jsTrue/jsFalse).
+jsValue g_next_js_value = 0x10000;
+
+const std::string* JsLookup(jsValue v) {
+  auto& reg = JsRegistry();
+  auto it = reg.find(v);
+  return it == reg.end() ? nullptr : &it->second;
+}
+}  // namespace
+
+jsValue wkeRunJS(wkeWebView webView, const utf8* script) {
+  if (!webView || !webView->view || !script)
+    return 0;
+  std::vector<char> buf(1 << 16, 0);  // 64 KiB result cap
+  mbEvalJS(webView->view, script, buf.data(), static_cast<int>(buf.size()));
+  auto& reg = JsRegistry();
+  if (reg.size() >= 4096)
+    reg.clear();  // bound the (non-GC'd) registry; very old handles expire to ""
+  const jsValue handle = g_next_js_value++;
+  reg[handle] = buf.data();  // up to the first NUL
+  return handle;
+}
+
+jsExecState wkeGlobalExec(wkeWebView webView) {
+  // No real exec state is needed — the jsValue handle carries the result. Return
+  // a non-null token so callers' null checks pass.
+  return reinterpret_cast<jsExecState>(webView);
+}
+
+int jsToInt(jsExecState /*es*/, jsValue v) {
+  const std::string* s = JsLookup(v);
+  return s ? std::atoi(s->c_str()) : 0;
+}
+
+double jsToDouble(jsExecState /*es*/, jsValue v) {
+  const std::string* s = JsLookup(v);
+  return s ? std::atof(s->c_str()) : 0.0;
+}
+
+bool jsToBoolean(jsExecState /*es*/, jsValue v) {
+  const std::string* s = JsLookup(v);
+  if (!s)
+    return false;
+  // JS truthiness over the coerced string: "true" / any non-empty value that
+  // isn't "false" or "0".
+  return *s == "true" || (!s->empty() && *s != "false" && *s != "0");
+}
+
+const utf8* jsToTempString(jsExecState /*es*/, jsValue v) {
+  const std::string* s = JsLookup(v);
+  JsTempBuf() = s ? *s : std::string();
+  return JsTempBuf().c_str();
 }

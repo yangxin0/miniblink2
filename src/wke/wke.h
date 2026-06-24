@@ -34,6 +34,14 @@
 typedef char utf8;
 typedef struct _tagWkeWebView* wkeWebView;
 
+// Scripting handle types (upstream: jsExecState = void*, jsValue = __int64). In
+// this slice a jsValue is an opaque handle to the string result of a wkeRunJS
+// call; the jsToXxx readers below coerce it. The full V8-backed jsValue object
+// model (jsObject/jsArray/jsCall, constructing values to pass into JS) is not yet
+// implemented.
+typedef void* jsExecState;
+typedef long long jsValue;
+
 // Mouse-event message codes for wkeFireMouseEvent (Win32 WM_* values, matching
 // upstream wkedefine.h).
 enum {
@@ -98,6 +106,23 @@ WKE_API void wkeSetUserAgent(wkeWebView webView, const utf8* userAgent);
 // real button-up), and LBUTTONDBLCLK (double click). Returns true if handled.
 WKE_API bool wkeFireMouseEvent(wkeWebView webView, unsigned int message, int x,
                                int y, unsigned int flags);
+
+// --- Scripting -----------------------------------------------------------------
+// Run `script` in the page's main frame and return a handle to its result. Read
+// the result with the jsToXxx coercions below (string/int/double/boolean). The
+// script must not open a modal dialog (alert/confirm/prompt) — that path is not
+// serviced here. NOTE: scripts that themselves show dialogs are unsupported.
+WKE_API jsValue wkeRunJS(wkeWebView webView, const utf8* script);
+// The view's global execution state. Accepted by the jsToXxx readers (in this
+// slice the result is carried by the jsValue handle, so the state is a token).
+WKE_API jsExecState wkeGlobalExec(wkeWebView webView);
+
+// Coerce a wkeRunJS result. jsToTempString returns a pointer owned by the library,
+// valid until the next jsToTempString call (the classic wke "temp" contract).
+WKE_API int jsToInt(jsExecState es, jsValue v);
+WKE_API double jsToDouble(jsExecState es, jsValue v);
+WKE_API bool jsToBoolean(jsExecState es, jsValue v);
+WKE_API const utf8* jsToTempString(jsExecState es, jsValue v);
 
 // --- Paint (pull model): render the view into a caller BGRA buffer -------------
 // `bits` must hold width*height*4 bytes; `pitch` is the row stride in bytes

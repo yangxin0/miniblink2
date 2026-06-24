@@ -69,6 +69,20 @@ int main() {
   const bool red = buf[c + 2] > 200 && buf[c + 1] < 60 && buf[c] < 60;
   check(red, "wkeFireMouseEvent click fires onclick (bg flips to red)");
 
+  // Scripting: wkeRunJS + the jsToXxx readers (string-backed jsValue).
+  wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");
+  jsExecState es = wkeGlobalExec(wv);
+  check(jsToInt(es, wkeRunJS(wv, "1+2")) == 3, "wkeRunJS + jsToInt (1+2==3)");
+  check(std::strcmp(jsToTempString(es, wkeRunJS(wv, "'hel'+'lo'")), "hello") == 0,
+        "wkeRunJS + jsToTempString ('hello')");
+  check(jsToDouble(es, wkeRunJS(wv, "7/2")) == 3.5, "wkeRunJS + jsToDouble (3.5)");
+  check(jsToBoolean(es, wkeRunJS(wv, "1<2")) &&
+            !jsToBoolean(es, wkeRunJS(wv, "1>2")),
+        "wkeRunJS + jsToBoolean (1<2 true, 1>2 false)");
+  check(std::strcmp(jsToTempString(es, wkeRunJS(wv, "document.title")),
+                    "JSDoc") == 0,
+        "wkeRunJS reads the DOM (document.title)");
+
   wkeDestroyWebView(wv);
   wkeFinalize();
 
