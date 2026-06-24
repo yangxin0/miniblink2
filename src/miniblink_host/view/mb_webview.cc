@@ -220,6 +220,12 @@ void MbWebView::CommitHtml(const char* data, size_t len, const char* base_url,
   // (from the HTTP Content-Type) is passed through as authoritative.
   auto params = std::make_unique<blink::WebNavigationParams>();
   params->url = url;
+  // NOTE: we deliberately leave params->policy_container null. Supplying a fresh
+  // empty WebPolicyContainer (to stop a prior page's <meta> CSP leaking into the
+  // next document in a reused view) CRASHES Blink at commit — its null mojo remote
+  // trips a CHECK. A real fix needs a bound PolicyContainerHost receiver, which is
+  // more plumbing than the quirk warrants (mb_shot is one-page-per-process; reused
+  // views should use a fresh mbView). Documented under Known gaps in PROGRESS.
   blink::WebNavigationParams::FillStaticResponse(
       params.get(), "text/html", blink::WebString::FromUtf8(charset),
       base::span<const char>(data, len));
