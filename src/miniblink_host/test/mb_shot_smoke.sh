@@ -26,6 +26,9 @@ cat > "$FIX" <<'HTML'
 <a id="lnk" href="https://example.com/x">link</a>
 <p id="msg">hello world</p>
 <input id="kq" type="text"><div id="krec">nokey</div>
+<input id="pv" value="preset"><input id="cb" type="checkbox" checked>
+<button id="btn" onclick="document.getElementById('cr').textContent='clicked';">b</button>
+<div id="cr">no</div>
 <script>
 localStorage.setItem('auth','tok-99');
 sessionStorage.setItem('cart','3 items');
@@ -56,6 +59,11 @@ checkc() {
   case "$3" in *"$2"*) PASS=$((PASS+1)); echo "  [PASS] $1";;
   *) FAIL=$((FAIL+1)); echo "  [FAIL] $1: [$3] missing [$2]";; esac
 }
+# checkre <name> <ERE> <actual> : extended-regex match
+checkre() {
+  if printf '%s' "$3" | grep -Eq "$2"; then PASS=$((PASS+1)); echo "  [PASS] $1";
+  else FAIL=$((FAIL+1)); echo "  [FAIL] $1: [$3] !~ /$2/"; fi
+}
 
 URL="file://$FIX"
 
@@ -68,6 +76,14 @@ run 40 "$URL" "$PNG" --visible "#msg";        check "--visible" "1" "$(cat "$TMP
 run 40 "$URL" "$PNG" --local-storage "auth";  check "--local-storage" "tok-99" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --session-storage "cart"; check "--session-storage" "3 items" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --url;                   checkc "--url" "fixture.html" "$(cat "$TMP/out")"
+run 40 "$URL" "$PNG" --value "#pv";           check "--value" "preset" "$(cat "$TMP/out")"
+run 40 "$URL" "$PNG" --checked "#cb";         check "--checked" "1" "$(cat "$TMP/out")"
+run 40 "$URL" "$PNG" --style "#msg" "display"; check "--style" "block" "$(cat "$TMP/out")"
+run 40 "$URL" "$PNG" --html;                  checkc "--html" "hello world" "$(cat "$TMP/out")"
+run 40 "$URL" "$PNG" --rect "#msg";           checkre "--rect" '^[0-9]+,[0-9]+,[0-9]+,[0-9]+$' "$(cat "$TMP/out")"
+# --click: a button's onclick mutates #cr; read it back via --eval
+run 40 "$URL" "$PNG" --click "#btn" --eval "document.getElementById('cr').textContent"
+check "--click fires handler" "clicked" "$(cat "$TMP/out")"
 
 # cookie round-trip: inject then read back the same origin from the in-memory jar
 run 40 "$URL" "$PNG" --set-cookie "https://t.test/" "s=1; Path=/" --cookies "https://t.test/"

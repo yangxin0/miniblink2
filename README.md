@@ -429,5 +429,6 @@ run so an unreachable host can't make it crawl. The `wke` layer has its own
 `build.sh` also runs `src/miniblink_host/test/mb_shot_smoke.sh`, a CLI regression
 test that drives the `mb_shot` binary against a local fixture and asserts the exact
 stdout of the extraction flags (`--title`/`--count`/`--attr`/`--text`/`--eval`/
-`--visible`/`--local-storage`/`--session-storage`/`--url`/`--cookies`/`--press`) plus
-the bad-size guard — coverage the C++ suites can't give the command-line tool itself.
+`--visible`/`--value`/`--checked`/`--style`/`--html`/`--rect`/`--local-storage`/
+`--session-storage`/`--url`/`--cookies`/`--click`/`--press`/`--wait-eval`) plus the
+bad-size guard — coverage the C++ suites can't give the command-line tool itself.
