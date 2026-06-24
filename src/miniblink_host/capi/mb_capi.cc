@@ -55,6 +55,12 @@ int mbWaitForSelectorHidden(mbView* v, const char* css_selector, int timeout_ms)
   return v->impl->WaitForSelectorHidden(css_selector, timeout_ms) ? 1 : 0;
 }
 
+int mbWaitForNetworkIdle(mbView* v, int idle_ms, int timeout_ms) {
+  if (!v || !v->impl)
+    return 0;
+  return v->impl->WaitForNetworkIdle(idle_ms, timeout_ms) ? 1 : 0;
+}
+
 int mbWaitForFunction(mbView* v, const char* js_expr, int timeout_ms) {
   if (!v || !v->impl || !js_expr)
     return 0;

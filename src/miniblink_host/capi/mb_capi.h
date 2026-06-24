@@ -63,6 +63,13 @@ MB_EXPORT int mbWaitForVisibleSelector(mbView*, const char* css_selector,
 MB_EXPORT int mbWaitForSelectorHidden(mbView*, const char* css_selector,
                                       int timeout_ms);
 
+// Wait until no new subresource request has been recorded for `idle_ms`
+// (Puppeteer's networkidle) — let an SPA's deferred fetches (XHR/fetch, lazy
+// images) settle before scraping/capturing. Returns 1 once the network is quiet,
+// 0 if `timeout_ms` elapses while still busy. Reads the process-wide request log,
+// so clear it (mbClearRequestLog) before the navigation to scope it to this page.
+MB_EXPORT int mbWaitForNetworkIdle(mbView*, int idle_ms, int timeout_ms);
+
 // View lifecycle. A view owns one WebView + main LocalFrame + WebFrameWidget.
 MB_EXPORT mbView* mbCreateView(int width, int height);
 MB_EXPORT void    mbDestroyView(mbView*);

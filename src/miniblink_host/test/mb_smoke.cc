@@ -2825,6 +2825,29 @@ int main() {
                (stays_shown ? "1" : "0"));
   }
 
+  // 102h. mbWaitForNetworkIdle: a page fires a deferred fetch (150ms) that routes
+  // through the loader; the wait must return idle (not timeout) only after that
+  // request lands — so the log holds it afterward. A second quiet page confirms
+  // it doesn't false-timeout. (file:// origin so the file:// fetch is same-scheme.)
+  {
+    mbClearRequestLog();
+    mbLoadHTML(v,
+        "<body><script>setTimeout(function(){var i=document.createElement('img');"
+        "i.src='file:///tmp/mb_ni_probe.png';document.body.appendChild(i);},150);"
+        "</script></body>", "file:///tmp/mb_ni_page.html");
+    const bool idle = mbWaitForNetworkIdle(v, 300, 5000) == 1;
+    char rb[4096] = {0};
+    mbGetRequestLog(rb, sizeof(rb));
+    const bool fetched = std::string(rb).find("mb_ni_probe.png") != std::string::npos;
+    mbClearRequestLog();
+    mbLoadHTML(v, "<body>quiet</body>", "about:blank");
+    const bool quiet_ok = mbWaitForNetworkIdle(v, 150, 3000) == 1;  // no false timeout
+    Expect(idle && fetched && quiet_ok,
+           "mbWaitForNetworkIdle returns after deferred fetch; quiet page is idle",
+           std::string("idle=") + (idle ? "1" : "0") + " fetched=" +
+               (fetched ? "1" : "0") + " quiet=" + (quiet_ok ? "1" : "0"));
+  }
+
   // 102b. mbCountSelector + indexed list scraping. Count the matches, then read
   // each one via :nth-of-type(n) selectors on mbGetTextForSelector — the standard
   // "scrape a list" pattern. Also: 0 for no matches, -1 for an invalid selector.

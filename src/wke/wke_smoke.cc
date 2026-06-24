@@ -1232,6 +1232,24 @@ int main() {
     std::remove(bl_css);
   }
 
+  // wkeWaitForNetworkIdle: a deferred fetch (150ms) routes through the loader; the
+  // wait returns idle only after it lands (log holds it). A quiet page is idle.
+  {
+    wkeClearRequestLog();
+    wkeLoadHtmlWithBaseUrl(wv,
+        "<body><script>setTimeout(function(){var i=document.createElement('img');"
+        "i.src='file:///tmp/wke_ni_probe.png';document.body.appendChild(i);},150);"
+        "</script></body>", "file:///tmp/wke_ni.html");
+    const bool idle = wkeWaitForNetworkIdle(wv, 300, 5000);
+    const bool fetched =
+        std::strstr(wkeGetRequestLog(wv), "wke_ni_probe.png") != nullptr;
+    wkeClearRequestLog();
+    wkeLoadHTML(wv, "<body>quiet</body>");
+    const bool quiet_ok = wkeWaitForNetworkIdle(wv, 150, 3000);
+    check(idle && fetched && quiet_ok,
+          "wkeWaitForNetworkIdle waits out a deferred fetch; quiet page is idle");
+  }
+
   // wkeScrollToBottom drives lazy loading: a scroll handler appends a tall block
   // per scroll (up to 3), so the page only finishes growing if something scrolls
   // it. A short viewport (< one block) guarantees each scroll moves. Auto-scroll

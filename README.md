@@ -176,7 +176,7 @@ See `docs/interface-surface.md` for the exact minimal Blink embedding surface, a
 
 ## Public C ABI (`src/miniblink_host/capi/mb_capi.h`)
 
-101 functions; the header has the full, commented signatures. The canonical flow —
+102 functions; the header has the full, commented signatures. The canonical flow —
 boot, render, read back, screenshot, shut down:
 
 ```c
@@ -196,6 +196,7 @@ Grouped overview (see `mb_capi.h` for the exact signatures):
   `mbResize` `mbPumpMessages` `mbWait` `mbWaitForSelector` `mbWaitForFunction`
   `mbWaitForVisibleSelector` (waits for actual visibility, not just existence)
   `mbWaitForSelectorHidden` (waits for gone/hidden — the spinner-disappeared signal)
+  `mbWaitForNetworkIdle` (waits for fetches to settle — Puppeteer networkidle)
 - **Load / navigation:** `mbLoadHTML` `mbLoadURL` `mbPostURL` `mbReload`
   `mbGoBack`/`mbGoForward`/`mbCanGoBack`/`mbCanGoForward` `mbGetURL` `mbGetTitle`
   `mbGetHttpStatus` `mbGetResponseHeaders`

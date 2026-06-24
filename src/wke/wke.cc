@@ -930,6 +930,13 @@ bool wkeWaitForSelectorHidden(wkeWebView webView, const char* selector,
          mbWaitForSelectorHidden(webView->view, selector, timeoutMs) != 0;
 }
 
+bool wkeWaitForNetworkIdle(wkeWebView webView, int idleMs, int timeoutMs) {
+  // Pump until no new request for idleMs (networkidle), or timeoutMs. True once
+  // quiet. Clear the log before navigating to scope it. (Port ext.)
+  return webView && webView->view &&
+         mbWaitForNetworkIdle(webView->view, idleMs, timeoutMs) != 0;
+}
+
 bool wkeWaitForFunction(wkeWebView webView, const utf8* jsExpr, int timeoutMs) {
   // Pump until `jsExpr` evaluates truthy (exceptions count as false), or
   // timeoutMs elapses. True if it became truthy. Generalizes the selector wait.

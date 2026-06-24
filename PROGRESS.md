@@ -63,7 +63,7 @@ the deliverable surface (C API, CLI, wke layer).
   blob: URLs (`fetch` + `<img>`), Intersection/Resize/Mutation observers, WAAPI,
   forms + submit-navigation, mouse/keyboard input, host-side history. CJK/i18n +
   system web fonts render.
-- **`mb_capi` C API — 101 functions:** lifecycle, load, JS eval, scraping
+- **`mb_capi` C API — 102 functions:** lifecycle, load, JS eval, scraping
   (text/attr/computed-style/count by selector), input (mouse/key/text/scroll +
   click/fill/select/focus/hover/scroll-into-view by selector), screenshots
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
@@ -107,7 +107,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **154/154** (default, network-free), `wke_smoke` **93/93**,
+- **Tests:** `mb_smoke` **155/155** (default, network-free), `wke_smoke` **94/94**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -125,6 +125,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- capi+wke: mbWaitForNetworkIdle / wkeWaitForNetworkIdle — Puppeteer networkidle (2026-06-24). A substantive wait built on the request-log infra (observability -> a new synchronization primitive): pump until no NEW subresource request has been recorded for idle_ms, so an SPA's deferred fetches/lazy images settle before scraping/capturing. Reads MbRequestCount() (new loader accessor); each new request resets the idle window; returns 1 idle / 0 at timeout. VERIFIED in both suites: a page that injects an <img> after 150ms -> the wait returns idle ONLY after that request lands (log holds it: fetched=1), and a quiet page is idle without false-timeout (quiet=1). Caught that fetch('file://') is blocked before the loader (fetched=0 on first try) -> switched the deferred request to an injected <img> (image loads do route through MbURLLoader). wke_smoke 94/94, mb_smoke 155/155, no survivors. ABI now 102 fns.
 - capi+wke: mbSaveElementPng / wkeSaveElementPng — screenshot one element by selector (2026-06-24). Puppeteer's elementHandle.screenshot, completing the capture family (full page / clip rect / element). Scrolls the first match into view and clips its viewport box (no destructive resize — side-effect-light vs the mb_shot --selector full-page-resize dance); oversized elements capture to the visible extent. Returns 1/0. VERIFIED in both suites with a STRONG check: a below-the-fold 120x40 (wke 90x35) div -> the saved PNG's IHDR width/height equal the element box exactly (dsf 1); no-match -> 0. wke_smoke 93/93, mb_smoke 154/154, no survivors. ABI now 101 fns.
 - maint: 100-function milestone health-check — all targets build + demo runs (2026-06-24). After a long run of feature ticks (building only mb_smoke/wke_smoke/mb_shot), verified the WHOLE target set still builds against the ~50 newer signatures: miniblink_host + mb_smoke + mb_shot + wke_smoke + **wke_demo** all link clean (no bit-rot). Ran wke_demo end-to-end: all 11 steps green — fill/select/click/wait, page→host bridge (window.mbBridge), scrape text, computed color rgb(0,128,0), native binding hostDouble(21)==42, option count, runJS, screenshot (writes then self-cleans via std::remove — the "missing PNG" was demo cleanup, not a wkeSavePng bug). No survivors. Verification-only; no code change. (Default suites remain mb_smoke 153/153, wke_smoke 92/92.)
 - capi+wke: mbDispatchEvent / wkeDispatchEvent — fire arbitrary synthetic DOM events (2026-06-24). The action surface only fired fixed events (click; input+change via fill/select); this dispatches a bubbling, cancelable Event of any type on the first match — trigger handlers click/fill don't (mouseover/mouseenter hover menus, focus/blur, submit, custom framework events). Synchronous DOM dispatch (no compositor). Returns 1/0 (matched). 🎉 ABI crosses 100 functions. VERIFIED in both suites: a #d with mouseover + custom 'ping' listeners — dispatch each -> the handler ran (counter==1); no-match -> 0. wke_smoke 92/92, mb_smoke 153/153, no survivors. ABI now 100 fns.

@@ -67,6 +67,9 @@ std::string MbGetAllCookies();
 void MbRecordRequest(const std::string& url);
 std::string MbGetRequestLog();
 void MbClearRequestLog();
+// Number of requests recorded so far (monotone until cleared) — the signal a
+// network-idle wait polls: when it stops increasing, the page has gone quiet.
+size_t MbRequestCount();
 
 // Process-wide request blocking: any fetched URL containing a registered
 // substring is failed (ERR_BLOCKED_BY_CLIENT) instead of loaded — block ads /

@@ -621,6 +621,10 @@ void MbClearRequestLog() {
   RequestLog().clear();
 }
 
+size_t MbRequestCount() {
+  return RequestLog().size();
+}
+
 // --- Request blocking --------------------------------------------------------
 namespace {
 std::vector<std::string>& BlockList() {

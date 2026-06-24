@@ -1515,6 +1515,38 @@ bool MbWebView::WaitForSelectorHidden(const char* css, int timeout_ms) {
   }
 }
 
+bool MbWebView::WaitForNetworkIdle(int idle_ms, int timeout_ms) {
+  if (!main_frame_)
+    return false;
+  // Pump until no NEW subresource request has been recorded for `idle_ms`
+  // (Puppeteer's networkidle) — for SPAs that lazy-fetch after the initial load.
+  // Reads the process-wide request log's count; each new fetch resets the idle
+  // window. Returns true once idle, false if `timeout_ms` elapses first. Clear the
+  // log (mbClearRequestLog) before the navigation to scope it to this page.
+  if (idle_ms <= 0)
+    idle_ms = 500;
+  size_t last = mb::MbRequestCount();
+  const base::TimeTicks hard_deadline =
+      base::TimeTicks::Now() + base::Milliseconds(timeout_ms > 0 ? timeout_ms : 0);
+  base::TimeTicks idle_deadline =
+      base::TimeTicks::Now() + base::Milliseconds(idle_ms);
+  for (;;) {
+    base::RunLoop().RunUntilIdle();
+    ServiceAnimations();
+    const base::TimeTicks now = base::TimeTicks::Now();
+    const size_t cur = mb::MbRequestCount();
+    if (cur != last) {  // activity -> restart the idle window
+      last = cur;
+      idle_deadline = now + base::Milliseconds(idle_ms);
+    }
+    if (now >= idle_deadline)
+      return true;  // quiet long enough
+    if (now >= hard_deadline)
+      return false;  // still busy at the hard timeout
+    base::PlatformThread::Sleep(base::Milliseconds(10));
+  }
+}
+
 void MbWebView::ServiceAnimations() {
   // Run rAF callbacks. The compositor normally drives this via BeginMainFrame; with
   // no compositor we call the page animator directly so requestAnimationFrame fires

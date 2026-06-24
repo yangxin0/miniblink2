@@ -306,6 +306,10 @@ WKE_API bool wkeWaitForVisibleSelector(wkeWebView webView, const char* selector,
 // "wait for the loading spinner to disappear" primitive. True once gone/hidden.
 WKE_API bool wkeWaitForSelectorHidden(wkeWebView webView, const char* selector,
                                       int timeoutMs);
+// Wait until no new request for idleMs (Puppeteer networkidle) — let an SPA's
+// deferred fetches settle. True once quiet, false at timeoutMs. Clear the request
+// log before navigating to scope it to this page. Port extension.
+WKE_API bool wkeWaitForNetworkIdle(wkeWebView webView, int idleMs, int timeoutMs);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);
