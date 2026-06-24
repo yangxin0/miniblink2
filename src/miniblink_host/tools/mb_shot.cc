@@ -328,6 +328,24 @@ int main(int argc, char** argv) {
   if (is_http && !post_body.empty()) {
     mbPostURL(view, input.c_str(), post_body.c_str(), nullptr);  // POST navigation
   } else if (input.rfind("file://", 0) == 0 || is_http) {
+    if (!is_http) {
+      // A file:// URL to a local path: verify it exists, consistent with the
+      // bare-path branch below — a missing file must fail, not blank-PNG-succeed.
+      // Only the file:///abs form (path starts with '/') and only when there's no
+      // percent-encoding (we don't decode here, so skip to avoid a false failure).
+      const std::string path = input.substr(7);  // strip "file://"
+      if (!path.empty() && path[0] == '/' &&
+          path.find('%') == std::string::npos) {
+        std::ifstream probe(path, std::ios::binary);
+        if (!probe.is_open()) {
+          std::fprintf(stderr, "mb_shot: cannot open input file '%s'\n",
+                       input.c_str());
+          mbDestroyView(view);
+          mbShutdown();
+          return 1;
+        }
+      }
+    }
     mbLoadURL(view, input.c_str());
   } else {
     // A local HTML file path: read it and commit (base URL = its file:// dir so that
