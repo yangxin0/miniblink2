@@ -452,6 +452,8 @@ test that drives the `mb_shot` binary against a local fixture and asserts the ex
 stdout of the extraction flags (`--title`/`--count`/`--attr`/`--text`/`--eval`/
 `--visible`/`--value`/`--checked`/`--style`/`--html`/`--html-for`/`--rect`/`--local-storage`/
 `--session-storage`/`--url`/`--cookies`/`--click`/`--press`/`--wait-eval`) plus the
-bad-size guard and an end-to-end `fill`→`click`→`wait-selector`→`eval` integration
-flow (the canonical scrape, extracting result rows as JSON) — coverage the C++ suites
-can't give the command-line tool itself.
+bad-size guard, the capture modes (PNG dimensions for default/`--scale`/`--clip`/
+`--selector`, and `.jpg`/`.pdf` output formats read from the file header), and an
+end-to-end `fill`→`click`→`wait-selector`→`eval` integration flow (the canonical
+scrape, extracting result rows as JSON) — coverage the C++ suites can't give the
+command-line tool itself.

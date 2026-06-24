@@ -76,6 +76,17 @@ checkre() {
   if printf '%s' "$3" | grep -Eq "$2"; then PASS=$((PASS+1)); echo "  [PASS] $1";
   else FAIL=$((FAIL+1)); echo "  [FAIL] $1: [$3] !~ /$2/"; fi
 }
+# imginfo <file> : "PNG WxH" / "JPEG" / "PDF" / "other" via header bytes (python3)
+imginfo() {
+  python3 -c '
+import sys,struct
+d=open(sys.argv[1],"rb").read(33)
+if d[:8]==b"\x89PNG\r\n\x1a\n":
+    w,h=struct.unpack(">II",d[16:24]); print("PNG %dx%d"%(w,h))
+elif d[:2]==b"\xff\xd8": print("JPEG")
+elif d[:4]==b"%PDF": print("PDF")
+else: print("other")' "$1" 2>/dev/null
+}
 
 URL="file://$FIX"
 
@@ -188,6 +199,29 @@ run 40 "$URL" "$PNG" --require ".nonexistent";  check "--require absent -> exit 
 run 40 "$TMP/does-not-exist.html" "$PNG"; check "missing bare-path input -> exit 1" "1" "$RC"
 checkc "missing input file message" "cannot open input file" "$(cat "$TMP/err")"
 run 40 "file://$TMP/does-not-exist.html" "$PNG"; check "missing file:// input -> exit 1" "1" "$RC"
+
+# capture modes (the headline feature): PNG dimensions + output formats, read from
+# the file's header bytes. Gated on python3 (skipped, not failed, if it's absent).
+if command -v python3 >/dev/null 2>&1; then
+  CAP="$TMP/cap.html"
+  cat > "$CAP" <<'HTML'
+<!doctype html><body style="margin:0"><div id="b" style="width:120px;height:60px;background:red"></div></body>
+HTML
+  run 40 "file://$CAP" "$TMP/d.png" 300 200
+  check "capture: default view size" "PNG 300x200" "$(imginfo "$TMP/d.png")"
+  run 40 "file://$CAP" "$TMP/s.png" --scale 2 300 200
+  check "capture: --scale 2 doubles the PNG" "PNG 600x400" "$(imginfo "$TMP/s.png")"
+  run 40 "file://$CAP" "$TMP/c.png" --clip 0,0,120,60 300 200
+  check "capture: --clip region size" "PNG 120x60" "$(imginfo "$TMP/c.png")"
+  run 40 "file://$CAP" "$TMP/e.png" --selector "#b" 300 200
+  check "capture: --selector element box" "PNG 120x60" "$(imginfo "$TMP/e.png")"
+  run 40 "file://$CAP" "$TMP/o.jpg" 300 200
+  check "capture: .jpg output format" "JPEG" "$(imginfo "$TMP/o.jpg")"
+  run 40 "file://$CAP" "$TMP/o.pdf" 300 200
+  check "capture: .pdf output format" "PDF" "$(imginfo "$TMP/o.pdf")"
+else
+  echo "  [SKIP] capture-mode dimension/format checks (no python3)"
+fi
 
 # bad-size guard: a non-numeric width positional must fail fast (exit 2), not crash
 run 40 "$URL" --out "$PNG"; check "bad-size guard exit code" "2" "$RC"
