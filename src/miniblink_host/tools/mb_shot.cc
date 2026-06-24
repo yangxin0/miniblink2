@@ -89,6 +89,7 @@ int main(int argc, char** argv) {
   std::string save_cookies;    // cookie jar file to write after the page settles
   int wait_ms = 0;            // fixed wait before capture
   int scroll_to_y = -1;       // absolute scroll Y before capture (-1 = none)
+  std::string scroll_to_sel;  // scroll this selector into view before capture
   std::string post_body;       // when set, POST this body to the URL (vs GET)
   std::string user_agent;      // override the User-Agent for the navigation
   std::vector<const char*> blocks;  // URL substrings to block (repeatable)
@@ -156,6 +157,8 @@ int main(int argc, char** argv) {
       wait_ms = std::atoi(argv[++i]);
     } else if (a == "--scroll-to" && i + 1 < argc) {
       scroll_to_y = std::atoi(argv[++i]);
+    } else if (a == "--scroll-to-selector" && i + 1 < argc) {
+      scroll_to_sel = argv[++i];
     } else if (a == "--post" && i + 1 < argc) {
       post_body = argv[++i];
     } else if ((a == "--user-agent" || a == "--ua") && i + 1 < argc) {
@@ -206,7 +209,7 @@ int main(int argc, char** argv) {
         "[--wait-selector CSS] [--wait-visible CSS] "
         "[--wait-hidden CSS] [--wait-idle] [--css STYLES] [--auto-scroll] "
         "[--wait-ms N] "
-        "[--scroll-to Y] "
+        "[--scroll-to Y] [--scroll-to-selector CSS] "
         "[--post BODY] [--proxy URL] "
         "[--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] "
         "[--no-follow] [--block SUBSTR] [--user-agent UA] "
@@ -403,6 +406,16 @@ int main(int argc, char** argv) {
   // --full). Runs before --scroll-to so a final fixed position can still be set.
   if (auto_scroll)
     mbScrollToBottom(view, 0);  // default step cap
+
+  // --scroll-to-selector: bring a specific element into view before a viewport
+  // capture (show it in context — distinct from --selector, which clips just its
+  // box). An absolute --scroll-to, if also given, applies after and wins.
+  if (!scroll_to_sel.empty()) {
+    if (!mbScrollIntoView(view, scroll_to_sel.c_str()))
+      std::fprintf(stderr,
+                   "mb_shot: WARNING — --scroll-to-selector '%s' matched no element\n",
+                   scroll_to_sel.c_str());
+  }
 
   // Scroll to an absolute Y before extracting/capturing (so --eval and the shot
   // both observe the scrolled viewport). For position:fixed/sticky pages, where
