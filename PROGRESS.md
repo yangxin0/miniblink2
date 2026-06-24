@@ -91,6 +91,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkePerformCookieCommand` + jar persistence via `wkeSetCookieJarPath`),
   proxy (`wkeSetProxy`, HTTP/SOCKS + auth), request headers
   (`wkeSetExtraHeaders`), i18n emulation (`wkeSetLocale`/`wkeSetTimezone`),
+  HTTP introspection (`wkeGetHttpStatusCode`/`wkeGetResponseHeaders`),
   navigation history,
   page text (`wkeGetText`), rendering accessors
   (`wkeSetTransparent`/`wkeIsTransparent`,
@@ -100,9 +101,9 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **50/50**,
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **51/51**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com cases
-  (wke_smoke 54; mb_smoke ~145).
+  (wke_smoke 56; mb_smoke ~145).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
 
@@ -117,6 +118,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke HTTP INTROSPECTION: wkeGetHttpStatusCode + wkeGetResponseHeaders (2026-06-24). Read the main document's final HTTP status + raw response headers after a load (wrap mbGetHttpStatus/mbGetResponseHeaders; headers via a new response_headers_cache). Documented PORT EXTENSIONS (classic wke uses the net hook). VERIFIED offline (non-http load → 0 + "") and over the network (MB_NET_TESTS): httpbin.org/get → status 200 + non-empty headers. wke_smoke 51/51 default, 56/56 net, mb_smoke 132/132, no survivors.
 - wke DOM READ: wkeGetText (2026-06-24). Page visible text (document.body.innerText) — the text counterpart to wkeGetSource's HTML (wraps mbGetText, size-first into a new text_cache). VERIFIED offline: includes rendered "Title"/"Hello world", excludes <script> contents and raw markup. wke_smoke 50/50, mb_smoke 132/132, no survivors.
 - wke DOM ACTIONS: hover/double-click/right-click/focus/blur by selector (2026-06-24). Five more pointer/focus selector actions (wrap mbHover/DoubleClick/RightClick/Focus/BlurSelector); each returns whether it matched. Documented PORT EXTENSIONS — completes the selector-action set. VERIFIED offline: #h onmouseover, #d ondblclick, #r oncontextmenu each fire; focus sets document.activeElement.id=="f", blur clears it; misses return false. wke_smoke 49/49, mb_smoke 132/132, no survivors.
 - wke DOM ACTION: wkeScrollIntoView (2026-06-24). Scroll the first selector match into the viewport — trigger lazy loading or frame an element before a screenshot (wraps mbScrollIntoView). Documented PORT EXTENSION. VERIFIED offline: a #t target below a 3000px spacer, with scrollY reset to 0, scrolls in — scrollY rises >0 and the element's box lands within the 600px viewport (via wkeGetElementRect); non-match returns false. wke_smoke 48/48, mb_smoke 132/132, no survivors.

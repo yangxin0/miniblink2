@@ -838,6 +838,14 @@ int main() {
     check(ok, "wkeGetText returns the page's visible text (no markup/scripts)");
   }
 
+  // HTTP introspection (offline): a non-http load reports status 0 + no headers.
+  {
+    wkeLoadHTML(wv, "<body>local</body>");
+    check(wkeGetHttpStatusCode(wv) == 0 &&
+              std::strcmp(wkeGetResponseHeaders(wv), "") == 0,
+          "wkeGetHttpStatusCode/wkeGetResponseHeaders are 0/empty for non-http");
+  }
+
   // Waits (offline): a setTimeout adds a delayed element / flag; the wait pumps
   // until it appears, and times out on a condition that never holds.
   {
@@ -916,6 +924,17 @@ int main() {
       std::printf("  [SKIP] wkeSetExtraHeaders echo (host unreachable)\n");
     }
     wkeSetExtraHeaders(wv, nullptr);  // clear for any later requests
+
+    // HTTP introspection over the network: a real 200 + non-empty headers.
+    wkeLoadURL(wv, "http://httpbin.org/get");
+    if (wkeIsLoadingSucceeded(wv)) {
+      const int code = wkeGetHttpStatusCode(wv);
+      const char* hdrs = wkeGetResponseHeaders(wv);
+      check(code == 200 && hdrs[0] != '\0',
+            "wkeGetHttpStatusCode==200 + wkeGetResponseHeaders non-empty (httpbin)");
+    } else {
+      std::printf("  [SKIP] wkeGetHttpStatusCode/Headers (host unreachable)\n");
+    }
   }
 
   wkeDestroyWebView(wv);

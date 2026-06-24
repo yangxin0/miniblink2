@@ -247,6 +247,12 @@ WKE_API const utf8* wkeGetSource(wkeWebView webView);
 // The page's visible text (document.body.innerText) — the text counterpart to
 // wkeGetSource's HTML. Owned by the view, valid until the next wkeGetText on it.
 WKE_API const utf8* wkeGetText(wkeWebView webView);
+// HTTP response introspection after a load (port extensions). wkeGetHttpStatusCode
+// returns the main document's final status (200/404/30x), or 0 for a non-http
+// load. wkeGetResponseHeaders returns the raw response headers ("" for non-http);
+// owned by the view, valid until the next call on it.
+WKE_API int wkeGetHttpStatusCode(wkeWebView webView);
+WKE_API const utf8* wkeGetResponseHeaders(wkeWebView webView);
 
 // Cookies, backed by the (process-wide) libcurl cookie jar.
 // wkeGetCookie returns the jar's cookies for the CURRENT document's URL as

@@ -51,6 +51,7 @@ struct _tagWkeWebView {
   std::string selector_attr_cache;  // backs wkeGetAttribute's return
   std::string computed_style_cache;  // backs wkeGetComputedStyle's return
   std::string text_cache;            // backs wkeGetText's return
+  std::string response_headers_cache;  // backs wkeGetResponseHeaders's return
 };
 
 // The last live webView, so the view-less wkePerformCookieCommand has a handle
@@ -639,6 +640,28 @@ const utf8* wkeGetSource(wkeWebView webView) {
   mbGetHTML(webView->view, buf.data(), len + 1);
   webView->source_cache.assign(buf.data());
   return webView->source_cache.c_str();
+}
+
+int wkeGetHttpStatusCode(wkeWebView webView) {
+  // The main document's final HTTP status (e.g. 200/404/30x), or 0 for a
+  // non-http load (loadHTML/file/data) or a failed fetch. (Port extension.)
+  return (webView && webView->view) ? mbGetHttpStatus(webView->view) : 0;
+}
+
+const utf8* wkeGetResponseHeaders(wkeWebView webView) {
+  // The main document's raw HTTP response headers ("" for a non-http/failed
+  // load). Owned by the view, valid until the next call on it. (Port extension.)
+  if (!webView || !webView->view)
+    return "";
+  const int len = mbGetResponseHeaders(webView->view, nullptr, 0);  // size first
+  if (len <= 0) {
+    webView->response_headers_cache.clear();
+    return webView->response_headers_cache.c_str();
+  }
+  std::vector<char> buf(static_cast<size_t>(len) + 1, 0);
+  mbGetResponseHeaders(webView->view, buf.data(), len + 1);
+  webView->response_headers_cache.assign(buf.data());
+  return webView->response_headers_cache.c_str();
 }
 
 const utf8* wkeGetText(wkeWebView webView) {
