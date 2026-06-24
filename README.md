@@ -428,7 +428,7 @@ Requirements: a Chromium M150 source tree with a component `out/Release`
 ./build.sh /path/to/chromium-150.x.y.z   # stages host into the tree, gn gen, ninja, runs the suite
 ```
 
-`mb_smoke` is a 177-check capability + regression suite covering
+`mb_smoke` is a 178-check capability + regression suite covering
 HTML/DOM, JS, CSS computed style, UA stylesheet, the `mbRunJS`+`mbEvalJS` bridge,
 `<canvas>` getImageData, external `<link>` CSS via the subresource loader,
 paint-to-bitmap, synthesized click, typed text (ASCII + UTF-8 accent/CJK/emoji),

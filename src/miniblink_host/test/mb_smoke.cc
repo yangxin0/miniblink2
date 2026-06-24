@@ -2319,6 +2319,28 @@ int main() {
            "iframe loads: child frame created + srcdoc content commits");
   }
 
+  // 77b. iframe content RENDERS into the parent's paint — not just the DOM (77).
+  // The child frame must composite into the screenshot for captures of pages with
+  // ads / embeds / maps / social widgets to be correct. Place a solid-green iframe
+  // at the top-left and read a pixel inside its box.
+  {
+    mbResize(v, W, H);
+    mbLoadHTML(v,
+        "<body style='margin:0'>"
+        "<iframe srcdoc=\"<body style='margin:0;background:rgb(0,128,0)'></body>\" "
+        "width='150' height='80' style='border:0;display:block'></iframe></body>",
+        "about:blank");
+    mbWait(v, 150);  // let the child commit + paint
+    std::vector<uint8_t> ifpx(static_cast<size_t>(W) * H * 4, 255);
+    mbPaintToBitmap(v, ifpx.data(), W, H, W * 4);
+    const size_t o = (static_cast<size_t>(30) * W + 40) * 4;  // inside the iframe box
+    const int pb = ifpx[o], pg = ifpx[o + 1], pr = ifpx[o + 2];
+    Expect(pr < 16 && pg > 110 && pg < 145 && pb < 16,
+           "iframe content renders into the parent paint (green child paints)",
+           std::string("rgb(") + std::to_string(pr) + "," + std::to_string(pg) +
+               "," + std::to_string(pb) + ")");
+  }
+
   // 78. iframe src= loads too (not just srcdoc): the child's navigation fetches
   // the src body via the loader (MbFetchUrl) and commits it. Uses a data: src
   // (portable; file/http go through the same path). The parent is loaded from a
