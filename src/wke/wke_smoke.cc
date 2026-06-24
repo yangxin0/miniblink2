@@ -125,6 +125,24 @@ int main() {
                     "JSDoc") == 0,
         "wkeRunJS reads the DOM (document.title)");
 
+  // localStorage persists across a same-origin navigation and is isolated by
+  // origin (real apps keep tokens/prefs there). Uses real origins via base URLs.
+  {
+    wkeLoadHtmlWithBaseUrl(wv, "<body>p1</body>", "https://ls.test/a");
+    wkeRunJS(wv, "localStorage.setItem('tok','xyz')");
+    wkeLoadHtmlWithBaseUrl(wv, "<body>p2</body>", "https://ls.test/b");  // same origin
+    const bool persisted = std::strcmp(
+        jsToTempString(es, wkeRunJS(wv, "localStorage.getItem('tok')||''")),
+        "xyz") == 0;
+    wkeLoadHtmlWithBaseUrl(wv, "<body>p3</body>", "https://other.test/");
+    const bool isolated = std::strcmp(
+        jsToTempString(es, wkeRunJS(wv, "localStorage.getItem('tok')||''")),
+        "") == 0;
+    check(persisted && isolated,
+          "localStorage persists across same-origin nav, isolated by origin");
+    wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore for later cases
+  }
+
   // Multiple concurrent webViews are independent (real multi-view apps): each has
   // its own document, title, and JS globals, and destroying one leaves the other
   // fully usable.
