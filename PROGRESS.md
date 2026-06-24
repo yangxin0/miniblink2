@@ -70,10 +70,10 @@ the deliverable surface (C API, CLI, wke layer).
   network config (proxy / cert-bypass / follow-redirects / status / response-headers),
   config (UA/headers/locale/tz/dark/DPR/transparent/images), history.
 - **`mb_shot` CLI (the deliverable tool):** a full scraper/automator — interact
-  (`--fill`/`--click`/`--wait-selector`/`--wait-visible`/`--wait-ms`) → extract
-  (`--text`/`--html`/`--eval`/`--value`/`--checked`/`--visible`/`--text-all`/
-  `--attr-all`) → capture (`--full`/`--clip`/`--selector`); plus `--proxy`/
-  `--insecure`/`--no-follow`/`--headers`/`--load-cookies`/`--save-cookies`.
+  (`--fill`/`--click`/`--wait-selector`/`--wait-visible`/`--wait-hidden`/`--css`/
+  `--wait-ms`) → extract (`--text`/`--html`/`--eval`/`--value`/`--checked`/
+  `--visible`/`--text-all`/`--attr-all`) → capture (`--full`/`--clip`/`--selector`);
+  plus `--proxy`/`--insecure`/`--no-follow`/`--headers`/`--load-cookies`/`--save-cookies`.
 - **wke compatibility layer (`src/wke/`):** a faithful subset over `mb_capi` covering
   the full headless-automation surface — lifecycle, load, loading-state polling,
   paint (`wkePaint`), PDF/PNG export (`wkeSavePdf`/`wkeSavePng`/
@@ -124,6 +124,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- mb_shot: --wait-hidden / --css — the spinner-gone + hide-noise workflow on the CLI (2026-06-24). Threads the last two ticks (mbWaitForSelectorHidden + mbInsertCSS) into the deliverable. --wait-hidden CSS blocks (interact phase, after --wait-visible) until the selector is gone/hidden; --css STYLES injects a stylesheet before capture. VERIFIED end-to-end on a local page where a 250ms timer removes #spin and reveals #content: --wait-hidden '#spin' --css '#banner{display:none}' --eval (content text) --visible '#banner' → prints "REAL CONTENT" then 0 (banner hidden by the injected CSS), no warnings; the negative --wait-hidden on a staying element warns "still visible at timeout". (Caught a test-authoring slip first — --text is a BARE flag, so a stray arg corrupted the positionals; re-ran correctly.) No survivors. mb_shot.cc + usage only; both suites unchanged (wke 83/83, mb 144/144).
 - capi+wke: mbInsertCSS / wkeInsertCSS — inject a stylesheet (Puppeteer addStyleTag) (2026-06-24). A distinct capability (not a selector reader): append a <style> with the given CSS to <head> to restyle or HIDE noise (cookie banners, ads, sticky headers) before a screenshot. Plain DOM append (createElement+appendChild), no v8 [[Set]] trap; returns success. VERIFIED in both suites end-to-end via the visibility primitive: a #x div reads IsVisible==1, after mbInsertCSS("#x{display:none}") it reads 0 — proving the injected rule actually applied. wke_smoke 83/83, mb_smoke 144/144, no survivors. ABI now 87 fns.
 - capi+wke: mbWaitForSelectorHidden / wkeWaitForSelectorHidden — wait for gone/hidden (2026-06-24). The inverse of WaitForVisibleSelector and the canonical "wait for the loading spinner to disappear before scraping" primitive (previously only via a hand-written WaitForFunction). Same poll loop, inverted checkVisibility probe: succeeds when the first match is absent OR hidden (display:none / visibility:hidden / opacity:0). Returns 1 gone/hidden, 0 timeout. VERIFIED in both suites: an absent #never is instantly hidden (deterministic), a #spin removed by a 300ms timer makes the wait resolve (then IsVisible==-1), a permanently shown #stay times out. wke_smoke 82/82, mb_smoke 143/143, no survivors. ABI now 86 fns.
 - mb_shot: --text-all / --attr-all — one-shot list scraping on the CLI (2026-06-24). Threads the last two ticks' query-all readers into the deliverable (pattern of --value/--checked/--visible). --text-all CSS prints the JSON array of every match's innerText; --attr-all CSS NAME prints the JSON array of attribute NAME across all matches (absent->null). VERIFIED end-to-end vs a local list page: --text-all '.r'→["alpha","beta","gamma"], --attr-all '.l' href→["/1","/2",null] (3rd <a> has no href), --text-all '.none'→[], invalid selector→empty+warning. No survivors. mb_shot.cc + usage only; both suites unchanged (wke 81/81, mb 142/142).

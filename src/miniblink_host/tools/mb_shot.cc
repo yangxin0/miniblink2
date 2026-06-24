@@ -62,6 +62,8 @@ int main(int argc, char** argv) {
   std::string headers;   // extra request headers, "Name: Value" per line
   std::string wait_selector;  // wait for this selector before capture
   std::string wait_visible;   // wait for this selector to be VISIBLE before capture
+  std::string wait_hidden;    // wait for this selector to be GONE/HIDDEN before capture
+  std::string inject_css;      // inject this CSS (hide noise) before capture
   std::string click_selector;  // click this selector before capture
   std::string fill_selector;   // fill this field before capture (with fill_text)
   std::string fill_text;       // value for --fill
@@ -97,6 +99,10 @@ int main(int argc, char** argv) {
       wait_selector = argv[++i];
     } else if (a == "--wait-visible" && i + 1 < argc) {
       wait_visible = argv[++i];
+    } else if (a == "--wait-hidden" && i + 1 < argc) {
+      wait_hidden = argv[++i];
+    } else if (a == "--css" && i + 1 < argc) {
+      inject_css = argv[++i];
     } else if (a == "--click" && i + 1 < argc) {
       click_selector = argv[++i];
     } else if (a == "--fill" && i + 2 < argc) {
@@ -162,8 +168,8 @@ int main(int argc, char** argv) {
         "[--transparent] [--text] [--html] [--eval JS] [--value CSS] "
         "[--checked CSS] [--visible CSS] [--text-all CSS] [--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
-        "[--click CSS] [--wait-selector CSS] [--wait-visible CSS] [--wait-ms N] "
-        "[--scroll-to Y] "
+        "[--click CSS] [--wait-selector CSS] [--wait-visible CSS] "
+        "[--wait-hidden CSS] [--css STYLES] [--wait-ms N] [--scroll-to Y] "
         "[--post BODY] [--proxy URL] "
         "[--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] "
         "[--no-follow] "
@@ -279,6 +285,22 @@ int main(int argc, char** argv) {
                    "mb_shot: WARNING — --wait-visible '%s' never became visible\n",
                    wait_visible.c_str());
     }
+  }
+  // --wait-hidden: block until the selector is gone/hidden — the canonical "wait
+  // for the loading spinner to disappear" before scraping/capturing.
+  if (!wait_hidden.empty()) {
+    if (!mbWaitForSelectorHidden(view, wait_hidden.c_str(),
+                                 wait_ms > 0 ? wait_ms : 5000)) {
+      std::fprintf(stderr,
+                   "mb_shot: WARNING — --wait-hidden '%s' still visible at timeout\n",
+                   wait_hidden.c_str());
+    }
+  }
+  // --css: inject a stylesheet (hide cookie banners / ads / sticky headers, or
+  // restyle) before capture. Applied after the waits so it lands on settled DOM.
+  if (!inject_css.empty()) {
+    if (!mbInsertCSS(view, inject_css.c_str()))
+      std::fprintf(stderr, "mb_shot: WARNING — --css injection failed\n");
   }
 
   // Optionally fill a field before interacting/capturing (e.g. type a query, then
