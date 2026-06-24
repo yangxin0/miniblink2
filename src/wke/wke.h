@@ -199,6 +199,11 @@ WKE_API const utf8* wkeGetTextForSelector(wkeWebView webView,
                                           const char* selector);
 WKE_API const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,
                                     const char* attr);
+// setAttribute(attr, value) on the first match (value "" for a bare boolean
+// attribute). Returns whether an element matched. The write side of
+// wkeGetAttribute; for a control's live value use wkeFillSelector.
+WKE_API bool wkeSetAttribute(wkeWebView webView, const char* selector,
+                             const char* attr, const char* value);
 // The first match's LIVE .value (what a form control holds after typing or
 // selection) — distinct from wkeGetAttribute's static "value" attribute. Returns
 // "" on no match or no value property; owned by the view until the next call.

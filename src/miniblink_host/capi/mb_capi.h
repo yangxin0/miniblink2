@@ -295,6 +295,13 @@ MB_EXPORT int mbGetTextForSelector(mbView*, const char* css_selector, char* out,
 MB_EXPORT int mbGetAttribute(mbView*, const char* css_selector, const char* attr,
                              char* out, int out_cap);
 
+// setAttribute(attr, value) on the first element matching `css_selector` (pass
+// value="" for a bare boolean attribute like "disabled"). Returns 1 if an element
+// matched, 0 if not. Sets the static HTML attribute — to set a control's live
+// .value use mbFillSelector.
+MB_EXPORT int mbSetAttribute(mbView*, const char* css_selector, const char* attr,
+                             const char* value);
+
 // Write the LIVE .value of the first element matching `css_selector` (what an
 // <input>/<textarea>/<select> currently holds after typing or selection) into
 // `out`. Distinct from mbGetAttribute, which reads the static "value" HTML

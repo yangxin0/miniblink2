@@ -158,6 +158,12 @@ class MbWebView {
   // only written on success.
   bool GetTextForSelector(const char* css_selector, std::string* out);
   bool GetAttribute(const char* css_selector, const char* attr, std::string* out);
+  // setAttribute(attr, value) on the first match (value="" for a bare boolean
+  // attribute like 'disabled'). Returns true if an element matched. The write
+  // side of GetAttribute — sets the static HTML attribute, not the .value
+  // property (use FillSelector for a control's value).
+  bool SetAttribute(const char* css_selector, const char* attr,
+                    const char* value);
   // The first match's LIVE .value property (what an <input>/<textarea>/<select>
   // currently holds after typing or selection) — distinct from GetAttribute,
   // which reads the static "value" HTML attribute (the initial value). Returns

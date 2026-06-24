@@ -176,7 +176,7 @@ See `docs/interface-surface.md` for the exact minimal Blink embedding surface, a
 
 ## Public C ABI (`src/miniblink_host/capi/mb_capi.h`)
 
-82 functions; the header has the full, commented signatures. The canonical flow —
+83 functions; the header has the full, commented signatures. The canonical flow —
 boot, render, read back, screenshot, shut down:
 
 ```c
@@ -194,6 +194,7 @@ Grouped overview (see `mb_capi.h` for the exact signatures):
 
 - **Lifecycle / pump:** `mbInitialize` `mbShutdown` `mbCreateView` `mbDestroyView`
   `mbResize` `mbPumpMessages` `mbWait` `mbWaitForSelector` `mbWaitForFunction`
+  `mbWaitForVisibleSelector` (waits for actual visibility, not just existence)
 - **Load / navigation:** `mbLoadHTML` `mbLoadURL` `mbPostURL` `mbReload`
   `mbGoBack`/`mbGoForward`/`mbCanGoBack`/`mbCanGoForward` `mbGetURL` `mbGetTitle`
   `mbGetHttpStatus` `mbGetResponseHeaders`
@@ -201,7 +202,9 @@ Grouped overview (see `mb_capi.h` for the exact signatures):
   type) `mbEvalJSIsolated` `mbDrainConsole` `mbJsBindFunction` (native C function
   callable from JS; returns string/number/boolean/null/JSON-object)
 - **Scraping:** `mbGetText` `mbGetHTML` `mbGetTextForSelector` `mbGetAttribute`
-  `mbGetComputedStyle` `mbCountSelector` `mbGetElementRect` `mbGetContentSize`
+  `mbSetAttribute` `mbGetValueForSelector` (live `.value`) `mbGetCheckedForSelector`
+  (`.checked`) `mbIsVisibleForSelector` `mbGetComputedStyle` `mbCountSelector`
+  `mbGetElementRect` `mbGetContentSize`
 - **Input:** `mbSendMouseClick` `mbSendMouseMove` `mbSendText` `mbSendKey`
   `mbSendScroll` `mbScrollTo`; by selector `mbClickSelector`
   `mbDoubleClickSelector` `mbRightClickSelector` `mbHoverSelector`
@@ -212,7 +215,7 @@ Grouped overview (see `mb_capi.h` for the exact signatures):
 - **Cookies / session:** `mbGetCookies` `mbGetAllCookies` (whole jar)
   `mbSetCookie` `mbClearCookies` `mbSaveCookies`/`mbLoadCookies` (file jar)
 - **Network config:** `mbSetProxy` `mbSetIgnoreCertErrors` `mbSetFollowRedirects`
-  `mbSetExtraHeaders` `mbSetUserAgent` `mbSetLoadImages`
+  `mbSetExtraHeaders` `mbSetUserAgent` `mbGetUserAgent` `mbSetLoadImages`
 - **Page config:** `mbSetDeviceScaleFactor` `mbSetTransparentBackground`
   `mbSetDarkMode` `mbSetLocale` `mbSetTimezone` `mbSetFocus` (window focus)
 

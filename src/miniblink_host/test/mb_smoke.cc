@@ -2375,6 +2375,31 @@ int main() {
                (empty_ok ? "1" : "0") + " absent=" + (absent ? "1" : "0"));
   }
 
+  // 102b2. mbSetAttribute writes the static HTML attribute: a changed href reads
+  // back via mbGetAttribute, a data-* round-trips, a bare boolean attr takes live
+  // effect (button.disabled), and a no-match returns 0.
+  {
+    mbLoadHTML(v, "<body><a id='lnk' href='old'>L</a>"
+                  "<button id='b'>B</button></body>", "about:blank");
+    char ab2[256] = {0};
+    const bool set_href = mbSetAttribute(v, "#lnk", "href", "https://new.test/") == 1;
+    mbGetAttribute(v, "#lnk", "href", ab2, sizeof(ab2));
+    const bool href_ok = std::string(ab2) == "https://new.test/";
+    char db[64] = {0};
+    const bool set_data = mbSetAttribute(v, "#lnk", "data-x", "hello") == 1;
+    mbGetAttribute(v, "#lnk", "data-x", db, sizeof(db));
+    const bool data_ok = std::string(db) == "hello";
+    const bool bool_ok =
+        mbSetAttribute(v, "#b", "disabled", "") == 1 &&
+        Eval(v, "String(document.getElementById('b').disabled)") == "true";
+    const bool nomatch_set = mbSetAttribute(v, "#none", "x", "y") == 0;
+    Expect(set_href && href_ok && set_data && data_ok && bool_ok && nomatch_set,
+           "mbSetAttribute writes the attribute (href/data-*/boolean), 0 on no match",
+           std::string("href=") + (href_ok ? "1" : "0") + " data=" +
+               (data_ok ? "1" : "0") + " bool=" + (bool_ok ? "1" : "0") +
+               " nomatch=" + (nomatch_set ? "1" : "0"));
+  }
+
   // 102c. mbGetValueForSelector reads the LIVE .value (post-typing/selection),
   // distinct from mbGetAttribute's static "value" attribute, with the same
   // -1 no-match / no-value-property sentinel.

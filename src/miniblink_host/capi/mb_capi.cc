@@ -425,6 +425,13 @@ int mbGetAttribute(mbView* v, const char* css_selector, const char* attr,
   return static_cast<int>(result.size());
 }
 
+int mbSetAttribute(mbView* v, const char* css_selector, const char* attr,
+                   const char* value) {
+  if (!v || !v->impl || !css_selector || !attr)
+    return 0;
+  return v->impl->SetAttribute(css_selector, attr, value) ? 1 : 0;
+}
+
 int mbGetValueForSelector(mbView* v, const char* css_selector, char* out,
                           int out_cap) {
   if (!v || !v->impl)

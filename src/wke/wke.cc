@@ -634,6 +634,13 @@ const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,
   return webView->selector_attr_cache.c_str();
 }
 
+bool wkeSetAttribute(wkeWebView webView, const char* selector, const char* attr,
+                     const char* value) {
+  // setAttribute on the first match; true if an element matched. (Port ext.)
+  return webView && webView->view && selector && attr &&
+         mbSetAttribute(webView->view, selector, attr, value) != 0;
+}
+
 const utf8* wkeGetValueForSelector(wkeWebView webView, const char* selector) {
   // Live .value of the FIRST element matching `selector` ("" if no match or the
   // element has no value property — same contract as wkeGetAttribute). Owned by

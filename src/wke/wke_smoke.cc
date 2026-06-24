@@ -1078,6 +1078,26 @@ int main() {
           "wkeGetValueForSelector reads live .value (distinct from the attribute)");
   }
 
+  // wkeSetAttribute writes the static HTML attribute: a changed href reads back
+  // via wkeGetAttribute, a data-* round-trips, a bare boolean attr takes live
+  // effect (button.disabled === true), and a no-match returns false.
+  {
+    wkeLoadHTML(wv, "<body><a id='lnk' href='old'>L</a>"
+                    "<button id='b'>B</button></body>");
+    const bool set_href =
+        wkeSetAttribute(wv, "#lnk", "href", "https://new.test/") &&
+        std::strcmp(wkeGetAttribute(wv, "#lnk", "href"), "https://new.test/") == 0;
+    const bool set_data =
+        wkeSetAttribute(wv, "#lnk", "data-x", "hello") &&
+        std::strcmp(wkeGetAttribute(wv, "#lnk", "data-x"), "hello") == 0;
+    const bool set_bool =
+        wkeSetAttribute(wv, "#b", "disabled", "") &&
+        jsToBoolean(es, wkeRunJS(wv, "document.getElementById('b').disabled"));
+    const bool nomatch = !wkeSetAttribute(wv, "#none", "x", "y");
+    check(set_href && set_data && set_bool && nomatch,
+          "wkeSetAttribute writes the attribute (href/data-*/boolean), false on no match");
+  }
+
   // wkeGetCheckedForSelector reports a checkbox/radio's live .checked state
   // (1/0), -1 for a non-checkable element, and tracks a click that toggles it.
   {

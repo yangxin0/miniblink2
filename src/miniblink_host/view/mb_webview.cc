@@ -647,6 +647,21 @@ bool MbWebView::GetAttribute(const char* css_selector, const char* attr,
   return true;
 }
 
+bool MbWebView::SetAttribute(const char* css_selector, const char* attr,
+                             const char* value) {
+  if (!css_selector || !attr)
+    return false;
+  // setAttribute(attr, value) on the first match; the flag string reports whether
+  // an element matched (1) or not (0). value defaults to "" when null (a bare
+  // boolean attribute like 'disabled'). The write is a plain method call — no v8
+  // [[Set]] trap — so it's safe in this build.
+  std::string js =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+      "\");if(!e)return '0';e.setAttribute(\"" + JsEscape(attr) + "\",\"" +
+      JsEscape(value ? value : "") + "\");return '1';})()";
+  return EvalToString(js.c_str()) == "1";
+}
+
 bool MbWebView::GetValueForSelector(const char* css_selector, std::string* out) {
   if (!css_selector)
     return false;
