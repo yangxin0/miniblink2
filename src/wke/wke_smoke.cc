@@ -195,6 +195,29 @@ int main() {
           "native bindings are per-view (no cross-view leak)");
   }
 
+  // A destroyed view's native bindings are freed (no unbounded leak across
+  // create/destroy churn), and freeing them doesn't disturb a surviving view's
+  // bindings.
+  {
+    wkeWebView keep = wkeCreateWebView();
+    wkeJsBindFunction(keep, "keepFn", WkeRet111, nullptr);
+    wkeLoadHTML(keep, "<body>k</body>");
+    jsExecState ek = wkeGlobalExec(keep);
+    bool churn_ok = true;
+    for (int i = 0; i < 5; ++i) {
+      wkeWebView t = wkeCreateWebView();
+      wkeJsBindFunction(t, "tmpFn", WkeRet222, nullptr);
+      wkeLoadHTML(t, "<body>t</body>");
+      churn_ok = churn_ok &&
+                 jsToInt(wkeGlobalExec(t), wkeRunJS(t, "tmpFn()")) == 222;
+      wkeDestroyWebView(t);  // its binding is forgotten
+    }
+    const bool keep_ok = jsToInt(ek, wkeRunJS(keep, "keepFn()")) == 111;
+    wkeDestroyWebView(keep);
+    check(churn_ok && keep_ok,
+          "bindings freed on destroy; survivor's bindings intact under churn");
+  }
+
   // The cookie jar is process-wide (shared across views) — the complement to the
   // per-view JS/binding isolation above: a login in one view is seen by another.
   {

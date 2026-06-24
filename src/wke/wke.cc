@@ -73,6 +73,7 @@ std::vector<wkeWebView>& LiveViews() {
 wkeWebView AnyLiveView() {
   return LiveViews().empty() ? nullptr : LiveViews().back();
 }
+void ForgetBindingsForView(wkeWebView wv);  // defined with the binding storage
 // The cookie jar file path (process-wide, matching mbSave/LoadCookies). Set via
 // wkeSetCookieJarPath; the Flush/Reload cookie commands persist to/from it.
 // Leaked (never destroyed) to avoid an exit-time destructor.
@@ -259,6 +260,7 @@ void wkeDestroyWebView(wkeWebView webView) {
     return;
   auto& live = LiveViews();
   live.erase(std::remove(live.begin(), live.end(), webView), live.end());
+  ForgetBindingsForView(webView);  // free this view's native bindings
   if (webView->view)
     mbDestroyView(webView->view);
   delete webView;
@@ -1230,6 +1232,17 @@ struct WkeBinding {
 std::vector<std::unique_ptr<WkeBinding>>& WkeBindings() {
   static auto* v = new std::vector<std::unique_ptr<WkeBinding>>();
   return *v;
+}
+// Drop a destroyed view's native bindings (its installed v8 functions die with
+// the view's context, so nothing references these any more). Prevents an
+// unbounded leak across view create/destroy churn. (Declared near the top.)
+void ForgetBindingsForView(wkeWebView wv) {
+  auto& b = WkeBindings();
+  b.erase(std::remove_if(b.begin(), b.end(),
+                         [wv](const std::unique_ptr<WkeBinding>& x) {
+                           return x->wv == wv;
+                         }),
+          b.end());
 }
 std::vector<jsValue>& CurrentArgs() {  // args of the in-flight bound call
   static auto* v = new std::vector<jsValue>();
