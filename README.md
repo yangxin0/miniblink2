@@ -247,7 +247,7 @@ A drop-in subset of [miniblink](https://github.com/weolar/miniblink49)'s classic
 runs on modern Blink with the original signatures (`utf8`, `wkeWebView`, `jsValue`,
 …). It is built into `libminiblink_host`; an embedder includes just `wke/wke.h`.
 
-Supported today (every item verified by `wke_smoke` — 88 default cases, plus
+Supported today (every item verified by `wke_smoke` — 96 default cases, plus
 over-the-network cases under `MB_NET_TESTS=1`). Functions marked *(ext)* are
 port extensions over `mb_capi` beyond the classic `wke` surface:
 
@@ -264,7 +264,8 @@ port extensions over `mb_capi` beyond the classic `wke` surface:
   (auto-scroll to load lazy content) *(ext)*, `wkeSetFocus`/`wkeKillFocus`.
 - **Capture / output:** `wkePaint` (into a caller BGRA buffer), and *(ext)*
   `wkePaintRect` (a region → BGRA buffer), `wkeSavePng`/`wkeSavePngRect`
-  (PNG/JPEG by extension), `wkeSavePdf`, `wkeEncodePng` (in-memory bytes).
+  `wkeSaveElementPng` (one element by selector) (PNG/JPEG by extension),
+  `wkeSavePdf`, `wkeEncodePng` (in-memory bytes).
 - **Accessors / view-state:** `wkeGetURL`/`wkeGetTitle`/`wkeGetSource`/`wkeGetText`,
   `wkeSetUserAgent`/`wkeGetUserAgent`, `wkeSetLoadImages`, `wkeSetName`/`wkeGetName`,
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`.
@@ -282,13 +283,16 @@ port extensions over `mb_capi` beyond the classic `wke` surface:
   `wkeRunJsInIsolatedWorld` (content-script eval: own globals, shared DOM) *(ext)*,
   and `wkeOnJsBridge` (page↔host bridge) *(ext)*.
 - **DOM automation** *(ext, Puppeteer-style)* — query `wkeCountSelector`/
-  `wkeGetTextForSelector`/`wkeGetAllTextForSelector`/`wkeGetAttribute`/
-  `wkeSetAttribute`/`wkeGetAllAttributeForSelector`/`wkeGetValueForSelector`/
-  `wkeGetCheckedForSelector`/`wkeIsVisibleForSelector`/`wkeGetElementRect`/
-  `wkeGetComputedStyle`; act `wkeClickSelector`/`wkeDoubleClickSelector`/
-  `wkeRightClickSelector`/`wkeHoverSelector`/`wkeFocusSelector`/`wkeBlurSelector`/
-  `wkeFillSelector`/`wkeSelectOption`/`wkeScrollIntoView`; wait `wkeWaitForSelector`/
-  `wkeWaitForFunction`/`wkeWaitForVisibleSelector`/`wkeWaitForSelectorHidden`.
+  `wkeGetTextForSelector`/`wkeGetAllTextForSelector`/`wkeGetHtmlForSelector`/
+  `wkeSetHtmlForSelector`/`wkeGetAttribute`/`wkeSetAttribute`/
+  `wkeGetAllAttributeForSelector`/`wkeGetValueForSelector`/
+  `wkeGetAllValueForSelector`/`wkeGetCheckedForSelector`/`wkeIsVisibleForSelector`/
+  `wkeGetElementRect`/`wkeGetComputedStyle`; act `wkeClickSelector`/
+  `wkeDoubleClickSelector`/`wkeRightClickSelector`/`wkeHoverSelector`/
+  `wkeFocusSelector`/`wkeBlurSelector`/`wkeFillSelector`/`wkeSelectOption`/
+  `wkeDispatchEvent` (synthetic events)/`wkeDragSelector` (drag from→to)/
+  `wkeScrollIntoView`; wait `wkeWaitForSelector`/`wkeWaitForFunction`/
+  `wkeWaitForVisibleSelector`/`wkeWaitForSelectorHidden`/`wkeWaitForNetworkIdle`.
 - **Storage** *(ext)* — `wkeGetLocalStorage`/`wkeSetLocalStorage`,
   `wkeGetSessionStorage`/`wkeSetSessionStorage` (origin-scoped Web Storage).
 - **Networking:** cookies `wkeGetCookie`/`wkeSetCookie`/`wkeGetAllCookie`/
@@ -350,7 +354,7 @@ Requirements: a Chromium M150 source tree with a component `out/Release`
 ./build.sh /path/to/chromium-150.x.y.z   # stages host into the tree, gn gen, ninja, runs the suite
 ```
 
-`mb_smoke` is a ~107-case (133-check) capability + regression suite covering
+`mb_smoke` is a 157-check capability + regression suite covering
 HTML/DOM, JS, CSS computed style, UA stylesheet, the `mbRunJS`+`mbEvalJS` bridge,
 `<canvas>` getImageData, external `<link>` CSS via the subresource loader,
 paint-to-bitmap, synthesized click, typed text (ASCII + UTF-8 accent/CJK/emoji),
@@ -367,4 +371,4 @@ failure, so it doubles as a regression test. A handful of over-the-network check
 (POST, the cookie jar, request headers, proxy, redirect/cert toggles, image
 loading, HTTP status) are opt-in via `MB_NET_TESTS=1`, kept out of the default
 run so an unreachable host can't make it crawl. The `wke` layer has its own
-`wke_smoke` (63 default cases) and a runnable `wke_demo` example.
+`wke_smoke` (96 default checks) and a runnable `wke_demo` example.
