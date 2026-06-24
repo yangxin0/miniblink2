@@ -61,12 +61,14 @@ int main(int argc, char** argv) {
   std::string selector;  // CSS selector -> capture that element's box
   std::string headers;   // extra request headers, "Name: Value" per line
   std::string wait_selector;  // wait for this selector before capture
+  std::string wait_visible;   // wait for this selector to be VISIBLE before capture
   std::string click_selector;  // click this selector before capture
   std::string fill_selector;   // fill this field before capture (with fill_text)
   std::string fill_text;       // value for --fill
   std::string eval_js;         // JS to run after load; result printed to stdout
   std::string value_selector;  // print this control's live .value to stdout
   std::string checked_selector;  // print this control's .checked (1/0) to stdout
+  std::string visible_selector;  // print this selector's visibility (1/0/-1)
   std::string proxy;           // libcurl proxy string for network fetches
   std::string load_cookies;    // cookie jar file to load before navigating
   std::string save_cookies;    // cookie jar file to write after the page settles
@@ -90,6 +92,8 @@ int main(int argc, char** argv) {
       selector = argv[++i];
     } else if (a == "--wait-selector" && i + 1 < argc) {
       wait_selector = argv[++i];
+    } else if (a == "--wait-visible" && i + 1 < argc) {
+      wait_visible = argv[++i];
     } else if (a == "--click" && i + 1 < argc) {
       click_selector = argv[++i];
     } else if (a == "--fill" && i + 2 < argc) {
@@ -101,6 +105,8 @@ int main(int argc, char** argv) {
       value_selector = argv[++i];
     } else if (a == "--checked" && i + 1 < argc) {
       checked_selector = argv[++i];
+    } else if (a == "--visible" && i + 1 < argc) {
+      visible_selector = argv[++i];
     } else if (a == "--proxy" && i + 1 < argc) {
       proxy = argv[++i];
     } else if (a == "--load-cookies" && i + 1 < argc) {
@@ -146,8 +152,9 @@ int main(int argc, char** argv) {
         stderr,
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
         "[--transparent] [--text] [--html] [--eval JS] [--value CSS] "
-        "[--checked CSS] [--fill CSS TEXT] "
-        "[--click CSS] [--wait-selector CSS] [--wait-ms N] [--scroll-to Y] "
+        "[--checked CSS] [--visible CSS] [--fill CSS TEXT] "
+        "[--click CSS] [--wait-selector CSS] [--wait-visible CSS] [--wait-ms N] "
+        "[--scroll-to Y] "
         "[--post BODY] [--proxy URL] "
         "[--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] "
         "[--no-follow] "
@@ -254,6 +261,16 @@ int main(int argc, char** argv) {
   } else if (wait_ms > 0) {
     mbWait(view, wait_ms);
   }
+  // --wait-visible: block until the selector is actually shown (not just present)
+  // — for content that mounts hidden then fades/toggles in.
+  if (!wait_visible.empty()) {
+    if (!mbWaitForVisibleSelector(view, wait_visible.c_str(),
+                                  wait_ms > 0 ? wait_ms : 5000)) {
+      std::fprintf(stderr,
+                   "mb_shot: WARNING — --wait-visible '%s' never became visible\n",
+                   wait_visible.c_str());
+    }
+  }
 
   // Optionally fill a field before interacting/capturing (e.g. type a query, then
   // --click the submit button). Runs before --click so a fill+submit flow works.
@@ -341,6 +358,16 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "mb_shot: --checked '%s' matched no checkable element\n",
                    checked_selector.c_str());
     std::fprintf(stdout, "%d\n", c);
+  }
+
+  // --visible: print whether a selector is actually shown — 1 visible, 0 hidden
+  // (display:none / visibility:hidden / opacity:0), -1 on no match.
+  if (!visible_selector.empty()) {
+    int vis = mbIsVisibleForSelector(view, visible_selector.c_str());
+    if (vis < 0)
+      std::fprintf(stderr, "mb_shot: --visible '%s' matched no element\n",
+                   visible_selector.c_str());
+    std::fprintf(stdout, "%d\n", vis);
   }
 
   // Persist the cookie jar after the page has settled (so cookies set during the
