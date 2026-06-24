@@ -51,9 +51,24 @@ that satisfies modern Blink so it runs without the full browser.
 The deliverable example app — a standalone headless screenshot renderer:
 
 ```sh
-mb_shot [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
-        [--wait-selector CSS] [--fill CSS TEXT] [--click CSS] [--wait-ms N] [--scroll-to Y] [--post BODY] [--eval JS] [--console] [--header "N: V"] [--proxy URL] [--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] [--no-follow] [--text] [--html] [--no-images] [--dark] [--lang L,L2] [--tz Area/City] \
-        <input.html | file://URL | http(s)://URL> <out.png> [width height]
+mb_shot \
+  # request config
+  [--user-agent UA] [--header "N: V"] [--proxy URL] [--insecure] [--no-follow] \
+  [--block SUBSTR] [--load-cookies FILE] [--save-cookies FILE] [--post BODY] \
+  [--no-images] [--dark] [--lang L,L2] [--tz Area/City] \
+  # interact
+  [--fill CSS TEXT] [--click CSS] [--drag FROM TO] [--dispatch CSS EVT] \
+  # synchronize
+  [--wait-selector CSS] [--wait-visible CSS] [--wait-hidden CSS] [--wait-idle] [--wait-ms N] \
+  # prepare the view
+  [--css STYLES] [--auto-scroll] [--scroll-to Y] [--scroll-to-selector CSS] \
+  # extract (to stdout)
+  [--text] [--html] [--eval JS] [--value CSS] [--checked CSS] [--visible CSS] \
+  [--rect CSS] [--style CSS PROP] [--text-all CSS] [--attr-all CSS NAME] \
+  [--requests] [--console] [--headers] \
+  # capture
+  [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
+  <input.html | file://URL | http(s)://URL> <out.png> [width height]
 ```
 
 `--full` captures the entire document height (the view is resized to the page's
@@ -80,6 +95,28 @@ N` just settles the page for N ms. Both compose with the capture options. `--fil
 types `TEXT` into the field matching the selector (firing `input`/`change`, so frameworks
 react), and `--click CSS` clicks the matching element before capturing (e.g. fill a search
 box then click submit, expand a menu, dismiss a banner). `--fill` runs before `--click`.
+`--drag FROM TO` mouse-drags one element's center onto another's (slider, sortable,
+map pan); `--dispatch CSS EVT` fires a synthetic DOM event (e.g. `mouseover` to open
+a hover menu, or a custom event) that click/fill don't.
+
+Beyond `--wait-selector`, the synchronization set covers the appear/disappear/quiet
+lifecycle: `--wait-visible CSS` waits until the element is actually shown (not just
+present — `display:none`/`opacity:0` don't count), `--wait-hidden CSS` waits until it
+goes away (the "spinner disappeared" signal), and `--wait-idle` waits until the page
+stops making network requests (Puppeteer's `networkidle`, for SPAs that lazy-fetch).
+`--css STYLES` injects a stylesheet (hide cookie banners / ads / sticky headers before
+a shot), `--auto-scroll` scrolls the page to trigger lazy-loaded / infinite-scroll
+content, and `--scroll-to-selector CSS` brings a specific element into the viewport
+(in context, vs `--selector`'s element-only clip). `--user-agent UA` (alias `--ua`) overrides the
+User-Agent (many sites serve different markup to mobile vs desktop), and `--block
+SUBSTR` (repeatable) drops any request whose URL contains the substring (ads,
+trackers, images) for faster, cleaner captures.
+
+The extraction flags read structured data to stdout: `--value CSS` (a control's live
+`.value`), `--checked CSS` (checkbox/radio `1`/`0`), `--visible CSS` (`1`/`0`/`-1`),
+`--rect CSS` (`x,y,w,h`), `--style CSS PROP` (a resolved computed style), `--text-all
+CSS` / `--attr-all CSS NAME` (a JSON array across *all* matches — one-shot list
+scraping), and `--requests` (the subresource URLs the page fetched).
 
 `--console` prints the page's captured console output (`console.log`/`warn`/`error`) to
 stderr — useful for debugging a page or scripting against its logs. `--headers` prints the
