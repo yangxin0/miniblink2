@@ -75,8 +75,9 @@ the deliverable surface (C API, CLI, wke layer).
 - **wke compatibility layer (`src/wke/`):** a faithful subset over `mb_capi` covering
   the full headless-automation surface — lifecycle, load, loading-state polling,
   paint (`wkePaint`), mouse (`wkeFireMouseEvent`), keyboard (`wkeFireKey*`),
-  scripting (`wkeRunJS` + `jsToInt/Double/Boolean/TempString`), navigation history.
-- **Tests:** `mb_smoke` **131/131** (default, network-free), `wke_smoke` **14/14**,
+  scripting (`wkeRunJS` + `jsToInt/Double/Boolean/TempString`), navigation history,
+  rendering accessors (`wkeSetTransparent`, `wkeGetContentWidth/Height`).
+- **Tests:** `mb_smoke` **131/131** (default, network-free), `wke_smoke` **16/16**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin cases (143 total).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
@@ -92,6 +93,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke: rendering accessors — wkeSetTransparent (→mbSetTransparentBackground) + wkeGetContentWidth/Height (→mbGetContentSize). wke_smoke 16/16 (content size of a tall doc; transparent unpainted alpha 0).
 - wke: navigation history — wkeCanGoBack/GoBack/CanGoForward/GoForward over mbGo*. wke_smoke 14/14.
 - wke: keyboard — wkeFireKeyDown/Up/PressEvent (charCode→UTF-8→mbSendText; VK→mbSendKey). 13/13.
 - wke: scripting — wkeRunJS + jsValue readers (string-backed handle registry). 11/11.

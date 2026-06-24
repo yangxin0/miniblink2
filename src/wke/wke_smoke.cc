@@ -121,6 +121,26 @@ int main() {
   check(on_b && can_back && back_a && can_fwd && fwd_b,
         "wkeGoBack/GoForward navigate the history (A<->B)");
 
+  // Content size: a tall/wide document reports its full scroll size, beyond the
+  // 200x150 view.
+  wkeResize(wv, 200, 150);
+  wkeLoadHTML(wv,
+              "<body style='margin:0'><div style='width:400px;height:2000px'>"
+              "</div></body>");
+  check(wkeGetContentHeight(wv) >= 2000 && wkeGetContentWidth(wv) >= 400,
+        "wkeGetContentWidth/Height report the full document size");
+
+  // Transparent background: an unpainted area keeps alpha 0 (BGRA byte 3).
+  wkeSetTransparent(wv, true);
+  wkeLoadHTML(wv,
+              "<body style='margin:0'><div style='width:10px;height:10px;"
+              "background:#000'></div></body>");
+  std::vector<unsigned char> tb(static_cast<size_t>(200) * 150 * 4, 200);
+  wkePaint(wv, tb.data(), 200 * 4);
+  const size_t corner = (static_cast<size_t>(140) * 200 + 190) * 4;  // far from box
+  check(tb[corner + 3] == 0,
+        "wkeSetTransparent: unpainted area keeps alpha 0");
+
   wkeDestroyWebView(wv);
   wkeFinalize();
 

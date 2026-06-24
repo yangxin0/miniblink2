@@ -100,6 +100,10 @@ WKE_API int wkeGetWidth(wkeWebView webView);
 WKE_API int wkeGetHeight(wkeWebView webView);
 WKE_API int wkeWidth(wkeWebView webView);
 WKE_API int wkeHeight(wkeWebView webView);
+// The full scrollable document size (>= the view), e.g. to size a full-page
+// capture. 0 before the first load.
+WKE_API int wkeGetContentWidth(wkeWebView webView);
+WKE_API int wkeGetContentHeight(wkeWebView webView);
 
 // --- Accessors / config --------------------------------------------------------
 // The returned const utf8* is owned by the view and valid until the next call to
@@ -107,6 +111,9 @@ WKE_API int wkeHeight(wkeWebView webView);
 WKE_API const utf8* wkeGetURL(wkeWebView webView);
 WKE_API const utf8* wkeGetTitle(wkeWebView webView);
 WKE_API void wkeSetUserAgent(wkeWebView webView, const utf8* userAgent);
+// Capture with a transparent background (areas the page does not paint keep
+// alpha 0) instead of opaque white. Call before loading the page.
+WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);
 
 // --- Input ---------------------------------------------------------------------
 // Deliver a mouse event at (x, y). `message` is one of the WKE_MSG_* codes;

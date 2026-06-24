@@ -153,6 +153,22 @@ int wkeHeight(wkeWebView webView) {
   return wkeGetHeight(webView);
 }
 
+int wkeGetContentWidth(wkeWebView webView) {
+  if (!webView || !webView->view)
+    return 0;
+  int w = 0, h = 0;
+  mbGetContentSize(webView->view, &w, &h);
+  return w;
+}
+
+int wkeGetContentHeight(wkeWebView webView) {
+  if (!webView || !webView->view)
+    return 0;
+  int w = 0, h = 0;
+  mbGetContentSize(webView->view, &w, &h);
+  return h;
+}
+
 const utf8* wkeGetURL(wkeWebView webView) {
   if (!webView || !webView->view)
     return "";
@@ -174,6 +190,11 @@ const utf8* wkeGetTitle(wkeWebView webView) {
 void wkeSetUserAgent(wkeWebView webView, const utf8* userAgent) {
   if (webView && webView->view)
     mbSetUserAgent(webView->view, userAgent);
+}
+
+void wkeSetTransparent(wkeWebView webView, bool transparent) {
+  if (webView && webView->view)
+    mbSetTransparentBackground(webView->view, transparent ? 1 : 0);
 }
 
 bool wkeFireMouseEvent(wkeWebView webView, unsigned int message, int x, int y,
