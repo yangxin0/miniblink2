@@ -74,7 +74,7 @@ the deliverable surface (C API, CLI, wke layer).
   `--auto-scroll`/`--wait-ms`) → extract (`--text`/`--html`/`--eval`/`--value`/`--checked`/
   `--visible`/`--text-all`/`--attr-all`/`--requests`) → capture (`--full`/`--clip`/
   `--selector`); plus `--proxy`/`--insecure`/`--no-follow`/`--headers`/
-  `--block`/`--load-cookies`/`--save-cookies`.
+  `--block`/`--user-agent`/`--load-cookies`/`--save-cookies`.
 - **wke compatibility layer (`src/wke/`):** a faithful subset over `mb_capi` covering
   the full headless-automation surface — lifecycle, load, loading-state polling,
   paint (`wkePaint`), PDF/PNG export (`wkeSavePdf`/`wkeSavePng`/
@@ -125,6 +125,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- mb_shot: --user-agent / --ua — set the User-Agent on the CLI (2026-06-24). Real scraper gap: many sites serve different markup by UA (mobile vs desktop), but the CLI couldn't override it. Wraps mbSetUserAgent, applied before navigation. VERIFIED end-to-end offline with a clean A/B: default navigator.userAgent is the Chrome/150 string; --user-agent 'MyScraper/2.0 (mobile)' makes navigator.userAgent return exactly that. No survivors. mb_shot.cc + usage only; both suites unchanged (wke 88/88, mb 149/149).
 - docs: re-sync the README wke-layer section (2026-06-24). The wke surface grew across ~15 ticks but the README's grouped wke list had drifted — 32 of the 116 wke exports were undocumented (storage, request log/block, value/checked/visible readers, all-text/attr, wait-visible/hidden, scroll-to-bottom, insert-css, UA getter, focus, full key-event names, …). Added them under the right groups (a new Storage bullet; broadened DOM-automation / Networking / Scripting / Geometry), and corrected the stale "63 default cases" -> 88. Cross-checked: all 116 unique wke functions now appear in README (0 missing), restoring the same "every export documented" invariant the mb_capi list holds. Docs-only — no code, suites unchanged (wke 88/88, mb 149/149).
 - mb_shot: --block SUBSTR — request blocking on the CLI (2026-06-24). Threads last tick's mbBlockUrl into the deliverable: repeatable --block registers URL substrings (applied before navigation) to drop ads/trackers/images for faster, cleaner shots. VERIFIED end-to-end offline with a clean A/B: a page linking a file:// stylesheet renders rgb(4,4,4) WITHOUT --block, but rgb(0,0,0) (default — request dropped) WITH --block 'ad.css'. No survivors. mb_shot.cc + usage only; both suites unchanged (wke 88/88, mb 149/149).
 - capi+wke: mbBlockUrl / mbClearUrlBlocks (+ wke) — request blocking (2026-06-24). Observability -> control: extends the request log's loader chokepoint to FAIL any fetched URL containing a registered substring (ERR_BLOCKED_BY_CLIENT) before fetching — suppress ads/trackers/images/analytics for faster, cleaner scrapes. Process-wide substring blocklist checked in MbURLLoader::Deliver (record, then block). A bounded slice of the "request interception" roadmap item. VERIFIED OFFLINE in both suites via a file:// stylesheet: with "mb_block.css" blocked, #q keeps the default color (request failed); after mbClearUrlBlocks + reload it turns rgb(5,5,5) (loads). wke_smoke 88/88, mb_smoke 149/149, no survivors. ABI now 96 fns (2 new).

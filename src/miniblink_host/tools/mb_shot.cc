@@ -82,6 +82,7 @@ int main(int argc, char** argv) {
   int wait_ms = 0;            // fixed wait before capture
   int scroll_to_y = -1;       // absolute scroll Y before capture (-1 = none)
   std::string post_body;       // when set, POST this body to the URL (vs GET)
+  std::string user_agent;      // override the User-Agent for the navigation
   std::vector<const char*> blocks;  // URL substrings to block (repeatable)
   std::vector<const char*> pos;  // positional args, flags filtered out
   for (int i = 1; i < argc; ++i) {
@@ -136,6 +137,8 @@ int main(int argc, char** argv) {
       scroll_to_y = std::atoi(argv[++i]);
     } else if (a == "--post" && i + 1 < argc) {
       post_body = argv[++i];
+    } else if ((a == "--user-agent" || a == "--ua") && i + 1 < argc) {
+      user_agent = argv[++i];
     } else if (a == "--console") {
       print_console = true;
     } else if (a == "--headers") {
@@ -182,7 +185,7 @@ int main(int argc, char** argv) {
         "[--scroll-to Y] "
         "[--post BODY] [--proxy URL] "
         "[--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] "
-        "[--no-follow] [--block SUBSTR] "
+        "[--no-follow] [--block SUBSTR] [--user-agent UA] "
         "<input.html|file://URL|http(s)://URL> <out.png> [width height]\n",
         argv[0]);
     return 2;
@@ -213,6 +216,8 @@ int main(int argc, char** argv) {
     mbSetLocale(view, lang.c_str());  // navigator.language(s)
   if (!tz.empty())
     mbSetTimezone(view, tz.c_str());  // Date/Intl timezone
+  if (!user_agent.empty())
+    mbSetUserAgent(view, user_agent.c_str());  // before load so the navigation uses it
   if (!headers.empty())
     mbSetExtraHeaders(view, headers.c_str());  // before load so the navigation uses them
   if (!proxy.empty())
