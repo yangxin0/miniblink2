@@ -89,6 +89,8 @@ int main() {
   check(std::strcmp(jsToTempString(es, wkeRunJS(wv, "'hel'+'lo'")), "hello") == 0,
         "wkeRunJS + jsToTempString ('hello')");
   check(jsToDouble(es, wkeRunJS(wv, "7/2")) == 3.5, "wkeRunJS + jsToDouble (3.5)");
+  check(jsToInt(es, jsEval(es, "6*7")) == 42,
+        "jsEval evaluates via the exec state (6*7==42)");
   {
     jsValue half = wkeRunJS(wv, "7/2");  // jsToFloat keeps the fraction; jsToInt truncates
     check(jsToFloat(es, half) == 3.5f && jsToInt(es, half) == 3,

@@ -1087,6 +1087,12 @@ jsValue wkeRunJS(wkeWebView webView, const utf8* script) {
   return handle;
 }
 
+jsValue jsEval(jsExecState es, const utf8* str) {
+  // Evaluate `str` in the exec state and return its result as a jsValue — the
+  // es-based sibling of wkeRunJS (es is the webView token from wkeGlobalExec).
+  return wkeRunJS(reinterpret_cast<wkeWebView>(es), str);
+}
+
 jsExecState wkeGlobalExec(wkeWebView webView) {
   // No real exec state is needed — the jsValue handle carries the result. Return
   // a non-null token so callers' null checks pass.

@@ -349,6 +349,9 @@ WKE_API bool wkeFireKeyPressEvent(wkeWebView webView, unsigned int charCode,
 // script must not open a modal dialog (alert/confirm/prompt) — that path is not
 // serviced here. NOTE: scripts that themselves show dialogs are unsupported.
 WKE_API jsValue wkeRunJS(wkeWebView webView, const utf8* script);
+// Evaluate `str` in the exec state, returning its result as a jsValue — the
+// es-based sibling of wkeRunJS (es is the token from wkeGlobalExec).
+WKE_API jsValue jsEval(jsExecState es, const utf8* str);
 // The view's global execution state. Accepted by the jsToXxx readers (in this
 // slice the result is carried by the jsValue handle, so the state is a token).
 WKE_API jsExecState wkeGlobalExec(wkeWebView webView);

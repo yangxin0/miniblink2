@@ -105,7 +105,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **59/59**,
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **60/60**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -123,6 +123,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke jsValue: jsEval (2026-06-24). The exec-state sibling of wkeRunJS — jsEval(es, str) evaluates and returns a jsValue (es is the wkeGlobalExec token = the webView, recovered by reinterpret_cast). Faithful, offline. VERIFIED: jsEval(es,"6*7") → jsToInt 42. wke_smoke 60/60, mb_smoke 132/132, no survivors.
 - wke FOCUS: wkeSetFocus/wkeKillFocus (2026-06-24). Faithful classic-wke window-focus control — needed a real host primitive (not doable from JS). Added MbWebView::SetFocus(bool) (parameterizes the creation-time SetIsActive+SetPageFocus), mbSetFocus in mb_capi, and the two wke wrappers. VERIFIED offline: document.hasFocus() true after wkeSetFocus, false after wkeKillFocus, true again after re-focus. 3-layer change (host+capi+wke) → full host rebuild. wke_smoke 59/59, mb_smoke 132/132, no survivors.
 - wke BRIDGE: wkeOnJsBridge — one-way page->host messages (2026-06-24). The safe half of native function binding: window.mbBridge(channel,message) (no return). Implemented purely with the JS-slot + drain pattern (NO C++ v8 — the synchronous-return path that needs v8 FunctionTemplate is deliberately NOT attempted). A bootstrap (window.mbBridge pushes "chmsg" to window.__mbb) is installed via the init script — combined with any user wkeSetInitScript, so it exists before page scripts — only when a callback is registered. Drained (split  entries /  fields) after each load and each wkeRunJS, like the console. VERIFIED offline: typeof window.mbBridge=="function" post-load; window.mbBridge('greet','hello') → callback fires once with channel "greet", message "hello". Fixed a -Wexit-time-destructors (test used static std::string → char buffers). wke_smoke 58/58, mb_smoke 132/132, no survivors. Synchronous wkeJsBindFunction (value-returning) remains the one deferred gap.
 - wke NETWORK: wkeSetLoadImages (2026-06-24). Toggle automatic image loading (wraps mbSetLoadImages) — disabling speeds up text/HTML scraping; inline data: images unaffected. The last unexposed mb_capi page toggle. Documented PORT EXTENSION. VERIFIED offline (toggle safe + local loads work, 57/57) AND over the network this run: images-on loads httpbin.org/image/png (naturalWidth>0), images-off skips it (naturalWidth==0) → 65/65. mb_smoke 132/132, no survivors. The remaining substantial gap is native function binding (wkeJsBindFunction) — synchronous C-from-JS needs careful in-context v8 work (the safe JS-slot pattern can't do it), so it's deferred, not a bounded tick.
