@@ -199,6 +199,9 @@ WKE_API bool wkeFillSelector(wkeWebView webView, const char* selector,
                              const utf8* text);
 WKE_API bool wkeSelectOption(wkeWebView webView, const char* selector,
                              const utf8* value);
+// Scroll the first matching element into the viewport (trigger lazy loading /
+// frame it before a screenshot); returns whether it matched. Port extension.
+WKE_API bool wkeScrollIntoView(wkeWebView webView, const char* selector);
 
 // Wait helpers for dynamic content (port extensions) — pump the loop until a
 // condition holds or timeoutMs elapses, returning whether it became true.

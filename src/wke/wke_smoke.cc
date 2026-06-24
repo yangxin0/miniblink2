@@ -780,6 +780,23 @@ int main() {
           "wkeClickSelector/wkeFillSelector/wkeSelectOption drive the page");
   }
 
+  // wkeScrollIntoView (offline): a target far below the fold scrolls into the
+  // viewport (scrollY rises from 0, and the element's box lands within height).
+  {
+    wkeLoadHTML(wv, "<body style='margin:0'><div style='height:3000px'></div>"
+                    "<div id='t' style='height:50px'>target</div></body>");
+    wkeScrollTo(wv, 0, 0);
+    const int before = jsToInt(es, wkeRunJS(wv, "Math.round(window.scrollY)"));
+    const bool acted = wkeScrollIntoView(wv, "#t");
+    const int after = jsToInt(es, wkeRunJS(wv, "Math.round(window.scrollY)"));
+    int ty = -1;
+    wkeGetElementRect(wv, "#t", nullptr, &ty, nullptr, nullptr);
+    const bool in_view = ty >= 0 && ty < 600;  // default view height
+    const bool miss = !wkeScrollIntoView(wv, "#none");
+    check(acted && before == 0 && after > 0 && in_view && miss,
+          "wkeScrollIntoView brings an element into the viewport");
+  }
+
   // Waits (offline): a setTimeout adds a delayed element / flag; the wait pumps
   // until it appears, and times out on a condition that never holds.
   {

@@ -527,6 +527,14 @@ bool wkeSelectOption(wkeWebView webView, const char* selector,
          mbSelectOption(webView->view, selector, value) != 0;
 }
 
+bool wkeScrollIntoView(wkeWebView webView, const char* selector) {
+  // Scroll the first matching element into the viewport (to trigger lazy
+  // loading or frame it before a screenshot). False if nothing matches. The
+  // click/fill selector ops already do this internally. (Port extension.)
+  return webView && webView->view && selector &&
+         mbScrollIntoView(webView->view, selector) != 0;
+}
+
 // --- Waits (pump the loop until a condition or timeout) ------------------------
 bool wkeWaitForSelector(wkeWebView webView, const char* selector,
                         int timeoutMs) {
