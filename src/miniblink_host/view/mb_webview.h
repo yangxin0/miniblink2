@@ -169,6 +169,8 @@ class MbWebView {
   // keep alpha 0 instead of being filled white.
   void SetTransparentBackground(bool transparent);
   void SendScroll(int x, int y, int dx, int dy);
+  // Absolute scroll: move the layout viewport to (x, y) in CSS px (window.scrollTo).
+  void ScrollTo(int x, int y);
   std::string EvalToString(const char* utf8_script);  // eval JS -> string result
   // Like EvalToString, but also reports the JS typeof the result (one of
   // "number"/"string"/"boolean"/"object"/"function"/"undefined"/"array"/"null")

@@ -194,6 +194,12 @@ MB_EXPORT void mbSendKey(mbView*, const char* key_name);
 // the page downward (toward larger window.scrollY), matching natural intent.
 MB_EXPORT void mbSendScroll(mbView*, int x, int y, int dx, int dy);
 
+// Scroll the layout viewport to an ABSOLUTE offset (x, y) in CSS px
+// (window.scrollTo). Unlike mbSendScroll's relative gesture or a full-page
+// resize, this captures the real viewport at a position — fixed/sticky elements
+// render correctly. Pair with mbPaintToBitmap / mbSavePng for a viewport shot.
+MB_EXPORT void mbScrollTo(mbView*, int x, int y);
+
 // Write the HTTP cookie jar's cookies for `url` ("name=value; name2=value2") into
 // `out` (NUL-terminated, up to out_cap). For exporting a session after a login flow.
 // Returns the full length in bytes; empty for non-http(s) URLs.

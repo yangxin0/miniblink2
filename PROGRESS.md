@@ -80,7 +80,7 @@ the deliverable surface (C API, CLI, wke layer).
   rendering accessors (`wkeSetTransparent`, `wkeGetContentWidth/Height`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **131/131** (default, network-free), `wke_smoke` **21/21**,
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **21/21**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin cases (143 total).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
@@ -96,6 +96,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- capi: mbScrollTo + mb_shot --scroll-to — absolute viewport scroll (window.scrollTo via the eval path), distinct from --full's resize (fixed/sticky render correctly). Applied before extract/capture so --eval + the shot see the scrolled state. mb_smoke 132/132 (scrollY==250); mb_shot --scroll-to 250 -> 250.
 - docs: README — added a "wke compatibility layer" section (supported surface, grouped, + a canonical headless usage example) and fixed the architecture diagram (wke is real now, not "future"); noted the ABI has outgrown the listed core. Verified all 44 documented wke symbols exist in wke.h. README-only (no code; tests unchanged).
 - wke+capi: jsTypeOf — host EvalWithType captures the result's JS type from the SAME single eval (no re-run/side-effects), exposed as mbEvalJSEx(value+type); wke's jsValue registry now stores {value,type} and jsTypeOf maps it. wke_smoke 21/21 (number/string/boolean/array/object/null/undefined/function). mbEvalJS unchanged (mb_smoke 131/131).
 - wke: mouse-wheel input — wkeFireMouseWheelEvent (→mbSendScroll, dy=-delta; Win32 positive=up). Completes mouse+keyboard+wheel. wke_smoke 20/20 (tall page scrolls down, scrollY>0).

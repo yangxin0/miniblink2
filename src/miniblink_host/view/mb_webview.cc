@@ -756,6 +756,15 @@ void MbWebView::SendScroll(int x, int y, int dx, int dy) {
                                          static_cast<double>(dy));
 }
 
+void MbWebView::ScrollTo(int x, int y) {
+  // Absolute scroll to a known offset (vs SendScroll's relative gesture) — for
+  // capturing the real viewport at a position, where fixed/sticky elements render
+  // correctly (a full-page resize would not). window.scrollTo via the eval path.
+  std::string js = "window.scrollTo(" + std::to_string(x) + "," +
+                   std::to_string(y) + ")";
+  EvalToString(js.c_str());
+}
+
 void MbWebView::RunInFrameTask(base::OnceClosure body, bool settle) {
   // Host-driven JS must execute within a scheduler task. Page scripts always do
   // (bracketed by WillProcessTask/DidProcessTask), and engine subsystems rely on

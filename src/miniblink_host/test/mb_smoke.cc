@@ -149,6 +149,13 @@ int main() {
     Expect(sy > 0, "input: gesture scroll (scrollY)",
            std::to_string(sy));
   }
+  // 11b. mbScrollTo: absolute scroll to a known offset (vs the relative gesture).
+  mbScrollTo(v, 0, 250);
+  {
+    int sy = std::atoi(Eval(v, "String(Math.round(window.scrollY))").c_str());
+    Expect(sy == 250, "mbScrollTo moves the viewport to an absolute Y",
+           std::to_string(sy));
+  }
 
   // 12. Mouse move: hover over an element fires mouseover (and :hover applies).
   mbLoadHTML(v,

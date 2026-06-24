@@ -231,6 +231,11 @@ void mbSendScroll(mbView* v, int x, int y, int dx, int dy) {
     v->impl->SendScroll(x, y, dx, dy);
 }
 
+void mbScrollTo(mbView* v, int x, int y) {
+  if (v && v->impl)
+    v->impl->ScrollTo(x, y);
+}
+
 int mbGetCookies(mbView* v, const char* url, char* out, int out_cap) {
   if (!v || !v->impl || !url)
     return 0;

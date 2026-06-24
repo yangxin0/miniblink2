@@ -69,6 +69,7 @@ int main(int argc, char** argv) {
   std::string load_cookies;    // cookie jar file to load before navigating
   std::string save_cookies;    // cookie jar file to write after the page settles
   int wait_ms = 0;            // fixed wait before capture
+  int scroll_to_y = -1;       // absolute scroll Y before capture (-1 = none)
   std::vector<const char*> pos;  // positional args, flags filtered out
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
@@ -101,6 +102,8 @@ int main(int argc, char** argv) {
       save_cookies = argv[++i];
     } else if (a == "--wait-ms" && i + 1 < argc) {
       wait_ms = std::atoi(argv[++i]);
+    } else if (a == "--scroll-to" && i + 1 < argc) {
+      scroll_to_y = std::atoi(argv[++i]);
     } else if (a == "--console") {
       print_console = true;
     } else if (a == "--headers") {
@@ -134,7 +137,8 @@ int main(int argc, char** argv) {
         stderr,
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
         "[--transparent] [--text] [--html] [--eval JS] [--fill CSS TEXT] "
-        "[--click CSS] [--wait-selector CSS] [--wait-ms N] [--proxy URL] "
+        "[--click CSS] [--wait-selector CSS] [--wait-ms N] [--scroll-to Y] "
+        "[--proxy URL] "
         "[--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] "
         "[--no-follow] "
         "<input.html|file://URL|http(s)://URL> <out.png> [width height]\n",
@@ -258,6 +262,12 @@ int main(int argc, char** argv) {
       mbWait(view, wait_ms > 0 ? wait_ms : 100);  // let the click's effects render
     }
   }
+
+  // Scroll to an absolute Y before extracting/capturing (so --eval and the shot
+  // both observe the scrolled viewport). For position:fixed/sticky pages, where
+  // --full's resize would render them wrong; best with a plain viewport capture.
+  if (scroll_to_y >= 0)
+    mbScrollTo(view, 0, scroll_to_y);
 
   if (print_console) {
     char cbuf[8192] = {0};

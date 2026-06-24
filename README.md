@@ -49,7 +49,7 @@ The deliverable example app — a standalone headless screenshot renderer:
 
 ```sh
 mb_shot [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
-        [--wait-selector CSS] [--fill CSS TEXT] [--click CSS] [--wait-ms N] [--eval JS] [--console] [--header "N: V"] [--proxy URL] [--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] [--no-follow] [--text] [--html] [--no-images] [--dark] [--lang L,L2] [--tz Area/City] \
+        [--wait-selector CSS] [--fill CSS TEXT] [--click CSS] [--wait-ms N] [--scroll-to Y] [--eval JS] [--console] [--header "N: V"] [--proxy URL] [--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] [--no-follow] [--text] [--html] [--no-images] [--dark] [--lang L,L2] [--tz Area/City] \
         <input.html | file://URL | http(s)://URL> <out.png> [width height]
 ```
 
