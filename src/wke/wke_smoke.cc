@@ -4,6 +4,7 @@
 
 #include "wke/wke.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -53,6 +54,20 @@ int main() {
   const bool blue = buf[c] > 200 && buf[c + 1] > 100 && buf[c + 1] < 160 &&
                     buf[c + 2] < 60;
   check(blue, "wkePaint renders the page (blue background pixel)");
+
+  // Input: a left click flips the background to red. Load a page whose onclick
+  // recolors the body, fire a down+up at the centre, repaint, and check the pixel
+  // turned red (BGRA: R high, G/B low) — verifies wkeFireMouseEvent end to end
+  // without needing wkeRunJS yet.
+  wkeLoadHTML(wv,
+              "<body style='margin:0;background:rgb(0,128,255)' "
+              "onclick='document.body.style.background=\"rgb(255,0,0)\"'>x</body>");
+  wkeFireMouseEvent(wv, WKE_MSG_LBUTTONDOWN, 100, 75, WKE_LBUTTON);
+  wkeFireMouseEvent(wv, WKE_MSG_LBUTTONUP, 100, 75, 0);
+  std::fill(buf.begin(), buf.end(), 0);
+  wkePaint(wv, buf.data(), 200 * 4);
+  const bool red = buf[c + 2] > 200 && buf[c + 1] < 60 && buf[c] < 60;
+  check(red, "wkeFireMouseEvent click fires onclick (bg flips to red)");
 
   wkeDestroyWebView(wv);
   wkeFinalize();

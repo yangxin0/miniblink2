@@ -34,6 +34,31 @@
 typedef char utf8;
 typedef struct _tagWkeWebView* wkeWebView;
 
+// Mouse-event message codes for wkeFireMouseEvent (Win32 WM_* values, matching
+// upstream wkedefine.h).
+enum {
+  WKE_MSG_MOUSEMOVE = 0x0200,
+  WKE_MSG_LBUTTONDOWN = 0x0201,
+  WKE_MSG_LBUTTONUP = 0x0202,
+  WKE_MSG_LBUTTONDBLCLK = 0x0203,
+  WKE_MSG_RBUTTONDOWN = 0x0204,
+  WKE_MSG_RBUTTONUP = 0x0205,
+  WKE_MSG_RBUTTONDBLCLK = 0x0206,
+  WKE_MSG_MBUTTONDOWN = 0x0207,
+  WKE_MSG_MBUTTONUP = 0x0208,
+  WKE_MSG_MBUTTONDBLCLK = 0x0209,
+  WKE_MSG_MOUSEWHEEL = 0x020A,
+};
+
+// Modifier/button flags for the mouse-event `flags` argument.
+enum {
+  WKE_LBUTTON = 0x01,
+  WKE_RBUTTON = 0x02,
+  WKE_SHIFT = 0x04,
+  WKE_CONTROL = 0x08,
+  WKE_MBUTTON = 0x10,
+};
+
 // --- Lifecycle (process-wide init/teardown + per-view create/destroy) ----------
 WKE_API void wkeInitialize(void);
 WKE_API void wkeFinalize(void);
@@ -65,6 +90,14 @@ WKE_API int wkeHeight(wkeWebView webView);
 WKE_API const utf8* wkeGetURL(wkeWebView webView);
 WKE_API const utf8* wkeGetTitle(wkeWebView webView);
 WKE_API void wkeSetUserAgent(wkeWebView webView, const utf8* userAgent);
+
+// --- Input ---------------------------------------------------------------------
+// Deliver a mouse event at (x, y). `message` is one of the WKE_MSG_* codes;
+// `flags` carries WKE_LBUTTON/etc. (currently advisory). Supported in this slice:
+// MOUSEMOVE (move), LBUTTONUP (a left click — the press is implicit, as with a
+// real button-up), and LBUTTONDBLCLK (double click). Returns true if handled.
+WKE_API bool wkeFireMouseEvent(wkeWebView webView, unsigned int message, int x,
+                               int y, unsigned int flags);
 
 // --- Paint (pull model): render the view into a caller BGRA buffer -------------
 // `bits` must hold width*height*4 bytes; `pitch` is the row stride in bytes

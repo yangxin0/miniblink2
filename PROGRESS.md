@@ -2137,8 +2137,21 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   the async callbacks (wkeOnLoadingFinish/PaintBitUpdated/TitleChanged), and the rest of the ~200-fn
   surface. This proves the wke-on-modern-Blink path end to end.
 
+- ✅ wke slice grown: mouse input — wkeFireMouseEvent (2026-06-24). Next roadmap step after starting the
+  layer. Added the upstream WKE_MSG_* mouse message codes (0x0200 MOUSEMOVE / 0x0201 LBUTTONDOWN /
+  0x0202 LBUTTONUP / 0x0203 LBUTTONDBLCLK …) + the WKE_LBUTTON/etc. flag enums to wke.h, and
+  wkeFireMouseEvent(wv, message, x, y, flags) -> bool in wke.cc: MOUSEMOVE->mbSendMouseMove,
+  LBUTTONUP->mbSendMouseClick (the click completes on button-up, as mbSendMouseClick does its own
+  press+release; LBUTTONDOWN is a no-op), LBUTTONDBLCLK->two clicks; a 20ms settle after the click lets
+  handlers/layout apply. VERIFIED in wke_smoke without needing wkeRunJS: load a page whose body onclick
+  recolors the background blue->red, fire a down+up at the centre, repaint, and the centre pixel is red
+  -> "click fires onclick". wke_smoke now 6/6, exit 0, no survivors; mb_smoke still 131/131 (additive).
+  DEFERRED in this slice: keyboard (wkeFireKeyDown/Up/Press — verifying typed input needs reading a
+  field value, which wants wkeRunJS/jsValue) and right-click/wheel (no coord-based variant in mb_capi
+  yet).
+
 ### REMAINING ROADMAP
-- wke layer: grow the slice — input (wkeFireMouse/KeyEvent), more accessors, then the async callback
+- wke layer: grow the slice — keyboard input (wkeFireKey*), more accessors, then the async callback
   model, and eventually the jsValue scripting layer (wkeRunJS). Each is an incremental, testable slice.
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

@@ -151,6 +151,32 @@ void wkeSetUserAgent(wkeWebView webView, const utf8* userAgent) {
     mbSetUserAgent(webView->view, userAgent);
 }
 
+bool wkeFireMouseEvent(wkeWebView webView, unsigned int message, int x, int y,
+                       unsigned int /*flags*/) {
+  if (!webView || !webView->view)
+    return false;
+  switch (message) {
+    case WKE_MSG_MOUSEMOVE:
+      mbSendMouseMove(webView->view, x, y);
+      return true;
+    case WKE_MSG_LBUTTONDOWN:
+      // The click is delivered on the matching LBUTTONUP (mbSendMouseClick does
+      // its own press+release), so the press alone is a no-op.
+      return true;
+    case WKE_MSG_LBUTTONUP:
+      mbSendMouseClick(webView->view, x, y);
+      mbWait(webView->view, 20);  // let the click's handlers/layout settle
+      return true;
+    case WKE_MSG_LBUTTONDBLCLK:
+      mbSendMouseClick(webView->view, x, y);
+      mbSendMouseClick(webView->view, x, y);  // approximate a double click
+      mbWait(webView->view, 20);
+      return true;
+    default:
+      return false;  // other buttons / wheel not in this slice
+  }
+}
+
 void wkePaint(wkeWebView webView, void* bits, int pitch) {
   if (!webView || !webView->view || !bits)
     return;
