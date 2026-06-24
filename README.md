@@ -44,6 +44,7 @@ that satisfies modern Blink so it runs without the full browser.
 | Custom request headers + default `Accept-Language` | ✅ |
 | On-screen window, GPU compositing | ⏳ roadmap |
 | IndexedDB (API present; `open()` degrades gracefully via `onerror` — needs an in-process `IDBFactory` backing store wired through the frame broker) | ⏳ roadmap |
+| Dedicated Web Workers (`new Worker(...)` constructs but the worker thread isn't serviced — needs worker-thread infrastructure) | ⏳ roadmap |
 
 ## Tool: `mb_shot` (headless HTML → PNG)
 
