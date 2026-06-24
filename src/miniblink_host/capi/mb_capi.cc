@@ -261,6 +261,20 @@ int mbGetCookies(mbView* v, const char* url, char* out, int out_cap) {
   return static_cast<int>(result.size());
 }
 
+int mbGetAllCookies(mbView* v, char* out, int out_cap) {
+  if (!v || !v->impl)
+    return 0;
+  std::string result = v->impl->GetAllCookies();
+  if (out && out_cap > 0) {
+    int n = static_cast<int>(result.size());
+    int copy = n < out_cap - 1 ? n : out_cap - 1;
+    for (int i = 0; i < copy; ++i)
+      out[i] = result[i];
+    out[copy] = '\0';
+  }
+  return static_cast<int>(result.size());
+}
+
 void mbSetCookie(mbView* v, const char* url, const char* cookie) {
   if (v && v->impl)
     v->impl->SetCookie(url, cookie);

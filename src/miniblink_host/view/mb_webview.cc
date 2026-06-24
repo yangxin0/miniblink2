@@ -561,6 +561,10 @@ std::string MbWebView::GetCookies(const char* url) {
   return url ? MbGetCookiesForUrl(url) : std::string();
 }
 
+std::string MbWebView::GetAllCookies() {
+  return MbGetAllCookies();  // whole jar as a Netscape cookie file (in memory)
+}
+
 void MbWebView::SetCookie(const char* url, const char* cookie) {
   // Inject a cookie (a "name=value[; attrs]" string) into the shared HTTP jar for
   // `url`'s origin — the inverse of GetCookies, for restoring a saved session.

@@ -352,6 +352,20 @@ int main() {
           "wkeGetCookie/wkeSetCookie/wkePerformCookieCommand are safe + consistent");
   }
 
+  // wkeGetAllCookie (offline): the whole jar (Netscape format) lists an injected
+  // cookie regardless of the current document URL (unlike wkeGetCookie).
+  {
+    wkeSetCookie(wv, "http://alljar.test/",
+                 "ajk=allval123; expires=Fri, 31 Dec 2027 23:59:59 GMT");
+    const char* all = wkeGetAllCookie(wv);
+    const bool ok = std::strstr(all, "# Netscape") != nullptr &&
+                    std::strstr(all, "alljar.test") != nullptr &&
+                    std::strstr(all, "ajk") != nullptr &&
+                    std::strstr(all, "allval123") != nullptr;
+    wkePerformCookieCommand(wkeCookieCommandClearAllCookies);  // reset jar
+    check(ok, "wkeGetAllCookie dumps the whole jar (Netscape format)");
+  }
+
   // Cookie persistence (offline): inject a cookie, flush the jar to a file, and
   // inspect the file; then clear + reload and re-flush to prove it round-trips.
   {

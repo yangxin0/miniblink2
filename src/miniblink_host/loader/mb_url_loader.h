@@ -53,6 +53,12 @@ void MbClearCookieJar();
 bool MbSaveCookies(const std::string& path);
 bool MbLoadCookies(const std::string& path);
 
+// Snapshot the WHOLE shared cookie jar (every host, session + persistent) as a
+// Netscape cookie file in memory — the same content MbSaveCookies writes, but
+// returned as a string for in-memory session export (DB, network) with no temp
+// file. Empty if the cookie engine is unavailable.
+std::string MbGetAllCookies();
+
 // Process-wide HTTP(S) proxy for all network fetches, as a libcurl proxy string:
 // "http://host:port", "socks5://host:port", "host:port" (defaults to http), or
 // "" to force a direct connection (overriding any *_proxy env vars). Once set

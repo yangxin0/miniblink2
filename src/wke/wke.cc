@@ -45,6 +45,7 @@ struct _tagWkeWebView {
   std::string bridge_message_cache;  // backs the callback's message arg
   std::string source_cache;  // backs wkeGetSource's const utf8* return
   std::string cookie_cache;  // backs wkeGetCookie's const utf8* return
+  std::string all_cookie_cache;  // backs wkeGetAllCookie's const utf8* return
   // Pure wke view-state (not backed by the engine): an app-name, a transparent
   // flag mirror, and an app-owned key/value store threaded through callbacks.
   std::string name;
@@ -830,6 +831,23 @@ const utf8* wkeGetCookie(wkeWebView webView) {
   mbGetCookies(webView->view, url, buf.data(), static_cast<int>(buf.size()));
   webView->cookie_cache.assign(buf.data());
   return webView->cookie_cache.c_str();
+}
+
+const utf8* wkeGetAllCookie(wkeWebView webView) {
+  // The WHOLE jar (every host, session + persistent) as a Netscape cookie file,
+  // in memory — for full session export. Owned by the view, valid until the next
+  // wkeGetAllCookie on it. (Port extension; size-first via mbGetAllCookies.)
+  if (!webView || !webView->view)
+    return "";
+  const int len = mbGetAllCookies(webView->view, nullptr, 0);  // size first
+  if (len <= 0) {
+    webView->all_cookie_cache.clear();
+    return webView->all_cookie_cache.c_str();
+  }
+  std::vector<char> buf(static_cast<size_t>(len) + 1, 0);
+  mbGetAllCookies(webView->view, buf.data(), len + 1);
+  webView->all_cookie_cache.assign(buf.data());
+  return webView->all_cookie_cache.c_str();
 }
 
 void wkeSetCookie(wkeWebView webView, const utf8* url, const utf8* cookie) {

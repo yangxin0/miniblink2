@@ -474,17 +474,15 @@ void MbClearCookieJar() {
   curl_easy_cleanup(curl);
 }
 
-bool MbSaveCookies(const std::string& path) {
-  if (path.empty())
-    return false;
+std::string MbGetAllCookies() {
   // Snapshot the WHOLE shared jar (every host, session + persistent) via
-  // CURLINFO_COOKIELIST — the same list MbGetCookiesForUrl reads — and write it
-  // as a Netscape cookie file (curl's native format, also reloadable by curl
-  // itself). We format the file ourselves rather than relying on CURLOPT_COOKIEJAR
-  // flushing a shared store, which is unreliable without an actual transfer.
+  // CURLINFO_COOKIELIST — the same list MbGetCookiesForUrl reads — formatted as a
+  // Netscape cookie file in memory. We format it ourselves rather than relying on
+  // CURLOPT_COOKIEJAR flushing a shared store, which is unreliable without a
+  // transfer.
   CURL* curl = curl_easy_init();
   if (!curl)
-    return false;
+    return std::string();
   curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");  // enable the cookie engine
   if (CURLSH* share = CookieShare())
     curl_easy_setopt(curl, CURLOPT_SHARE, share);
@@ -499,7 +497,16 @@ bool MbSaveCookies(const std::string& path) {
   }
   curl_slist_free_all(list);
   curl_easy_cleanup(curl);
-  return base::WriteFile(base::FilePath::FromUTF8Unsafe(path), out);
+  return out;
+}
+
+bool MbSaveCookies(const std::string& path) {
+  if (path.empty())
+    return false;
+  // Write the whole-jar snapshot (a Netscape cookie file, curl's native format,
+  // reloadable by curl itself) to `path`.
+  return base::WriteFile(base::FilePath::FromUTF8Unsafe(path),
+                         MbGetAllCookies());
 }
 
 bool MbLoadCookies(const std::string& path) {
