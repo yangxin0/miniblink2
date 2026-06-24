@@ -84,6 +84,13 @@ MB_EXPORT int mbClickSelector(mbView*, const char* css_selector);
 // or the element has no box.
 MB_EXPORT int mbHoverSelector(mbView*, const char* css_selector);
 
+// Scroll the first element matching `css_selector` to the viewport center
+// (Element.scrollIntoView). Returns 1 on success, 0 if nothing matches. The
+// click/double-click/right-click/hover selector ops already do this internally,
+// so a below-the-fold target is clickable; call this directly to trigger lazy
+// loading or to frame an element before a screenshot.
+MB_EXPORT int mbScrollIntoView(mbView*, const char* css_selector);
+
 // Double-click the first element matching `css_selector` (its center), firing a
 // dblclick — for text selection, expand/collapse, inline edit. Returns 1 on
 // success, 0 if nothing matches or the element has no box.

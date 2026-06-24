@@ -67,6 +67,11 @@ class MbWebView {
   // triggers form-field validation.
   bool FocusSelector(const char* css_selector);
   bool BlurSelector(const char* css_selector);
+  // Scroll the first match to the viewport center (Element.scrollIntoView). The
+  // coordinate-based interactions below (click/hover) call this first so an
+  // element below the fold gets an on-screen box to target; also independently
+  // useful to trigger lazy-loading or to frame an element for a screenshot.
+  bool ScrollIntoView(const char* css_selector);
   // Full scrollable document size (logical px), >= viewport — for full-page
   // capture (resize to this height, then paint).
   bool GetContentSize(int* w, int* h);

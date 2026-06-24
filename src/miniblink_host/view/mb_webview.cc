@@ -284,9 +284,26 @@ void MbWebView::SendMouseClick(int x, int y) {
     widget_->SendMouseClick(x, y);
 }
 
+bool MbWebView::ScrollIntoView(const char* css_selector) {
+  // Scroll the first match to the viewport center. scrollIntoView forces layout
+  // and updates the scroll offset synchronously, so a getBoundingClientRect that
+  // runs right after sees the element's new (in-viewport) position. False if no
+  // element matches. Used by the click/hover paths and exposed via the C API.
+  if (!css_selector)
+    return false;
+  std::string js =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+      "\");if(!e||!e.scrollIntoView)return '0';"
+      "e.scrollIntoView({block:'center',inline:'center'});return '1';})()";
+  return EvalToString(js.c_str()) == "1";
+}
+
 bool MbWebView::ClickSelector(const char* css_selector) {
   if (!css_selector || !widget_)
     return false;
+  // Bring the element on-screen first so a below-the-fold target has a box
+  // inside the viewport for the coordinate-based click to land on.
+  ScrollIntoView(css_selector);
   // Embed the selector as a JS string literal, ask the page for the element's
   // center, then click there. Returns "" if there is no match or no box.
   std::string js =
@@ -341,6 +358,7 @@ bool MbWebView::SelectOption(const char* css_selector, const char* value) {
 bool MbWebView::DoubleClickSelector(const char* css_selector) {
   // Double-click the first match's center (fires dblclick — text selection,
   // expand/collapse, inline edit). Returns false if no match / no box.
+  ScrollIntoView(css_selector);  // bring a below-fold target on-screen
   int x = 0, y = 0, w = 0, h = 0;
   if (!widget_ || !GetElementRect(css_selector, &x, &y, &w, &h) ||
       (w <= 0 && h <= 0))
@@ -351,6 +369,7 @@ bool MbWebView::DoubleClickSelector(const char* css_selector) {
 
 bool MbWebView::RightClickSelector(const char* css_selector) {
   // Right-click the first match's center (fires contextmenu — right-click menus).
+  ScrollIntoView(css_selector);  // bring a below-fold target on-screen
   int x = 0, y = 0, w = 0, h = 0;
   if (!widget_ || !GetElementRect(css_selector, &x, &y, &w, &h) ||
       (w <= 0 && h <= 0))
@@ -363,6 +382,7 @@ bool MbWebView::HoverSelector(const char* css_selector) {
   // Move the pointer to the first match's center, generating mousemove +
   // mouseover/mouseenter and applying :hover — for dropdown menus, tooltips, and
   // hover-revealed controls. Returns false if there's no match or no box.
+  ScrollIntoView(css_selector);  // bring a below-fold target on-screen
   int x = 0, y = 0, w = 0, h = 0;
   if (!widget_ || !GetElementRect(css_selector, &x, &y, &w, &h) ||
       (w <= 0 && h <= 0))

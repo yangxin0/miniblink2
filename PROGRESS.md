@@ -1929,6 +1929,20 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   (mbGetAttribute also -1 when the attribute is absent/null). Smoke case 102 verifies all six paths
   (text, attr, href, no-match -1, empty==0, absent -1). 123/123, no survivors. C API now 58 fns.
 
+- ✅ DONE: below-the-fold interaction auto-scrolls — mbScrollIntoView + click-path fix (2026-06-24).
+  A real FUNCTIONAL bug, not just coverage: the selector interactions (mbClickSelector/DoubleClick/
+  RightClick/Hover) compute the target's center from getBoundingClientRect (VIEWPORT coords) then send
+  a mouse event there. For an element below the fold the box is outside the viewport, so the click
+  landed on nothing — reproduced with a button ~2000px down in a 400px view (onclick never fired;
+  mb_shot --click left it reading "Click me"). Fix: a new MbWebView::ScrollIntoView(selector) (Element.
+  scrollIntoView({block:'center'}), which forces layout + updates the scroll offset synchronously, so
+  the very next getBoundingClientRect sees the new in-viewport position) is now called first inside all
+  four coordinate-based interaction methods. Also exposed as mbScrollIntoView for direct use (lazy-load
+  triggers, framing an element before a screenshot). VERIFIED both ways: smoke case 103 (below=1
+  scroll=1 inview=1 click=1) and the original mb_shot repro now reads "HIT". 124/124, no survivors.
+  C API now 59 fns. (FocusSelector/BlurSelector/Fill/Select use JS .focus()/.value, not coordinates,
+  so they were never affected.)
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

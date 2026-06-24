@@ -2230,6 +2230,40 @@ int main() {
                (empty_ok ? "1" : "0") + " absent=" + (absent ? "1" : "0"));
   }
 
+  // 103. Below-the-fold interaction auto-scrolls. A button ~2000px down is
+  // outside a 400px viewport, so a coordinate-based click would miss; the click
+  // path now calls scrollIntoView first. Also exercise mbScrollIntoView directly.
+  {
+    mbResize(v, 400, 400);
+    mbLoadHTML(v,
+        "<body style='margin:0'><div style='height:2000px'></div>"
+        "<button id='b' onclick='window.__c=1'>go</button>"
+        "<div style='height:600px'></div></body>", "about:blank");
+    mbWait(v, 30);
+    // Before any scroll, the button is far below the fold.
+    const bool below = std::atoi(Eval(v,
+        "String(Math.round(document.getElementById('b')"
+        ".getBoundingClientRect().top))").c_str()) > 400;
+    // mbScrollIntoView brings it into the viewport [0,400).
+    const bool scrolled = mbScrollIntoView(v, "#b") == 1;
+    const int top_after = std::atoi(Eval(v,
+        "String(Math.round(document.getElementById('b')"
+        ".getBoundingClientRect().top))").c_str());
+    const bool in_view = top_after >= 0 && top_after < 400;
+    // The click path auto-scrolls + lands even starting scrolled elsewhere.
+    mbRunJS(v, "window.scrollTo(0,0);window.__c=0;");
+    mbWait(v, 20);
+    mbClickSelector(v, "#b");
+    mbWait(v, 30);
+    const bool clicked = Eval(v, "String(window.__c||0)") == "1";
+    Expect(below && scrolled && in_view && clicked,
+           "below-fold element auto-scrolls into view for click",
+           std::string("below=") + (below ? "1" : "0") + " scroll=" +
+               (scrolled ? "1" : "0") + " inview=" + (in_view ? "1" : "0") +
+               " click=" + (clicked ? "1" : "0"));
+    mbResize(v, W, H);  // restore the shared viewport for later cases
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
