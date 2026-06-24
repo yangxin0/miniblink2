@@ -96,6 +96,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- docs: README — replaced the stale flat C-ABI list (showed ~40 of 72 fns) with an accurate grouped overview of all 72 mb_capi functions + a canonical flow snippet; verified every documented name exists in mb_capi.h (0 drift). README-only.
 - capi: mbPostURL — host-driven POST navigation (MbWebView::PostURL → MbFetchUrl with POST; the loader already supported it, defaults Content-Type to form-urlencoded). Completes GET-only mbLoadURL. Net-gated case 43 (httpbin/post echoes mbk=postval -> status 200; net suite 145/145). Default mb_smoke 132/132.
 - capi: mbScrollTo + mb_shot --scroll-to — absolute viewport scroll (window.scrollTo via the eval path), distinct from --full's resize (fixed/sticky render correctly). Applied before extract/capture so --eval + the shot see the scrolled state. mb_smoke 132/132 (scrollY==250); mb_shot --scroll-to 250 -> 250.
 - docs: README — added a "wke compatibility layer" section (supported surface, grouped, + a canonical headless usage example) and fixed the architecture diagram (wke is real now, not "future"); noted the ABI has outgrown the listed core. Verified all 44 documented wke symbols exist in wke.h. README-only (no code; tests unchanged).

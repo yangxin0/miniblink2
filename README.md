@@ -173,48 +173,44 @@ See `docs/interface-surface.md` for the exact minimal Blink embedding surface, a
 
 ## Public C ABI (`src/miniblink_host/capi/mb_capi.h`)
 
+72 functions; the header has the full, commented signatures. The canonical flow —
+boot, render, read back, screenshot, shut down:
+
 ```c
-int   mbInitialize(void);                 // boot the engine (once)
-mbView* mbCreateView(int w, int h);
-void  mbLoadHTML(mbView*, const char* html, const char* base_url);
-void  mbLoadURL(mbView*, const char* url);          // file:// today
-void  mbWait(mbView*, int ms);                      // drive timers/async for ms
-int   mbWaitForSelector(mbView*, const char* css, int timeout_ms);  // wait for element
-int   mbWaitForFunction(mbView*, const char* js_expr, int timeout_ms);  // wait for JS predicate
-void  mbRunJS(mbView*, const char* script);         // host -> page: drive it
-void  mbSetInitScript(mbView*, const char* script); // run before each page's own scripts
-int   mbEvalJS(mbView*, const char* script, char* out, int cap);  // host <- page: read back
-int   mbEvalJSIsolated(mbView*, const char* script, char* out, int cap);  // isolated world
-int   mbGetCookies(mbView*, const char* url, char* out, int cap);  // export the session jar
-int   mbDrainConsole(mbView*, char* out, int cap);  // drain captured console output
-void  mbSendMouseClick(mbView*, int x, int y);      // synthesize a click
-int   mbClickSelector(mbView*, const char* css);    // click element by selector (page.click)
-int   mbFillSelector(mbView*, const char* css, const char* text);  // fill input by selector (fill)
-void  mbSendMouseMove(mbView*, int x, int y);       // move pointer: hover + mousemove
-void  mbSetDeviceScaleFactor(mbView*, float scale); // HiDPI: devicePixelRatio + Nx raster
-void  mbSetUserAgent(mbView*, const char* ua);      // navigator.userAgent + HTTP requests
-void  mbSetTransparentBackground(mbView*, int on);  // omitBackground: alpha-preserving capture
-void  mbSetLoadImages(mbView*, int enabled);        // 0 = skip network image loads
-void  mbSetDarkMode(mbView*, int dark);             // emulate prefers-color-scheme: dark
-void  mbSetLocale(mbView*, const char* langs);      // navigator.language(s)
-void  mbSetTimezone(mbView*, const char* iana_tz);  // Date/Intl timezone
-void  mbSetExtraHeaders(mbView*, const char* headers); // extra HTTP request headers
-void  mbSendText(mbView*, const char* text);        // type UTF-8 into the focused element
-void  mbSendScroll(mbView*, int x, int y, int dx, int dy);  // scroll the page (dy>0 = down)
-int   mbPaintToBitmap(mbView*, void* bgra, int w, int h, int stride);
-int   mbSavePdf(mbView*, const char* path);          // print document -> paginated PDF
-int   mbSavePngRect(mbView*, const char* path, int x, int y, int w, int h);  // clip -> PNG
-int   mbPaintRectToBitmap(mbView*, void* bgra, int x, int y, int w, int h, int stride);
-int   mbSavePng(mbView*, const char* path, int w, int h);  // render -> PNG file
-void  mbResize(mbView*, int w, int h);
-void  mbDestroyView(mbView*);
-void  mbShutdown(void);
+mbInitialize();
+mbView* v = mbCreateView(1200, 800);
+mbLoadURL(v, "https://example.com");
+mbWaitForFunction(v, "document.readyState==='complete'", 5000);
+char buf[256]; mbEvalJS(v, "document.title", buf, sizeof buf);
+mbSavePng(v, "shot.png", 1200, 800);
+mbDestroyView(v);
+mbShutdown();
 ```
 
-(The ABI has grown well beyond this core — scraping by selector, the network knobs
-`mbSetProxy`/`mbSetIgnoreCertErrors`/`mbSetFollowRedirects`, `mbGetHttpStatus`/
-`mbGetResponseHeaders`, cookie-jar `mbSaveCookies`/`mbLoadCookies`, in-memory
-`mbEncodePng`, and more; see `mb_capi.h` for the full, commented list.)
+Grouped overview (see `mb_capi.h` for the exact signatures):
+
+- **Lifecycle / pump:** `mbInitialize` `mbShutdown` `mbCreateView` `mbDestroyView`
+  `mbResize` `mbPumpMessages` `mbWait` `mbWaitForSelector` `mbWaitForFunction`
+- **Load / navigation:** `mbLoadHTML` `mbLoadURL` `mbPostURL` `mbReload`
+  `mbGoBack`/`mbGoForward`/`mbCanGoBack`/`mbCanGoForward` `mbGetURL` `mbGetTitle`
+  `mbGetHttpStatus` `mbGetResponseHeaders`
+- **Scripting:** `mbRunJS` `mbSetInitScript` `mbEvalJS` `mbEvalJSEx` (value + JS
+  type) `mbEvalJSIsolated` `mbDrainConsole`
+- **Scraping:** `mbGetText` `mbGetHTML` `mbGetTextForSelector` `mbGetAttribute`
+  `mbGetComputedStyle` `mbCountSelector` `mbGetElementRect` `mbGetContentSize`
+- **Input:** `mbSendMouseClick` `mbSendMouseMove` `mbSendText` `mbSendKey`
+  `mbSendScroll` `mbScrollTo`; by selector `mbClickSelector`
+  `mbDoubleClickSelector` `mbRightClickSelector` `mbHoverSelector`
+  `mbFocusSelector` `mbBlurSelector` `mbFillSelector` `mbSelectOption`
+  `mbScrollIntoView`
+- **Capture / output:** `mbPaintToBitmap` `mbPaintRectToBitmap` `mbSavePng`
+  `mbSavePngRect` `mbSavePdf` `mbEncodePng` (in-memory PNG bytes)
+- **Cookies / session:** `mbGetCookies` `mbSetCookie` `mbClearCookies`
+  `mbSaveCookies`/`mbLoadCookies` (file jar)
+- **Network config:** `mbSetProxy` `mbSetIgnoreCertErrors` `mbSetFollowRedirects`
+  `mbSetExtraHeaders` `mbSetUserAgent` `mbSetLoadImages`
+- **Page config:** `mbSetDeviceScaleFactor` `mbSetTransparentBackground`
+  `mbSetDarkMode` `mbSetLocale` `mbSetTimezone`
 
 ## wke compatibility layer (`src/wke/wke.h`)
 
