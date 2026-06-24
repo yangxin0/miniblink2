@@ -64,7 +64,7 @@ mb_shot \
   [--css STYLES] [--auto-scroll] [--scroll-to Y] [--scroll-to-selector CSS] \
   # extract (to stdout)
   [--text] [--html] [--eval JS] [--value CSS] [--checked CSS] [--visible CSS] \
-  [--rect CSS] [--style CSS PROP] [--text-all CSS] [--attr-all CSS NAME] \
+  [--rect CSS] [--style CSS PROP] [--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] \
   [--requests] [--console] [--headers] \
   # capture
   [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
@@ -114,7 +114,8 @@ trackers, images) for faster, cleaner captures.
 
 The extraction flags read structured data to stdout: `--value CSS` (a control's live
 `.value`), `--checked CSS` (checkbox/radio `1`/`0`), `--visible CSS` (`1`/`0`/`-1`),
-`--rect CSS` (`x,y,w,h`), `--style CSS PROP` (a resolved computed style), `--text-all
+`--rect CSS` (`x,y,w,h`), `--style CSS PROP` (a resolved computed style), `--attr CSS
+NAME` (the first match's attribute — an `href`/`src`/`content`), `--text-all
 CSS` / `--attr-all CSS NAME` (a JSON array across *all* matches — one-shot list
 scraping), and `--requests` (the subresource URLs the page fetched).
 

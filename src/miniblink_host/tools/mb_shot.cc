@@ -83,6 +83,8 @@ int main(int argc, char** argv) {
   std::string style_selector;    // print a computed style property of this selector
   std::string style_prop;        // the CSS property name for --style
   std::string text_all_selector;  // print JSON array of all matches' innerText
+  std::string attr_selector;      // print first match's attribute value
+  std::string attr_name;          // attribute name for --attr
   std::string attr_all_selector;  // print JSON array of all matches' attribute
   std::string attr_all_name;      // attribute name for --attr-all
   std::string proxy;           // libcurl proxy string for network fetches
@@ -146,6 +148,9 @@ int main(int argc, char** argv) {
       style_prop = argv[++i];
     } else if (a == "--text-all" && i + 1 < argc) {
       text_all_selector = argv[++i];
+    } else if (a == "--attr" && i + 2 < argc) {
+      attr_selector = argv[++i];
+      attr_name = argv[++i];
     } else if (a == "--attr-all" && i + 2 < argc) {
       attr_all_selector = argv[++i];
       attr_all_name = argv[++i];
@@ -208,7 +213,7 @@ int main(int argc, char** argv) {
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
         "[--transparent] [--text] [--html] [--requests] [--eval JS] [--value CSS] "
         "[--checked CSS] [--visible CSS] [--rect CSS] [--style CSS PROP] "
-        "[--text-all CSS] [--attr-all CSS NAME] "
+        "[--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
         "[--click CSS] [--drag FROM TO] [--dispatch CSS EVT] "
         "[--wait-selector CSS] [--wait-visible CSS] "
@@ -226,6 +231,19 @@ int main(int argc, char** argv) {
   const char* out = pos[1];
   const int w = pos.size() > 2 ? std::atoi(pos[2]) : 1200;
   const int h = pos.size() > 3 ? std::atoi(pos[3]) : 800;
+
+  // A non-positive width/height (e.g. a non-numeric positional reaching atoi,
+  // the classic mistake of using a "--out path" flag that mb_shot doesn't have)
+  // would allocate a zero-size bitmap and abort deep in Skia's PNG encoder.
+  // Fail fast with a clear message instead.
+  if (w <= 0 || h <= 0) {
+    std::fprintf(stderr,
+                 "mb_shot: width/height must be positive (got %dx%d). "
+                 "The output path is a positional arg, not a flag: "
+                 "mb_shot <input> <out.png> [width height]\n",
+                 w, h);
+    return 2;
+  }
 
   if (!mbInitialize()) {
     std::fprintf(stderr, "mb_shot: engine init failed\n");
@@ -547,6 +565,22 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "mb_shot: --text-all '%s' invalid selector\n",
                    text_all_selector.c_str());
     std::fwrite(tab.data(), 1, std::strlen(tab.data()), stdout);
+    std::fputc('\n', stdout);
+  }
+
+  // --attr CSS NAME: print the first match's NAME attribute value (e.g. an href
+  // or src), then a newline. Empty line + a stderr warning when no element
+  // matches or the attribute is absent (mbGetAttribute returns -1 for both),
+  // distinct from a genuinely empty attribute value.
+  if (!attr_selector.empty()) {
+    std::vector<char> abuf(1 << 16, 0);  // 64 KiB
+    int n = mbGetAttribute(view, attr_selector.c_str(), attr_name.c_str(),
+                           abuf.data(), static_cast<int>(abuf.size()));
+    if (n < 0)
+      std::fprintf(stderr,
+                   "mb_shot: --attr '%s' [%s] matched no element / no attribute\n",
+                   attr_selector.c_str(), attr_name.c_str());
+    std::fwrite(abuf.data(), 1, std::strlen(abuf.data()), stdout);
     std::fputc('\n', stdout);
   }
 
