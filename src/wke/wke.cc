@@ -160,6 +160,15 @@ void DrainBridgeToCallback(wkeWebView wv) {
   }
 }
 
+// Deliver any console output / window.mbBridge messages that a just-run page
+// event handler (a selector click/fill/etc.) produced — the same drains the
+// load and wkeRunJS paths do, so page->host signals from handlers aren't
+// stranded until the next eval.
+void DrainPageEvents(wkeWebView wv) {
+  DrainConsoleToCallback(wv);
+  DrainBridgeToCallback(wv);
+}
+
 // Re-apply the view's zoom to the current document. This port models wke's page
 // zoom as CSS zoom on the document element, which scales layout (and the
 // coordinates getBoundingClientRect reports). A factor of 1.0 is a no-op.
@@ -607,59 +616,89 @@ bool wkeGetElementRect(wkeWebView webView, const char* selector, int* x, int* y,
 }
 
 // --- DOM actions (drive the page without writing JS) ---------------------------
+// Each selector action runs page JS (event handlers), so after acting it drains
+// console + window.mbBridge output via DrainPageEvents — so a page->host message
+// sent from, e.g., an onclick handler reaches the host immediately.
 bool wkeClickSelector(wkeWebView webView, const char* selector) {
   // Click the first element matching `selector` (resolves its box and dispatches
   // a real click). False if nothing matches or it has no box. (Port extension.)
-  return webView && webView->view && selector &&
-         mbClickSelector(webView->view, selector) != 0;
+  if (!webView || !webView->view || !selector)
+    return false;
+  const bool ok = mbClickSelector(webView->view, selector) != 0;
+  DrainPageEvents(webView);
+  return ok;
 }
 
 bool wkeFillSelector(wkeWebView webView, const char* selector,
                      const utf8* text) {
   // Set the value of the first matching input/textarea and fire input+change
   // (so frameworks like React observe it). False if nothing matches. (Port ext.)
-  return webView && webView->view && selector && text &&
-         mbFillSelector(webView->view, selector, text) != 0;
+  if (!webView || !webView->view || !selector || !text)
+    return false;
+  const bool ok = mbFillSelector(webView->view, selector, text) != 0;
+  DrainPageEvents(webView);
+  return ok;
 }
 
 bool wkeSelectOption(wkeWebView webView, const char* selector,
                      const utf8* value) {
   // Choose a <select> option whose value (or visible text) equals `value`,
   // firing input+change. False if no <select> or no matching option. (Port ext.)
-  return webView && webView->view && selector && value &&
-         mbSelectOption(webView->view, selector, value) != 0;
+  if (!webView || !webView->view || !selector || !value)
+    return false;
+  const bool ok = mbSelectOption(webView->view, selector, value) != 0;
+  DrainPageEvents(webView);
+  return ok;
 }
 
 bool wkeScrollIntoView(wkeWebView webView, const char* selector) {
   // Scroll the first matching element into the viewport (to trigger lazy
   // loading or frame it before a screenshot). False if nothing matches. The
   // click/fill selector ops already do this internally. (Port extension.)
-  return webView && webView->view && selector &&
-         mbScrollIntoView(webView->view, selector) != 0;
+  if (!webView || !webView->view || !selector)
+    return false;
+  const bool ok = mbScrollIntoView(webView->view, selector) != 0;
+  DrainPageEvents(webView);
+  return ok;
 }
 
 // Additional pointer/focus actions on the first selector match (each false if
 // nothing matches). Hover fires mouseover/enter; double/right-click fire dblclick
 // /contextmenu; focus/blur move the active element. (Port extensions.)
 bool wkeHoverSelector(wkeWebView webView, const char* selector) {
-  return webView && webView->view && selector &&
-         mbHoverSelector(webView->view, selector) != 0;
+  if (!webView || !webView->view || !selector)
+    return false;
+  const bool ok = mbHoverSelector(webView->view, selector) != 0;
+  DrainPageEvents(webView);
+  return ok;
 }
 bool wkeDoubleClickSelector(wkeWebView webView, const char* selector) {
-  return webView && webView->view && selector &&
-         mbDoubleClickSelector(webView->view, selector) != 0;
+  if (!webView || !webView->view || !selector)
+    return false;
+  const bool ok = mbDoubleClickSelector(webView->view, selector) != 0;
+  DrainPageEvents(webView);
+  return ok;
 }
 bool wkeRightClickSelector(wkeWebView webView, const char* selector) {
-  return webView && webView->view && selector &&
-         mbRightClickSelector(webView->view, selector) != 0;
+  if (!webView || !webView->view || !selector)
+    return false;
+  const bool ok = mbRightClickSelector(webView->view, selector) != 0;
+  DrainPageEvents(webView);
+  return ok;
 }
 bool wkeFocusSelector(wkeWebView webView, const char* selector) {
-  return webView && webView->view && selector &&
-         mbFocusSelector(webView->view, selector) != 0;
+  if (!webView || !webView->view || !selector)
+    return false;
+  const bool ok = mbFocusSelector(webView->view, selector) != 0;
+  DrainPageEvents(webView);
+  return ok;
 }
 bool wkeBlurSelector(wkeWebView webView, const char* selector) {
-  return webView && webView->view && selector &&
-         mbBlurSelector(webView->view, selector) != 0;
+  if (!webView || !webView->view || !selector)
+    return false;
+  const bool ok = mbBlurSelector(webView->view, selector) != 0;
+  DrainPageEvents(webView);
+  return ok;
 }
 
 // --- Waits (pump the loop until a condition or timeout) ------------------------

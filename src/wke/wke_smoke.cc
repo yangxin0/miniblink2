@@ -906,9 +906,20 @@ int main() {
     const bool got = g_bridge_n == 1 &&
                      std::strcmp(g_bridge_channel, "greet") == 0 &&
                      std::strcmp(g_bridge_message, "hello") == 0;
+
+    // Realistic path: a page event handler calls window.mbBridge; the selector
+    // action drains it, so the host hears it with no manual wkeRunJS.
+    wkeLoadHTML(wv, "<body><button id='b' onclick=\"window.mbBridge('click',"
+                    "'fired')\">b</button></body>");
+    g_bridge_n = 0;
+    wkeClickSelector(wv, "#b");
+    const bool from_handler = g_bridge_n == 1 &&
+                              std::strcmp(g_bridge_channel, "click") == 0 &&
+                              std::strcmp(g_bridge_message, "fired") == 0;
+
     wkeOnJsBridge(wv, nullptr, nullptr);  // unregister (removes the bootstrap)
-    check(defined && got,
-          "wkeOnJsBridge delivers window.mbBridge(channel,message) to the host");
+    check(defined && got && from_handler,
+          "wkeOnJsBridge delivers window.mbBridge from eval AND event handlers");
   }
 
   // jsToString (offline): JSON for objects/arrays, coerced value for primitives.
