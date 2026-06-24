@@ -161,6 +161,11 @@ class MbWebView {
   // (one call for list scraping, vs count + :nth-of-type loop). Returns false on
   // an invalid selector; zero matches yields the valid "[]".
   bool GetAllTextForSelector(const char* css_selector, std::string* out);
+  // getAttribute(attr) of EVERY match as a JSON array string (absent attr ->
+  // null, preserving index alignment); raw value, not the resolved property.
+  // Returns false on an invalid selector; "[]" for zero matches.
+  bool GetAllAttributeForSelector(const char* css_selector, const char* attr,
+                                  std::string* out);
   bool GetAttribute(const char* css_selector, const char* attr, std::string* out);
   // setAttribute(attr, value) on the first match (value="" for a bare boolean
   // attribute like 'disabled'). Returns true if an element matched. The write

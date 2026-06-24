@@ -56,6 +56,7 @@ struct _tagWkeWebView {
   bool editable = false;     // wkeSetEditable; re-applied after each load
   std::string selector_text_cache;  // backs wkeGetTextForSelector's return
   std::string selector_alltext_cache;  // backs wkeGetAllTextForSelector's return
+  std::string selector_allattr_cache;  // backs wkeGetAllAttributeForSelector's return
   std::string selector_attr_cache;  // backs wkeGetAttribute's return
   std::string selector_value_cache; // backs wkeGetValueForSelector's return
   std::string computed_style_cache;  // backs wkeGetComputedStyle's return
@@ -631,6 +632,28 @@ const utf8* wkeGetAllTextForSelector(wkeWebView webView, const char* selector) {
   mbGetAllTextForSelector(webView->view, selector, buf.data(), len + 1);
   webView->selector_alltext_cache.assign(buf.data());
   return webView->selector_alltext_cache.c_str();
+}
+
+const utf8* wkeGetAllAttributeForSelector(wkeWebView webView,
+                                          const char* selector,
+                                          const char* attr) {
+  // getAttribute(attr) of EVERY match as a JSON array string (absent -> null;
+  // "[]" for none, "" for an invalid selector). Owned by the view. (Port ext.)
+  if (!webView || !webView->view || !selector || !attr) {
+    if (webView)
+      webView->selector_allattr_cache.clear();
+    return webView ? webView->selector_allattr_cache.c_str() : "";
+  }
+  const int len =
+      mbGetAllAttributeForSelector(webView->view, selector, attr, nullptr, 0);
+  if (len <= 0) {  // -1 invalid selector
+    webView->selector_allattr_cache.clear();
+    return webView->selector_allattr_cache.c_str();
+  }
+  std::vector<char> buf(static_cast<size_t>(len) + 1, 0);
+  mbGetAllAttributeForSelector(webView->view, selector, attr, buf.data(), len + 1);
+  webView->selector_allattr_cache.assign(buf.data());
+  return webView->selector_allattr_cache.c_str();
 }
 
 const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,

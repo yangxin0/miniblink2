@@ -2418,6 +2418,26 @@ int main() {
                (none_ok ? "1" : "0") + " bad=" + (bad_ok ? "1" : "0"));
   }
 
+  // 102b4. mbGetAllAttributeForSelector scrapes one attribute across all matches
+  // as a JSON array; a missing attribute -> null; raw value (href stays "/3").
+  {
+    mbLoadHTML(v, "<body><a class='l' href='/1'>1</a>"
+                  "<a class='l' href='/2'>2</a>"
+                  "<a class='l'>3</a></body>", "about:blank");  // 3rd lacks href
+    char jb[256] = {0};
+    int jlen = mbGetAllAttributeForSelector(v, ".l", "href", jb, sizeof(jb));
+    const bool hrefs_ok = jlen > 0 && std::string(jb) == "[\"/1\",\"/2\",null]";
+    char nb[16] = {0};
+    mbGetAllAttributeForSelector(v, ".none", "href", nb, sizeof(nb));
+    const bool none_ok = std::string(nb) == "[]";
+    const bool bad_ok =
+        mbGetAllAttributeForSelector(v, "(((", "href", jb, sizeof(jb)) == -1;
+    Expect(hrefs_ok && none_ok && bad_ok,
+           "mbGetAllAttributeForSelector returns a JSON array of an attr (null if absent)",
+           std::string("hrefs=") + (hrefs_ok ? "1" : "0") + " none=" +
+               (none_ok ? "1" : "0") + " bad=" + (bad_ok ? "1" : "0"));
+  }
+
   // 102c. mbGetValueForSelector reads the LIVE .value (post-typing/selection),
   // distinct from mbGetAttribute's static "value" attribute, with the same
   // -1 no-match / no-value-property sentinel.

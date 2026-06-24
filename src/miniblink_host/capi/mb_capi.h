@@ -296,6 +296,16 @@ MB_EXPORT int mbGetTextForSelector(mbView*, const char* css_selector, char* out,
 MB_EXPORT int mbGetAllTextForSelector(mbView*, const char* css_selector,
                                       char* out, int out_cap);
 
+// Write attribute `attr` of EVERY element matching `css_selector` as a JSON array
+// string (e.g. ["/a","/b"] for all link hrefs) into `out` — list scraping of an
+// attribute in one call. An element missing the attribute contributes JSON null
+// (keeping index alignment with mbGetAllTextForSelector). Raw attribute value,
+// not the resolved property. Returns the length (>=0; "[]" for no matches) or -1
+// on an invalid selector. Size first with out=NULL/out_cap=0.
+MB_EXPORT int mbGetAllAttributeForSelector(mbView*, const char* css_selector,
+                                           const char* attr, char* out,
+                                           int out_cap);
+
 // Write the value of attribute `attr` on the first element matching
 // `css_selector` into `out`. Returns the value's length in bytes (>=0), or -1 if
 // no element matches OR the attribute is absent (null). Size first with

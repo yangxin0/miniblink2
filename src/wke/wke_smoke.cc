@@ -1112,6 +1112,22 @@ int main() {
           "wkeGetAllTextForSelector returns a JSON array of every match's text");
   }
 
+  // wkeGetAllAttributeForSelector scrapes one attribute across all matches as a
+  // JSON array; a missing attribute becomes null; raw value (href stays "/3").
+  {
+    wkeLoadHTML(wv, "<body><a class='l' href='/1'>1</a>"
+                    "<a class='l' href='/2'>2</a>"
+                    "<a class='l'>3</a></body>");  // 3rd has no href
+    const bool hrefs_ok = std::strcmp(wkeGetAllAttributeForSelector(wv, ".l", "href"),
+                                      "[\"/1\",\"/2\",null]") == 0;
+    const bool none_ok =
+        std::strcmp(wkeGetAllAttributeForSelector(wv, ".none", "href"), "[]") == 0;
+    const bool bad_ok =
+        std::strcmp(wkeGetAllAttributeForSelector(wv, "(((", "href"), "") == 0;
+    check(hrefs_ok && none_ok && bad_ok,
+          "wkeGetAllAttributeForSelector returns a JSON array of an attr (null if absent)");
+  }
+
   // wkeGetCheckedForSelector reports a checkbox/radio's live .checked state
   // (1/0), -1 for a non-checkable element, and tracks a click that toggles it.
   {

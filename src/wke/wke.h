@@ -201,6 +201,11 @@ WKE_API const utf8* wkeGetTextForSelector(wkeWebView webView,
 // invalid selector) — list scraping in one call. Owned by the view.
 WKE_API const utf8* wkeGetAllTextForSelector(wkeWebView webView,
                                              const char* selector);
+// getAttribute(attr) of EVERY match as a JSON array string (absent -> null;
+// "[]" for none, "" for an invalid selector). Owned by the view.
+WKE_API const utf8* wkeGetAllAttributeForSelector(wkeWebView webView,
+                                                  const char* selector,
+                                                  const char* attr);
 WKE_API const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,
                                     const char* attr);
 // setAttribute(attr, value) on the first match (value "" for a bare boolean

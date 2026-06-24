@@ -649,6 +649,28 @@ bool MbWebView::GetAllTextForSelector(const char* css_selector,
   return true;
 }
 
+bool MbWebView::GetAllAttributeForSelector(const char* css_selector,
+                                           const char* attr, std::string* out) {
+  if (!css_selector || !attr)
+    return false;
+  // getAttribute(attr) of EVERY match, as a JSON array string. An element whose
+  // attribute is absent contributes JSON null (preserving index alignment with
+  // GetAllTextForSelector). Raw attribute value (getAttribute), not the resolved
+  // property — so href stays "/path", not the absolutized URL. Invalid selector
+  // throws -> "" -> false; zero matches is the valid "[]".
+  std::string js =
+      "(function(){try{var ns=document.querySelectorAll(\"" +
+      JsEscape(css_selector) + "\");var a=[];for(var i=0;i<ns.length;i++)"
+      "a.push(ns[i].getAttribute(\"" + JsEscape(attr) +
+      "\"));return JSON.stringify(a);}catch(e){return '';}})()";
+  std::string s = EvalToString(js.c_str());
+  if (s.empty())
+    return false;  // invalid selector
+  if (out)
+    *out = s;
+  return true;
+}
+
 bool MbWebView::GetAttribute(const char* css_selector, const char* attr,
                              std::string* out) {
   if (!css_selector || !attr)
