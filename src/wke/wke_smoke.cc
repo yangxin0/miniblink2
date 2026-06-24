@@ -83,6 +83,22 @@ int main() {
                     "JSDoc") == 0,
         "wkeRunJS reads the DOM (document.title)");
 
+  // Keyboard: type into a focused field, then submit with Enter — verified by
+  // reading the field value and the form's submit flag through wkeRunJS.
+  wkeLoadHTML(wv,
+              "<form onsubmit='window.__sub=1;return false'>"
+              "<input id='k'></form>");
+  wkeRunJS(wv, "document.getElementById('k').focus()");
+  wkeFireKeyPressEvent(wv, 'a', 0, false);
+  wkeFireKeyPressEvent(wv, 'b', 0, false);
+  check(std::strcmp(jsToTempString(
+                        es, wkeRunJS(wv, "document.getElementById('k').value")),
+                    "ab") == 0,
+        "wkeFireKeyPressEvent types into the focused field ('ab')");
+  wkeFireKeyDownEvent(wv, 0x0D, 0, false);  // VK_RETURN -> submit
+  check(jsToInt(es, wkeRunJS(wv, "window.__sub|0")) == 1,
+        "wkeFireKeyDownEvent Enter triggers the form submit handler");
+
   wkeDestroyWebView(wv);
   wkeFinalize();
 

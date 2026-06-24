@@ -180,6 +180,74 @@ bool wkeFireMouseEvent(wkeWebView webView, unsigned int message, int x, int y,
   }
 }
 
+namespace {
+// Encode a Unicode code point as UTF-8 (mbSendText takes UTF-8).
+std::string CodePointToUtf8(unsigned int cp) {
+  std::string s;
+  if (cp < 0x80) {
+    s += static_cast<char>(cp);
+  } else if (cp < 0x800) {
+    s += static_cast<char>(0xC0 | (cp >> 6));
+    s += static_cast<char>(0x80 | (cp & 0x3F));
+  } else if (cp < 0x10000) {
+    s += static_cast<char>(0xE0 | (cp >> 12));
+    s += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+    s += static_cast<char>(0x80 | (cp & 0x3F));
+  } else {
+    s += static_cast<char>(0xF0 | (cp >> 18));
+    s += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+    s += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+    s += static_cast<char>(0x80 | (cp & 0x3F));
+  }
+  return s;
+}
+// Map a Win32 virtual-key code to the key name mbSendKey understands, or null for
+// a plain character key (whose insertion comes via wkeFireKeyPressEvent instead).
+const char* VkToKeyName(unsigned int vk) {
+  switch (vk) {
+    case 0x0D: return "Enter";
+    case 0x09: return "Tab";
+    case 0x1B: return "Escape";
+    case 0x08: return "Backspace";
+    case 0x2E: return "Delete";
+    case 0x25: return "ArrowLeft";
+    case 0x26: return "ArrowUp";
+    case 0x27: return "ArrowRight";
+    case 0x28: return "ArrowDown";
+    case 0x24: return "Home";
+    case 0x23: return "End";
+    case 0x21: return "PageUp";
+    case 0x22: return "PageDown";
+    default: return nullptr;
+  }
+}
+}  // namespace
+
+bool wkeFireKeyDownEvent(wkeWebView webView, unsigned int virtualKeyCode,
+                         unsigned int /*flags*/, bool /*systemKey*/) {
+  if (!webView || !webView->view)
+    return false;
+  if (const char* name = VkToKeyName(virtualKeyCode)) {
+    mbSendKey(webView->view, name);  // a special key's default action
+    mbWait(webView->view, 20);
+  }
+  // A plain character key is delivered by the matching wkeFireKeyPressEvent.
+  return true;
+}
+
+bool wkeFireKeyUpEvent(wkeWebView webView, unsigned int /*virtualKeyCode*/,
+                       unsigned int /*flags*/, bool /*systemKey*/) {
+  return webView && webView->view;  // no-op (the down/press did the work)
+}
+
+bool wkeFireKeyPressEvent(wkeWebView webView, unsigned int charCode,
+                          unsigned int /*flags*/, bool /*systemKey*/) {
+  if (!webView || !webView->view || charCode == 0)
+    return false;
+  mbSendText(webView->view, CodePointToUtf8(charCode).c_str());
+  return true;
+}
+
 void wkePaint(wkeWebView webView, void* bits, int pitch) {
   if (!webView || !webView->view || !bits)
     return;

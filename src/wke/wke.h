@@ -107,6 +107,20 @@ WKE_API void wkeSetUserAgent(wkeWebView webView, const utf8* userAgent);
 WKE_API bool wkeFireMouseEvent(wkeWebView webView, unsigned int message, int x,
                                int y, unsigned int flags);
 
+// Keyboard events to the focused element. wkeFireKeyPressEvent inserts the
+// character `charCode` (the text-producing event). wkeFireKeyDownEvent maps the
+// common special virtual-key codes (VK_RETURN=0x0D, VK_TAB=0x09, VK_BACK=0x08,
+// VK_DELETE=0x2E, VK_ESCAPE=0x1B, the arrows, Home/End/PageUp/PageDown) to their
+// default actions; a plain character key is a no-op there (the matching
+// wkeFireKeyPressEvent does the insertion, as with a real keyboard). KeyUp is a
+// no-op. `flags`/`systemKey` are advisory in this slice. Return true if handled.
+WKE_API bool wkeFireKeyDownEvent(wkeWebView webView, unsigned int virtualKeyCode,
+                                 unsigned int flags, bool systemKey);
+WKE_API bool wkeFireKeyUpEvent(wkeWebView webView, unsigned int virtualKeyCode,
+                               unsigned int flags, bool systemKey);
+WKE_API bool wkeFireKeyPressEvent(wkeWebView webView, unsigned int charCode,
+                                  unsigned int flags, bool systemKey);
+
 // --- Scripting -----------------------------------------------------------------
 // Run `script` in the page's main frame and return a handle to its result. Read
 // the result with the jsToXxx coercions below (string/int/double/boolean). The

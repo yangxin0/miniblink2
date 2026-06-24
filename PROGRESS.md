@@ -2164,8 +2164,20 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   wkeRunJS("document.title")=="JSDoc" (reads the live DOM). exit 0, no survivors; mb_smoke still 131/131
   (additive). LIMITATION noted: a script that opens a modal dialog aborts (the mbEvalJS modal caveat).
 
+- ✅ wke slice grown: KEYBOARD input — wkeFireKeyDown/Up/PressEvent (2026-06-24). The deferred item from
+  the mouse tick, now verifiable thanks to wkeRunJS. Added the three upstream signatures to wke.h, and
+  in wke.cc: wkeFireKeyPressEvent(charCode) -> mbSendText(CodePointToUtf8(charCode)) (the text-producing
+  event; a tiny UTF-8 encoder handles non-ASCII); wkeFireKeyDownEvent(vk) maps the common special VKs
+  (VK_RETURN 0x0D->Enter, VK_TAB 0x09->Tab, VK_BACK 0x08->Backspace, VK_DELETE 0x2E->Delete, VK_ESCAPE
+  0x1B->Escape, arrows 0x25-0x28, Home/End/PageUp/PageDown) to mbSendKey, and a plain char key is a
+  no-op there (the press does the insertion, mirroring a real keyboard); KeyUp is a no-op. VERIFIED in
+  wke_smoke (now 13/13): focus an input via wkeRunJS, wkeFireKeyPressEvent 'a'+'b' -> the field value
+  reads "ab", then wkeFireKeyDownEvent(VK_RETURN) -> the form's onsubmit flag is set. exit 0, no
+  survivors; mb_smoke still 131/131 (additive). The wke layer now covers the full headless-automation
+  surface: lifecycle, load, paint, mouse, keyboard, and scripting.
+
 ### REMAINING ROADMAP
-- wke layer: grow the slice — keyboard input (wkeFireKey*), more accessors, then the async callback
+- wke layer: grow the slice — more accessors (cookies/transparent/etc.), then the async callback
   model, and eventually the jsValue scripting layer (wkeRunJS). Each is an incremental, testable slice.
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.
