@@ -1857,6 +1857,38 @@ int main() {
            std::string("open=") + opened + " click=" + std::to_string(clicked));
   }
 
+  // 62-csp. A strict Content-Security-Policy blocks the PAGE's own scripts but NOT
+  // the host's extraction. Host eval (mbEvalJS / the selector readers) runs in a
+  // privileged context like DevTools, so script-src 'none' can't stop it — which
+  // is what lets us scrape the large fraction of the real web that ships strict
+  // CSP. The page's inline script is blocked (proving CSP is active), yet
+  // mbGetTextForSelector / mbCountSelector / mbEvalJS all still read the DOM.
+  // Run on a dedicated view: a document's CSP from <meta> persists on the frame,
+  // so reusing the shared `v` would carry script-src 'none' into later cases
+  // (mb_shot is one-page-per-process, so that never bites the real tool).
+  {
+    mbView* cv = mbCreateView(W, H);
+    mbLoadHTML(cv,
+        "<meta http-equiv='Content-Security-Policy' "
+        "content=\"script-src 'none'; default-src 'none'\">"
+        "<body><h1 id='t'>protected</h1><div class='r'>a</div><div class='r'>b</div>"
+        "<script>window.__pageran=true;</script></body>",  // CSP blocks this
+        "https://csp.test/");
+    const bool page_blocked =
+        Eval(cv, "String(typeof window.__pageran)") == "undefined";
+    char tb[64] = {0};
+    const bool host_text = mbGetTextForSelector(cv, "#t", tb, sizeof(tb)) >= 0 &&
+                           std::string(tb) == "protected";
+    const bool host_count = mbCountSelector(cv, ".r") == 2;
+    const bool host_eval =
+        Eval(cv, "document.getElementById('t').textContent") == "protected";
+    Expect(page_blocked && host_text && host_count && host_eval,
+           "CSP script-src 'none' blocks page scripts, not host extraction",
+           std::string("pageBlocked=") + (page_blocked ? "1" : "0") + " text=" +
+               tb + " count=" + (host_count ? "2" : "?"));
+    mbDestroyView(cv);
+  }
+
   // 62b. mbDispatchEvent fires arbitrary DOM events that click/fill don't — a
   // mouseover handler and a custom-event handler both run; no-match -> 0.
   {
