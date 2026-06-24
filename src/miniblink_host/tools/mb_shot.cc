@@ -51,6 +51,7 @@ int main(int argc, char** argv) {
   bool print_text = false;
   bool print_html = false;
   bool print_requests = false;  // dump the subresource request log to stdout
+  bool auto_scroll = false;     // scroll through the page to load lazy content
   bool no_images = false;
   bool dark_mode = false;
   bool insecure = false;  // skip TLS cert verification
@@ -144,6 +145,8 @@ int main(int argc, char** argv) {
       print_html = true;
     } else if (a == "--requests") {
       print_requests = true;
+    } else if (a == "--auto-scroll") {
+      auto_scroll = true;
     } else if (a == "--no-images") {
       no_images = true;
     } else if (a == "--dark") {
@@ -172,7 +175,8 @@ int main(int argc, char** argv) {
         "[--checked CSS] [--visible CSS] [--text-all CSS] [--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
         "[--click CSS] [--wait-selector CSS] [--wait-visible CSS] "
-        "[--wait-hidden CSS] [--css STYLES] [--wait-ms N] [--scroll-to Y] "
+        "[--wait-hidden CSS] [--css STYLES] [--auto-scroll] [--wait-ms N] "
+        "[--scroll-to Y] "
         "[--post BODY] [--proxy URL] "
         "[--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] "
         "[--no-follow] "
@@ -328,6 +332,12 @@ int main(int argc, char** argv) {
       mbWait(view, wait_ms > 0 ? wait_ms : 100);  // let the click's effects render
     }
   }
+
+  // --auto-scroll: scroll through the page to trigger lazy-load / infinite-scroll
+  // so deferred images and content materialize before extract/capture (pairs with
+  // --full). Runs before --scroll-to so a final fixed position can still be set.
+  if (auto_scroll)
+    mbScrollToBottom(view, 0);  // default step cap
 
   // Scroll to an absolute Y before extracting/capturing (so --eval and the shot
   // both observe the scrolled viewport). For position:fixed/sticky pages, where
