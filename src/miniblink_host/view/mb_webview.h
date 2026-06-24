@@ -80,6 +80,9 @@ class MbWebView {
   // point equals a click.
   void SendMouseDown(int x, int y);
   void SendMouseUp(int x, int y);
+  // Single-finger touch tap (touchstart+touchend) at (x,y) — fires touch-only
+  // handlers (mobile menus, tap targets) with a populated touches[0].
+  void SendTouchTap(int x, int y);
   // Click the center of the first element matching `css_selector`. Resolves the
   // element's bounding box in the page, then synthesizes a click there. Returns
   // false if the selector matches nothing or the element has no box (display:none

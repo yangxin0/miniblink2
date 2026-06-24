@@ -1162,6 +1162,20 @@ int main() {
     wkeResize(wv, sw > 0 ? sw : 800, sh > 0 ? sh : 600);  // restore
   }
 
+  // wkeFireTouchTap fires a touch-only handler with touches[0].clientX == tap x.
+  {
+    wkeLoadHTML(wv,
+        "<body style='margin:0'><div id='b' style='width:200px;height:100px'></div>"
+        "<script>window.__tx=-1;window.__te=0;var b=document.getElementById('b');"
+        "b.addEventListener('touchstart',function(e){if(e.touches[0])"
+        "window.__tx=Math.round(e.touches[0].clientX);});"
+        "b.addEventListener('touchend',function(){window.__te=1;});</script></body>");
+    wkeFireTouchTap(wv, 60, 40);
+    const bool ok = jsToInt(es, wkeRunJS(wv, "window.__tx")) == 60 &&
+                    jsToInt(es, wkeRunJS(wv, "window.__te")) == 1;
+    check(ok, "wkeFireTouchTap fires touchstart+touchend (touches[0].clientX==60)");
+  }
+
   // wkeGetValueForSelector reads a control's LIVE .value (post-typing/selection),
   // which differs from the static "value" attribute that wkeGetAttribute reads.
   {

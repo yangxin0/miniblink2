@@ -251,6 +251,31 @@ int main() {
              Eval(v, "String(window.__dropx)") + " nomatch=" + (nomatch ? "1" : "0"));
   }
 
+  // 12c. mbSendTouchTap fires real touch events (touchstart+touchend) that mouse
+  // events don't — a touch-only handler runs and sees touches[0].clientX == tap x.
+  {
+    mbLoadHTML(v,
+        "<body style='margin:0'><div id='b' style='width:200px;height:100px'></div>"
+        "<script>window.__ts=0;window.__tx=-1;window.__te=0;"
+        "var b=document.getElementById('b');"
+        "b.addEventListener('touchstart',function(e){window.__ts=1;"
+        "if(e.touches[0])window.__tx=Math.round(e.touches[0].clientX);});"
+        "b.addEventListener('touchend',function(){window.__te=1;});"
+        "</script></body>", "about:blank");
+    {
+      std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+      mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // layout for hit-testing
+    }
+    mbSendTouchTap(v, 50, 40);
+    const bool start = Eval(v, "String(window.__ts)") == "1";
+    const bool coord = Eval(v, "String(window.__tx)") == "50";
+    const bool end = Eval(v, "String(window.__te)") == "1";
+    Expect(start && coord && end,
+           "mbSendTouchTap fires touchstart+touchend with touches[0].clientX",
+           std::string("start=") + (start ? "1" : "0") + " x=" +
+               Eval(v, "String(window.__tx)") + " end=" + (end ? "1" : "0"));
+  }
+
   // 13. Body with an embedded NUL byte must not truncate the document (the host
   // used to commit body.c_str(), losing everything after the first NUL). Load via
   // file:// (the length-preserving path) and verify content AFTER the NUL parsed.

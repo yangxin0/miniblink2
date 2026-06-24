@@ -133,6 +133,11 @@ void mbSendMouseUp(mbView* v, int x, int y) {
     v->impl->SendMouseUp(x, y);
 }
 
+void mbSendTouchTap(mbView* v, int x, int y) {
+  if (v && v->impl)
+    v->impl->SendTouchTap(x, y);
+}
+
 int mbClickSelector(mbView* v, const char* css_selector) {
   if (!v || !v->impl || !css_selector)
     return 0;

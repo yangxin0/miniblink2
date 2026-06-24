@@ -114,6 +114,11 @@ MB_EXPORT void mbSendMouseClick(mbView*, int x, int y);
 MB_EXPORT void mbSendMouseDown(mbView*, int x, int y);
 MB_EXPORT void mbSendMouseUp(mbView*, int x, int y);
 
+// Single-finger touch tap (touchstart+touchend) at (x,y) — fires touch-only
+// handlers (mobile nav menus, tap targets) that mouse events don't, with a
+// populated touches[0].clientX/Y. Touch events are enabled in the engine.
+MB_EXPORT void mbSendTouchTap(mbView*, int x, int y);
+
 // Click the center of the first element matching `css_selector` (Puppeteer-style
 // page.click). Resolves the element's box in the page then clicks its center.
 // Returns 1 on success, 0 if nothing matches or the element has no box

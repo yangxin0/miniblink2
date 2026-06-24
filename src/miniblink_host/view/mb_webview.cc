@@ -327,6 +327,26 @@ void MbWebView::SendMouseDown(int x, int y) {
     widget_->SendMouseDown(x, y);
 }
 
+void MbWebView::SendTouchTap(int x, int y) {
+  // A single-finger tap at (x,y): dispatch correctly-shaped touchstart+touchend
+  // TouchEvents on the element under the point. Synthetic (not a native input
+  // event) because Blink routes real WebTouchEvents through an async touch queue
+  // the offscreen widget doesn't wire (HandleInputEvent DCHECKs against touch);
+  // this drives touch-only handlers, with touches[0].clientX/Y populated. No-op
+  // if no element is under the point or the Touch API is unavailable.
+  const std::string sx = std::to_string(x), sy = std::to_string(y);
+  std::string js =
+      "(function(){try{var e=document.elementFromPoint(" + sx + "," + sy +
+      ");if(!e)return;var t=new Touch({identifier:0,target:e,clientX:" + sx +
+      ",clientY:" + sy + ",pageX:" + sx + ",pageY:" + sy +
+      ",screenX:" + sx + ",screenY:" + sy + "});"
+      "e.dispatchEvent(new TouchEvent('touchstart',{bubbles:true,cancelable:true,"
+      "touches:[t],targetTouches:[t],changedTouches:[t]}));"
+      "e.dispatchEvent(new TouchEvent('touchend',{bubbles:true,cancelable:true,"
+      "touches:[],targetTouches:[],changedTouches:[t]}));}catch(err){}})()";
+  EvalToString(js.c_str());
+}
+
 void MbWebView::SendMouseUp(int x, int y) {
   if (widget_)
     widget_->SendMouseUp(x, y);

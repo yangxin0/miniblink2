@@ -1319,6 +1319,15 @@ bool wkeFireMouseWheelEvent(wkeWebView webView, int x, int y, int delta,
   return true;
 }
 
+bool wkeFireTouchTap(wkeWebView webView, int x, int y) {
+  // Single-finger touch tap at (x,y) — fires touch-only handlers. (Port ext.)
+  if (!webView || !webView->view)
+    return false;
+  mbSendTouchTap(webView->view, x, y);
+  mbWait(webView->view, 20);  // let the tap's handlers/layout settle
+  return true;
+}
+
 bool wkeFireKeyDownEvent(wkeWebView webView, unsigned int virtualKeyCode,
                          unsigned int /*flags*/, bool /*systemKey*/) {
   if (!webView || !webView->view)

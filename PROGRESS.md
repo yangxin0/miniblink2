@@ -63,7 +63,7 @@ the deliverable surface (C API, CLI, wke layer).
   blob: URLs (`fetch` + `<img>`), Intersection/Resize/Mutation observers, WAAPI,
   forms + submit-navigation, mouse/keyboard input, host-side history. CJK/i18n +
   system web fonts render.
-- **`mb_capi` C API — 105 functions:** lifecycle, load, JS eval, scraping
+- **`mb_capi` C API — 106 functions:** lifecycle, load, JS eval, scraping
   (text/attr/computed-style/count by selector), input (mouse/key/text/scroll +
   click/fill/select/focus/hover/scroll-into-view by selector), screenshots
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
@@ -107,7 +107,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **157/157** (default, network-free), `wke_smoke` **96/96**,
+- **Tests:** `mb_smoke` **158/158** (default, network-free), `wke_smoke` **97/97**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -125,6 +125,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- capi+wke: mbSendTouchTap / wkeFireTouchTap — touch input (2026-06-25). A distinct capability (mobile/touch-only handlers, which mouse events don't reach; mbDispatchEvent can't shape a TouchEvent with touch-point coords). First probed that the engine supports touch (TouchEvent type, ontouchstart in window, JS-dispatched touch fires). Tried a native WebTouchEvent via the widget's HandleInputEvent -> SIGABRT: WebFrameWidgetImpl DCHECKs !IsTouchEventType (Blink routes real touch through an async touch queue the offscreen widget doesn't wire). Reverted that and reimplemented in MbWebView via a correctly-shaped synthetic TouchEvent (elementFromPoint -> new Touch -> dispatch touchstart[touches:[t]]+touchend[changedTouches:[t]]). VERIFIED in both suites: a touch-only handler fires and reads touches[0].clientX == the tap x (mb 50, wke 60), touchend fires. wke_smoke 97/97, mb_smoke 158/158, no survivors. ABI now 106 fns. (Synthetic, not native input — documented; native touch needs the full touch-event pipeline.)
 - docs: re-sync the README mb_shot CLI section (all 45 flags) (2026-06-25). The deliverable tool's docs had badly drifted — the usage block + prose listed ~25 flags but the binary accepts 45 (~20 undocumented: value/checked/visible/rect/style/text-all/attr-all/requests, drag/dispatch, wait-visible/hidden/idle, css/auto-scroll/scroll-to-selector, user-agent/ua/block). Rewrote the usage block grouped by phase (request-config / interact / synchronize / prepare-view / extract / capture) and added concise prose for the new interaction, wait, view-prep, and extraction flags. Cross-checked all 45 flags now appear in README (0 missing; --ua noted as the --user-agent alias). Docs-only — no code, suites unchanged (wke 96/96, mb 157/157).
 - mb_shot: --scroll-to-selector CSS — position the viewport at an element (2026-06-25). Exposes mbScrollIntoView on the CLI: bring a specific element into view before a viewport-mode capture (show it in context — distinct from --selector, which clips just its box; and from --scroll-to Y, which is absolute). VERIFIED end-to-end offline with a clean A/B (600x400 viewport): a #x below a 2000px spacer reads scrollY==0 WITHOUT the flag, and WITH --scroll-to-selector '#x' scrollY>0 AND #x's rect.top is within [0,400) (in-viewport) -> "true,true". No survivors. mb_shot.cc + usage only; both suites unchanged (wke 96/96, mb 157/157).
 - mb_shot: --dispatch CSS EVT — synthetic DOM event on the CLI (2026-06-25). Exposes mbDispatchEvent in the interact phase (after --drag), completing CLI interaction parity (--fill/--click/--drag/--dispatch): fire a hover/custom/framework event that click/fill don't, before capture. VERIFIED end-to-end offline with a clean A/B: a #m whose 'reveal' listener rewrites its text reads "hidden" WITHOUT the flag and "REVEALED" WITH --dispatch '#m' reveal; no survivors. mb_shot.cc + usage only; both suites unchanged (wke 96/96, mb 157/157).

@@ -431,6 +431,9 @@ WKE_API bool wkeFireMouseEvent(wkeWebView webView, unsigned int message, int x,
 // ~120). Returns true if handled.
 WKE_API bool wkeFireMouseWheelEvent(wkeWebView webView, int x, int y, int delta,
                                     unsigned int flags);
+// Single-finger touch tap (touchstart+touchend) at (x,y) — fires touch-only
+// handlers (mobile menus, tap targets). Port extension.
+WKE_API bool wkeFireTouchTap(wkeWebView webView, int x, int y);
 
 // Keyboard events to the focused element. wkeFireKeyPressEvent inserts the
 // character `charCode` (the text-producing event). wkeFireKeyDownEvent maps the
