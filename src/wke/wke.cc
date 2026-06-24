@@ -38,6 +38,11 @@ struct _tagWkeWebView {
   void* console_param = nullptr;
   wkeDocumentReadyCallback on_document_ready = nullptr;
   void* document_ready_param = nullptr;
+  wkeJsBridgeCallback on_js_bridge = nullptr;  // page->host window.mbBridge channel
+  void* js_bridge_param = nullptr;
+  std::string user_init_script;  // wkeSetInitScript; combined with the bridge bootstrap
+  std::string bridge_channel_cache;  // backs the callback's channel arg
+  std::string bridge_message_cache;  // backs the callback's message arg
   std::string source_cache;  // backs wkeGetSource's const utf8* return
   std::string cookie_cache;  // backs wkeGetCookie's const utf8* return
   // Pure wke view-state (not backed by the engine): an app-name, a transparent
@@ -108,6 +113,53 @@ void DrainConsoleToCallback(wkeWebView wv) {
   }
 }
 
+// The page->host bridge bootstrap: defines window.mbBridge(channel, message),
+// which queues "channelmessage" for the host to drain. Installed via the
+// init script (so it exists before page scripts) only when a bridge callback is
+// set. Combined with any user wkeSetInitScript.
+const char kBridgeBootstrap[] =
+    "window.mbBridge=function(c,m){(window.__mbb=window.__mbb||[])"
+    ".push(String(c)+'\\u0001'+String(m));};";
+
+void ApplyInitScript(wkeWebView wv) {
+  if (!wv || !wv->view)
+    return;
+  std::string combined =
+      wv->on_js_bridge ? std::string(kBridgeBootstrap) : std::string();
+  combined += wv->user_init_script;
+  mbSetInitScript(wv->view, combined.c_str());
+}
+
+// Drain queued window.mbBridge messages and deliver each to the host callback.
+// Entries are joined by , each "channelmessage". Called after a load
+// and after wkeRunJS (the points where page JS may have run).
+void DrainBridgeToCallback(wkeWebView wv) {
+  if (!wv || !wv->view || !wv->on_js_bridge)
+    return;
+  std::vector<char> buf(1 << 16, 0);
+  mbEvalJS(wv->view,
+           "(function(){try{var q=(window.__mbb||[]).join('\\u0002');"
+           "window.__mbb=[];return q}catch(e){return ''}})()",
+           buf.data(), static_cast<int>(buf.size()));
+  const std::string all(buf.data());
+  std::string::size_type start = 0;
+  for (std::string::size_type i = 0; i <= all.size(); ++i) {
+    if (i != all.size() && all[i] != '\x02')
+      continue;
+    const std::string entry = all.substr(start, i - start);
+    start = i + 1;
+    if (entry.empty())
+      continue;
+    const std::string::size_type sep = entry.find('\x01');
+    wv->bridge_channel_cache =
+        sep == std::string::npos ? std::string() : entry.substr(0, sep);
+    wv->bridge_message_cache =
+        sep == std::string::npos ? entry : entry.substr(sep + 1);
+    wv->on_js_bridge(wv, wv->js_bridge_param, wv->bridge_channel_cache.c_str(),
+                     wv->bridge_message_cache.c_str());
+  }
+}
+
 // Re-apply the view's zoom to the current document. This port models wke's page
 // zoom as CSS zoom on the document element, which scales layout (and the
 // coordinates getBoundingClientRect reports). A factor of 1.0 is a no-op.
@@ -138,6 +190,7 @@ void FireLoadCallbacks(wkeWebView wv) {
   ApplyZoom(wv);      // a non-default zoom persists across navigations
   ApplyEditable(wv);  // a set editable flag persists across navigations
   DrainConsoleToCallback(wv);
+  DrainBridgeToCallback(wv);  // deliver any window.mbBridge calls from page load
   if (wv->on_title_changed) {
     char tb[2048] = {0};
     mbGetTitle(wv->view, tb, sizeof(tb));
@@ -379,8 +432,22 @@ void wkeSetInitScript(wkeWebView webView, const utf8* script) {
   // Run `script` in each new document BEFORE the page's own scripts (like
   // Puppeteer's evaluateOnNewDocument) — set globals, stub/override APIs, or
   // install a harness the page then observes. NULL/"" clears. (Port extension.)
-  if (webView && webView->view)
-    mbSetInitScript(webView->view, script ? script : "");
+  if (!webView || !webView->view)
+    return;
+  webView->user_init_script = script ? script : "";
+  ApplyInitScript(webView);  // re-combine with the bridge bootstrap (if any)
+}
+
+void wkeOnJsBridge(wkeWebView webView, wkeJsBridgeCallback callback,
+                   void* param) {
+  // Register a host callback for page->host messages sent via
+  // window.mbBridge(channel, message). One-way (no return value). Set before
+  // navigating so the bootstrap is installed in the next document. (Port ext.)
+  if (!webView || !webView->view)
+    return;
+  webView->on_js_bridge = callback;
+  webView->js_bridge_param = param;
+  ApplyInitScript(webView);  // (de)install the window.mbBridge bootstrap
 }
 
 bool wkeSavePdf(wkeWebView webView, const utf8* path) {
@@ -1004,6 +1071,7 @@ jsValue wkeRunJS(wkeWebView webView, const utf8* script) {
     return 0;
   const jsValue handle = StoreEval(webView, std::string(script));
   DrainConsoleToCallback(webView);  // deliver any console output the script logged
+  DrainBridgeToCallback(webView);   // deliver any window.mbBridge calls it made
   return handle;
 }
 

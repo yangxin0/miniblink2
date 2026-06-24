@@ -10,6 +10,18 @@
 #include <cstring>
 #include <vector>
 
+// Capture state for the wkeOnJsBridge test (a C callback can't capture locals).
+static int g_bridge_n = 0;
+static char g_bridge_channel[256], g_bridge_message[1024];
+static void OnBridge(wkeWebView, void*, const utf8* channel,
+                     const utf8* message) {
+  ++g_bridge_n;
+  std::snprintf(g_bridge_channel, sizeof(g_bridge_channel), "%s",
+                channel ? channel : "");
+  std::snprintf(g_bridge_message, sizeof(g_bridge_message), "%s",
+                message ? message : "");
+}
+
 int main() {
   int pass = 0, fail = 0;
   auto check = [&](bool ok, const char* name) {
@@ -864,6 +876,24 @@ int main() {
         !jsIsFalse(bt) && !jsIsNull(u);
     check(ok, "jsIsNumber/String/Boolean/Object/Array/Function/Undefined/Null/"
               "True/False classify values");
+  }
+
+  // wkeOnJsBridge (offline): window.mbBridge(channel,message) is installed before
+  // page scripts and delivers calls to the host callback (one-way page->host).
+  {
+    wkeOnJsBridge(wv, OnBridge, nullptr);
+    wkeLoadHTML(wv, "<body>bridge</body>");  // init script defines window.mbBridge
+    const bool defined =
+        std::strcmp(jsToTempString(es, wkeRunJS(wv, "typeof window.mbBridge")),
+                    "function") == 0;
+    g_bridge_n = 0;
+    wkeRunJS(wv, "window.mbBridge('greet', 'hello')");  // drained post-run
+    const bool got = g_bridge_n == 1 &&
+                     std::strcmp(g_bridge_channel, "greet") == 0 &&
+                     std::strcmp(g_bridge_message, "hello") == 0;
+    wkeOnJsBridge(wv, nullptr, nullptr);  // unregister (removes the bootstrap)
+    check(defined && got,
+          "wkeOnJsBridge delivers window.mbBridge(channel,message) to the host");
   }
 
   // jsToString (offline): JSON for objects/arrays, coerced value for primitives.

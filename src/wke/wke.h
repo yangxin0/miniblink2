@@ -495,4 +495,14 @@ typedef void (*wkeDocumentReadyCallback)(wkeWebView webView, void* param);
 WKE_API void wkeOnDocumentReady(wkeWebView webView,
                                 wkeDocumentReadyCallback callback, void* param);
 
+// One-way page->host message bridge (port extension). After wkeOnJsBridge, each
+// document gains a window.mbBridge(channel, message) function; calls to it are
+// delivered to `callback` (after the page load and after each wkeRunJS). No
+// return value — for the page to signal the host (events, progress, results).
+// Set before navigating so the bootstrap is installed in the next document.
+typedef void (*wkeJsBridgeCallback)(wkeWebView webView, void* param,
+                                    const utf8* channel, const utf8* message);
+WKE_API void wkeOnJsBridge(wkeWebView webView, wkeJsBridgeCallback callback,
+                           void* param);
+
 #endif  // MINIBLINK_WKE_WKE_H_
