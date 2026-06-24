@@ -70,6 +70,7 @@ int main(int argc, char** argv) {
   std::string save_cookies;    // cookie jar file to write after the page settles
   int wait_ms = 0;            // fixed wait before capture
   int scroll_to_y = -1;       // absolute scroll Y before capture (-1 = none)
+  std::string post_body;       // when set, POST this body to the URL (vs GET)
   std::vector<const char*> pos;  // positional args, flags filtered out
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
@@ -104,6 +105,8 @@ int main(int argc, char** argv) {
       wait_ms = std::atoi(argv[++i]);
     } else if (a == "--scroll-to" && i + 1 < argc) {
       scroll_to_y = std::atoi(argv[++i]);
+    } else if (a == "--post" && i + 1 < argc) {
+      post_body = argv[++i];
     } else if (a == "--console") {
       print_console = true;
     } else if (a == "--headers") {
@@ -138,7 +141,7 @@ int main(int argc, char** argv) {
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
         "[--transparent] [--text] [--html] [--eval JS] [--fill CSS TEXT] "
         "[--click CSS] [--wait-selector CSS] [--wait-ms N] [--scroll-to Y] "
-        "[--proxy URL] "
+        "[--post BODY] [--proxy URL] "
         "[--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] "
         "[--no-follow] "
         "<input.html|file://URL|http(s)://URL> <out.png> [width height]\n",
@@ -186,7 +189,9 @@ int main(int argc, char** argv) {
   }
 
   const bool is_http = input.rfind("http", 0) == 0;
-  if (input.rfind("file://", 0) == 0 || is_http) {
+  if (is_http && !post_body.empty()) {
+    mbPostURL(view, input.c_str(), post_body.c_str(), nullptr);  // POST navigation
+  } else if (input.rfind("file://", 0) == 0 || is_http) {
     mbLoadURL(view, input.c_str());
   } else {
     // A local HTML file path: read it and commit (base URL = its file:// dir so that
