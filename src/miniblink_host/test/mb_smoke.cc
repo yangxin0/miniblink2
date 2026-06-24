@@ -152,6 +152,32 @@ int main() {
          "input: typed UTF-8 (accent/CJK/emoji)",
          Eval(v, "document.getElementById('u').value"));
 
+  // 10b. UTF-8-safe buffer truncation: a getter into a too-small buffer must cut
+  // at a character boundary, never mid-multibyte. "café" has a multi-byte é after
+  // "caf"; a 5-byte buffer's naive cut at byte 4 would land inside é (invalid
+  // UTF-8). The boundary-aware copy backs off so the result ends at a real char
+  // boundary — encoding-independent check below (works whatever é encodes to).
+  {
+    mbLoadHTML(v, "<body><b id='t'>café</b></body>", "about:blank");
+    char big[64] = {0};
+    mbGetTextForSelector(v, "#t", big, sizeof(big));  // the full text
+    const std::string full_s(big);
+    char small[5] = {0};  // out_cap 5 -> at most 4 usable bytes
+    mbGetTextForSelector(v, "#t", small, sizeof(small));
+    const std::string got(small);
+    const bool truncated = got.size() < full_s.size();  // buffer was too small
+    const bool is_prefix = full_s.compare(0, got.size(), got) == 0;
+    // The byte just past `got` in the full text must NOT be a continuation byte
+    // (0b10xxxxxx) — i.e. `got` ended at a char boundary (naive cut would not).
+    const bool boundary =
+        got.size() == full_s.size() ||
+        (static_cast<unsigned char>(full_s[got.size()]) & 0xC0) != 0x80;
+    Expect(truncated && is_prefix && boundary && !got.empty(),
+           "mbGetTextForSelector truncates at a UTF-8 boundary (no split char)",
+           std::string("full=") + std::to_string((int)full_s.size()) + " got='" +
+               got + "' (" + std::to_string((int)got.size()) + "B)");
+  }
+
   // 11. Scroll: a tall page, synthesize a downward gesture scroll, verify scrollY.
   mbLoadHTML(v,
              "<body style='margin:0'><div style='height:5000px'></div></body>",

@@ -107,7 +107,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **162/162** (default, network-free), `wke_smoke` **100/100**,
+- **Tests:** `mb_smoke` **163/163** (default, network-free), `wke_smoke` **100/100**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -125,6 +125,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- hardening: UTF-8-safe buffer truncation in the C-ABI string getters (2026-06-25). The 23 out-buffer getters each duplicated a copy loop that truncated at out_cap-1 BYTES — splitting a multi-byte char mid-sequence on an undersized buffer (invalid UTF-8 for CJK/emoji scraping). Replaced all 23 with one shared CopyToBuffer() that backs off to a UTF-8 character boundary (skips trailing continuation bytes; result[size()]=='\0' makes the no-truncation case safe). Fixes the correctness bug AND removes 23x duplication. VERIFIED: "café" into a 5-byte buffer -> "caf" (3B), full=7, and the byte past the cut is a non-continuation byte (boundary) — encoding-robust check. mb_smoke 163/163, wke_smoke 100/100 (wke benefits too via the shared lib), no survivors. ABI unchanged (110).
 - mb_shot: --set-cookie URL COOKIE — inline session injection on the CLI (2026-06-25). The real workflow gap: "scrape as a logged-in user" previously needed a hand-crafted Netscape file for --load-cookies; now a repeatable --set-cookie injects a cookie into the jar before navigation (sent on the navigation + subresources), applied after --load-cookies so it can override. VERIFIED end-to-end offline: --set-cookie 'http://auth.test/' 'session=tok42' --save-cookies dumps a jar containing "auth.test ... session tok42". No survivors. mb_shot.cc + usage only; both suites unchanged (wke 100/100, mb 162/162).
 - maint: full health-check — all 6 targets build + both demos run (2026-06-25). After ~15 functions landed across the widget/host/loader since the last all-targets build, re-verified the whole set: miniblink_host + mb_smoke + mb_shot + mb_demo + wke_smoke + wke_demo all link clean (no bit-rot). Ran both reference demos end-to-end: mb_demo all 9 steps OK, wke_demo all 11 steps OK, exit 0 each. Suites green (wke_smoke 100/100, mb_smoke 162/162), no survivors. Verification-only; no code change.
 - capi+wke: mbGetCookie / wkeGetCookieValue — read one cookie by name (2026-06-25). Convenience over mbGetCookies' whole-jar string for the common "read the session/auth cookie to check login" check — host-side parse of the "n=v; n2=v2" jar; -1 (capi) / "" (wke) when the name is absent. wke variant uses the current document URL (like wkeGetCookie). VERIFIED offline (in-memory jar): set sid/theme -> mbGetCookie("sid")=="abc123", missing->-1; wke set+navigate to the origin -> wkeGetCookieValue("auth")=="tok9". wke_smoke 100/100 (milestone), mb_smoke 162/162, no survivors. ABI now 110 fns.

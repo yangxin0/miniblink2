@@ -4,6 +4,7 @@
 #include "miniblink_host/capi/mb_capi.h"
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -16,6 +17,28 @@
 struct mbView {
   std::unique_ptr<mb::MbWebView> impl;
 };
+
+namespace {
+// Copy `result` into out[out_cap] (NUL-terminated). When the buffer is too small,
+// truncate at a UTF-8 character boundary so the output never ends mid-multibyte
+// (which would be invalid UTF-8 — matters for CJK/emoji scraping). Callers
+// normally size first with out=NULL, so truncation is the undersized-buffer path.
+void CopyToBuffer(const std::string& result, char* out, int out_cap) {
+  if (!out || out_cap <= 0)
+    return;
+  size_t copy = result.size() < static_cast<size_t>(out_cap - 1)
+                    ? result.size()
+                    : static_cast<size_t>(out_cap - 1);
+  // If the byte just past the cut is a UTF-8 continuation byte (10xxxxxx), we'd
+  // be splitting a multi-byte sequence — back off to the character boundary.
+  // (result[result.size()] is '\0' in C++11+, so the no-truncation case is safe.)
+  while (copy > 0 &&
+         (static_cast<unsigned char>(result[copy]) & 0xC0) == 0x80)
+    --copy;
+  std::memcpy(out, result.data(), copy);
+  out[copy] = '\0';
+}
+}  // namespace
 
 extern "C" {
 
@@ -241,13 +264,7 @@ int mbGetUserAgent(mbView* v, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;
   std::string result = v->impl->GetUserAgent();
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -340,13 +357,7 @@ int mbGetCookies(mbView* v, const char* url, char* out, int out_cap) {
   if (!v || !v->impl || !url)
     return 0;
   std::string result = v->impl->GetCookies(url);
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -357,13 +368,7 @@ int mbGetCookie(mbView* v, const char* url, const char* name, char* out,
   std::string result;
   if (!v->impl->GetCookieValue(url, name, &result))
     return -1;  // cookie not present
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -371,13 +376,7 @@ int mbGetAllCookies(mbView* v, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;
   std::string result = v->impl->GetAllCookies();
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -404,13 +403,7 @@ int mbLoadCookies(const char* path) {
 int mbGetRequestLog(char* out, int out_cap) {
   // Process-wide: newline-separated subresource URLs the loader has fetched.
   std::string result = mb::MbGetRequestLog();
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -433,13 +426,7 @@ int mbGetLocalStorage(mbView* v, const char* key, char* out, int out_cap) {
   std::string result;
   if (!v->impl->GetLocalStorage(key, &result))
     return -1;  // absent, or storage unavailable on this origin
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -455,13 +442,7 @@ int mbGetSessionStorage(mbView* v, const char* key, char* out, int out_cap) {
   std::string result;
   if (!v->impl->GetSessionStorage(key, &result))
     return -1;
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -480,13 +461,7 @@ int mbDrainConsole(mbView* v, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;
   std::string result = v->impl->DrainConsole();
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -494,13 +469,7 @@ int mbGetURL(mbView* v, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;
   std::string result = v->impl->GetURL();
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -508,13 +477,7 @@ int mbGetTitle(mbView* v, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;
   std::string result = v->impl->GetTitle();
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -522,13 +485,7 @@ int mbGetText(mbView* v, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;
   std::string result = v->impl->GetText();
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -536,13 +493,7 @@ int mbGetHTML(mbView* v, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;
   std::string result = v->impl->GetHTML();
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -553,13 +504,7 @@ int mbGetTextForSelector(mbView* v, const char* css_selector, char* out,
   std::string result;
   if (!v->impl->GetTextForSelector(css_selector, &result))
     return -1;  // no element matched
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -570,13 +515,7 @@ int mbGetAllTextForSelector(mbView* v, const char* css_selector, char* out,
   std::string result;
   if (!v->impl->GetAllTextForSelector(css_selector, &result))
     return -1;  // invalid selector
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -593,13 +532,7 @@ int mbGetHtmlForSelector(mbView* v, const char* css_selector, char* out,
   std::string result;
   if (!v->impl->GetHtmlForSelector(css_selector, &result))
     return -1;  // no element matched
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -610,13 +543,7 @@ int mbGetAllValueForSelector(mbView* v, const char* css_selector, char* out,
   std::string result;
   if (!v->impl->GetAllValueForSelector(css_selector, &result))
     return -1;  // invalid selector
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -627,13 +554,7 @@ int mbGetAllAttributeForSelector(mbView* v, const char* css_selector,
   std::string result;
   if (!v->impl->GetAllAttributeForSelector(css_selector, attr, &result))
     return -1;  // invalid selector
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -644,13 +565,7 @@ int mbGetAttribute(mbView* v, const char* css_selector, const char* attr,
   std::string result;
   if (!v->impl->GetAttribute(css_selector, attr, &result))
     return -1;  // no element matched, or attribute absent
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -668,13 +583,7 @@ int mbGetValueForSelector(mbView* v, const char* css_selector, char* out,
   std::string result;
   if (!v->impl->GetValueForSelector(css_selector, &result))
     return -1;  // no element matched, or no value property
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -703,13 +612,7 @@ int mbGetComputedStyle(mbView* v, const char* css_selector, const char* property
   std::string result;
   if (!v->impl->GetComputedStyle(css_selector, property, &result))
     return -1;  // no element matched
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -726,13 +629,7 @@ int mbGetResponseHeaders(mbView* v, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;
   const std::string& result = v->impl->GetResponseHeaders();
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -756,13 +653,7 @@ int mbEvalJSIsolated(mbView* v, const char* utf8_script, char* out, int out_cap)
   if (!v || !v->impl)
     return 0;
   std::string result = v->impl->EvalIsolated(utf8_script);
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
@@ -770,13 +661,7 @@ int mbEvalJS(mbView* v, const char* utf8_script, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;
   std::string result = v->impl->EvalToString(utf8_script);
-  if (out && out_cap > 0) {
-    int n = static_cast<int>(result.size());
-    int copy = n < out_cap - 1 ? n : out_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out[i] = result[i];
-    out[copy] = '\0';
-  }
+  CopyToBuffer(result, out, out_cap);
   return static_cast<int>(result.size());
 }
 
