@@ -157,6 +157,12 @@ WKE_API void wkeSetDeviceScaleFactor(wkeWebView webView, float scale);
 // (window.scrollTo). Moves the real viewport (fixed/sticky elements render
 // correctly) — pair with wkeSavePng/wkePaint for a long-page shot. Port extension.
 WKE_API void wkeScrollTo(wkeWebView webView, int x, int y);
+// Render the current frame to a width x height PNG held IN MEMORY (no temp
+// file); returns the byte length and sets *outData (0 on failure). The bytes are
+// owned by the view and valid only until the next wkeEncodePng on it or
+// wkeDestroyWebView — copy them out before either. Port extension.
+WKE_API int wkeEncodePng(wkeWebView webView, int width, int height,
+                         const unsigned char** outData);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);

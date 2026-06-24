@@ -409,6 +409,17 @@ void wkeScrollTo(wkeWebView webView, int x, int y) {
     mbScrollTo(webView->view, x, y);
 }
 
+int wkeEncodePng(wkeWebView webView, int width, int height,
+                 const unsigned char** outData) {
+  // Render the current frame to a width x height PNG held in memory (no temp
+  // file) — for embedders that serve the bytes. Returns the length and sets
+  // *outData; 0 on failure. The bytes are owned by the view and valid only until
+  // the next wkeEncodePng on it or wkeDestroyWebView — copy them out. (Port ext.)
+  if (!webView || !webView->view || width <= 0 || height <= 0 || !outData)
+    return 0;
+  return mbEncodePng(webView->view, width, height, outData);
+}
+
 void wkeSetTransparent(wkeWebView webView, bool transparent) {
   if (!webView || !webView->view)
     return;

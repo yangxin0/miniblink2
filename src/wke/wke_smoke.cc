@@ -672,6 +672,27 @@ int main() {
           "wkeScrollTo moves the viewport to an absolute offset");
   }
 
+  // wkeEncodePng (offline): render to in-memory PNG bytes (no temp file); verify
+  // the signature and that the IHDR width/height match the requested size.
+  {
+    wkeLoadHTML(wv, "<body style='background:#fff'>encode</body>");
+    const unsigned char* data = nullptr;
+    const int len = wkeEncodePng(wv, 160, 90, &data);
+    const bool magic = len > 24 && data && data[0] == 0x89 && data[1] == 'P' &&
+                       data[2] == 'N' && data[3] == 'G' && data[4] == 0x0D &&
+                       data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A;
+    int iw = 0, ih = 0;
+    if (magic) {
+      iw = (data[16] << 24) | (data[17] << 16) | (data[18] << 8) | data[19];
+      ih = (data[20] << 24) | (data[21] << 16) | (data[22] << 8) | data[23];
+    }
+    const unsigned char* unused = nullptr;
+    const bool nullsafe = wkeEncodePng(nullptr, 160, 90, &unused) == 0 &&
+                          wkeEncodePng(wv, 160, 90, nullptr) == 0;
+    check(magic && iw == 160 && ih == 90 && nullsafe,
+          "wkeEncodePng returns an in-memory PNG of the requested size");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {
