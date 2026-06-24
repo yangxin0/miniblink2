@@ -74,6 +74,8 @@ int main(int argc, char** argv) {
   std::string checked_selector;  // print this control's .checked (1/0) to stdout
   std::string visible_selector;  // print this selector's visibility (1/0/-1)
   std::string rect_selector;     // print this selector's bounding box "x,y,w,h"
+  std::string style_selector;    // print a computed style property of this selector
+  std::string style_prop;        // the CSS property name for --style
   std::string text_all_selector;  // print JSON array of all matches' innerText
   std::string attr_all_selector;  // print JSON array of all matches' attribute
   std::string attr_all_name;      // attribute name for --attr-all
@@ -123,6 +125,9 @@ int main(int argc, char** argv) {
       visible_selector = argv[++i];
     } else if (a == "--rect" && i + 1 < argc) {
       rect_selector = argv[++i];
+    } else if (a == "--style" && i + 2 < argc) {
+      style_selector = argv[++i];
+      style_prop = argv[++i];
     } else if (a == "--text-all" && i + 1 < argc) {
       text_all_selector = argv[++i];
     } else if (a == "--attr-all" && i + 2 < argc) {
@@ -181,8 +186,8 @@ int main(int argc, char** argv) {
         stderr,
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
         "[--transparent] [--text] [--html] [--requests] [--eval JS] [--value CSS] "
-        "[--checked CSS] [--visible CSS] [--rect CSS] [--text-all CSS] "
-        "[--attr-all CSS NAME] "
+        "[--checked CSS] [--visible CSS] [--rect CSS] [--style CSS PROP] "
+        "[--text-all CSS] [--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
         "[--click CSS] [--wait-selector CSS] [--wait-visible CSS] "
         "[--wait-hidden CSS] [--css STYLES] [--auto-scroll] [--wait-ms N] "
@@ -448,6 +453,19 @@ int main(int argc, char** argv) {
     else
       std::fprintf(stderr, "mb_shot: --rect '%s' matched no element\n",
                    rect_selector.c_str());
+  }
+
+  // --style CSS PROP: print a resolved computed-style value (color -> "rgb(...)",
+  // display:none -> "none") — CSS / visual assertions from the command line.
+  if (!style_selector.empty()) {
+    std::vector<char> sb(1 << 14, 0);  // 16 KiB
+    int n = mbGetComputedStyle(view, style_selector.c_str(), style_prop.c_str(),
+                               sb.data(), static_cast<int>(sb.size()));
+    if (n < 0)
+      std::fprintf(stderr, "mb_shot: --style '%s' matched no element\n",
+                   style_selector.c_str());
+    std::fwrite(sb.data(), 1, std::strlen(sb.data()), stdout);
+    std::fputc('\n', stdout);
   }
 
   // --text-all: print a JSON array of every match's innerText (one-shot list
