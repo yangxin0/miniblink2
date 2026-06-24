@@ -866,9 +866,30 @@ void MbNativeTrampoline(const v8::FunctionCallbackInfo<v8::Value>& info) {
   if (!b || !b->fn)
     return;
   std::vector<std::string> args;
+  std::vector<int> types;  // per-arg JS type (see MbJsNativeFn doc)
   args.reserve(info.Length());
+  types.reserve(info.Length());
   for (int i = 0; i < info.Length(); ++i) {
-    v8::String::Utf8Value s(isolate, info[i]);
+    v8::Local<v8::Value> v = info[i];
+    int t = 0;  // string
+    if (v->IsNumber())
+      t = 1;
+    else if (v->IsBoolean())
+      t = 2;
+    else if (v->IsNull())
+      t = 3;
+    else if (v->IsUndefined())
+      t = 4;
+    else if (v->IsArray())
+      t = 6;
+    else if (v->IsFunction())
+      t = 7;
+    else if (v->IsString())
+      t = 0;
+    else if (v->IsObject())
+      t = 5;
+    types.push_back(t);
+    v8::String::Utf8Value s(isolate, v);
     args.emplace_back(*s ? *s : "");
   }
   std::vector<const char*> argv;
@@ -877,7 +898,8 @@ void MbNativeTrampoline(const v8::FunctionCallbackInfo<v8::Value>& info) {
     argv.push_back(a.c_str());
   int out_type = 0;  // 0 string, 1 number, 2 boolean, 3 null, 4 undefined
   const char* result = b->fn(b->userdata, static_cast<int>(args.size()),
-                             argv.empty() ? nullptr : argv.data(), &out_type);
+                             argv.empty() ? nullptr : argv.data(),
+                             types.empty() ? nullptr : types.data(), &out_type);
   switch (out_type) {
     case 1:  // number
       info.GetReturnValue().Set(

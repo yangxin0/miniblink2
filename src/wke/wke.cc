@@ -1179,7 +1179,7 @@ std::vector<jsValue>& CurrentArgs() {  // args of the in-flight bound call
 }
 
 const char* WkeNativeShim(void* userdata, int argc, const char** argv,
-                          int* out_type) {
+                          const int* argtypes, int* out_type) {
   auto* b = static_cast<WkeBinding*>(userdata);
   if (!b || !b->fn)
     return nullptr;
@@ -1187,7 +1187,21 @@ const char* WkeNativeShim(void* userdata, int argc, const char** argv,
   CurrentArgs().clear();
   for (int i = 0; i < argc; ++i) {
     const char* a = argv[i] ? argv[i] : "";
-    CurrentArgs().push_back(MakeLiteral(a, "string", JsStringLiteral(a)));
+    const int t = argtypes ? argtypes[i] : 0;
+    // Preserve each arg's JS type so jsTypeOf/jsIs* on jsArg are accurate.
+    const char* ty = "string";
+    std::string lit = JsStringLiteral(a);
+    switch (t) {
+      case 1: ty = "number"; lit = a; break;
+      case 2: ty = "boolean"; lit = a; break;
+      case 3: ty = "null"; lit = "null"; break;
+      case 4: ty = "undefined"; lit = "undefined"; break;
+      case 5: ty = "object"; lit = "undefined"; break;
+      case 6: ty = "array"; lit = "undefined"; break;
+      case 7: ty = "function"; lit = "undefined"; break;
+      default: break;  // string
+    }
+    CurrentArgs().push_back(MakeLiteral(a, ty, lit));
   }
   const jsValue r = b->fn(reinterpret_cast<jsExecState>(b->wv), b->param);
   CurrentArgs() = saved;

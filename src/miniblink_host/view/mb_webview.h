@@ -54,13 +54,15 @@ class MbWebView {
   // Set a script to run on every new document BEFORE its own scripts (init/inject).
   void SetInitScript(const char* utf8_script);
   // Bind a native C function callable from JS as window[name](...). JS args are
-  // coerced to UTF-8 strings; the function returns a UTF-8 string (or NULL ->
-  // undefined). It may set *out_type to choose the JS type of the return value:
-  // 0=string (default), 1=number (parsed from the string), 2=boolean ("true"),
-  // 3=null, 4=undefined. Synchronous (JS gets the return value inline). Installed
-  // into each new document's main world. `userdata` is passed to the callback.
+  // coerced to UTF-8 strings (argv[i]); argtypes[i] reports each arg's JS type
+  // (0=string,1=number,2=boolean,3=null,4=undefined,5=object,6=array,7=function).
+  // The function returns a UTF-8 string and may set *out_type to choose the JS
+  // type of the return value (same codes 0..4; 0=string is the default).
+  // Synchronous (JS gets the return value inline). Installed into each new
+  // document's main world. `userdata` is passed to the callback.
   using MbJsNativeFn = const char* (*)(void* userdata, int argc,
-                                       const char** argv, int* out_type);
+                                       const char** argv, const int* argtypes,
+                                       int* out_type);
   void BindJsFunction(const char* name, MbJsNativeFn fn, void* userdata);
   // A bound native function (public so the install trampoline can read it).
   struct NativeBinding {

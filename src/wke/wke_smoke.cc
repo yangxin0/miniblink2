@@ -31,6 +31,10 @@ static jsValue WkeAdd(jsExecState es, void* param) {
     sum += jsToInt(es, jsArg(es, i));
   return jsInt(sum);
 }
+// Reports whether its first arg arrived as a JS number (arg-type fidelity).
+static jsValue WkeArg0IsNumber(jsExecState es, void*) {
+  return jsBoolean(jsIsNumber(jsArg(es, 0)));
+}
 
 int main() {
   int pass = 0, fail = 0;
@@ -921,7 +925,8 @@ int main() {
   // synchronously — reads args via jsArg/jsArgCount, returns a jsValue inline.
   {
     wkeJsBindFunction(wv, "wkeAdd", WkeAdd, &g_bind_base);
-    wkeLoadHTML(wv, "<body>bind</body>");  // installs window.wkeAdd
+    wkeJsBindFunction(wv, "wkeIsNum", WkeArg0IsNumber, nullptr);
+    wkeLoadHTML(wv, "<body>bind</body>");  // installs window.wkeAdd/wkeIsNum
     const bool defined =
         std::strcmp(jsToTempString(es, wkeRunJS(wv, "typeof window.wkeAdd")),
                     "function") == 0;
@@ -931,8 +936,13 @@ int main() {
                          "typeof window.wkeAdd(2,3)==='number'"));
     const bool arith =
         jsToInt(es, wkeRunJS(wv, "window.wkeAdd(2,3)+1")) == 106;
-    check(defined && typed && arith,
-          "wkeJsBindFunction: JS calls a bound C fn; returns a typed number");
+    // Arg types flow through: jsArg(0) reflects the real JS type.
+    const bool args_typed =
+        jsToBoolean(es, wkeRunJS(wv, "window.wkeIsNum(5)")) &&
+        !jsToBoolean(es, wkeRunJS(wv, "window.wkeIsNum('x')")) &&
+        !jsToBoolean(es, wkeRunJS(wv, "window.wkeIsNum(true)"));
+    check(defined && typed && arith && args_typed,
+          "wkeJsBindFunction: typed args (jsArg) + typed number return");
   }
 
   // wkeOnJsBridge (offline): window.mbBridge(channel,message) is installed before
