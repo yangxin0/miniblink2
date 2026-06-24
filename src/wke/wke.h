@@ -137,6 +137,9 @@ WKE_API void* wkeGetUserKeyValue(wkeWebView webView, const char* key);
 // re-applied after each navigation. Non-positive factors are ignored.
 WKE_API void wkeSetZoomFactor(wkeWebView webView, float factor);
 WKE_API float wkeGetZoomFactor(wkeWebView webView);
+// Make the whole document editable (modeled as document.designMode). The flag
+// is re-applied after each navigation, matching wke's persistent editability.
+WKE_API void wkeSetEditable(wkeWebView webView, bool editable);
 // The current document's HTML (the rendered, post-JS DOM serialized to HTML).
 // Owned by the view, valid until the next wkeGetSource on it.
 WKE_API const utf8* wkeGetSource(wkeWebView webView);

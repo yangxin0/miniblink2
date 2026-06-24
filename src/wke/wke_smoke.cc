@@ -432,6 +432,29 @@ int main() {
           "wkeSetZoomFactor scales layout + persists across navigations");
   }
 
+  // wkeSetEditable toggles whole-document editability (designMode) and persists.
+  {
+    auto designMode = [&]() {
+      return jsToTempString(es, wkeRunJS(wv, "document.designMode"));
+    };
+    wkeLoadHTML(wv, "<body>edit me</body>");
+    const bool off0 = std::strcmp(designMode(), "off") == 0;
+
+    wkeSetEditable(wv, true);
+    const bool on1 = std::strcmp(designMode(), "on") == 0;
+    const bool dom_ok = jsToBoolean(
+        es, wkeRunJS(wv, "document.body.isContentEditable"));
+
+    wkeLoadHTML(wv, "<body>again</body>");  // fresh doc — must re-apply
+    const bool on2 = std::strcmp(designMode(), "on") == 0;
+
+    wkeSetEditable(wv, false);
+    const bool off1 = std::strcmp(designMode(), "off") == 0;
+
+    check(off0 && on1 && dom_ok && on2 && off1,
+          "wkeSetEditable toggles document editability + persists across loads");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {

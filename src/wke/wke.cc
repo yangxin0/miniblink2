@@ -46,6 +46,7 @@ struct _tagWkeWebView {
   bool transparent = false;
   std::map<std::string, void*> user_kv;
   double zoom_factor = 1.0;  // wkeSetZoomFactor; re-applied after each load
+  bool editable = false;     // wkeSetEditable; re-applied after each load
 };
 
 // The last live webView, so the view-less wkePerformCookieCommand has a handle
@@ -114,12 +115,23 @@ void ApplyZoom(wkeWebView wv) {
   mbEvalJS(wv->view, js.c_str(), buf, sizeof(buf));
 }
 
+// Re-apply the view's editable flag to the current document (wke's whole-page
+// editability is modeled as document.designMode). Fresh documents default to
+// non-editable, so this only needs to act when the flag is set.
+void ApplyEditable(wkeWebView wv) {
+  if (!wv || !wv->view || !wv->editable)
+    return;
+  char buf[8] = {0};
+  mbEvalJS(wv->view, "try{document.designMode='on'}catch(e){}", buf, sizeof(buf));
+}
+
 // Fire the title-changed then loading-finish callbacks after a load completes.
 // (The load is synchronous, so this is the faithful "loading finished" moment.)
 void FireLoadCallbacks(wkeWebView wv) {
   if (!wv || !wv->view)
     return;
-  ApplyZoom(wv);  // a non-default zoom persists across navigations
+  ApplyZoom(wv);      // a non-default zoom persists across navigations
+  ApplyEditable(wv);  // a set editable flag persists across navigations
   DrainConsoleToCallback(wv);
   if (wv->on_title_changed) {
     char tb[2048] = {0};
@@ -362,6 +374,17 @@ void wkeSetZoomFactor(wkeWebView webView, float factor) {
 
 float wkeGetZoomFactor(wkeWebView webView) {
   return webView ? static_cast<float>(webView->zoom_factor) : 1.0f;
+}
+
+void wkeSetEditable(wkeWebView webView, bool editable) {
+  if (!webView || !webView->view)
+    return;
+  webView->editable = editable;  // persisted across loads via ApplyEditable
+  char buf[8] = {0};
+  mbEvalJS(webView->view,
+           editable ? "try{document.designMode='on'}catch(e){}"
+                    : "try{document.designMode='off'}catch(e){}",
+           buf, sizeof(buf));
 }
 
 const utf8* wkeGetSource(wkeWebView webView) {
