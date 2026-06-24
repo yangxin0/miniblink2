@@ -74,7 +74,8 @@ the deliverable surface (C API, CLI, wke layer).
   `--headers`/`--load-cookies`/`--save-cookies`.
 - **wke compatibility layer (`src/wke/`):** a faithful subset over `mb_capi` covering
   the full headless-automation surface — lifecycle, load, loading-state polling,
-  paint (`wkePaint`), PDF/PNG export (`wkeSavePdf`/`wkeSavePng`),
+  paint (`wkePaint`), PDF/PNG export (`wkeSavePdf`/`wkeSavePng`/
+  `wkeSavePngRect`),
   mouse (`wkeFireMouseEvent`), keyboard (`wkeFireKey*`),
   scripting (`wkeRunJS` + `jsToInt/Double/Boolean/TempString` + `jsTypeOf` +
   the full jsValue object model — reads `jsGetLength`/`jsGetAt`/`jsGet`/
@@ -92,9 +93,9 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **38/38**,
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **39/39**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com cases
-  (wke_smoke 42; mb_smoke ~145).
+  (wke_smoke 43; mb_smoke ~145).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
 
@@ -109,6 +110,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke OUTPUT: wkeSavePngRect (2026-06-24). Render just a logical rect (x,y,w,h) to a PNG — element/region screenshot (wraps mbSavePngRect; output w*dsf x h*dsf). Documented PORT EXTENSION. VERIFIED offline + strongly: the saved PNG's IHDR width/height (big-endian at byte offsets 16/20) equal the requested 120x80 (dsf=1), not just the magic; null view/path safe. wke_smoke 39/39, mb_smoke 132/132, no survivors.
 - wke OUTPUT: wkeSavePng (2026-06-24). Render the current frame at WxH and save it; format follows the extension (.jpg/.jpeg→JPEG q90, else PNG) — wraps mbSavePng. Documented PORT EXTENSION (classic wke captures via wkePaint then app-encodes). VERIFIED offline: a .png starts with the \x89PNG signature (size>100) and a .jpg starts with the JPEG SOI FF D8; null view/path safe. wke_smoke 38/38, mb_smoke 132/132, no survivors.
 - wke OUTPUT: wkeSavePdf (2026-06-24). Print the current document to a multi-page US-Letter PDF (wraps mbSavePdf). Documented PORT EXTENSION (no classic wke print API). VERIFIED offline: prints a real file whose first 5 bytes are "%PDF-" and size > 500, and null view/path are safe. wke_smoke 37/37, mb_smoke 132/132, no survivors.
 - wke SCRIPTING: wkeSetInitScript (2026-06-24). evaluateOnNewDocument-style hook — runs a script in each new document BEFORE the page's own scripts (wraps mbSetInitScript → RunDocumentStartScript at document-element-available). Lets an app set globals / stub APIs / install a harness the page then observes. NULL/"" clears. Documented PORT EXTENSION. VERIFIED offline: init sets window.__early, the page's inline <script> reads it into window.__pageSaw=="injected"; after clearing, a reload reads "no". wke_smoke 36/36, mb_smoke 132/132, no survivors.

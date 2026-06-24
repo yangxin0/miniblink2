@@ -144,6 +144,11 @@ WKE_API bool wkeSavePdf(wkeWebView webView, const utf8* path);
 // whether the file was written. Port extension.
 WKE_API bool wkeSavePng(wkeWebView webView, const utf8* path, int width,
                         int height);
+// Render just the logical rect (x,y,w,h) of the page to a PNG at `path` (e.g.
+// an element screenshot); the output image is (w*dsf x h*dsf) px. Returns
+// whether the file was written. Port extension.
+WKE_API bool wkeSavePngRect(wkeWebView webView, const utf8* path, int x, int y,
+                            int w, int h);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);

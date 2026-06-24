@@ -385,6 +385,14 @@ bool wkeSavePng(wkeWebView webView, const utf8* path, int width, int height) {
          mbSavePng(webView->view, path, width, height) != 0;
 }
 
+bool wkeSavePngRect(wkeWebView webView, const utf8* path, int x, int y, int w,
+                    int h) {
+  // Render just the logical rect (x,y,w,h) of the page to a PNG (e.g. an element
+  // screenshot); the output is (w*dsf x h*dsf) px. (Port extension.)
+  return webView && webView->view && path && w > 0 && h > 0 &&
+         mbSavePngRect(webView->view, path, x, y, w, h) != 0;
+}
+
 void wkeSetTransparent(wkeWebView webView, bool transparent) {
   if (!webView || !webView->view)
     return;

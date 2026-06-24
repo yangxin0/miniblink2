@@ -601,6 +601,33 @@ int main() {
           "wkeSavePng writes a PNG (and JPEG by extension)");
   }
 
+  // wkeSavePngRect (offline): a rect capture yields a PNG whose IHDR dimensions
+  // (big-endian at byte offsets 16/20) equal the requested w x h (dsf=1).
+  {
+    const char* png = "/private/tmp/claude-501/wke_rect.png";
+    std::remove(png);
+    wkeLoadHTML(wv, "<body style='margin:0;background:#10c040'>rect</body>");
+    const bool wrote = wkeSavePngRect(wv, png, 5, 5, 120, 80);
+    unsigned char d[24] = {0};
+    size_t n = 0;
+    if (FILE* f = std::fopen(png, "rb")) {
+      n = std::fread(d, 1, 24, f);
+      std::fclose(f);
+    }
+    const bool magic = n >= 24 && d[0] == 0x89 && d[1] == 'P' && d[2] == 'N' &&
+                       d[3] == 'G';
+    int iw = 0, ih = 0;
+    if (magic) {
+      iw = (d[16] << 24) | (d[17] << 16) | (d[18] << 8) | d[19];
+      ih = (d[20] << 24) | (d[21] << 16) | (d[22] << 8) | d[23];
+    }
+    const bool nullsafe = !wkeSavePngRect(wv, nullptr, 0, 0, 10, 10) &&
+                          !wkeSavePngRect(nullptr, png, 0, 0, 10, 10);
+    std::remove(png);
+    check(wrote && magic && iw == 120 && ih == 80 && nullsafe,
+          "wkeSavePngRect captures a logical rect at the requested size");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {
