@@ -619,6 +619,44 @@ jsValue jsGetGlobal(jsExecState es, const char* prop) {
   return StoreEval(wv, expr);
 }
 
+jsKeys* jsGetKeys(jsExecState es, jsValue object) {
+  // Thread-local backing store: holds the key strings (and the const char*
+  // array pointing into them) so the returned jsKeys* stays valid until the
+  // next call. Rebuilt each invocation.
+  struct KeysHolder {
+    std::vector<std::string> storage;
+    std::vector<const char*> ptrs;
+    jsKeys keys;
+  };
+  static thread_local KeysHolder* holder = new KeysHolder();  // leaked: no dtor
+  holder->storage.clear();
+  holder->ptrs.clear();
+  holder->keys.length = 0;
+  holder->keys.keys = nullptr;
+
+  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  if (!wv || !wv->view)
+    return &holder->keys;
+
+  // Park Object.keys(obj) in a slot, then read each name back as a string.
+  const jsValue arr =
+      StoreEval(wv, "(function(){try{return Object.keys(window.__mbslots[" +
+                        std::to_string(object) + "])}catch(e){return []}})()");
+  const int n = jsGetLength(es, arr);
+  holder->storage.reserve(n);
+  for (int i = 0; i < n; ++i) {
+    const JsRecord* r = JsLookup(jsGetAt(es, arr, i));
+    holder->storage.push_back(r ? r->value : std::string());
+  }
+  // Build the pointer array only after storage is final (push_back can realloc).
+  holder->ptrs.reserve(holder->storage.size());
+  for (const std::string& s : holder->storage)
+    holder->ptrs.push_back(s.c_str());
+  holder->keys.length = static_cast<unsigned int>(holder->ptrs.size());
+  holder->keys.keys = holder->ptrs.empty() ? nullptr : holder->ptrs.data();
+  return &holder->keys;
+}
+
 // --- jsValue constructors (build args to pass INTO JS) -------------------------
 jsValue jsInt(int n) {
   return MakeLiteral(std::to_string(n), "number", std::to_string(n));

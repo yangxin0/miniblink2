@@ -198,6 +198,17 @@ WKE_API jsValue jsGetAt(jsExecState es, jsValue object, int index);
 WKE_API jsValue jsGet(jsExecState es, jsValue object, const char* prop);
 WKE_API jsValue jsGetGlobal(jsExecState es, const char* prop);
 
+// Enumerate an object's own-enumerable property names (Object.keys order).
+// The returned jsKeys* and its strings are owned by wke and stay valid only
+// until the next jsGetKeys call on the same thread (empty list if not an
+// object). Mirrors the classic wke jsGetKeys contract.
+struct _jsKeys {
+  unsigned int length;
+  const char** keys;
+};
+typedef struct _jsKeys jsKeys;
+WKE_API jsKeys* jsGetKeys(jsExecState es, jsValue object);
+
 // Construct jsValues to pass as arguments INTO JS (e.g. to jsCall).
 WKE_API jsValue jsInt(int n);
 WKE_API jsValue jsDouble(double d);

@@ -274,6 +274,23 @@ int main() {
           "jsCall/jsCallGlobal invoke functions with constructed args + this");
   }
 
+  // jsGetKeys enumerates own-enumerable property names in Object.keys order.
+  {
+    jsValue obj = wkeRunJS(wv, "({alpha:1, beta:2, gamma:3})");
+    jsKeys* keys = jsGetKeys(es, obj);
+    const bool keys_ok = keys && keys->length == 3 &&
+                         std::strcmp(keys->keys[0], "alpha") == 0 &&
+                         std::strcmp(keys->keys[1], "beta") == 0 &&
+                         std::strcmp(keys->keys[2], "gamma") == 0;
+
+    jsValue prim = wkeRunJS(wv, "42");
+    jsKeys* empty = jsGetKeys(es, prim);
+    const bool empty_ok = empty && empty->length == 0;
+
+    check(keys_ok && empty_ok,
+          "jsGetKeys enumerates object property names (empty for non-objects)");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {
