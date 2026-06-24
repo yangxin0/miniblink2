@@ -252,7 +252,8 @@ port extensions over `mb_capi` beyond the classic `wke` surface:
   `jsDouble`/`jsBoolean`/`jsString`/`jsUndefined`/`jsNull`; read `jsGetLength`/
   `jsGetAt`/`jsGet`/`jsGetGlobal`/`jsGetKeys`; build `jsEmptyObject`/`jsEmptyArray`
   + `jsSet`/`jsSetAt`/`jsSetGlobal`; call `jsCall`/`jsCallGlobal`; plus
-  `wkeSetInitScript` (evaluateOnNewDocument) *(ext)*.
+  `wkeSetInitScript` (evaluateOnNewDocument) and `wkeRunJsInIsolatedWorld`
+  (content-script eval: own globals, shared DOM) *(ext)*.
 - **DOM automation** *(ext, Puppeteer-style)* — query `wkeCountSelector`/
   `wkeGetTextForSelector`/`wkeGetAttribute`/`wkeGetElementRect`/
   `wkeGetComputedStyle`; act `wkeClickSelector`/`wkeDoubleClickSelector`/

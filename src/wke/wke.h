@@ -361,6 +361,12 @@ WKE_API jsValue wkeRunJS(wkeWebView webView, const utf8* script);
 // Evaluate `str` in the exec state, returning its result as a jsValue — the
 // es-based sibling of wkeRunJS (es is the token from wkeGlobalExec).
 WKE_API jsValue jsEval(jsExecState es, const utf8* str);
+// Run `script` in a dedicated ISOLATED world (its own JS globals, separate from
+// the page and from wkeRunJS, but the SAME DOM) — the content-script model, for
+// injecting automation the page can't observe or collide with. Returns the
+// result as a string, owned by the view, valid until the next call. Port ext.
+WKE_API const utf8* wkeRunJsInIsolatedWorld(wkeWebView webView,
+                                            const utf8* script);
 // The view's global execution state. Accepted by the jsToXxx readers (in this
 // slice the result is carried by the jsValue handle, so the state is a token).
 WKE_API jsExecState wkeGlobalExec(wkeWebView webView);

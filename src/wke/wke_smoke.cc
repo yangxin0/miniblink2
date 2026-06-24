@@ -170,6 +170,23 @@ int main() {
     check(ok, "Web Crypto: SubtleCrypto.digest computes SHA-256 (secure context)");
   }
 
+  // wkeRunJsInIsolatedWorld: separate globals from the main world, shared DOM.
+  {
+    wkeLoadHTML(wv, "<body>iso</body>");
+    wkeRunJS(wv, "window.__main=42;"
+                 "document.body.setAttribute('data-x','dom')");
+    const bool no_global =
+        std::strcmp(wkeRunJsInIsolatedWorld(wv, "String(typeof window.__main)"),
+                    "undefined") == 0;
+    const bool sees_dom = std::strcmp(
+        wkeRunJsInIsolatedWorld(wv, "document.body.getAttribute('data-x')"),
+        "dom") == 0;
+    wkeRunJsInIsolatedWorld(wv, "window.__iso=99");  // must not leak to main
+    const bool no_leak = jsToInt(es, wkeRunJS(wv, "window.__iso|0")) == 0;
+    check(no_global && sees_dom && no_leak,
+          "wkeRunJsInIsolatedWorld: own globals, shared DOM, no leak to main");
+  }
+
   // Keyboard: type into a focused field, then submit with Enter — verified by
   // reading the field value and the form's submit flag through wkeRunJS.
   wkeLoadHTML(wv,

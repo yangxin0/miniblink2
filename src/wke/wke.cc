@@ -56,6 +56,7 @@ struct _tagWkeWebView {
   std::string selector_text_cache;  // backs wkeGetTextForSelector's return
   std::string selector_attr_cache;  // backs wkeGetAttribute's return
   std::string computed_style_cache;  // backs wkeGetComputedStyle's return
+  std::string isolated_cache;  // backs wkeRunJsInIsolatedWorld's return
   std::string text_cache;            // backs wkeGetText's return
   std::string response_headers_cache;  // backs wkeGetResponseHeaders's return
 };
@@ -1162,6 +1163,28 @@ jsValue jsEval(jsExecState es, const utf8* str) {
   // Evaluate `str` in the exec state and return its result as a jsValue — the
   // es-based sibling of wkeRunJS (es is the webView token from wkeGlobalExec).
   return wkeRunJS(reinterpret_cast<wkeWebView>(es), str);
+}
+
+const utf8* wkeRunJsInIsolatedWorld(wkeWebView webView, const utf8* script) {
+  // Run `script` in a dedicated ISOLATED world: its own JS globals (separate
+  // from the page and from wkeRunJS's main world) but the SAME DOM — the
+  // content-script model, for injecting automation that the page can't see or
+  // collide with. Returns the result coerced to a string (owned by the view,
+  // valid until the next call on it). (Port extension — wraps mbEvalJSIsolated.)
+  if (!webView || !webView->view || !script) {
+    if (webView)
+      webView->isolated_cache.clear();
+    return webView ? webView->isolated_cache.c_str() : "";
+  }
+  const int len = mbEvalJSIsolated(webView->view, script, nullptr, 0);  // size
+  if (len <= 0) {
+    webView->isolated_cache.clear();
+    return webView->isolated_cache.c_str();
+  }
+  std::vector<char> buf(static_cast<size_t>(len) + 1, 0);
+  mbEvalJSIsolated(webView->view, script, buf.data(), len + 1);
+  webView->isolated_cache.assign(buf.data());
+  return webView->isolated_cache.c_str();
 }
 
 jsExecState wkeGlobalExec(wkeWebView webView) {

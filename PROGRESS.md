@@ -105,7 +105,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **133/133** (default, network-free), `wke_smoke` **66/66**,
+- **Tests:** `mb_smoke` **133/133** (default, network-free), `wke_smoke` **67/67**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -123,6 +123,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke SCRIPTING: wkeRunJsInIsolatedWorld (2026-06-24). Exposes mbEvalJSIsolated through wke — runs a script in a dedicated isolated world (own JS globals, separate from the page and from wkeRunJS, but the SAME DOM): the content-script model for injecting automation the page can't observe or collide with. Returns the result as a view-owned temp string. Port extension. VERIFIED offline: an isolated eval sees typeof window.__main (a main-world global) as "undefined", reads a DOM attribute the main world set ("dom"), and its own window.__iso does NOT leak back to the main world. wke_smoke 67/67, mb_smoke 133/133, no survivors.
 - investigation: dedicated Web Workers don't run (2026-06-24). Probed the audit's "Worker present, functionality unverified": new Worker(blob URL) that postMessages back stays 'pending' even after 3.5s of pumping (no message, no onerror, no throw) — the constructor succeeds but the worker thread is never serviced. Like IndexedDB, this needs real worker-thread infrastructure (WorkerThread + scheduler + message routing), a substantial subsystem, not a bounded tick. Added an honest roadmap row so the docs don't imply Workers work. No code change; suites unchanged (wke_smoke 66/66, mb_smoke 133/133).
 - test: Web Crypto verified end-to-end (2026-06-24). Now that wkeLoadHtmlWithBaseUrl can make a secure-context page, added the functional SubtleCrypto test that was impossible before: in an https:// page, crypto.subtle.digest('SHA-256','abc') resolves (async, via wkeWaitForFunction) to first byte 0xba — the correct hash. Confirms the wait mechanism DOES service async crypto completion (the earlier failure was purely insecure-context crypto.subtle being undefined, not the pump). Web Crypto fully works headlessly. wke_smoke 66/66, mb_smoke 133/133, no survivors.
 - wke LOAD: wkeLoadHtmlWithBaseUrl (2026-06-24). Exposes mbLoadHTML's existing base_url through wke (plain wkeLoadHTML hardcodes about:blank). Commits in-memory HTML at a given origin, so relative URLs resolve against it AND an https:// base makes the page a SECURE CONTEXT — which unblocks the secure-context-gated APIs the audit found (Web Crypto SubtleCrypto, etc.) for loadHTML content. Mainstream-wke API, mapped to the existing param. VERIFIED offline: base https://base.test/dir/page resolves <a href='x.html'> to https://base.test/dir/x.html, window.isSecureContext==true + crypto.subtle present, while wkeLoadHTML (about:blank) is insecure. wke_smoke 65/65, mb_smoke 133/133, no survivors.
