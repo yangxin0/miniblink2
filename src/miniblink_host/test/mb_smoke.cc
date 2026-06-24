@@ -438,6 +438,36 @@ int main() {
     mbResize(v, W, H);  // restore the shared viewport for later cases
   }
 
+  // 14d. Responsive emulation: width media queries track the VIEW width (set via
+  // mbResize / mb_shot's width/height), so a mobile screenshot is just a narrow
+  // view — the practical mobile-emulation path. Conversely <meta name=viewport>
+  // directives are NOT honored (desktop-mode WebView: the layout viewport is
+  // always the view size). This locks in both — the working capability and the
+  // documented limitation — since responsive sites depend on the first.
+  {
+    const char* doc =
+        "<style>#c{color:rgb(1,1,1)}@media (max-width:500px){#c{color:rgb(2,2,2)}}"
+        "</style><body><div id='c'>x</div></body>";
+    mbResize(v, 400, H);
+    mbLoadHTML(v, doc, "about:blank");
+    const std::string narrow =
+        Eval(v, "getComputedStyle(document.getElementById('c')).color");
+    mbResize(v, 800, H);
+    mbLoadHTML(v, doc, "about:blank");
+    const std::string wide =
+        Eval(v, "getComputedStyle(document.getElementById('c')).color");
+    // A viewport meta width cannot override the layout width (it's ignored).
+    mbResize(v, 400, H);
+    mbLoadHTML(v, "<meta name=viewport content='width=980'><body>x</body>",
+               "about:blank");
+    const std::string iw = Eval(v, "String(window.innerWidth)");
+    Expect(narrow == "rgb(2, 2, 2)" && wide == "rgb(1, 1, 1)" && iw == "400",
+           "responsive: width media queries track the view size "
+           "(<meta viewport> ignored)",
+           std::string("narrow=") + narrow + " wide=" + wide + " iw@vp980=" + iw);
+    mbResize(v, W, H);  // restore the shared viewport for later cases
+  }
+
   // 15. HiDPI: setting device scale factor makes window.devicePixelRatio report it
   // and resolution media queries re-evaluate (without zooming layout).
   mbSetDeviceScaleFactor(v, 2.0f);
