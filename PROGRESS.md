@@ -71,9 +71,9 @@ the deliverable surface (C API, CLI, wke layer).
   config (UA/headers/locale/tz/dark/DPR/transparent/images), history.
 - **`mb_shot` CLI (the deliverable tool):** a full scraper/automator — interact
   (`--fill`/`--click`/`--wait-selector`/`--wait-visible`/`--wait-ms`) → extract
-  (`--text`/`--html`/`--eval`/`--value`/`--checked`/`--visible`) → capture
-  (`--full`/`--clip`/`--selector`); plus `--proxy`/`--insecure`/`--no-follow`/
-  `--headers`/`--load-cookies`/`--save-cookies`.
+  (`--text`/`--html`/`--eval`/`--value`/`--checked`/`--visible`/`--text-all`/
+  `--attr-all`) → capture (`--full`/`--clip`/`--selector`); plus `--proxy`/
+  `--insecure`/`--no-follow`/`--headers`/`--load-cookies`/`--save-cookies`.
 - **wke compatibility layer (`src/wke/`):** a faithful subset over `mb_capi` covering
   the full headless-automation surface — lifecycle, load, loading-state polling,
   paint (`wkePaint`), PDF/PNG export (`wkeSavePdf`/`wkeSavePng`/
@@ -124,6 +124,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- mb_shot: --text-all / --attr-all — one-shot list scraping on the CLI (2026-06-24). Threads the last two ticks' query-all readers into the deliverable (pattern of --value/--checked/--visible). --text-all CSS prints the JSON array of every match's innerText; --attr-all CSS NAME prints the JSON array of attribute NAME across all matches (absent->null). VERIFIED end-to-end vs a local list page: --text-all '.r'→["alpha","beta","gamma"], --attr-all '.l' href→["/1","/2",null] (3rd <a> has no href), --text-all '.none'→[], invalid selector→empty+warning. No survivors. mb_shot.cc + usage only; both suites unchanged (wke 81/81, mb 142/142).
 - capi+wke: mbGetAllAttributeForSelector / wkeGetAllAttributeForSelector — list attr scraping (2026-06-24). Complement to last tick's all-text: getAttribute(attr) of EVERY match as a JSON array (all link hrefs / img srcs in one call). An element missing the attribute contributes JSON null, keeping index alignment with the all-text array; raw value (getAttribute), not the resolved property, so href stays "/3". "[]" for none, -1/"" for an invalid selector. VERIFIED in both suites: three <a class=l> (two with href, one without) → ["/1","/2",null], .none → [], "(((" → -1. wke_smoke 81/81, mb_smoke 142/142, no survivors. ABI now 85 fns.
 - capi+wke: mbGetAllTextForSelector / wkeGetAllTextForSelector — list scraping in one call (2026-06-24). The per-selector readers all returned the FIRST match; scraping a list meant mbCountSelector + an :nth-of-type loop (N+1 calls, fragile). Added a query-all that returns the innerText of EVERY match as a JSON.stringify'd array (embedded commas/newlines/quotes survive). "[]" for zero matches, -1/"" for an invalid selector (querySelectorAll throws). VERIFIED in both suites: <li class=r>a/b/c → ["a","b","c"], .none → [], "(((" → -1. wke_smoke 80/80, mb_smoke 141/141, no survivors. ABI now 84 fns.
 - capi+wke: mbSetAttribute / wkeSetAttribute — the attribute WRITER (+ README ABI re-sync) (2026-06-24). We could read attributes (mbGetAttribute) and set a control's .value (mbFillSelector) but not set an arbitrary HTML attribute — a real write gap. Added setAttribute(attr, value) on the first match (value "" = a bare boolean attr like disabled); a plain method call, no v8 [[Set]] trap. Returns matched/1 or not/0. VERIFIED in both suites: a changed href reads back via GetAttribute, a data-* round-trips, disabled="" takes LIVE effect (button.disabled===true), no-match→0. Also re-synced the README grouped ABI list, which had drifted: the 5 prior exports (mbGetUserAgent/Value/Checked/Visible/WaitForVisible) were missing — added them + mbSetAttribute and cross-checked all 83 exports now appear (0 missing), restoring the "every export documented" invariant. wke_smoke 79/79, mb_smoke 140/140, no survivors. ABI now 83 fns.

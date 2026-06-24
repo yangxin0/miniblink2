@@ -69,6 +69,9 @@ int main(int argc, char** argv) {
   std::string value_selector;  // print this control's live .value to stdout
   std::string checked_selector;  // print this control's .checked (1/0) to stdout
   std::string visible_selector;  // print this selector's visibility (1/0/-1)
+  std::string text_all_selector;  // print JSON array of all matches' innerText
+  std::string attr_all_selector;  // print JSON array of all matches' attribute
+  std::string attr_all_name;      // attribute name for --attr-all
   std::string proxy;           // libcurl proxy string for network fetches
   std::string load_cookies;    // cookie jar file to load before navigating
   std::string save_cookies;    // cookie jar file to write after the page settles
@@ -107,6 +110,11 @@ int main(int argc, char** argv) {
       checked_selector = argv[++i];
     } else if (a == "--visible" && i + 1 < argc) {
       visible_selector = argv[++i];
+    } else if (a == "--text-all" && i + 1 < argc) {
+      text_all_selector = argv[++i];
+    } else if (a == "--attr-all" && i + 2 < argc) {
+      attr_all_selector = argv[++i];
+      attr_all_name = argv[++i];
     } else if (a == "--proxy" && i + 1 < argc) {
       proxy = argv[++i];
     } else if (a == "--load-cookies" && i + 1 < argc) {
@@ -152,7 +160,8 @@ int main(int argc, char** argv) {
         stderr,
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
         "[--transparent] [--text] [--html] [--eval JS] [--value CSS] "
-        "[--checked CSS] [--visible CSS] [--fill CSS TEXT] "
+        "[--checked CSS] [--visible CSS] [--text-all CSS] [--attr-all CSS NAME] "
+        "[--fill CSS TEXT] "
         "[--click CSS] [--wait-selector CSS] [--wait-visible CSS] [--wait-ms N] "
         "[--scroll-to Y] "
         "[--post BODY] [--proxy URL] "
@@ -368,6 +377,33 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "mb_shot: --visible '%s' matched no element\n",
                    visible_selector.c_str());
     std::fprintf(stdout, "%d\n", vis);
+  }
+
+  // --text-all: print a JSON array of every match's innerText (one-shot list
+  // scraping). "[]" for no matches; a warning + empty line on an invalid selector.
+  if (!text_all_selector.empty()) {
+    std::vector<char> tab(1 << 20, 0);  // 1 MiB
+    int n = mbGetAllTextForSelector(view, text_all_selector.c_str(), tab.data(),
+                                    static_cast<int>(tab.size()));
+    if (n < 0)
+      std::fprintf(stderr, "mb_shot: --text-all '%s' invalid selector\n",
+                   text_all_selector.c_str());
+    std::fwrite(tab.data(), 1, std::strlen(tab.data()), stdout);
+    std::fputc('\n', stdout);
+  }
+
+  // --attr-all CSS NAME: print a JSON array of attribute NAME across all matches
+  // (absent -> null). "[]" for no matches; warning on an invalid selector.
+  if (!attr_all_selector.empty()) {
+    std::vector<char> aab(1 << 20, 0);  // 1 MiB
+    int n = mbGetAllAttributeForSelector(view, attr_all_selector.c_str(),
+                                         attr_all_name.c_str(), aab.data(),
+                                         static_cast<int>(aab.size()));
+    if (n < 0)
+      std::fprintf(stderr, "mb_shot: --attr-all '%s' invalid selector\n",
+                   attr_all_selector.c_str());
+    std::fwrite(aab.data(), 1, std::strlen(aab.data()), stdout);
+    std::fputc('\n', stdout);
   }
 
   // Persist the cookie jar after the page has settled (so cookies set during the
