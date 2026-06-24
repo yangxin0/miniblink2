@@ -246,6 +246,11 @@ class MbWebView {
   void SendScroll(int x, int y, int dx, int dy);
   // Absolute scroll: move the layout viewport to (x, y) in CSS px (window.scrollTo).
   void ScrollTo(int x, int y);
+  // Repeatedly scroll to the bottom and settle until the page stops growing (or
+  // max_steps, default 20), triggering IntersectionObserver/lazy-load so deferred
+  // content materializes before a --full capture or scrape. Returns the number of
+  // steps that grew the page (0 = static).
+  int ScrollToBottom(int max_steps);
   std::string EvalToString(const char* utf8_script);  // eval JS -> string result
   // Like EvalToString, but also reports the JS typeof the result (one of
   // "number"/"string"/"boolean"/"object"/"function"/"undefined"/"array"/"null")

@@ -986,6 +986,30 @@ void MbWebView::ScrollTo(int x, int y) {
   EvalToString(js.c_str());
 }
 
+int MbWebView::ScrollToBottom(int max_steps) {
+  if (!main_frame_)
+    return 0;
+  if (max_steps <= 0)
+    max_steps = 20;  // sane default cap for unbounded infinite-scroll pages
+  // Repeatedly scroll to the current bottom and settle, so IntersectionObserver /
+  // lazy-load handlers append more content; stop when the page stops growing (all
+  // content loaded) or max_steps is hit. WaitMs drives the lifecycle including
+  // ForceUpdateViewportIntersections, so observers fire between scrolls. Returns
+  // the number of steps that grew the page (0 = a static page that never grew).
+  std::string last_h = EvalToString("''+document.body.scrollHeight");
+  int grew = 0;
+  for (int i = 0; i < max_steps; ++i) {
+    EvalToString("(window.scrollTo(0,document.body.scrollHeight),'')");
+    WaitMs(80);  // let lazy content append + lay out (same settle as the IO test)
+    std::string h = EvalToString("''+document.body.scrollHeight");
+    if (h == last_h)
+      break;  // no new content appeared -> reached the end
+    last_h = h;
+    ++grew;
+  }
+  return grew;
+}
+
 void MbWebView::RunInFrameTask(base::OnceClosure body, bool settle) {
   // Host-driven JS must execute within a scheduler task. Page scripts always do
   // (bracketed by WillProcessTask/DidProcessTask), and engine subsystems rely on

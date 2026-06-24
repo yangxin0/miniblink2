@@ -176,6 +176,10 @@ WKE_API void wkeSetDeviceScaleFactor(wkeWebView webView, float scale);
 // (window.scrollTo). Moves the real viewport (fixed/sticky elements render
 // correctly) — pair with wkeSavePng/wkePaint for a long-page shot. Port extension.
 WKE_API void wkeScrollTo(wkeWebView webView, int x, int y);
+// Auto-scroll to the bottom, settling so lazy/IntersectionObserver content loads,
+// until the page stops growing or maxSteps (<=0 -> default 20). Returns the number
+// of steps that grew the page. Use before a full-page capture/scrape.
+WKE_API int wkeScrollToBottom(wkeWebView webView, int maxSteps);
 // Follow HTTP 3xx redirects (default, follow=true) or stop at the redirect
 // response (follow=false) so wkeGetHttpStatusCode/wkeGetResponseHeaders expose
 // the 30x + Location. Process-wide; set before navigating. Port extension.

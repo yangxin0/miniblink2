@@ -285,6 +285,12 @@ void mbScrollTo(mbView* v, int x, int y) {
     v->impl->ScrollTo(x, y);
 }
 
+int mbScrollToBottom(mbView* v, int max_steps) {
+  if (!v || !v->impl)
+    return 0;
+  return v->impl->ScrollToBottom(max_steps);
+}
+
 int mbGetCookies(mbView* v, const char* url, char* out, int out_cap) {
   if (!v || !v->impl || !url)
     return 0;

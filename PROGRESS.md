@@ -63,7 +63,7 @@ the deliverable surface (C API, CLI, wke layer).
   blob: URLs (`fetch` + `<img>`), Intersection/Resize/Mutation observers, WAAPI,
   forms + submit-navigation, mouse/keyboard input, host-side history. CJK/i18n +
   system web fonts render.
-- **`mb_capi` C API — 93 functions:** lifecycle, load, JS eval, scraping
+- **`mb_capi` C API — 94 functions:** lifecycle, load, JS eval, scraping
   (text/attr/computed-style/count by selector), input (mouse/key/text/scroll +
   click/fill/select/focus/hover/scroll-into-view by selector), screenshots
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
@@ -107,7 +107,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **147/147** (default, network-free), `wke_smoke` **86/86**,
+- **Tests:** `mb_smoke` **148/148** (default, network-free), `wke_smoke` **87/87**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -125,6 +125,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- capi+wke: mbScrollToBottom / wkeScrollToBottom — auto-scroll to load lazy content (2026-06-24). A distinct capability not expressible with existing primitives in one call: repeatedly scroll to the bottom and settle (WaitMs drives the lifecycle incl. ForceUpdateViewportIntersections, so IntersectionObserver/lazy handlers fire) until the page stops growing or max_steps (default 20). Returns the count of steps that grew the page. Use before a --full capture / scrape so infinite-scroll items + lazy images materialize. VERIFIED in both suites with a scroll-handler appender (deterministic, viewport-independent) under a short viewport: 3 lazy blocks load (1 initial + 3 = 4), grew=3. (First wrote an IntersectionObserver+sentinel test that passed in wke but failed in mb — grew=0/blocks=2 — because IO edge-intersection is viewport-height sensitive; switched to a scroll-event appender + explicit small viewport restored after.) wke_smoke 87/87, mb_smoke 148/148, no survivors. ABI now 94 fns.
 - mb_shot: --requests — subresource fetch log on the CLI (2026-06-24). Threads last tick's request log into the deliverable: clears the log before navigation (scoping it to this page) and prints the fetched URLs (one per line) in the extract phase — a command-line asset/tracker inventory. VERIFIED end-to-end offline: a page linking a file:// stylesheet prints that .css URL under --requests, no survivors. mb_shot.cc + usage only; both suites unchanged (wke 86/86, mb 147/147).
 - capi+wke: mbGetRequestLog / mbClearRequestLog (+ wke) — network observability (2026-06-24). A genuinely new area (not selectors/storage): the loader now records every subresource URL it fetches (img/css/fetch/XHR) at the MbURLLoader::Deliver chokepoint into a process-wide, capped (2048, oldest-dropped) log. mbGetRequestLog returns them newline-separated; mbClearRequestLog empties it (scope to a page by clearing before load). Single-threaded main-thread loader -> no locking. VERIFIED OFFLINE (file:// subresources flow through the same chokepoint as network ones): clear, load a page linking a file:// stylesheet, wait until it APPLIES (proves the fetch reached the loader), log contains the .css URL; clear -> empty. wke_smoke 86/86, mb_smoke 147/147, no survivors. ABI now 93 fns (2 new). Note: captures subresources via the URLLoader; the top-level navigation (MbFetchUrl) is not logged — known via mbGetURL.
 - capi+wke: mbGetSessionStorage / mbSetSessionStorage (+ wke) — complete Web Storage (2026-06-24). The expected peer of last tick's localStorage accessors (users who find mbGetLocalStorage look for the session variant). Same contract/origin caveats, but a per-session store. VERIFIED in both suites against an https base: set via C is observed in JS (sessionStorage.getItem), set in JS is read via C, and crucially a key in sessionStorage is ABSENT from localStorage (proving the two stores are distinct). wke_smoke 85/85, mb_smoke 146/146, no survivors. ABI now 91 fns (2 new).

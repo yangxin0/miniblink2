@@ -572,6 +572,15 @@ void wkeScrollTo(wkeWebView webView, int x, int y) {
     mbScrollTo(webView->view, x, y);
 }
 
+int wkeScrollToBottom(wkeWebView webView, int maxSteps) {
+  // Auto-scroll to the bottom, settling each step so lazy/IntersectionObserver
+  // content loads, until the page stops growing or maxSteps. Returns the number
+  // of steps that grew the page. (Port extension.)
+  if (!webView || !webView->view)
+    return 0;
+  return mbScrollToBottom(webView->view, maxSteps);
+}
+
 int wkeEncodePng(wkeWebView webView, int width, int height,
                  const unsigned char** outData) {
   // Render the current frame to a width x height PNG held in memory (no temp

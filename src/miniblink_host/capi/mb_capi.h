@@ -250,6 +250,13 @@ MB_EXPORT void mbSendScroll(mbView*, int x, int y, int dx, int dy);
 // render correctly. Pair with mbPaintToBitmap / mbSavePng for a viewport shot.
 MB_EXPORT void mbScrollTo(mbView*, int x, int y);
 
+// Auto-scroll to the bottom, settling between steps so IntersectionObserver /
+// lazy-load handlers append their content, until the page stops growing or
+// `max_steps` is reached (<=0 -> default 20). Use before mbSavePng(--full) or a
+// scrape so deferred images / infinite-scroll items materialize. Returns the
+// number of steps that grew the page (0 = a static page).
+MB_EXPORT int mbScrollToBottom(mbView*, int max_steps);
+
 // Write the HTTP cookie jar's cookies for `url` ("name=value; name2=value2") into
 // `out` (NUL-terminated, up to out_cap). For exporting a session after a login flow.
 // Returns the full length in bytes; empty for non-http(s) URLs.

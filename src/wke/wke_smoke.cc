@@ -1162,6 +1162,31 @@ int main() {
     std::remove(rl_css);
   }
 
+  // wkeScrollToBottom drives lazy loading: a scroll handler appends a tall block
+  // per scroll (up to 3), so the page only finishes growing if something scrolls
+  // it. A short viewport (< one block) guarantees each scroll moves. Auto-scroll
+  // must trigger all 3 (1 initial + 3 = 4 blocks).
+  {
+    const int sw = wkeGetWidth(wv), sh = wkeGetHeight(wv);  // save to restore
+    wkeResize(wv, sw > 0 ? sw : 400, 300);  // viewport shorter than a 600px block
+    wkeLoadHTML(wv,
+        "<body style='margin:0'>"
+        "<div class='blk' style='height:600px'>0</div>"
+        "<script>window.__n=0;"
+        "window.addEventListener('scroll',function(){"
+        "if(window.__n<3){window.__n++;"
+        "var d=document.createElement('div');d.className='blk';"
+        "d.style.height='600px';d.textContent=window.__n;"
+        "document.body.appendChild(d);}});</script></body>");
+    const int grew = wkeScrollToBottom(wv, 10);
+    const bool all_loaded =
+        jsToInt(es, wkeRunJS(wv, "document.querySelectorAll('.blk').length")) == 4 &&
+        jsToInt(es, wkeRunJS(wv, "window.__n")) == 3;
+    check(grew > 0 && all_loaded,
+          "wkeScrollToBottom triggers lazy scroll-loaded content (4 blocks)");
+    wkeResize(wv, sw > 0 ? sw : 800, sh > 0 ? sh : 600);  // restore
+  }
+
   // wkeGetAllTextForSelector scrapes a whole list in one call, returning a JSON
   // array of each match's innerText; "[]" for no matches, "" for a bad selector.
   {

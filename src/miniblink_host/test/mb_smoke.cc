@@ -1698,6 +1698,33 @@ int main() {
     std::remove(css_path);
   }
 
+  // 75a2. mbScrollToBottom drives lazy loading: a scroll handler appends a tall
+  // block on each scroll (up to 3), so the page only finishes growing if something
+  // actually scrolls it. A small viewport (< one block) guarantees each scrollTo
+  // moves. Auto-scrolling to the bottom must trigger all 3 (1 initial + 3 = 4).
+  {
+    mbResize(v, W, 300);  // viewport shorter than a 600px block -> scrolling moves
+    mbLoadHTML(v,
+        "<body style='margin:0'>"
+        "<div class='blk' style='height:600px'>0</div>"
+        "<script>window.__n=0;"
+        "window.addEventListener('scroll',function(){"
+        "if(window.__n<3){window.__n++;"
+        "var d=document.createElement('div');d.className='blk';"
+        "d.style.height='600px';d.textContent=window.__n;"
+        "document.body.appendChild(d);}});</script></body>",
+        "about:blank");
+    const int grew = mbScrollToBottom(v, 10);
+    const bool all_loaded = Eval(v, "String(document.querySelectorAll('.blk').length)")
+                                == "4" &&
+                            Eval(v, "String(window.__n)") == "3";
+    Expect(grew > 0 && all_loaded,
+           "mbScrollToBottom triggers lazy scroll-loaded content (4 blocks)",
+           std::string("grew=") + std::to_string(grew) + " blocks=" +
+               Eval(v, "String(document.querySelectorAll('.blk').length)"));
+    mbResize(v, W, H);  // restore the shared viewport for later cases
+  }
+
   // 75b. Request log: the loader records every subresource it fetches. Clear it,
   // load a page that links a file:// stylesheet, and confirm the log captured the
   // stylesheet URL; then clear and confirm it empties. (Offline — file:// flows
