@@ -125,6 +125,31 @@ int main() {
                     "JSDoc") == 0,
         "wkeRunJS reads the DOM (document.title)");
 
+  // Multiple concurrent webViews are independent (real multi-view apps): each has
+  // its own document, title, and JS globals, and destroying one leaves the other
+  // fully usable.
+  {
+    wkeWebView wv2 = wkeCreateWebView();
+    wkeResize(wv2, 120, 90);
+    wkeLoadHTML(wv2, "<title>Second</title><body>2</body>");
+    jsExecState es2 = wkeGlobalExec(wv2);
+    wkeRunJS(wv, "window.__v='A'");
+    wkeRunJS(wv2, "window.__v='B'");
+    const bool indep =
+        std::strcmp(wkeGetTitle(wv), "JSDoc") == 0 &&
+        std::strcmp(wkeGetTitle(wv2), "Second") == 0 &&
+        std::strcmp(jsToTempString(es, wkeRunJS(wv, "window.__v")), "A") == 0 &&
+        std::strcmp(jsToTempString(es2, wkeRunJS(wv2, "window.__v")), "B") == 0 &&
+        jsToInt(es2, wkeRunJS(wv2, "3+4")) == 7;
+    wkeDestroyWebView(wv2);
+    // The original view still works after the second is destroyed.
+    const bool survives = std::strcmp(jsToTempString(es, wkeRunJS(wv,
+                              "window.__v")), "A") == 0 &&
+                          jsToInt(es, wkeRunJS(wv, "5+5")) == 10;
+    check(indep && survives,
+          "multiple concurrent webViews are independent + outlive each other");
+  }
+
   // Modern web-platform JS works headlessly: structuredClone deep-clones nested
   // structures. (Web Crypto SubtleCrypto also works but is secure-context-gated —
   // present on https/file://, absent on this about:blank page — verified via

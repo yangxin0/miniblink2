@@ -105,7 +105,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **133/133** (default, network-free), `wke_smoke` **68/68**,
+- **Tests:** `mb_smoke` **133/133** (default, network-free), `wke_smoke` **69/69**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -123,6 +123,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- test: multiple concurrent webViews are independent (2026-06-24). The suites had only ever used one view; added a real multi-view case — create a 2nd wkeWebView alongside the 1st, load distinct docs, and confirm independent titles + JS globals (wv.__v=='A' while wv2.__v=='B'), then destroy wv2 and confirm wv still runs JS/reads state. Verifies the engine has no single-view assumption (multiple Blink WebViews coexist in the one process/isolate) and that teardown of one doesn't disturb the other. wke_smoke 69/69, mb_smoke 133/133, no survivors. Test-only.
 - wke PAINT: wkePaintRect + wke↔mb_capi coverage audit (2026-06-24). Systematic check: of 75 mb_capi exports, the wke layer now wraps all but 3 — mbRunJS (redundant with wkeRunJS), mbPumpMessages (no need in the synchronous model), and mbPaintRectToBitmap. Exposed the last as wkePaintRect (composite a logical rect into a caller BGRA8888 buffer — partial/dirty-rect capture to memory without encoding), completing wke's paint surface. Port extension. VERIFIED offline: painting a 20x10 sub-rect of an rgb(10,200,30) page yields the right BGRA pixels (B≈30,G≈200,R≈10). Fixed a -Wshadow (renamed a `c` local). wke_smoke 68/68, mb_smoke 133/133, no survivors.
 - wke SCRIPTING: wkeRunJsInIsolatedWorld (2026-06-24). Exposes mbEvalJSIsolated through wke — runs a script in a dedicated isolated world (own JS globals, separate from the page and from wkeRunJS, but the SAME DOM): the content-script model for injecting automation the page can't observe or collide with. Returns the result as a view-owned temp string. Port extension. VERIFIED offline: an isolated eval sees typeof window.__main (a main-world global) as "undefined", reads a DOM attribute the main world set ("dom"), and its own window.__iso does NOT leak back to the main world. wke_smoke 67/67, mb_smoke 133/133, no survivors.
 - investigation: dedicated Web Workers don't run (2026-06-24). Probed the audit's "Worker present, functionality unverified": new Worker(blob URL) that postMessages back stays 'pending' even after 3.5s of pumping (no message, no onerror, no throw) — the constructor succeeds but the worker thread is never serviced. Like IndexedDB, this needs real worker-thread infrastructure (WorkerThread + scheduler + message routing), a substantial subsystem, not a bounded tick. Added an honest roadmap row so the docs don't imply Workers work. No code change; suites unchanged (wke_smoke 66/66, mb_smoke 133/133).
