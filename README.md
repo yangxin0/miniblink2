@@ -226,7 +226,8 @@ over-the-network cases under `MB_NET_TESTS=1`). Functions marked *(ext)* are
 port extensions over `mb_capi` beyond the classic `wke` surface:
 
 - **Lifecycle / load:** `wkeInitialize`/`wkeFinalize`, `wkeCreateWebView`/
-  `wkeDestroyWebView`, `wkeLoadURL`/`wkeLoadHTML`, `wkePostURL`, `wkeReload`, the
+  `wkeDestroyWebView`, `wkeLoadURL`/`wkeLoadHTML`/`wkeLoadHtmlWithBaseUrl`
+  (base origin → relative URLs + secure context), `wkePostURL`, `wkeReload`, the
   loading-state pollers (`wkeIsLoadingCompleted`/`Succeeded`/`Failed`,
   `wkeIsDocumentReady`).
 - **Geometry / rendering:** `wkeResize`, `wkeGetWidth`/`Height`,

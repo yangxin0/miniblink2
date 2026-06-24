@@ -79,6 +79,11 @@ WKE_API void wkeDestroyWebView(wkeWebView webView);
 // --- Loading -------------------------------------------------------------------
 WKE_API void wkeLoadURL(wkeWebView webView, const utf8* url);
 WKE_API void wkeLoadHTML(wkeWebView webView, const utf8* html);
+// Like wkeLoadHTML but commits the document at `baseUrl` (its URL + origin):
+// relative URLs resolve against it, and an https:// base makes the page a
+// secure context (enabling Web Crypto subtle, etc.). NULL/"" => about:blank.
+WKE_API void wkeLoadHtmlWithBaseUrl(wkeWebView webView, const utf8* html,
+                                    const utf8* baseUrl);
 WKE_API void wkeReload(wkeWebView webView);
 // POST `postData` (Content-Type defaults to form-urlencoded) to an http(s) URL and
 // commit the response. `postLen` is the body length; the body is treated as text

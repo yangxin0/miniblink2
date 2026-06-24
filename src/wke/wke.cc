@@ -273,6 +273,20 @@ void wkeLoadHTML(wkeWebView webView, const utf8* html) {
   FireLoadCallbacks(webView);
 }
 
+void wkeLoadHtmlWithBaseUrl(wkeWebView webView, const utf8* html,
+                            const utf8* baseUrl) {
+  // Like wkeLoadHTML but commits the document at `baseUrl` (the document URL +
+  // origin) instead of about:blank — so relative URLs resolve against it and an
+  // https:// base makes the page a secure context (Web Crypto subtle, etc.).
+  if (!webView || !webView->view)
+    return;
+  webView->last_was_http = false;
+  mbLoadHTML(webView->view, html,
+             (baseUrl && baseUrl[0]) ? baseUrl : "about:blank");
+  mbWait(webView->view, 30);
+  FireLoadCallbacks(webView);
+}
+
 void wkeReload(wkeWebView webView) {
   if (webView && webView->view)
     mbReload(webView->view);

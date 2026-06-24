@@ -135,6 +135,25 @@ int main() {
             "{\"a\":[1,2],\"b\":\"x\"}") == 0,
         "structuredClone deep-clones a nested object (modern JS)");
 
+  // wkeLoadHtmlWithBaseUrl: an https base resolves relative URLs against it and
+  // makes the page a secure context (so Web Crypto SubtleCrypto is available),
+  // unlike the about:blank base of plain wkeLoadHTML.
+  {
+    wkeLoadHtmlWithBaseUrl(wv, "<body><a id='l' href='x.html'>L</a></body>",
+                           "https://base.test/dir/page");
+    const bool url_ok =
+        std::strcmp(jsToTempString(
+                        es, wkeRunJS(wv, "document.getElementById('l').href")),
+                    "https://base.test/dir/x.html") == 0;
+    const bool secure = jsToBoolean(es, wkeRunJS(wv, "window.isSecureContext")) &&
+                        jsToBoolean(es, wkeRunJS(wv, "typeof crypto.subtle"
+                                                     "==='object'"));
+    wkeLoadHTML(wv, "<body>x</body>");  // about:blank base is NOT secure
+    const bool insecure = !jsToBoolean(es, wkeRunJS(wv, "window.isSecureContext"));
+    check(url_ok && secure && insecure,
+          "wkeLoadHtmlWithBaseUrl: base origin (relative URLs + secure context)");
+  }
+
   // Keyboard: type into a focused field, then submit with Enter — verified by
   // reading the field value and the form's submit flag through wkeRunJS.
   wkeLoadHTML(wv,
