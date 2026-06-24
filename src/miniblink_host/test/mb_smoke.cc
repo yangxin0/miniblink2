@@ -2593,6 +2593,24 @@ int main() {
                (none_ok ? "1" : "0") + " bad=" + (bad_ok ? "1" : "0"));
   }
 
+  // 102b4b. mbGetAllValueForSelector serializes a whole form's LIVE values in one
+  // call; a typed-over field is reflected (unlike the static value attribute).
+  {
+    mbLoadHTML(v, "<body><input class='f' value='a'><input class='f' value='b'>"
+                  "<input class='f' value='c'></body>", "about:blank");
+    mbFillSelector(v, ".f:nth-of-type(2)", "B2");  // change the 2nd live value
+    char jb[256] = {0};
+    int jlen = mbGetAllValueForSelector(v, ".f", jb, sizeof(jb));
+    const bool ok = jlen > 0 && std::string(jb) == "[\"a\",\"B2\",\"c\"]";
+    char nb[16] = {0};
+    mbGetAllValueForSelector(v, ".none", nb, sizeof(nb));
+    const bool none_ok = std::string(nb) == "[]";
+    Expect(ok && none_ok,
+           "mbGetAllValueForSelector serializes all live form values as JSON",
+           std::string("vals=") + (ok ? "1" : "0") + " none=" + (none_ok ? "1" : "0") +
+               " got=" + jb);
+  }
+
   // 102b6. mbGetLocalStorage/mbSetLocalStorage share the page's localStorage for
   // the document's origin (needs a real http(s) base, not about:blank): set via
   // C and observe in JS, set in JS and read via C, an absent key -> -1.

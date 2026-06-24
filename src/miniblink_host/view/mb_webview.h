@@ -174,6 +174,9 @@ class MbWebView {
   // Returns false on an invalid selector; "[]" for zero matches.
   bool GetAllAttributeForSelector(const char* css_selector, const char* attr,
                                   std::string* out);
+  // The live .value of EVERY match as a JSON array string (serialize a form's
+  // current state; absent value -> null). False on an invalid selector.
+  bool GetAllValueForSelector(const char* css_selector, std::string* out);
   bool GetAttribute(const char* css_selector, const char* attr, std::string* out);
   // setAttribute(attr, value) on the first match (value="" for a bare boolean
   // attribute like 'disabled'). Returns true if an element matched. The write

@@ -1270,6 +1270,20 @@ int main() {
           "wkeGetAllAttributeForSelector returns a JSON array of an attr (null if absent)");
   }
 
+  // wkeGetAllValueForSelector serializes a whole form's LIVE values in one call;
+  // a typed-over field is reflected (unlike the static value attribute).
+  {
+    wkeLoadHTML(wv, "<body><input class='f' value='a'><input class='f' value='b'>"
+                    "<input class='f' value='c'></body>");
+    wkeFillSelector(wv, ".f:nth-of-type(2)", "B2");  // change the 2nd live value
+    const bool ok =
+        std::strcmp(wkeGetAllValueForSelector(wv, ".f"), "[\"a\",\"B2\",\"c\"]") == 0;
+    const bool none_ok =
+        std::strcmp(wkeGetAllValueForSelector(wv, ".none"), "[]") == 0;
+    check(ok && none_ok,
+          "wkeGetAllValueForSelector serializes all live form values as JSON");
+  }
+
   // wkeGetCheckedForSelector reports a checkbox/radio's live .checked state
   // (1/0), -1 for a non-checkable element, and tracks a click that toggles it.
   {

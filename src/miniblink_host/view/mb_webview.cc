@@ -649,6 +649,28 @@ bool MbWebView::GetAllTextForSelector(const char* css_selector,
   return true;
 }
 
+bool MbWebView::GetAllValueForSelector(const char* css_selector,
+                                       std::string* out) {
+  if (!css_selector)
+    return false;
+  // The live .value of EVERY match, as a JSON array string — serialize a whole
+  // form's current state in one call (vs GetAllAttribute's static "value"
+  // attribute). A match with no value property contributes JSON null. Invalid
+  // selector throws -> "" -> false; zero matches is the valid "[]".
+  std::string js =
+      "(function(){try{var ns=document.querySelectorAll(\"" +
+      JsEscape(css_selector) +
+      "\");var a=[];for(var i=0;i<ns.length;i++){var v=ns[i].value;"
+      "a.push(v===undefined?null:v);}return JSON.stringify(a);}"
+      "catch(e){return '';}})()";
+  std::string s = EvalToString(js.c_str());
+  if (s.empty())
+    return false;  // invalid selector
+  if (out)
+    *out = s;
+  return true;
+}
+
 bool MbWebView::GetAllAttributeForSelector(const char* css_selector,
                                            const char* attr, std::string* out) {
   if (!css_selector || !attr)

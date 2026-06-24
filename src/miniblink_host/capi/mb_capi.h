@@ -370,6 +370,14 @@ MB_EXPORT int mbGetAllAttributeForSelector(mbView*, const char* css_selector,
                                            const char* attr, char* out,
                                            int out_cap);
 
+// Write the live .value of EVERY element matching `css_selector` as a JSON array
+// string (e.g. ["alice","",  "on"]) into `out` — serialize a whole form's current
+// state in one call, vs mbGetAllAttributeForSelector(...,"value") which gives the
+// static initial attribute. A match with no value property contributes JSON null.
+// Returns the length (>=0; "[]" for no matches) or -1 on an invalid selector.
+MB_EXPORT int mbGetAllValueForSelector(mbView*, const char* css_selector,
+                                       char* out, int out_cap);
+
 // Write the value of attribute `attr` on the first element matching
 // `css_selector` into `out`. Returns the value's length in bytes (>=0), or -1 if
 // no element matches OR the attribute is absent (null). Size first with

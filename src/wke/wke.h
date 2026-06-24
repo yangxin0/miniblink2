@@ -222,6 +222,10 @@ WKE_API const utf8* wkeGetAllTextForSelector(wkeWebView webView,
 WKE_API const utf8* wkeGetAllAttributeForSelector(wkeWebView webView,
                                                   const char* selector,
                                                   const char* attr);
+// Live .value of EVERY match as a JSON array string (serialize a form's state;
+// absent -> null; "[]" none, "" invalid). Owned by the view.
+WKE_API const utf8* wkeGetAllValueForSelector(wkeWebView webView,
+                                              const char* selector);
 WKE_API const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,
                                     const char* attr);
 // setAttribute(attr, value) on the first match (value "" for a bare boolean
