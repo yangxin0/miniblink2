@@ -833,6 +833,17 @@ bool wkeDispatchEvent(wkeWebView webView, const char* selector, const char* type
   return ok;
 }
 
+bool wkeDragSelector(wkeWebView webView, const char* fromSelector,
+                     const char* toSelector) {
+  // Mouse-drag `from` -> `to` by selector centers; true if both matched. (Port
+  // extension — Puppeteer dragAndDrop; mouse-based, not HTML5 native DnD.)
+  if (!webView || !webView->view || !fromSelector || !toSelector)
+    return false;
+  const bool ok = mbDragSelector(webView->view, fromSelector, toSelector) != 0;
+  DrainPageEvents(webView);
+  return ok;
+}
+
 bool wkeFillSelector(wkeWebView webView, const char* selector,
                      const utf8* text) {
   // Set the value of the first matching input/textarea and fire input+change

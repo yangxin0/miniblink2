@@ -272,6 +272,10 @@ WKE_API bool wkeClickSelector(wkeWebView webView, const char* selector);
 // custom) on the first match — trigger handlers click/fill don't. True if matched.
 WKE_API bool wkeDispatchEvent(wkeWebView webView, const char* selector,
                               const char* type);
+// Mouse-drag from one selector's center to another's (Puppeteer dragAndDrop;
+// mouse-based, not HTML5 native DnD). Both must be in view. True if both matched.
+WKE_API bool wkeDragSelector(wkeWebView webView, const char* fromSelector,
+                             const char* toSelector);
 WKE_API bool wkeFillSelector(wkeWebView webView, const char* selector,
                              const utf8* text);
 WKE_API bool wkeSelectOption(wkeWebView webView, const char* selector,

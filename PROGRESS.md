@@ -63,7 +63,7 @@ the deliverable surface (C API, CLI, wke layer).
   blob: URLs (`fetch` + `<img>`), Intersection/Resize/Mutation observers, WAAPI,
   forms + submit-navigation, mouse/keyboard input, host-side history. CJK/i18n +
   system web fonts render.
-- **`mb_capi` C API — 104 functions:** lifecycle, load, JS eval, scraping
+- **`mb_capi` C API — 105 functions:** lifecycle, load, JS eval, scraping
   (text/attr/computed-style/count by selector), input (mouse/key/text/scroll +
   click/fill/select/focus/hover/scroll-into-view by selector), screenshots
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
@@ -107,7 +107,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **156/156** (default, network-free), `wke_smoke` **95/95**,
+- **Tests:** `mb_smoke` **157/157** (default, network-free), `wke_smoke` **96/96**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -125,6 +125,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- capi+wke: mbDragSelector / wkeDragSelector — drag one element onto another (2026-06-25). The high-level convenience over last tick's drag primitives (Puppeteer dragAndDrop): resolve both selectors' centers, then press on `from`, glide through 6 interpolated moves (carrying the held button), release on `to` — removes the rect-math + interpolation boilerplate. Mouse-based (sliders/sortables/map-pan), not HTML5 native DnD; both elements must be in view. VERIFIED in both suites: a #handle that follows the cursor dropped exactly at #target's center x (dropx==220), moves observed, no-match -> 0/false. Caught a -Wshadow build error (a top-of-main `nomatch` collided with later block-scoped ones) -> wrapped the test in its own block. wke_smoke 96/96, mb_smoke 157/157, no survivors. ABI now 105 fns.
 - capi+wke: mbSendMouseDown / mbSendMouseUp — drag support (2026-06-25). Only combined mbSendMouseClick existed, so DRAG (sliders, canvas drawing, drag-reorder) was impossible. Added separate press/release in the widget with a held-button state: while pressed, SendMouseMove carries kLeftButtonDown so drag moves report e.buttons==1 (backward-compatible — a hover move when not pressed is unchanged). Down->move(s)->up drags; down+up at one point clicks. Also upgraded wke: wkeFireMouseEvent LBUTTONDOWN/UP now map to real down/up (was: DOWN no-op, UP=full click) — preserves the click (down+up) AND enables drag through the classic wke API. VERIFIED: mb_smoke drag on a pad -> dx==150, e.buttons==1 during the move, and a down+up still fires onclick (dx=150 btn=1 click=1); wke drag delta+buttons match; the existing wke click test still passes. wke_smoke 95/95, mb_smoke 156/156, no survivors. ABI now 104 fns (2 new).
 - maint: re-certified build.sh end-to-end (the standalone-build claim) (2026-06-24). Ran the documented one-command build `./build.sh <tree>` from current sources after last tick's new mb_demo target + ~50 functions since the prior cert: stages host+wke, patches idempotent (all 4 already-applied), gn gen clean, builds all SIX targets (miniblink_host, mb_smoke, mb_shot, mb_demo, wke_smoke, wke_demo — mb_demo links via the canonical path, not just direct ninja), vendors both resource paks, runs mb_smoke -> 155/155, exit 0, no survivors. No WARN/NOTE (root gn_all dep still wired — no manual step). Confirms the user's headline requirement ("it's a standalone project") holds with the new target. Verification-only; no code change.
 - example: mb_demo — a runnable pure-C mb_capi end-to-end sample (2026-06-24). The primary deliverable seam (the C ABI) had no runnable example — only the wke layer did (wke_demo). Added src/miniblink_host/tools/mb_demo.cc + an executable("mb_demo") GN target (and to build.sh's ninja line); it drives the C ABI: fill #name -> read live value -> dispatch a custom 'refresh' event -> wait for network idle (a deferred <img>) -> scrape text + outerHTML -> check the request log -> element screenshot -> eval, asserting each step (so it doubles as an integration check + C-ABI doc). VERIFIED: all 9 steps OK, exit 0, no survivors; the other targets + suites unregressed (wke_smoke 94/94, mb_smoke 155/155). Example-only — no engine/API change (ABI stays 102). NOTE: a new GN target needs the staged BUILD.gn + gn gen (ninja auto-reran gn here; build.sh does both).

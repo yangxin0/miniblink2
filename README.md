@@ -176,7 +176,7 @@ See `docs/interface-surface.md` for the exact minimal Blink embedding surface, a
 
 ## Public C ABI (`src/miniblink_host/capi/mb_capi.h`)
 
-104 functions; the header has the full, commented signatures. The canonical flow —
+105 functions; the header has the full, commented signatures. The canonical flow —
 boot, render, read back, screenshot, shut down:
 
 ```c
@@ -224,7 +224,8 @@ Grouped overview (see `mb_capi.h` for the exact signatures):
   by selector `mbClickSelector`
   `mbDoubleClickSelector` `mbRightClickSelector` `mbHoverSelector`
   `mbFocusSelector` `mbBlurSelector` `mbFillSelector` `mbSelectOption`
-  `mbDispatchEvent` (synthetic DOM events) `mbScrollIntoView`
+  `mbDispatchEvent` (synthetic DOM events) `mbDragSelector` (drag from→to)
+  `mbScrollIntoView`
 - **Capture / output:** `mbPaintToBitmap` `mbPaintRectToBitmap` `mbSavePng`
   `mbSavePngRect` `mbSaveElementPng` (one element by selector) `mbSavePdf`
   `mbEncodePng` (in-memory PNG bytes)

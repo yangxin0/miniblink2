@@ -223,6 +223,34 @@ int main() {
              Eval(v, "String(window.__btn)") + " click=" +
              Eval(v, "String(window.__clk||0)"));
 
+  // 12b. mbDragSelector drags one element's center onto another's: #handle follows
+  // the cursor during the drag and the drop lands at #target's center x (220).
+  {
+  mbLoadHTML(v,
+      "<body style='margin:0'>"
+      "<div id='handle' style='position:absolute;left:0;top:0;width:40px;height:40px'></div>"
+      "<div id='target' style='position:absolute;left:200px;top:0;width:40px;height:40px'></div>"
+      "<script>window.__moved=0;window.__dropx=-1;var drag=0;"
+      "document.getElementById('handle').addEventListener('mousedown',function(){drag=1;});"
+      "document.addEventListener('mousemove',function(e){if(drag){window.__moved=1;"
+      "document.getElementById('handle').style.left=e.clientX+'px';}});"
+      "document.addEventListener('mouseup',function(e){if(drag){drag=0;window.__dropx=e.clientX;}});"
+      "</script></body>", "about:blank");
+  {
+    std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // layout for hit-testing
+  }
+  const bool drag_ok = mbDragSelector(v, "#handle", "#target") == 1;
+  const bool dropped = Eval(v, "String(window.__dropx)") == "220" &&
+                       Eval(v, "String(window.__moved)") == "1" &&
+                       Eval(v, "document.getElementById('handle').style.left") == "220px";
+  const bool nomatch = mbDragSelector(v, "#handle", "#none") == 0;
+  Expect(drag_ok && dropped && nomatch,
+         "mbDragSelector drags from-center to to-center (drop at 220)",
+         std::string("ok=") + (drag_ok ? "1" : "0") + " dropx=" +
+             Eval(v, "String(window.__dropx)") + " nomatch=" + (nomatch ? "1" : "0"));
+  }
+
   // 13. Body with an embedded NUL byte must not truncate the document (the host
   // used to commit body.c_str(), losing everything after the first NUL). Load via
   // file:// (the length-preserving path) and verify content AFTER the NUL parsed.

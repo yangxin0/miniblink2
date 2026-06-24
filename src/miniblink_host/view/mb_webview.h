@@ -86,6 +86,11 @@ class MbWebView {
   // / zero-size). Puppeteer-style page.click(selector) — saves callers computing
   // coordinates by hand.
   bool ClickSelector(const char* css_selector);
+  // Mouse-drag the center of `from_selector` to the center of `to_selector`
+  // (press, interpolated moves carrying the held button, release) — slider/
+  // sortable/map-pan widgets. Not HTML5 native DnD. Both must be in view. Returns
+  // true if both matched.
+  bool DragSelector(const char* from_selector, const char* to_selector);
   // Dispatch a bubbling, cancelable DOM Event of `type` on the first match —
   // trigger handlers click/fill don't (mouseover/focus/blur/submit/custom events).
   // Returns true if an element matched.

@@ -120,6 +120,14 @@ MB_EXPORT void mbSendMouseUp(mbView*, int x, int y);
 // (display:none / zero-size). Pair with mbWaitForSelector for dynamic content.
 MB_EXPORT int mbClickSelector(mbView*, const char* css_selector);
 
+// Mouse-drag the center of the first `from_selector` match to the center of the
+// first `to_selector` match (Puppeteer dragAndDrop): press, glide through
+// interpolated moves (carrying the held button), release. Drives mouse-based drag
+// widgets (sliders, sortable lists, map panning); does NOT trigger HTML5 native
+// drag-and-drop. Both elements must be in the viewport. Returns 1 if both matched.
+MB_EXPORT int mbDragSelector(mbView*, const char* from_selector,
+                             const char* to_selector);
+
 // Dispatch a synthetic bubbling, cancelable DOM event of `type` (e.g. "mouseover",
 // "focus", "submit", or a custom event name) on the first element matching
 // `css_selector` — trigger handlers that mbClickSelector / mbFillSelector don't.

@@ -1144,6 +1144,21 @@ int main() {
     const bool dragged = jsToInt(es, wkeRunJS(wv, "window.__dx")) == 150 &&
                          jsToInt(es, wkeRunJS(wv, "window.__btn")) == 1;
     check(dragged, "wkeFireMouseEvent down->move->up performs a drag (delta + buttons)");
+
+    // wkeDragSelector: drag #handle's center onto #target's; the drop lands at the
+    // target center x and #handle followed the cursor.
+    wkeLoadHTML(wv,
+        "<body style='margin:0'>"
+        "<div id='handle' style='position:absolute;left:0;top:0;width:40px;height:40px'></div>"
+        "<div id='target' style='position:absolute;left:200px;top:0;width:40px;height:40px'></div>"
+        "<script>window.__dropx=-1;var drag=0;"
+        "document.getElementById('handle').addEventListener('mousedown',function(){drag=1;});"
+        "document.addEventListener('mouseup',function(e){if(drag){drag=0;window.__dropx=e.clientX;}});"
+        "</script></body>");
+    const bool dd = wkeDragSelector(wv, "#handle", "#target") &&
+                    jsToInt(es, wkeRunJS(wv, "window.__dropx")) == 220 &&
+                    !wkeDragSelector(wv, "#handle", "#none");
+    check(dd, "wkeDragSelector drags from-center to to-center (drop at 220)");
     wkeResize(wv, sw > 0 ? sw : 800, sh > 0 ? sh : 600);  // restore
   }
 

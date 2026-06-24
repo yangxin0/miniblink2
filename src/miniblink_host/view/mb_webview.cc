@@ -383,6 +383,42 @@ bool MbWebView::ClickSelector(const char* css_selector) {
   return true;
 }
 
+bool MbWebView::DragSelector(const char* from_selector, const char* to_selector) {
+  if (!from_selector || !to_selector || !widget_)
+    return false;
+  // Mouse-drag the center of `from` to the center of `to` (Puppeteer dragAndDrop):
+  // press on from, glide through interpolated points (each move carries the held
+  // button so e.buttons==1, and dragover/mousemove handlers see motion), release
+  // on to. Drives mouse-based drag widgets (sliders, sortable lists, map panning);
+  // it does NOT trigger HTML5 native drag-and-drop (dragstart/drop need a
+  // DataTransfer). Both elements must be in the viewport. Returns true if both
+  // matched and had a box.
+  auto center = [&](const char* sel, int* cx, int* cy) -> bool {
+    std::string js =
+        "(function(){var e=document.querySelector(\"" + JsEscape(sel) +
+        "\");if(!e)return '';var r=e.getBoundingClientRect();"
+        "if(r.width<=0&&r.height<=0)return '';"
+        "return Math.round(r.left+r.width/2)+','+Math.round(r.top+r.height/2);})()";
+    std::string c = EvalToString(js.c_str());
+    std::string::size_type comma = c.find(',');
+    if (comma == std::string::npos)
+      return false;
+    *cx = std::atoi(c.substr(0, comma).c_str());
+    *cy = std::atoi(c.substr(comma + 1).c_str());
+    return true;
+  };
+  int fx = 0, fy = 0, tx = 0, ty = 0;
+  if (!center(from_selector, &fx, &fy) || !center(to_selector, &tx, &ty))
+    return false;
+  SendMouseDown(fx, fy);
+  constexpr int kSteps = 6;  // interpolate so drag handlers track the motion
+  for (int i = 1; i <= kSteps; ++i) {
+    SendMouseMove(fx + (tx - fx) * i / kSteps, fy + (ty - fy) * i / kSteps);
+  }
+  SendMouseUp(tx, ty);
+  return true;
+}
+
 bool MbWebView::GetContentSize(int* w, int* h) {
   // The full scrollable document size (logical px), >= the viewport. For
   // full-page screenshots: mbResize to this height, then paint — content below
