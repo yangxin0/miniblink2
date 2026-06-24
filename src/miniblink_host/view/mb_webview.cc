@@ -1249,6 +1249,30 @@ bool MbWebView::WaitForFunction(const char* js_expr, int timeout_ms) {
   }
 }
 
+bool MbWebView::WaitForVisibleSelector(const char* css, int timeout_ms) {
+  if (!main_frame_ || !css)
+    return false;
+  // Like WaitForSelector, but the condition is real VISIBILITY (the same
+  // checkVisibility test as IsVisibleForSelector), not mere existence — so it
+  // waits out a fade-in / display:none toggle / lazy reveal, not just DOM
+  // insertion. Same poll cadence; "0" while absent or hidden, "1" once shown.
+  const std::string probe =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css) +
+      "\");if(!e)return '0';return (typeof e.checkVisibility==='function'?"
+      "e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}):"
+      "!!(e.offsetWidth||e.offsetHeight||e.getClientRects().length))?'1':'0';})()";
+  const base::TimeTicks deadline =
+      base::TimeTicks::Now() + base::Milliseconds(timeout_ms > 0 ? timeout_ms : 0);
+  for (;;) {
+    base::RunLoop().RunUntilIdle();
+    if (EvalToString(probe.c_str()) == "1")
+      return true;
+    if (base::TimeTicks::Now() >= deadline)
+      return false;
+    base::PlatformThread::Sleep(base::Milliseconds(10));
+  }
+}
+
 void MbWebView::ServiceAnimations() {
   // Run rAF callbacks. The compositor normally drives this via BeginMainFrame; with
   // no compositor we call the page animator directly so requestAnimationFrame fires

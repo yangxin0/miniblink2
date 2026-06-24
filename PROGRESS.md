@@ -63,7 +63,7 @@ the deliverable surface (C API, CLI, wke layer).
   blob: URLs (`fetch` + `<img>`), Intersection/Resize/Mutation observers, WAAPI,
   forms + submit-navigation, mouse/keyboard input, host-side history. CJK/i18n +
   system web fonts render.
-- **`mb_capi` C API — 81 functions:** lifecycle, load, JS eval, scraping
+- **`mb_capi` C API — 82 functions:** lifecycle, load, JS eval, scraping
   (text/attr/computed-style/count by selector), input (mouse/key/text/scroll +
   click/fill/select/focus/hover/scroll-into-view by selector), screenshots
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
@@ -105,7 +105,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **138/138** (default, network-free), `wke_smoke` **77/77**,
+- **Tests:** `mb_smoke` **139/139** (default, network-free), `wke_smoke` **78/78**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -123,6 +123,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- capi+wke: mbWaitForVisibleSelector / wkeWaitForVisibleSelector — wait for SHOWN, not just present (2026-06-24). Builds on last tick's visibility check: a visibility-aware wait (same poll cadence/loop-pumping as WaitForSelector, same checkVisibility probe as IsVisibleForSelector) that blocks until the first match is actually visible — for content that mounts hidden then fades/toggles in (modals, lazy panels, spinners). Returns 1 once shown, 0 on timeout. VERIFIED in both suites: a permanently visibility:hidden #ghost is FOUND by WaitForSelector yet IsVisible==0 (existence != visibility, deterministic); a display:none #m revealed by a 300ms timer makes WaitForVisible resolve→IsVisible==1; #ghost times out (0). Caught a test-timing bug first: an 80ms reveal fired during mbLoadHTML's own load-pump, so the "exists-but-hidden" assertion was nondeterministic → switched that assertion to the permanently-hidden #ghost. wke_smoke 78/78, mb_smoke 139/139, no survivors. ABI now 82 fns.
 - capi+wke: mbIsVisibleForSelector / wkeIsVisibleForSelector — visibility != existence (2026-06-24). A common automation pitfall: wkeWaitForSelector/querySelector only prove an element is IN THE DOM, not that it's SHOWN — an element can match a selector yet be display:none / visibility:hidden / opacity:0 / content-visibility-clipped. Added a real visibility check built on modern Blink M150's Element.checkVisibility({checkOpacity:true, checkVisibilityCSS:true}) (verified present in this build's element.idl; the two opts are stable, the three extras are RuntimeEnabled and avoided), with a layout-box fallback. Returns 1 visible / 0 hidden / -1 no match. VERIFIED in both suites that the same element that COUNTS as 1 (exists) reports 0 (hidden) under each of display:none/visibility:hidden/opacity:0, a shown div is 1, and a no-match is -1. wke_smoke 77/77, mb_smoke 138/138, no survivors. ABI now 81 fns.
 - mb_shot: --value / --checked — thread the new form readers into the CLI (2026-06-24). The last two ticks added mbGetValueForSelector/mbGetCheckedForSelector to the C API but the deliverable CLI couldn't use them. Added --value CSS (prints a control's live .value; pairs with --fill) and --checked CSS (prints .checked as 1/0, or -1 + a stderr warning on no match / non-checkable). Both call the readers directly (no eval). VERIFIED end-to-end against a local form.html: --fill '#n' 'typed-over' --value '#n' → "typed-over"; --value '#s' → selected option "y"; --checked '#c1'/'#c2' → 1/0; --click '#c2' --checked '#c2' → 1 (toggle tracked); --checked '#d' (div) → -1 + warning. No survivors. mb_shot.cc + usage only; suites unchanged (wke_smoke 76/76, mb_smoke 137/137).
 - capi+wke: mbGetCheckedForSelector / wkeGetCheckedForSelector — read a checkbox/radio's .checked (2026-06-24). Completes the form read-back set (after live .value last tick): the OTHER property the old headers flagged as "comes via eval". Reads the first match's .checked as 1/0, with -1 for a non-checkable element (typeof .checked !== 'boolean') OR no match — the int/-1 sentinel shape of mbCountSelector. MbWebView::GetCheckedForSelector → mbGetCheckedForSelector → wkeGetCheckedForSelector. VERIFIED in both suites: a checkbox[checked]→1, an unchecked one→0, a click toggles it (mbClickSelector→1), a <div> and a no-match selector both→-1. wke_smoke 76/76, mb_smoke 137/137, no survivors. ABI now 80 fns.

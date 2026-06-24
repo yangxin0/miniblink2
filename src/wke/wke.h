@@ -255,6 +255,11 @@ WKE_API bool wkeWaitForSelector(wkeWebView webView, const char* selector,
                                 int timeoutMs);
 WKE_API bool wkeWaitForFunction(wkeWebView webView, const utf8* jsExpr,
                                 int timeoutMs);
+// Like wkeWaitForSelector but waits for the first match to be actually VISIBLE
+// (not display:none / visibility:hidden / opacity:0), not just present. True
+// once it's shown. For content that mounts hidden then fades/toggles in.
+WKE_API bool wkeWaitForVisibleSelector(wkeWebView webView, const char* selector,
+                                       int timeoutMs);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);

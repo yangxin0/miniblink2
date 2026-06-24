@@ -1345,6 +1345,30 @@ int main() {
           "wkeWaitForSelector/wkeWaitForFunction resolve on condition + time out");
   }
 
+  // wkeWaitForVisibleSelector waits past mere existence: an element present from
+  // the start but display:none until a timer reveals it. wkeWaitForSelector
+  // returns immediately (it exists) yet it's hidden; the visible-wait blocks
+  // until the reveal, and times out on something that stays hidden.
+  {
+    wkeLoadHTML(wv,
+                "<body><div id='m' style='display:none'>modal</div>"
+                "<div id='ghost' style='visibility:hidden'>x</div>"
+                "<script>setTimeout(function(){"
+                "document.getElementById('m').style.display='block';},300);"
+                "</script></body>");
+    // #ghost exists but is permanently hidden: existence (found by selector) is
+    // not visibility. Deterministic — no timer race with load-pump.
+    const bool exists_but_hidden = wkeWaitForSelector(wv, "#ghost", 1000) &&
+                                   wkeIsVisibleForSelector(wv, "#ghost") == 0;
+    // The visible-wait resolves once the timer flips #m to display:block.
+    const bool became_visible = wkeWaitForVisibleSelector(wv, "#m", 4000) &&
+                                wkeIsVisibleForSelector(wv, "#m") == 1;
+    // #ghost stays hidden -> visible-wait times out.
+    const bool stays_hidden = !wkeWaitForVisibleSelector(wv, "#ghost", 120);
+    check(exists_but_hidden && became_visible && stays_hidden,
+          "wkeWaitForVisibleSelector waits for visibility, not just existence");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {

@@ -49,6 +49,13 @@ MB_EXPORT int mbWaitForSelector(mbView*, const char* css_selector, int timeout_m
 // condition, e.g. "window.appReady" or "document.querySelectorAll('.row').length>5".
 MB_EXPORT int mbWaitForFunction(mbView*, const char* js_expr, int timeout_ms);
 
+// Like mbWaitForSelector but waits for the first match to be actually VISIBLE
+// (checkVisibility — not display:none / visibility:hidden / opacity:0), not just
+// present in the DOM. Returns 1 once it's shown, 0 on timeout. Use for content
+// that mounts hidden then fades/toggles in (modals, lazy panels, spinners).
+MB_EXPORT int mbWaitForVisibleSelector(mbView*, const char* css_selector,
+                                       int timeout_ms);
+
 // View lifecycle. A view owns one WebView + main LocalFrame + WebFrameWidget.
 MB_EXPORT mbView* mbCreateView(int width, int height);
 MB_EXPORT void    mbDestroyView(mbView*);

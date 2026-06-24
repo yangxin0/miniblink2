@@ -781,6 +781,14 @@ bool wkeWaitForSelector(wkeWebView webView, const char* selector,
          mbWaitForSelector(webView->view, selector, timeoutMs) != 0;
 }
 
+bool wkeWaitForVisibleSelector(wkeWebView webView, const char* selector,
+                               int timeoutMs) {
+  // Pump until the first match is actually visible (not just present), or
+  // timeoutMs elapses. True once it's shown. (Port ext.)
+  return webView && webView->view && selector &&
+         mbWaitForVisibleSelector(webView->view, selector, timeoutMs) != 0;
+}
+
 bool wkeWaitForFunction(wkeWebView webView, const utf8* jsExpr, int timeoutMs) {
   // Pump until `jsExpr` evaluates truthy (exceptions count as false), or
   // timeoutMs elapses. True if it became truthy. Generalizes the selector wait.

@@ -2448,6 +2448,30 @@ int main() {
                (exists_distinct ? "1" : "0") + " nomatch=" + (nomatch ? "1" : "0"));
   }
 
+  // 102f. mbWaitForVisibleSelector waits past existence: an element present from
+  // the start but display:none until a timer reveals it. mbWaitForSelector returns
+  // at once (it exists) yet it's hidden; the visible-wait blocks until the reveal;
+  // an element that stays hidden times out.
+  {
+    mbLoadHTML(v,
+        "<body><div id='m' style='display:none'>modal</div>"
+        "<div id='ghost' style='visibility:hidden'>x</div>"
+        "<script>setTimeout(function(){"
+        "document.getElementById('m').style.display='block';},300);</script></body>",
+        "about:blank");
+    // #ghost exists but is permanently hidden — deterministic (no timer race).
+    const bool exists_but_hidden = mbWaitForSelector(v, "#ghost", 1000) == 1 &&
+                                   mbIsVisibleForSelector(v, "#ghost") == 0;
+    const bool became_visible = mbWaitForVisibleSelector(v, "#m", 4000) == 1 &&
+                                mbIsVisibleForSelector(v, "#m") == 1;
+    const bool stays_hidden = mbWaitForVisibleSelector(v, "#ghost", 120) == 0;
+    Expect(exists_but_hidden && became_visible && stays_hidden,
+           "mbWaitForVisibleSelector waits for visibility, not just existence",
+           std::string("exists_hidden=") + (exists_but_hidden ? "1" : "0") +
+               " became_visible=" + (became_visible ? "1" : "0") +
+               " stays_hidden=" + (stays_hidden ? "1" : "0"));
+  }
+
   // 102b. mbCountSelector + indexed list scraping. Count the matches, then read
   // each one via :nth-of-type(n) selectors on mbGetTextForSelector — the standard
   // "scrape a list" pattern. Also: 0 for no matches, -1 for an invalid selector.
