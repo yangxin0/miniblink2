@@ -68,6 +68,8 @@ int main(int argc, char** argv) {
   std::string wait_hidden;    // wait for this selector to be GONE/HIDDEN before capture
   std::string inject_css;      // inject this CSS (hide noise) before capture
   std::string click_selector;  // click this selector before capture
+  std::string drag_from;       // drag this selector...
+  std::string drag_to;         // ...onto this one before capture (--drag FROM TO)
   std::string fill_selector;   // fill this field before capture (with fill_text)
   std::string fill_text;       // value for --fill
   std::string eval_js;         // JS to run after load; result printed to stdout
@@ -115,6 +117,9 @@ int main(int argc, char** argv) {
       inject_css = argv[++i];
     } else if (a == "--click" && i + 1 < argc) {
       click_selector = argv[++i];
+    } else if (a == "--drag" && i + 2 < argc) {
+      drag_from = argv[++i];
+      drag_to = argv[++i];
     } else if (a == "--fill" && i + 2 < argc) {
       fill_selector = argv[++i];
       fill_text = argv[++i];
@@ -192,7 +197,7 @@ int main(int argc, char** argv) {
         "[--checked CSS] [--visible CSS] [--rect CSS] [--style CSS PROP] "
         "[--text-all CSS] [--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
-        "[--click CSS] [--wait-selector CSS] [--wait-visible CSS] "
+        "[--click CSS] [--drag FROM TO] [--wait-selector CSS] [--wait-visible CSS] "
         "[--wait-hidden CSS] [--wait-idle] [--css STYLES] [--auto-scroll] "
         "[--wait-ms N] "
         "[--scroll-to Y] "
@@ -360,6 +365,18 @@ int main(int argc, char** argv) {
                    click_selector.c_str());
     } else {
       mbWait(view, wait_ms > 0 ? wait_ms : 100);  // let the click's effects render
+    }
+  }
+
+  // --drag FROM TO: mouse-drag one element's center onto another's (slider thumb,
+  // sortable item, map pan) before capturing, then let it settle.
+  if (!drag_from.empty()) {
+    if (!mbDragSelector(view, drag_from.c_str(), drag_to.c_str())) {
+      std::fprintf(stderr,
+                   "mb_shot: WARNING — --drag '%s' -> '%s' matched no element\n",
+                   drag_from.c_str(), drag_to.c_str());
+    } else {
+      mbWait(view, wait_ms > 0 ? wait_ms : 100);
     }
   }
 
