@@ -66,6 +66,8 @@ int main(int argc, char** argv) {
   std::string lang;  // navigator.language(s)
   std::string tz;    // IANA timezone for Date/Intl
   float scale = 1.0f;
+  bool scale_set = false;  // was --scale given explicitly (vs the mobile default)
+  bool mobile = false;     // --mobile: mobile UA + DPR 3 + 390x844 default viewport
   std::string clip;      // "x,y,w,h"
   std::string selector;  // CSS selector -> capture that element's box
   std::string require_selector;  // assert this selector matches; else exit 3
@@ -118,6 +120,9 @@ int main(int argc, char** argv) {
       scale = static_cast<float>(std::atof(argv[++i]));
       if (scale <= 0.0f)
         scale = 1.0f;
+      scale_set = true;
+    } else if (a == "--mobile") {
+      mobile = true;
     } else if (a == "--clip" && i + 1 < argc) {
       clip = argv[++i];
     } else if (a == "--selector" && i + 1 < argc) {
@@ -240,7 +245,7 @@ int main(int argc, char** argv) {
   if (pos.size() < 2) {
     std::fprintf(
         stderr,
-        "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
+        "usage: %s [--full] [--scale N] [--mobile] [--clip x,y,w,h] [--selector CSS] "
         "[--transparent] [--title] [--url] [--cookies URL] "
         "[--local-storage KEY] [--session-storage KEY] [--text] [--html] [--html-for CSS] [--requests] [--eval JS] [--value CSS] "
         "[--checked CSS] [--count CSS] [--visible CSS] [--rect CSS] [--style CSS PROP] "
@@ -261,8 +266,12 @@ int main(int argc, char** argv) {
   }
   const std::string input = pos[0];
   const char* out = pos[1];
-  const int w = pos.size() > 2 ? std::atoi(pos[2]) : 1200;
-  const int h = pos.size() > 3 ? std::atoi(pos[3]) : 800;
+  // --mobile presets a phone-ish viewport / DPR / UA; explicit width/height,
+  // --scale, and --user-agent each still override their respective default.
+  const int w = pos.size() > 2 ? std::atoi(pos[2]) : (mobile ? 390 : 1200);
+  const int h = pos.size() > 3 ? std::atoi(pos[3]) : (mobile ? 844 : 800);
+  if (mobile && !scale_set)
+    scale = 3.0f;  // typical phone device-pixel-ratio (retina)
 
   // A non-positive width/height (e.g. a non-numeric positional reaching atoi,
   // the classic mistake of using a "--out path" flag that mb_shot doesn't have)
@@ -298,6 +307,14 @@ int main(int argc, char** argv) {
     mbSetLocale(view, lang.c_str());  // navigator.language(s)
   if (!tz.empty())
     mbSetTimezone(view, tz.c_str());  // Date/Intl timezone
+  if (user_agent.empty() && mobile) {
+    // Default mobile UA so sites that UA-sniff serve their mobile layout (paired
+    // with the narrow view). An explicit --user-agent overrides this.
+    user_agent =
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 "
+        "Safari/604.1";
+  }
   if (!user_agent.empty())
     mbSetUserAgent(view, user_agent.c_str());  // before load so the navigation uses it
   if (!headers.empty())

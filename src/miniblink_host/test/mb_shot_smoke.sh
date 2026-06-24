@@ -118,6 +118,11 @@ run 40 "$URL" "$PNG" --fill "#sq" "apple" --click "#go" --wait-selector ".res" \
     --eval "JSON.stringify(Array.prototype.map.call(document.querySelectorAll('.res'),function(e){return e.textContent;}))"
 check "integration: fill->click->wait->extract JSON" '["apple-1","apple-2","apple-3"]' "$(cat "$TMP/out")"
 
+# --mobile: preset a phone viewport (390) + DPR 3 + iPhone UA in one flag
+run 40 "$URL" "$PNG" --mobile \
+    --eval "window.innerWidth+','+window.devicePixelRatio+','+/iPhone/.test(navigator.userAgent)"
+check "--mobile preset (390/DPR3/iPhone UA)" "390,3,true" "$(cat "$TMP/out")"
+
 # --require: assert a scrape target is present; exit 3 when it isn't (for scripting)
 run 40 "$URL" "$PNG" --require "#msg";          check "--require present -> exit 0" "0" "$RC"
 run 40 "$URL" "$PNG" --require ".nonexistent";  check "--require absent -> exit 3" "3" "$RC"

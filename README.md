@@ -68,11 +68,16 @@ mb_shot \
   [--rect CSS] [--style CSS PROP] [--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] \
   [--requests] [--console] [--headers] \
   # capture
-  [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
+  [--full] [--scale N] [--mobile] [--clip x,y,w,h | --selector CSS] [--transparent] \
   # assert (scripting)
   [--require CSS] \
   <input.html | file://URL | http(s)://URL> <out.png> [width height]
 ```
+
+`--mobile` presets a phone emulation in one flag: a 390×844 viewport, `devicePixelRatio`
+3, and an iPhone Safari User-Agent — so responsive sites serve their mobile layout
+(width media queries track the view size; an explicit width/height, `--scale`, or
+`--user-agent` each still overrides its part). Example: `mb_shot --mobile https://news.site shot.png`.
 
 For scripting, `--require CSS` makes the run **assert** the page contains a match for
 `CSS` after all waits/interaction — exit `3` if it doesn't (the capture is still
