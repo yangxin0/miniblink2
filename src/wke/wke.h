@@ -186,6 +186,14 @@ typedef enum _jsType {
 } jsType;
 WKE_API jsType jsTypeOf(jsValue v);
 
+// Object-model reads over a wkeRunJS result (array/object). jsGetLength returns
+// an array's .length (0 otherwise); jsGetAt returns element `index` as a new,
+// further-navigable jsValue (read it with the jsToXxx/jsTypeOf above; undefined if
+// out of range). Valid until the next navigation. (jsGet by property name and
+// jsCall remain future work.)
+WKE_API int jsGetLength(jsExecState es, jsValue object);
+WKE_API jsValue jsGetAt(jsExecState es, jsValue object, int index);
+
 // --- Paint (pull model): render the view into a caller BGRA buffer -------------
 // `bits` must hold width*height*4 bytes; `pitch` is the row stride in bytes
 // (pass width*4 for a tightly-packed buffer).

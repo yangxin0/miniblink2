@@ -223,6 +223,21 @@ int main() {
             jsTypeOf(wkeRunJS(wv, "(function(){})")) == JSTYPE_FUNCTION,
         "jsTypeOf reports number/string/boolean/array/object/null/undefined/function");
 
+  // jsGetLength + jsGetAt: read array elements (incl. nested) via the JS-side
+  // slot store — the object-model slice.
+  {
+    jsValue arr = wkeRunJS(wv, "['ant','bee','cat']");
+    const int len = jsGetLength(es, arr);
+    jsValue e1 = jsGetAt(es, arr, 1);                 // 'bee'
+    jsValue nested = wkeRunJS(wv, "[[10,20],[30,40]]");
+    jsValue inner = jsGetAt(es, nested, 1);           // [30,40]
+    const int inner0 = jsToInt(es, jsGetAt(es, inner, 0));  // 30
+    check(len == 3 && std::strcmp(jsToTempString(es, e1), "bee") == 0 &&
+              jsGetLength(es, nested) == 2 &&
+              jsTypeOf(inner) == JSTYPE_ARRAY && inner0 == 30,
+          "jsGetLength/jsGetAt read array elements (incl. nested)");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {

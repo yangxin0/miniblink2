@@ -7,6 +7,7 @@
 
 #include "wke/wke.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -433,20 +434,40 @@ const JsRecord* JsLookup(jsValue v) {
   auto it = reg.find(v);
   return it == reg.end() ? nullptr : &it->second;
 }
+
+// Eval `script` and record its coerced value + type under a fresh handle, ALSO
+// parking the live result in window.__mbslots[handle] so a later eval can index
+// it (backs jsGetAt). The slot store is done IN JS (a wrapper assignment) — never
+// from C++, which is what crashed a prior attempt. The wrapper only parses if
+// `script` is an EXPRESSION; for a statement it's a parse error (nothing runs,
+// empty type) and we fall back to a plain eval (no slot). The empty-type check
+// avoids re-running a valid expression that merely yields undefined.
+jsValue StoreEval(wkeWebView wv, const std::string& script) {
+  auto& reg = JsRegistry();
+  if (reg.size() >= 4096)
+    reg.clear();  // bound the C++ registry; old handles' value/type expire to ""
+  const jsValue handle = g_next_js_value++;  // handle id == its __mbslots slot
+  const std::string wrapped =
+      "window.__mbslots=window.__mbslots||{};window.__mbslots[" +
+      std::to_string(handle) + "]=(" + script + ")";
+  std::vector<char> value(1 << 16, 0);  // 64 KiB result cap
+  char type[16] = {0};
+  mbEvalJSEx(wv->view, wrapped.c_str(), value.data(),
+             static_cast<int>(value.size()), type, sizeof(type));
+  if (type[0] == '\0') {  // wrapper didn't parse/run (a statement) -> plain eval
+    std::fill(value.begin(), value.end(), 0);
+    mbEvalJSEx(wv->view, script.c_str(), value.data(),
+               static_cast<int>(value.size()), type, sizeof(type));
+  }
+  reg[handle] = JsRecord{std::string(value.data()), std::string(type)};
+  return handle;
+}
 }  // namespace
 
 jsValue wkeRunJS(wkeWebView webView, const utf8* script) {
   if (!webView || !webView->view || !script)
     return 0;
-  std::vector<char> value(1 << 16, 0);  // 64 KiB result cap
-  char type[16] = {0};
-  mbEvalJSEx(webView->view, script, value.data(),
-             static_cast<int>(value.size()), type, sizeof(type));
-  auto& reg = JsRegistry();
-  if (reg.size() >= 4096)
-    reg.clear();  // bound the (non-GC'd) registry; very old handles expire to ""
-  const jsValue handle = g_next_js_value++;
-  reg[handle] = JsRecord{std::string(value.data()), std::string(type)};
+  const jsValue handle = StoreEval(webView, std::string(script));
   DrainConsoleToCallback(webView);  // deliver any console output the script logged
   return handle;
 }
@@ -503,6 +524,33 @@ jsType jsTypeOf(jsValue v) {
   if (t == "object")
     return JSTYPE_OBJECT;
   return JSTYPE_UNDEFINED;
+}
+
+int jsGetLength(jsExecState es, jsValue object) {
+  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  if (!wv || !wv->view)
+    return 0;
+  // Read window.__mbslots[object].length safely (0 if not array / not present).
+  const std::string script = "(function(){try{return window.__mbslots[" +
+                             std::to_string(object) +
+                             "].length}catch(e){return 0}})()";
+  char buf[32] = {0};
+  mbEvalJS(wv->view, script.c_str(), buf, sizeof(buf));
+  return std::atoi(buf);
+}
+
+jsValue jsGetAt(jsExecState es, jsValue object, int index) {
+  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  if (!wv || !wv->view)
+    return 0;
+  // Index into the parked value, returning a fresh navigable jsValue (undefined
+  // if out of range / not indexable). The IIFE never throws, so StoreEval's
+  // wrapper always parses.
+  const std::string expr = "(function(){try{return window.__mbslots[" +
+                           std::to_string(object) + "][" +
+                           std::to_string(index) +
+                           "]}catch(e){return undefined}})()";
+  return StoreEval(wv, expr);
 }
 
 // --- Callbacks -----------------------------------------------------------------
