@@ -899,6 +899,10 @@ std::string& JsTempBuf() {
   static auto* s = new std::string();
   return *s;
 }
+std::string& JsStringBuf() {  // separate temp for jsToString (JSON view)
+  static auto* s = new std::string();
+  return *s;
+}
 // Start above wke's small reserved constants (jsUndefined/jsNull/jsTrue/jsFalse).
 jsValue g_next_js_value = 0x10000;
 
@@ -1018,6 +1022,29 @@ const utf8* jsToTempString(jsExecState /*es*/, jsValue v) {
   const JsRecord* r = JsLookup(v);
   JsTempBuf() = r ? r->value : std::string();
   return JsTempBuf().c_str();
+}
+
+const utf8* jsToString(jsExecState es, jsValue v) {
+  // Like jsToTempString, but object/array values are JSON-serialized (via the
+  // slot) for a useful representation instead of "[object Object]". Owned by the
+  // library, valid until the next jsToString call.
+  const JsRecord* r = JsLookup(v);
+  if (!r) {
+    JsStringBuf().clear();
+    return JsStringBuf().c_str();
+  }
+  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  if (wv && wv->view && !r->literal.empty() &&
+      (r->type == "object" || r->type == "array")) {
+    std::vector<char> buf(1 << 16, 0);
+    const std::string js = "(function(){try{return JSON.stringify(" +
+                           r->literal + ")}catch(e){return ''}})()";
+    mbEvalJS(wv->view, js.c_str(), buf.data(), static_cast<int>(buf.size()));
+    JsStringBuf().assign(buf.data());
+    return JsStringBuf().c_str();
+  }
+  JsStringBuf() = r->value;  // primitives: the coerced value
+  return JsStringBuf().c_str();
 }
 
 jsType jsTypeOf(jsValue v) {

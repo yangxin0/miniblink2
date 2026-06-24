@@ -861,6 +861,21 @@ int main() {
               "True/False classify values");
   }
 
+  // jsToString (offline): JSON for objects/arrays, coerced value for primitives.
+  {
+    wkeLoadHTML(wv, "<body>str</body>");
+    const bool obj_json = std::strcmp(jsToString(es, wkeRunJS(wv, "({a:1,b:'x'})")),
+                                      "{\"a\":1,\"b\":\"x\"}") == 0;
+    const bool arr_json =
+        std::strcmp(jsToString(es, wkeRunJS(wv, "[1,2,3]")), "[1,2,3]") == 0;
+    const bool num_ok =
+        std::strcmp(jsToString(es, wkeRunJS(wv, "42")), "42") == 0;
+    const bool str_ok =
+        std::strcmp(jsToString(es, wkeRunJS(wv, "'hi'")), "hi") == 0;
+    check(obj_json && arr_json && num_ok && str_ok,
+          "jsToString JSON-serializes objects/arrays, coerces primitives");
+  }
+
   // HTTP introspection (offline): a non-http load reports status 0 + no headers.
   {
     wkeLoadHTML(wv, "<body>local</body>");

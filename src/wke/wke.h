@@ -347,6 +347,10 @@ WKE_API int jsToInt(jsExecState es, jsValue v);
 WKE_API double jsToDouble(jsExecState es, jsValue v);
 WKE_API bool jsToBoolean(jsExecState es, jsValue v);
 WKE_API const utf8* jsToTempString(jsExecState es, jsValue v);
+// Like jsToTempString, but object/array values are JSON-serialized (e.g.
+// {"a":1} / [1,2,3]) instead of coercing to "[object Object]". Owned by the
+// library, valid until the next jsToString call.
+WKE_API const utf8* jsToString(jsExecState es, jsValue v);
 
 // The JS type of a wkeRunJS result (captured during the eval). The object kinds
 // (object/array/function) are reported, but reading into them (jsGet/jsGetAt/
