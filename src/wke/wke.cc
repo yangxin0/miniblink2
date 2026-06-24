@@ -494,6 +494,22 @@ bool wkeSelectOption(wkeWebView webView, const char* selector,
          mbSelectOption(webView->view, selector, value) != 0;
 }
 
+// --- Waits (pump the loop until a condition or timeout) ------------------------
+bool wkeWaitForSelector(wkeWebView webView, const char* selector,
+                        int timeoutMs) {
+  // Pump until the first element matching `selector` exists, or timeoutMs
+  // elapses. True if it appeared (Puppeteer-style waitForSelector). (Port ext.)
+  return webView && webView->view && selector &&
+         mbWaitForSelector(webView->view, selector, timeoutMs) != 0;
+}
+
+bool wkeWaitForFunction(wkeWebView webView, const utf8* jsExpr, int timeoutMs) {
+  // Pump until `jsExpr` evaluates truthy (exceptions count as false), or
+  // timeoutMs elapses. True if it became truthy. Generalizes the selector wait.
+  return webView && webView->view && jsExpr &&
+         mbWaitForFunction(webView->view, jsExpr, timeoutMs) != 0;
+}
+
 void wkeSetTransparent(wkeWebView webView, bool transparent) {
   if (!webView || !webView->view)
     return;

@@ -750,6 +750,25 @@ int main() {
           "wkeClickSelector/wkeFillSelector/wkeSelectOption drive the page");
   }
 
+  // Waits (offline): a setTimeout adds a delayed element / flag; the wait pumps
+  // until it appears, and times out on a condition that never holds.
+  {
+    wkeLoadHTML(wv,
+                "<body><script>setTimeout(function(){"
+                "var d=document.createElement('div');d.id='ready';"
+                "document.body.appendChild(d);},50);</script></body>");
+    const bool sel_ok = wkeWaitForSelector(wv, "#ready", 4000) &&
+                        !wkeWaitForSelector(wv, "#never", 100);
+
+    wkeLoadHTML(wv, "<body><script>setTimeout(function(){"
+                    "window.__ready2=1;},50);</script></body>");
+    const bool fn_ok = wkeWaitForFunction(wv, "window.__ready2===1", 2000) &&
+                       !wkeWaitForFunction(wv, "window.__never", 60);
+
+    check(sel_ok && fn_ok,
+          "wkeWaitForSelector/wkeWaitForFunction resolve on condition + time out");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {

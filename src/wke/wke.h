@@ -187,6 +187,16 @@ WKE_API bool wkeFillSelector(wkeWebView webView, const char* selector,
                              const utf8* text);
 WKE_API bool wkeSelectOption(wkeWebView webView, const char* selector,
                              const utf8* value);
+
+// Wait helpers for dynamic content (port extensions) — pump the loop until a
+// condition holds or timeoutMs elapses, returning whether it became true.
+// wkeWaitForSelector waits for the first match of `selector` to exist;
+// wkeWaitForFunction waits for the JS expression `jsExpr` to evaluate truthy
+// (exceptions count as false). Pair with the click/fill/query helpers on SPAs.
+WKE_API bool wkeWaitForSelector(wkeWebView webView, const char* selector,
+                                int timeoutMs);
+WKE_API bool wkeWaitForFunction(wkeWebView webView, const utf8* jsExpr,
+                                int timeoutMs);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);
