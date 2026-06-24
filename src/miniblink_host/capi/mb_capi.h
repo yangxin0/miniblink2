@@ -194,6 +194,14 @@ MB_EXPORT void mbSetCookie(mbView*, const char* url, const char* cookie);
 // Erase all cookies from the HTTP jar (reset the session).
 MB_EXPORT void mbClearCookies(mbView*);
 
+// Persist the WHOLE cookie jar (all hosts, session + persistent) to a Netscape
+// cookie file and load it back — for session reuse across process runs (log in
+// once, reload the jar next run). Process-wide (the jar is shared; no view param).
+// Return 1 on success, 0 on failure (unwritable path / missing file). The file is
+// curl's native --cookie-jar format, so it interoperates with curl/wget.
+MB_EXPORT int mbSaveCookies(const char* path);
+MB_EXPORT int mbLoadCookies(const char* path);
+
 // Write the committed main document's URL (the final URL after any redirects)
 // into `out` (NUL-terminated, up to out_cap). Returns the full length in bytes.
 MB_EXPORT int mbGetURL(mbView*, char* out, int out_cap);

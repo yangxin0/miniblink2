@@ -438,6 +438,63 @@ void MbClearCookieJar() {
   curl_easy_cleanup(curl);
 }
 
+bool MbSaveCookies(const std::string& path) {
+  if (path.empty())
+    return false;
+  // Snapshot the WHOLE shared jar (every host, session + persistent) via
+  // CURLINFO_COOKIELIST — the same list MbGetCookiesForUrl reads — and write it
+  // as a Netscape cookie file (curl's native format, also reloadable by curl
+  // itself). We format the file ourselves rather than relying on CURLOPT_COOKIEJAR
+  // flushing a shared store, which is unreliable without an actual transfer.
+  CURL* curl = curl_easy_init();
+  if (!curl)
+    return false;
+  curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");  // enable the cookie engine
+  if (CURLSH* share = CookieShare())
+    curl_easy_setopt(curl, CURLOPT_SHARE, share);
+  struct curl_slist* list = nullptr;
+  curl_easy_getinfo(curl, CURLINFO_COOKIELIST, &list);
+  std::string out = "# Netscape HTTP Cookie File\n";
+  for (struct curl_slist* it = list; it; it = it->next) {
+    if (it->data) {
+      out += it->data;
+      out += "\n";
+    }
+  }
+  curl_slist_free_all(list);
+  curl_easy_cleanup(curl);
+  return base::WriteFile(base::FilePath::FromUTF8Unsafe(path), out);
+}
+
+bool MbLoadCookies(const std::string& path) {
+  std::string contents;
+  if (path.empty() ||
+      !base::ReadFileToString(base::FilePath::FromUTF8Unsafe(path), &contents))
+    return false;
+  CURL* curl = curl_easy_init();
+  if (!curl)
+    return false;
+  curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");  // enable the cookie engine
+  if (CURLSH* share = CookieShare())
+    curl_easy_setopt(curl, CURLOPT_SHARE, share);
+  // Inject each Netscape line via COOKIELIST (same path as MbAddCookieToJar), so
+  // no transfer is needed. Keep "#HttpOnly_..." lines (curl's HttpOnly marker);
+  // skip blank lines and ordinary "# ..." comments (e.g. the header).
+  std::string::size_type start = 0;
+  for (std::string::size_type i = 0; i <= contents.size(); ++i) {
+    if (i == contents.size() || contents[i] == '\n' || contents[i] == '\r') {
+      std::string line = contents.substr(start, i - start);
+      start = i + 1;
+      if (line.empty() ||
+          (line[0] == '#' && line.rfind("#HttpOnly_", 0) != 0))
+        continue;
+      curl_easy_setopt(curl, CURLOPT_COOKIELIST, line.c_str());
+    }
+  }
+  curl_easy_cleanup(curl);
+  return true;
+}
+
 std::string MbGetCookiesForUrl(const std::string& url) {
   GURL gurl(url);
   if (!gurl.SchemeIsHTTPOrHTTPS())

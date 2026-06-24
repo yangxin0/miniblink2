@@ -63,6 +63,8 @@ int main(int argc, char** argv) {
   std::string fill_text;       // value for --fill
   std::string eval_js;         // JS to run after load; result printed to stdout
   std::string proxy;           // libcurl proxy string for network fetches
+  std::string load_cookies;    // cookie jar file to load before navigating
+  std::string save_cookies;    // cookie jar file to write after the page settles
   int wait_ms = 0;            // fixed wait before capture
   std::vector<const char*> pos;  // positional args, flags filtered out
   for (int i = 1; i < argc; ++i) {
@@ -90,6 +92,10 @@ int main(int argc, char** argv) {
       eval_js = argv[++i];
     } else if (a == "--proxy" && i + 1 < argc) {
       proxy = argv[++i];
+    } else if (a == "--load-cookies" && i + 1 < argc) {
+      load_cookies = argv[++i];
+    } else if (a == "--save-cookies" && i + 1 < argc) {
+      save_cookies = argv[++i];
     } else if (a == "--wait-ms" && i + 1 < argc) {
       wait_ms = std::atoi(argv[++i]);
     } else if (a == "--console") {
@@ -120,6 +126,7 @@ int main(int argc, char** argv) {
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
         "[--transparent] [--text] [--html] [--eval JS] [--fill CSS TEXT] "
         "[--click CSS] [--wait-selector CSS] [--wait-ms N] [--proxy URL] "
+        "[--load-cookies FILE] [--save-cookies FILE] "
         "<input.html|file://URL|http(s)://URL> <out.png> [width height]\n",
         argv[0]);
     return 2;
@@ -154,6 +161,11 @@ int main(int argc, char** argv) {
     mbSetExtraHeaders(view, headers.c_str());  // before load so the navigation uses them
   if (!proxy.empty())
     mbSetProxy(proxy.c_str());  // route fetches through the proxy (process-wide)
+  if (!load_cookies.empty()) {
+    if (!mbLoadCookies(load_cookies.c_str()))  // restore a saved session
+      std::fprintf(stderr, "mb_shot: WARNING — --load-cookies '%s' unreadable\n",
+                   load_cookies.c_str());
+  }
 
   const bool is_http = input.rfind("http", 0) == 0;
   if (input.rfind("file://", 0) == 0 || is_http) {
@@ -258,6 +270,14 @@ int main(int argc, char** argv) {
     mbEvalJS(view, eval_js.c_str(), ebuf.data(), static_cast<int>(ebuf.size()));
     std::fwrite(ebuf.data(), 1, std::strlen(ebuf.data()), stdout);
     std::fputc('\n', stdout);
+  }
+
+  // Persist the cookie jar after the page has settled (so cookies set during the
+  // load are captured) — for reuse on a later run via --load-cookies.
+  if (!save_cookies.empty()) {
+    if (!mbSaveCookies(save_cookies.c_str()))
+      std::fprintf(stderr, "mb_shot: WARNING — --save-cookies '%s' unwritable\n",
+                   save_cookies.c_str());
   }
 
   // Clip / element capture: resolve a logical rectangle and shoot just that. We

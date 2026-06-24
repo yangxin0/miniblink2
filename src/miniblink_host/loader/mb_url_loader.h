@@ -45,6 +45,14 @@ std::string MbGetCookiesForUrl(const std::string& url);
 // Erase all cookies from the shared HTTP jar (e.g. to reset a session).
 void MbClearCookieJar();
 
+// Save the WHOLE shared cookie jar (every host, session + persistent) to `path`
+// as a Netscape cookie file, and load it back. For session persistence across
+// process runs — log in once, reuse the jar next run. Save returns false if the
+// file can't be written; Load returns false if `path` is missing/unreadable.
+// (Netscape format = curl's native --cookie-jar format, so it interoperates.)
+bool MbSaveCookies(const std::string& path);
+bool MbLoadCookies(const std::string& path);
+
 // Process-wide HTTP(S) proxy for all network fetches, as a libcurl proxy string:
 // "http://host:port", "socks5://host:port", "host:port" (defaults to http), or
 // "" to force a direct connection (overriding any *_proxy env vars). Once set

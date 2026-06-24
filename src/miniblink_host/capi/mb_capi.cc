@@ -242,6 +242,16 @@ void mbClearCookies(mbView* v) {
     v->impl->ClearCookies();
 }
 
+int mbSaveCookies(const char* path) {
+  // Process-wide (the jar is shared): write the whole cookie jar to `path`.
+  return (path && mb::MbSaveCookies(path)) ? 1 : 0;
+}
+
+int mbLoadCookies(const char* path) {
+  // Process-wide: load a previously-saved jar from `path` into the shared jar.
+  return (path && mb::MbLoadCookies(path)) ? 1 : 0;
+}
+
 int mbDrainConsole(mbView* v, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;

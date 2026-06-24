@@ -2039,6 +2039,22 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   warning), proving the proxy is actually applied to the request. Full default smoke still 128/128
   (network-free, proxy never set), no survivors. README + usage updated. C API now 62 fns.
 
+- ✅ DONE: whole-jar cookie persistence — mbSaveCookies/mbLoadCookies + mb_shot --save/--load-cookies
+  (2026-06-24). The per-host string export (mbGetCookies) can't save a full multi-host session;
+  file-based jars are the standard automation primitive (curl --cookie-jar, Puppeteer) — log in once,
+  reuse next run. Implemented in mb_url_loader by REUSING the proven mechanisms (not the unreliable
+  COOKIEJAR/COOKIEFILE-over-share flush): MbSaveCookies snapshots the whole shared jar via
+  CURLINFO_COOKIELIST and writes a Netscape file (curl-native, interoperable); MbLoadCookies reads the
+  file and re-injects each line via COOKIELIST (same path as MbAddCookieToJar) — keeps #HttpOnly_
+  lines + session cookies, skips the header/blank lines. C API mbSaveCookies/mbLoadCookies (process-
+  wide, the jar is shared) + mb_shot --load-cookies (before nav) / --save-cookies (after settle).
+  VERIFIED two ways: (1) smoke case 105 — deterministic local round-trip: set sid+theme on an https
+  origin, save, clear (confirmed empty), load, both come back (got=[sid=xyz789; theme=dark]); (2) CLI
+  across TWO separate processes against httpbin — run1 saves the Set-Cookie clisid into the jar, run2
+  --load-cookies and httpbin echoes {"cookies":{"clisid":"abc123"}}, proving the restored session is
+  sent. (file:// document.cookie does NOT reach the curl jar — http(s) only by design — so the CLI
+  demo uses a real http origin.) 129/129, no survivors. README + usage updated. C API now 64 fns.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

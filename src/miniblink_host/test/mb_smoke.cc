@@ -2377,6 +2377,33 @@ int main() {
            Eval(v, "String(location.search)"));
   }
 
+  // 105. Cookie jar persistence: save the whole jar to a file, clear it, reload,
+  // and the cookies come back — session reuse across process runs. Local + no
+  // network (the jar is in-memory; mbSetCookie/mbGetCookies work on an https
+  // origin without a fetch, as in case 87).
+  {
+    mbClearCookies(v);  // start from a known-empty jar
+    mbSetCookie(v, "https://persist.test/", "sid=xyz789");
+    mbSetCookie(v, "https://persist.test/", "theme=dark");
+    const bool saved = mbSaveCookies("/tmp/mb_jar.txt") == 1;
+    mbClearCookies(v);
+    char c1[256] = {0};
+    mbGetCookies(v, "https://persist.test/", c1, sizeof(c1));
+    const bool cleared = c1[0] == '\0';
+    const bool loaded = mbLoadCookies("/tmp/mb_jar.txt") == 1;
+    char c2[256] = {0};
+    mbGetCookies(v, "https://persist.test/", c2, sizeof(c2));
+    const std::string got(c2);
+    const bool restored = got.find("sid=xyz789") != std::string::npos &&
+                          got.find("theme=dark") != std::string::npos;
+    Expect(saved && cleared && loaded && restored,
+           "cookie jar save/load round-trips a session across a clear",
+           std::string("saved=") + (saved ? "1" : "0") + " cleared=" +
+               (cleared ? "1" : "0") + " loaded=" + (loaded ? "1" : "0") +
+               " got=[" + got + "]");
+    mbClearCookies(v);  // don't leak into later cases
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
