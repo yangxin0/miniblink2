@@ -235,28 +235,30 @@ A drop-in subset of [miniblink](https://github.com/weolar/miniblink49)'s classic
 runs on modern Blink with the original signatures (`utf8`, `wkeWebView`, `jsValue`,
 …). It is built into `libminiblink_host`; an embedder includes just `wke/wke.h`.
 
-Supported today (every item verified by `wke_smoke` — 63 default cases, plus
+Supported today (every item verified by `wke_smoke` — 88 default cases, plus
 over-the-network cases under `MB_NET_TESTS=1`). Functions marked *(ext)* are
 port extensions over `mb_capi` beyond the classic `wke` surface:
 
 - **Lifecycle / load:** `wkeInitialize`/`wkeFinalize`, `wkeCreateWebView`/
   `wkeDestroyWebView`, `wkeLoadURL`/`wkeLoadHTML`/`wkeLoadHtmlWithBaseUrl`
   (base origin → relative URLs + secure context), `wkePostURL`, `wkeReload`, the
-  loading-state pollers (`wkeIsLoadingCompleted`/`Succeeded`/`Failed`,
-  `wkeIsDocumentReady`).
-- **Geometry / rendering:** `wkeResize`, `wkeGetWidth`/`Height`,
-  `wkeGetContentWidth`/`Height`, `wkeSetTransparent`/`wkeIsTransparent`,
+  loading-state pollers (`wkeIsLoading`, `wkeIsLoadingCompleted`,
+  `wkeIsLoadingSucceeded`, `wkeIsLoadingFailed`, `wkeIsDocumentReady`).
+- **Geometry / rendering:** `wkeResize`, `wkeGetWidth`/`wkeGetHeight`/`wkeWidth`/
+  `wkeHeight`, `wkeGetContentWidth`/`wkeGetContentHeight`,
+  `wkeSetTransparent`/`wkeIsTransparent`,
   `wkeSetZoomFactor`/`wkeGetZoomFactor`, `wkeSetEditable`, `wkeSetDarkMode` *(ext)*,
-  `wkeSetDeviceScaleFactor` *(ext)*, `wkeScrollTo` *(ext)*.
+  `wkeSetDeviceScaleFactor` *(ext)*, `wkeScrollTo` *(ext)*, `wkeScrollToBottom`
+  (auto-scroll to load lazy content) *(ext)*, `wkeSetFocus`/`wkeKillFocus`.
 - **Capture / output:** `wkePaint` (into a caller BGRA buffer), and *(ext)*
   `wkePaintRect` (a region → BGRA buffer), `wkeSavePng`/`wkeSavePngRect`
   (PNG/JPEG by extension), `wkeSavePdf`, `wkeEncodePng` (in-memory bytes).
 - **Accessors / view-state:** `wkeGetURL`/`wkeGetTitle`/`wkeGetSource`/`wkeGetText`,
-  `wkeSetUserAgent`, `wkeSetName`/`wkeGetName`, `wkeSetUserKeyValue`/
-  `wkeGetUserKeyValue`.
+  `wkeSetUserAgent`/`wkeGetUserAgent`, `wkeSetLoadImages`, `wkeSetName`/`wkeGetName`,
+  `wkeSetUserKeyValue`/`wkeGetUserKeyValue`.
 - **Navigation:** `wkeCanGoBack`/`wkeGoBack`/`wkeCanGoForward`/`wkeGoForward`.
-- **Input:** `wkeFireMouseEvent`, `wkeFireMouseWheelEvent`, `wkeFireKeyDown`/`Up`/
-  `PressEvent`.
+- **Input:** `wkeFireMouseEvent`, `wkeFireMouseWheelEvent`, `wkeFireKeyDownEvent`/
+  `wkeFireKeyUpEvent`/`wkeFireKeyPressEvent`.
 - **Scripting (full string-backed `jsValue` model):** `wkeRunJS` + `wkeGlobalExec`;
   classify `jsTypeOf` + `jsIsNumber`/`String`/`Boolean`/`Object`/`Array`/`Function`/
   `Undefined`/`Null`/`True`/`False`; coerce `jsToInt`/`jsToFloat`/`jsToDouble`/
@@ -264,19 +266,26 @@ port extensions over `mb_capi` beyond the classic `wke` surface:
   `jsDouble`/`jsBoolean`/`jsString`/`jsUndefined`/`jsNull`; read `jsGetLength`/
   `jsGetAt`/`jsGet`/`jsGetGlobal`/`jsGetKeys`; build `jsEmptyObject`/`jsEmptyArray`
   + `jsSet`/`jsSetAt`/`jsSetGlobal`; call `jsCall`/`jsCallGlobal`; plus
-  `wkeSetInitScript` (evaluateOnNewDocument) and `wkeRunJsInIsolatedWorld`
-  (content-script eval: own globals, shared DOM) *(ext)*.
+  `wkeSetInitScript` (evaluateOnNewDocument), `wkeInsertCSS` (addStyleTag) *(ext)*,
+  `wkeRunJsInIsolatedWorld` (content-script eval: own globals, shared DOM) *(ext)*,
+  and `wkeOnJsBridge` (page↔host bridge) *(ext)*.
 - **DOM automation** *(ext, Puppeteer-style)* — query `wkeCountSelector`/
-  `wkeGetTextForSelector`/`wkeGetAttribute`/`wkeGetElementRect`/
+  `wkeGetTextForSelector`/`wkeGetAllTextForSelector`/`wkeGetAttribute`/
+  `wkeSetAttribute`/`wkeGetAllAttributeForSelector`/`wkeGetValueForSelector`/
+  `wkeGetCheckedForSelector`/`wkeIsVisibleForSelector`/`wkeGetElementRect`/
   `wkeGetComputedStyle`; act `wkeClickSelector`/`wkeDoubleClickSelector`/
   `wkeRightClickSelector`/`wkeHoverSelector`/`wkeFocusSelector`/`wkeBlurSelector`/
   `wkeFillSelector`/`wkeSelectOption`/`wkeScrollIntoView`; wait `wkeWaitForSelector`/
-  `wkeWaitForFunction`.
-- **Networking:** cookies `wkeGetCookie`/`wkeSetCookie`/`wkePerformCookieCommand`
-  + jar persistence `wkeSetCookieJarPath`; `wkeSetProxy` (HTTP/SOCKS + auth);
-  and *(ext)* `wkeSetExtraHeaders`, `wkeSetLocale`/`wkeSetTimezone`,
-  `wkeSetFollowRedirects`, `wkeSetIgnoreCertErrors`, `wkeGetHttpStatusCode`/
-  `wkeGetResponseHeaders`.
+  `wkeWaitForFunction`/`wkeWaitForVisibleSelector`/`wkeWaitForSelectorHidden`.
+- **Storage** *(ext)* — `wkeGetLocalStorage`/`wkeSetLocalStorage`,
+  `wkeGetSessionStorage`/`wkeSetSessionStorage` (origin-scoped Web Storage).
+- **Networking:** cookies `wkeGetCookie`/`wkeSetCookie`/`wkeGetAllCookie`/
+  `wkePerformCookieCommand` + jar persistence `wkeSetCookieJarPath`; `wkeSetProxy`
+  (HTTP/SOCKS + auth); and *(ext)* `wkeSetExtraHeaders`, `wkeSetLocale`/
+  `wkeSetTimezone`, `wkeSetFollowRedirects`, `wkeSetIgnoreCertErrors`,
+  `wkeGetHttpStatusCode`/`wkeGetResponseHeaders`,
+  `wkeGetRequestLog`/`wkeClearRequestLog` (subresource fetch log),
+  `wkeBlockUrl`/`wkeClearUrlBlocks` (block URLs by substring).
 - **Callbacks:** `wkeOnLoadingFinish`, `wkeOnTitleChanged`, `wkeOnConsole`,
   `wkeOnDocumentReady` (+ `wkeString`/`wkeGetString`).
 
