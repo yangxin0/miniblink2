@@ -101,6 +101,14 @@ executable("mb_shot") {
   deps = [ ":miniblink_host" ]
 }
 
+# mb_demo: a runnable example of the pure-C mb_capi ABI (fill/value/dispatch/
+# wait-idle/scrape/request-log/element-screenshot) that doubles as documentation.
+executable("mb_demo") {
+  sources = [ "tools/mb_demo.cc" ]
+  include_dirs = [ "//third_party/blink/renderer" ]
+  deps = [ ":miniblink_host" ]
+}
+
 # wke_smoke: exercises the wke compatibility slice end to end (its own process).
 executable("wke_smoke") {
   sources = [ "../wke/wke_smoke.cc" ]

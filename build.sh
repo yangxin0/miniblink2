@@ -49,8 +49,8 @@ export PATH="$TREE/buildtools/mac:$PATH"
 echo "==> gn gen"
 ( cd "$TREE" && gn gen "$OUT" >/dev/null )
 
-echo "==> ninja miniblink_host mb_smoke mb_shot wke_smoke wke_demo"
-( cd "$TREE" && ninja -C "$OUT" miniblink_host mb_smoke mb_shot wke_smoke wke_demo )
+echo "==> ninja miniblink_host mb_smoke mb_shot mb_demo wke_smoke wke_demo"
+( cd "$TREE" && ninja -C "$OUT" miniblink_host mb_smoke mb_shot mb_demo wke_smoke wke_demo )
 
 echo "==> vendor resource paks next to the binary"
 cp "$TREE/$OUT/gen/third_party/blink/public/resources/blink_resources.pak" \

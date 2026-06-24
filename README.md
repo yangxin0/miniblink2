@@ -190,6 +190,11 @@ mbDestroyView(v);
 mbShutdown();
 ```
 
+A complete, runnable C-ABI example (fill → read value → dispatch a custom event →
+wait for network idle → scrape text/HTML → request log → element screenshot) is
+`src/miniblink_host/tools/mb_demo.cc` (the `mb_demo` target) — the C counterpart
+to `wke_demo`.
+
 Grouped overview (see `mb_capi.h` for the exact signatures):
 
 - **Lifecycle / pump:** `mbInitialize` `mbShutdown` `mbCreateView` `mbDestroyView`
