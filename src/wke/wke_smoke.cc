@@ -226,6 +226,15 @@ int main() {
             con.all.find("boom") != std::string::npos && con.saw_error,
         "wkeOnConsole captures console.log/error with levels");
 
+  // Uncaught exceptions surface through the console channel as error-level
+  // messages — the embedder's way to observe a script error (Blink handles the
+  // throw internally, so it's not visible via wkeRunJS's result).
+  con.all.clear();
+  con.saw_error = 0;
+  wkeLoadHTML(wv, "<body><script>throw new Error('uncaughtX')</script></body>");
+  check(con.all.find("uncaughtX") != std::string::npos && con.saw_error,
+        "wkeOnConsole captures an uncaught JS exception (error level)");
+
   // Document-ready callback + wkeGetSource: the callback fires on load and the
   // source contains the page's (post-JS) markup.
   int doc_ready = 0;
