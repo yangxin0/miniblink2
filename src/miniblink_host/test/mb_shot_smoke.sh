@@ -29,12 +29,20 @@ cat > "$FIX" <<'HTML'
 <input id="pv" value="preset"><input id="cb" type="checkbox" checked>
 <button id="btn" onclick="document.getElementById('cr').textContent='clicked';">b</button>
 <div id="cr">no</div>
+<input id="sq" value=""><button id="go" type="button" onclick="render()">go</button>
+<div id="results"></div>
 <script>
 localStorage.setItem('auth','tok-99');
 sessionStorage.setItem('cart','3 items');
 document.getElementById('kq').addEventListener('keydown',function(e){
   document.getElementById('krec').textContent=e.key;});
 setTimeout(function(){window.delayedReady=true;},150);  // for --wait-eval
+function render(){  // a search form that renders result rows on submit
+  var q=document.getElementById('sq').value, box=document.getElementById('results');
+  box.innerHTML='';
+  for(var i=1;i<=3;i++){var d=document.createElement('div');d.className='res';
+    d.textContent=q+'-'+i;box.appendChild(d);}
+}
 </script></body></html>
 HTML
 
@@ -101,6 +109,14 @@ check "--press delivers the key" "ArrowDown" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --wait-eval "window.delayedReady===true" \
     --eval "String(window.delayedReady===true)"
 check "--wait-eval blocks until truthy" "true" "$(cat "$TMP/out")"
+
+# integration: the canonical scrape workflow — fill a search box, click submit,
+# wait for the rendered result rows, then extract them as structured JSON. This
+# exercises the phase pipeline (interact -> synchronize -> extract) end to end, so
+# a regression in flag ordering/composition (not just one flag) is caught.
+run 40 "$URL" "$PNG" --fill "#sq" "apple" --click "#go" --wait-selector ".res" \
+    --eval "JSON.stringify(Array.prototype.map.call(document.querySelectorAll('.res'),function(e){return e.textContent;}))"
+check "integration: fill->click->wait->extract JSON" '["apple-1","apple-2","apple-3"]' "$(cat "$TMP/out")"
 
 # bad-size guard: a non-numeric width positional must fail fast (exit 2), not crash
 run 40 "$URL" --out "$PNG"; check "bad-size guard exit code" "2" "$RC"
