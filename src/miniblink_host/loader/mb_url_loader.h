@@ -68,6 +68,14 @@ void MbRecordRequest(const std::string& url);
 std::string MbGetRequestLog();
 void MbClearRequestLog();
 
+// Process-wide request blocking: any fetched URL containing a registered
+// substring is failed (ERR_BLOCKED_BY_CLIENT) instead of loaded — block ads /
+// trackers / images / analytics for faster, cleaner scrapes. MbBlockUrl adds a
+// substring; MbClearUrlBlocks removes all; MbIsUrlBlocked is the loader's check.
+void MbBlockUrl(const std::string& substring);
+void MbClearUrlBlocks();
+bool MbIsUrlBlocked(const std::string& url);
+
 // Process-wide HTTP(S) proxy for all network fetches, as a libcurl proxy string:
 // "http://host:port", "socks5://host:port", "host:port" (defaults to http), or
 // "" to force a direct connection (overriding any *_proxy env vars). Once set

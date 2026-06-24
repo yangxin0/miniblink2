@@ -621,6 +621,30 @@ void MbClearRequestLog() {
   RequestLog().clear();
 }
 
+// --- Request blocking --------------------------------------------------------
+namespace {
+std::vector<std::string>& BlockList() {
+  static std::vector<std::string>* bl = new std::vector<std::string>();
+  return *bl;
+}
+}  // namespace
+
+void MbBlockUrl(const std::string& substring) {
+  if (!substring.empty())
+    BlockList().push_back(substring);
+}
+
+void MbClearUrlBlocks() {
+  BlockList().clear();
+}
+
+bool MbIsUrlBlocked(const std::string& url) {
+  for (const std::string& s : BlockList())
+    if (url.find(s) != std::string::npos)
+      return true;
+  return false;
+}
+
 bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* content_type, const std::string& user_agent,
                 const std::string& extra_headers, const std::string& post_body,
@@ -675,6 +699,16 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
     return;
   const GURL& url = request->url;
   MbRecordRequest(url.spec());  // network observability: every subresource fetch
+
+  // Request blocking: fail a blocked URL up front (ERR_BLOCKED_BY_CLIENT), before
+  // any fetch — the resource simply never loads (ad/tracker/image suppression).
+  if (MbIsUrlBlocked(url.spec())) {
+    client_->DidFail(
+        blink::WebURLError(net::ERR_BLOCKED_BY_CLIENT, ToWebURL(url)),
+        base::TimeTicks::Now(), blink::URLLoaderClient::kUnknownEncodedDataLength,
+        0, 0);
+    return;
+  }
 
   std::string contents;
   std::string http_content_type;  // from the server, may be "text/html; charset=..."

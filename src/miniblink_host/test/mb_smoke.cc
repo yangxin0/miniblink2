@@ -1756,6 +1756,37 @@ int main() {
     std::remove(rl_css);
   }
 
+  // 75c. Request blocking: a blocked subresource never loads. With "mb_block.css"
+  // blocked, the file:// stylesheet's request fails -> #q keeps the default color;
+  // after mbClearUrlBlocks a reload loads it -> #q turns rgb(5,5,5).
+  {
+    const char* bl_css = "/tmp/mb_block.css";
+    if (FILE* f = std::fopen(bl_css, "wb")) {
+      std::fputs("#q{color:rgb(5,5,5)}", f);
+      std::fclose(f);
+    }
+    const char* doc =
+        "<head><link rel='stylesheet' href='file:///tmp/mb_block.css'></head>"
+        "<body><b id='q'>x</b></body>";
+    mbBlockUrl("mb_block.css");
+    mbLoadHTML(v, doc, "file:///tmp/mb_blk_page.html");
+    mbWaitForSelector(v, "#q", 1000);
+    mbWait(v, 80);  // give the (blocked) request time to resolve
+    const bool blocked =
+        Eval(v, "getComputedStyle(document.getElementById('q')).color") !=
+        "rgb(5, 5, 5)";
+    mbClearUrlBlocks();
+    mbLoadHTML(v, doc, "file:///tmp/mb_blk_page.html");  // reload, now unblocked
+    const bool applies = mbWaitForFunction(
+        v, "getComputedStyle(document.getElementById('q')).color==='rgb(5, 5, 5)'",
+        2000) == 1;
+    Expect(blocked && applies,
+           "mbBlockUrl blocks a subresource; mbClearUrlBlocks restores it",
+           std::string("blocked=") + (blocked ? "1" : "0") + " applies=" +
+               (applies ? "1" : "0"));
+    std::remove(bl_css);
+  }
+
   // 76. CSS background-image renders (data: SVG). Distinct from <img>: exercises
   // the CSS background paint path + a data: URL image + SVG-as-image. A 30x30 div
   // with a green-SVG background should paint green at its center.

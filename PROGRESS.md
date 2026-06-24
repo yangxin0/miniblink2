@@ -63,7 +63,7 @@ the deliverable surface (C API, CLI, wke layer).
   blob: URLs (`fetch` + `<img>`), Intersection/Resize/Mutation observers, WAAPI,
   forms + submit-navigation, mouse/keyboard input, host-side history. CJK/i18n +
   system web fonts render.
-- **`mb_capi` C API — 94 functions:** lifecycle, load, JS eval, scraping
+- **`mb_capi` C API — 96 functions:** lifecycle, load, JS eval, scraping
   (text/attr/computed-style/count by selector), input (mouse/key/text/scroll +
   click/fill/select/focus/hover/scroll-into-view by selector), screenshots
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
@@ -107,7 +107,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **148/148** (default, network-free), `wke_smoke` **87/87**,
+- **Tests:** `mb_smoke` **149/149** (default, network-free), `wke_smoke` **88/88**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -125,6 +125,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- capi+wke: mbBlockUrl / mbClearUrlBlocks (+ wke) — request blocking (2026-06-24). Observability -> control: extends the request log's loader chokepoint to FAIL any fetched URL containing a registered substring (ERR_BLOCKED_BY_CLIENT) before fetching — suppress ads/trackers/images/analytics for faster, cleaner scrapes. Process-wide substring blocklist checked in MbURLLoader::Deliver (record, then block). A bounded slice of the "request interception" roadmap item. VERIFIED OFFLINE in both suites via a file:// stylesheet: with "mb_block.css" blocked, #q keeps the default color (request failed); after mbClearUrlBlocks + reload it turns rgb(5,5,5) (loads). wke_smoke 88/88, mb_smoke 149/149, no survivors. ABI now 96 fns (2 new).
 - mb_shot: --auto-scroll — load lazy content before capture/scrape on the CLI (2026-06-24). Threads last tick's mbScrollToBottom into the deliverable (bare flag, default step cap), applied in the interact phase before --scroll-to/extract/capture — pairs with --full for lazy/infinite-scroll pages. VERIFIED end-to-end offline with a clean A/B against a scroll-loaded page (300x300 viewport): WITHOUT the flag .blk count is 1; WITH --auto-scroll it's 4 (3 lazy blocks loaded). No survivors. mb_shot.cc + usage only; both suites unchanged (wke 87/87, mb 148/148).
 - capi+wke: mbScrollToBottom / wkeScrollToBottom — auto-scroll to load lazy content (2026-06-24). A distinct capability not expressible with existing primitives in one call: repeatedly scroll to the bottom and settle (WaitMs drives the lifecycle incl. ForceUpdateViewportIntersections, so IntersectionObserver/lazy handlers fire) until the page stops growing or max_steps (default 20). Returns the count of steps that grew the page. Use before a --full capture / scrape so infinite-scroll items + lazy images materialize. VERIFIED in both suites with a scroll-handler appender (deterministic, viewport-independent) under a short viewport: 3 lazy blocks load (1 initial + 3 = 4), grew=3. (First wrote an IntersectionObserver+sentinel test that passed in wke but failed in mb — grew=0/blocks=2 — because IO edge-intersection is viewport-height sensitive; switched to a scroll-event appender + explicit small viewport restored after.) wke_smoke 87/87, mb_smoke 148/148, no survivors. ABI now 94 fns.
 - mb_shot: --requests — subresource fetch log on the CLI (2026-06-24). Threads last tick's request log into the deliverable: clears the log before navigation (scoping it to this page) and prints the fetched URLs (one per line) in the extract phase — a command-line asset/tracker inventory. VERIFIED end-to-end offline: a page linking a file:// stylesheet prints that .css URL under --requests, no survivors. mb_shot.cc + usage only; both suites unchanged (wke 86/86, mb 147/147).

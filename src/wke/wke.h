@@ -347,6 +347,11 @@ WKE_API bool wkeSetSessionStorage(wkeWebView webView, const utf8* key,
 // before a load to scope it to that page). Port extension.
 WKE_API const utf8* wkeGetRequestLog(wkeWebView webView);
 WKE_API void wkeClearRequestLog();
+// Process-wide request blocking: any fetched URL containing `substring` is failed
+// instead of loaded (ad/tracker/image suppression). wkeBlockUrl adds a substring;
+// wkeClearUrlBlocks removes all. Set before navigating. Port extension.
+WKE_API void wkeBlockUrl(const utf8* substring);
+WKE_API void wkeClearUrlBlocks();
 // Set the cookie jar file path (Flush/Reload persist to/from it). This port
 // takes a utf8 path rather than the Windows wke WCHAR. The path is process-wide
 // (the jar is shared); the webView arg is accepted for signature compatibility.

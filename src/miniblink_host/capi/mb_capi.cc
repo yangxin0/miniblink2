@@ -356,6 +356,15 @@ void mbClearRequestLog(void) {
   mb::MbClearRequestLog();
 }
 
+void mbBlockUrl(const char* substring) {
+  if (substring)
+    mb::MbBlockUrl(substring);
+}
+
+void mbClearUrlBlocks(void) {
+  mb::MbClearUrlBlocks();
+}
+
 int mbGetLocalStorage(mbView* v, const char* key, char* out, int out_cap) {
   if (!v || !v->impl || !key)
     return -1;

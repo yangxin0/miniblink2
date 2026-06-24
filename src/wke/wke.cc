@@ -1074,6 +1074,15 @@ void wkeClearRequestLog() {
   mbClearRequestLog();  // process-wide
 }
 
+void wkeBlockUrl(const utf8* substring) {
+  if (substring)
+    mbBlockUrl(substring);  // process-wide
+}
+
+void wkeClearUrlBlocks() {
+  mbClearUrlBlocks();  // process-wide
+}
+
 void wkeSetCookie(wkeWebView webView, const utf8* url, const utf8* cookie) {
   // `cookie` is a single "name=value[; Path=/; Domain=...]" set-cookie string.
   if (webView && webView->view && url && cookie)

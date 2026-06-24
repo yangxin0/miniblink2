@@ -1162,6 +1162,34 @@ int main() {
     std::remove(rl_css);
   }
 
+  // wkeBlockUrl blocks a subresource: with the stylesheet URL blocked it never
+  // loads (#q keeps default color); wkeClearUrlBlocks + reload restores it.
+  {
+    const char* bl_css = "/tmp/mb_wke_block.css";
+    if (FILE* f = std::fopen(bl_css, "wb")) {
+      std::fputs("#q{color:rgb(5,5,5)}", f);
+      std::fclose(f);
+    }
+    const char* doc =
+        "<head><link rel='stylesheet' href='file:///tmp/mb_wke_block.css'></head>"
+        "<body><b id='q'>x</b></body>";
+    wkeBlockUrl("mb_wke_block.css");
+    wkeLoadHtmlWithBaseUrl(wv, doc, "file:///tmp/mb_wke_blk.html");
+    wkeWaitForSelector(wv, "#q", 1000);
+    const bool blocked =
+        std::strcmp(jsToTempString(es, wkeRunJS(wv,
+            "getComputedStyle(document.getElementById('q')).color")),
+            "rgb(5, 5, 5)") != 0;
+    wkeClearUrlBlocks();
+    wkeLoadHtmlWithBaseUrl(wv, doc, "file:///tmp/mb_wke_blk.html");
+    const bool applies = wkeWaitForFunction(wv,
+        "getComputedStyle(document.getElementById('q')).color==='rgb(5, 5, 5)'",
+        2000);
+    check(blocked && applies,
+          "wkeBlockUrl blocks a subresource; wkeClearUrlBlocks restores it");
+    std::remove(bl_css);
+  }
+
   // wkeScrollToBottom drives lazy loading: a scroll handler appends a tall block
   // per scroll (up to 3), so the page only finishes growing if something scrolls
   // it. A short viewport (< one block) guarantees each scroll moves. Auto-scroll

@@ -292,6 +292,14 @@ MB_EXPORT int mbLoadCookies(const char* path);
 MB_EXPORT int mbGetRequestLog(char* out, int out_cap);
 MB_EXPORT void mbClearRequestLog(void);
 
+// Network control: block any fetched URL containing `substring` (failed with
+// ERR_BLOCKED_BY_CLIENT instead of loaded) — suppress ads / trackers / images /
+// analytics for faster, cleaner scrapes and screenshots. mbBlockUrl registers a
+// substring (call repeatedly for several); mbClearUrlBlocks removes all. Process-
+// wide, applied at the loader. Set before navigating to affect that page's loads.
+MB_EXPORT void mbBlockUrl(const char* substring);
+MB_EXPORT void mbClearUrlBlocks(void);
+
 // localStorage access for the current document's origin — inject an auth token /
 // app state before an SPA boots (pair with mbSetInitScript), or read it back.
 // mbGetLocalStorage writes the value of `key` into `out` and returns its length
