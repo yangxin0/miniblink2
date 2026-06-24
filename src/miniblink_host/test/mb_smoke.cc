@@ -2404,6 +2404,29 @@ int main() {
     mbClearCookies(v);  // don't leak into later cases
   }
 
+  // 106. mbEncodePng: render to an in-memory PNG (no temp file) for embedders.
+  // Verify the returned bytes are a valid PNG (8-byte signature) whose IHDR
+  // width/height (big-endian at offsets 16 and 20) match the requested size.
+  {
+    mbLoadHTML(v, "<body style='background:#fff'>encode me</body>",
+               "about:blank");
+    mbWait(v, 30);
+    const unsigned char* data = nullptr;
+    const int len = mbEncodePng(v, W, H, &data);
+    const bool magic = len > 24 && data && data[0] == 0x89 && data[1] == 'P' &&
+                       data[2] == 'N' && data[3] == 'G' && data[4] == 0x0D &&
+                       data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A;
+    int iw = 0, ih = 0;
+    if (magic) {
+      iw = (data[16] << 24) | (data[17] << 16) | (data[18] << 8) | data[19];
+      ih = (data[20] << 24) | (data[21] << 16) | (data[22] << 8) | data[23];
+    }
+    Expect(magic && iw == W && ih == H,
+           "mbEncodePng returns a valid in-memory PNG of the requested size",
+           std::string("len=") + std::to_string(len) + " dim=" +
+               std::to_string(iw) + "x" + std::to_string(ih));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

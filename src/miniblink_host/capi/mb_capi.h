@@ -295,6 +295,14 @@ MB_EXPORT int mbPaintToBitmap(mbView*,
 // extension: .jpg/.jpeg -> JPEG (quality 90), anything else -> PNG. Returns 1 on success.
 MB_EXPORT int mbSavePng(mbView*, const char* path, int width, int height);
 
+// Render the current frame to a width×height PNG held in memory (no temp file) —
+// for embedders that serve the bytes (over HTTP, into a DB, etc.). On success
+// sets *out_data to the encoded PNG bytes and returns the length; returns 0 on
+// failure. The bytes are owned by the view and remain valid only until the next
+// mbEncodePng on this view or mbDestroyView — copy them out before either.
+MB_EXPORT int mbEncodePng(mbView*, int width, int height,
+                          const unsigned char** out_data);
+
 // Print the document to a multi-page PDF (US Letter) at `path`. Returns 1 on success.
 MB_EXPORT int mbSavePdf(mbView*, const char* path);
 

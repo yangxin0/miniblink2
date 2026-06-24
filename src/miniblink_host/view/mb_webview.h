@@ -15,6 +15,7 @@
 #ifndef MINIBLINK_HOST_VIEW_MB_WEBVIEW_H_
 #define MINIBLINK_HOST_VIEW_MB_WEBVIEW_H_
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -174,6 +175,12 @@ class MbWebView {
   bool WaitForFunction(const char* js_expr, int timeout_ms);
   bool PaintToBitmap(void* out_bgra, int w, int h, int stride);
   bool SavePng(const char* path, int w, int h);  // render + encode PNG to disk
+  // Render the full view to a w×h PNG held in memory (encoded_png_) — for
+  // embedders that want the bytes (serve over HTTP, store in a DB) without a temp
+  // file. Returns true on success; read the bytes via EncodedData(). The buffer is
+  // valid until the next EncodePng or the view's destruction.
+  bool EncodePng(int w, int h);
+  const std::vector<uint8_t>& EncodedData() const { return encoded_png_; }
   // Print the document to a multi-page PDF (US Letter) at `path` via Blink's print path.
   bool SavePdf(const char* path);
   // Render just the logical rect (x,y,w,h) to a PNG (output is w*dsf x h*dsf px).
@@ -219,6 +226,8 @@ class MbWebView {
   std::vector<std::string> history_;  // main-frame navigation stack (URLs)
   int history_index_ = -1;            // current position; -1 before first load
   bool in_history_nav_ = false;       // a Go{Back,Forward} is in flight
+
+  std::vector<uint8_t> encoded_png_;  // retained bytes from the last EncodePng
 };
 
 }  // namespace mb

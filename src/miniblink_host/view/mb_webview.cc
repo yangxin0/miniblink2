@@ -1043,6 +1043,15 @@ bool EncodeBitmapToPath(const SkBitmap& bitmap, const char* path) {
     data = gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, /*discard_transparency=*/false);
   return data && base::WriteFile(base::FilePath(path), *data);
 }
+// Encode `bitmap` to PNG bytes in memory (lossless, alpha kept).
+bool EncodeBitmapToPng(const SkBitmap& bitmap, std::vector<uint8_t>* out) {
+  std::optional<std::vector<uint8_t>> data =
+      gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, /*discard_transparency=*/false);
+  if (!data)
+    return false;
+  *out = std::move(*data);
+  return true;
+}
 }  // namespace
 
 bool MbWebView::SavePngRect(const char* path, int x, int y, int w, int h) {
@@ -1115,6 +1124,23 @@ bool MbWebView::SavePng(const char* path, int w, int h) {
   if (!PaintInto(canvas))
     return false;
   return EncodeBitmapToPath(bitmap, path);
+}
+
+bool MbWebView::EncodePng(int w, int h) {
+  if (w <= 0 || h <= 0)
+    return false;
+  // Render the full view to a w×h BGRA bitmap and encode it to PNG bytes held in
+  // encoded_png_ (so the C API can hand back a pointer without a temp file). Same
+  // paint path as SavePng; the bytes live until the next EncodePng or teardown.
+  SkBitmap bitmap;
+  if (!bitmap.tryAllocPixels(
+          SkImageInfo::Make(w, h, kBGRA_8888_SkColorType, kPremul_SkAlphaType))) {
+    return false;
+  }
+  SkCanvas canvas(bitmap);
+  if (!PaintInto(canvas))
+    return false;
+  return EncodeBitmapToPng(bitmap, &encoded_png_);
 }
 
 }  // namespace mb

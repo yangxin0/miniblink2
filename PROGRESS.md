@@ -2069,6 +2069,17 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   badssl's tiny pages; the page genuinely loads — the title is the proof. Pre-existing heuristic,
   unrelated.)
 
+- ✅ DONE: in-memory PNG encode — mbEncodePng (2026-06-24). Diversified off the network domain to an
+  EMBEDDER capability: every screenshot path wrote to a FILE (mbSavePng/mbSavePngRect), so an embedder
+  serving a shot over HTTP or storing it in a DB had to round-trip a temp file. mbEncodePng(v, w, h,
+  &data) renders the full view and hands back the PNG bytes in memory. Clean one-call API (no caller
+  malloc, no callback): the view retains the bytes (encoded_png_ member) and returns a pointer + length
+  valid until the next encode/destroy — matches wke's retained-bitmap model. Reuses the exact paint +
+  gfx::PNGCodec::EncodeBGRASkBitmap path as SavePng (split out EncodeBitmapToPng helper). VERIFIED
+  deterministically + locally (no network): smoke case 106 asserts the bytes are a real PNG (8-byte
+  signature) whose IHDR width/height (BE @ offsets 16/20) match the request -> len=2539 dim=400x300.
+  130/130, no survivors. C API now 66 fns. (Embedder-only, so no mb_shot flag — the CLI writes files.)
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

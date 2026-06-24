@@ -3,8 +3,10 @@
 
 #include "miniblink_host/capi/mb_capi.h"
 
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/runtime/mb_runtime.h"
@@ -443,6 +445,17 @@ int mbSavePng(mbView* v, const char* path, int width, int height) {
   if (!v || !v->impl || !path)
     return 0;
   return v->impl->SavePng(path, width, height) ? 1 : 0;
+}
+
+int mbEncodePng(mbView* v, int width, int height, const unsigned char** out_data) {
+  if (!v || !v->impl || width <= 0 || height <= 0)
+    return 0;
+  if (!v->impl->EncodePng(width, height))
+    return 0;
+  const std::vector<uint8_t>& data = v->impl->EncodedData();
+  if (out_data)
+    *out_data = data.data();  // valid until the next mbEncodePng / mbDestroyView
+  return static_cast<int>(data.size());
 }
 
 int mbSavePdf(mbView* v, const char* path) {
