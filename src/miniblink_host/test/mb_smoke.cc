@@ -1173,6 +1173,28 @@ int main() {
              Eval(v, "String(window.__idb)") == "error",
          "IndexedDB open() fails gracefully via onerror (no hang/crash)");
 
+  // 39b. History API (SPA client-side routing). pushState/replaceState update
+  // location + history.state, and — the part that matters to an embedder —
+  // mbGetURL reflects the new URL, so a scraper/automation sees the current SPA
+  // route (not just the initial load). Uses a real https origin (the realistic
+  // SPA case; about:blank can't pushState cross-path).
+  {
+    mbLoadHTML(v, "<body>spa</body>", "https://spa.test/page/one");
+    mbRunJS(v, "history.pushState({a:1},'','/page/two?q=1');");
+    char u1[256] = {0};
+    mbGetURL(v, u1, sizeof(u1));
+    const std::string loc_push = Eval(v, "location.pathname+location.search");
+    mbRunJS(v, "history.replaceState({a:2},'','/page/three');");
+    char u2[256] = {0};
+    mbGetURL(v, u2, sizeof(u2));
+    const std::string state = Eval(v, "String(history.state&&history.state.a)");
+    Expect(std::string(u1) == "https://spa.test/page/two?q=1" &&
+               loc_push == "/page/two?q=1" &&
+               std::string(u2) == "https://spa.test/page/three" && state == "2",
+           "History API: pushState/replaceState update location + mbGetURL",
+           std::string("push=") + u1 + " replace=" + u2 + " state=" + state);
+  }
+
   // 40. WebSocket degrades gracefully. We have no network backend for the WS
   // mojo connector, so the handshake can't complete — but it must FAIL with the
   // spec's error/close events, not crash or hang the host. (A site's reconnect
