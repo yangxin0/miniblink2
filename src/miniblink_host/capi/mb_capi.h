@@ -179,6 +179,16 @@ MB_EXPORT void mbSetDarkMode(mbView*, int dark);
 // if the window lost focus; setting it restores focus. For simulating focus/blur.
 MB_EXPORT void mbSetFocus(mbView*, int focused);
 
+// Bind a native C function callable from JS as window[name](...). JS arguments
+// are coerced to UTF-8 strings (argc/argv); the function returns a UTF-8 string
+// (or NULL -> undefined). Synchronous — JS receives the return value inline. The
+// binding is installed into each new document's main world (call before
+// navigating). `userdata` is passed back to every invocation.
+typedef const char* (*mbJsNativeFn)(void* userdata, int argc,
+                                    const char** argv);
+MB_EXPORT void mbJsBindFunction(mbView*, const char* name, mbJsNativeFn fn,
+                                void* userdata);
+
 // Set navigator.language / navigator.languages (a comma-separated list, e.g.
 // "fr-FR,fr,en"), for JS that localizes by the user's languages. Before navigating.
 MB_EXPORT void mbSetLocale(mbView*, const char* utf8_languages);

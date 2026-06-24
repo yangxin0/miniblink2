@@ -289,7 +289,11 @@ Loading is synchronous here, so a `wke` app can poll `wkeIsLoadingCompleted`
 (always true after `wkeLoadURL` returns) instead of waiting on a message loop.
 The `jsValue` object model is implemented as a JS-side slot store (objects/arrays
 are parked in the page and navigated by `jsGet`/`jsGetAt`/`jsCall`), not raw V8
-handles; native function binding (`wkeJsBindFunction`) remains the main gap.
+handles. Native function binding (`wkeJsBindFunction`) is supported: a C function
+is installed on `window` (via v8 `CreateDataProperty` at document-element-available
+— the public `Object::Set` API traps in this sandboxed build) and called
+synchronously from JS, reading args with `jsArg`/`jsArgCount`. In this port the
+args arrive as strings and the returned `jsValue` is delivered to JS as a string.
 
 ## Build
 

@@ -19,6 +19,15 @@ std::string Eval(mbView* v, const char* js) {
   return std::string(buf);
 }
 
+// Native function bound into JS for the mbJsBindFunction test: echoes its first
+// argument with a "!" suffix and the userdata it was given.
+const char* SmokeEcho(void* userdata, int argc, const char** argv) {
+  static char buf[256];
+  std::snprintf(buf, sizeof(buf), "%s!%d", (argc > 0 && argv[0]) ? argv[0] : "",
+                userdata ? *static_cast<int*>(userdata) : -1);
+  return buf;
+}
+
 std::string EvalIso(mbView* v, const char* js) {
   char buf[512];
   mbEvalJSIsolated(v, js, buf, sizeof(buf));
@@ -2520,6 +2529,23 @@ int main() {
            "mbEncodePng returns a valid in-memory PNG of the requested size",
            std::string("len=") + std::to_string(len) + " dim=" +
                std::to_string(iw) + "x" + std::to_string(ih));
+  }
+
+  // 107. Native function binding: a C function bound via mbJsBindFunction is
+  // callable from JS synchronously — window[name](args) returns the C result
+  // inline — receiving string args and the userdata pointer. Installed into each
+  // new document (so it works after a navigation and from a page event handler).
+  {
+    int tag = 7;
+    mbJsBindFunction(v, "mbEcho", SmokeEcho, &tag);
+    mbLoadHTML(v, "<body>native</body>", "about:blank");
+    const std::string defined = Eval(v, "typeof window.mbEcho");
+    const std::string r = Eval(v, "window.mbEcho('hi')");  // -> "hi!7"
+    const std::string in_expr =
+        Eval(v, "(function(){return 'got:'+window.mbEcho('x');})()");
+    Expect(defined == "function" && r == "hi!7" && in_expr == "got:x!7",
+           "mbJsBindFunction: JS calls a bound C function synchronously",
+           "typeof=" + defined + " r=" + r + " expr=" + in_expr);
   }
 
   mbDestroyView(v);

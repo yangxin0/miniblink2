@@ -1156,6 +1156,72 @@ jsExecState wkeGlobalExec(wkeWebView webView) {
   return reinterpret_cast<jsExecState>(webView);
 }
 
+// --- Native function binding (wkeJsBindFunction): JS -> C synchronously --------
+// Built on the host's mbJsBindFunction (string args -> string return). Each wke
+// binding wraps the classic jsValue-based callback: the host shim parks the
+// string args as jsValues (read via jsArg/jsArgCount), calls the wke function,
+// and stringifies its returned jsValue back for JS. (Return is coerced to a JS
+// string — this port's mb primitive is string-valued.)
+namespace {
+struct WkeBinding {
+  wkeJsNativeFunction fn = nullptr;
+  void* param = nullptr;
+  wkeWebView wv = nullptr;
+  std::string ret;  // backs the const char* handed back to the host/v8
+};
+std::vector<std::unique_ptr<WkeBinding>>& WkeBindings() {
+  static auto* v = new std::vector<std::unique_ptr<WkeBinding>>();
+  return *v;
+}
+std::vector<jsValue>& CurrentArgs() {  // args of the in-flight bound call
+  static auto* v = new std::vector<jsValue>();
+  return *v;
+}
+
+const char* WkeNativeShim(void* userdata, int argc, const char** argv) {
+  auto* b = static_cast<WkeBinding*>(userdata);
+  if (!b || !b->fn)
+    return nullptr;
+  std::vector<jsValue> saved = CurrentArgs();  // re-entrancy safe
+  CurrentArgs().clear();
+  for (int i = 0; i < argc; ++i) {
+    const char* a = argv[i] ? argv[i] : "";
+    CurrentArgs().push_back(MakeLiteral(a, "string", JsStringLiteral(a)));
+  }
+  const jsValue r = b->fn(reinterpret_cast<jsExecState>(b->wv), b->param);
+  CurrentArgs() = saved;
+  const JsRecord* rec = JsLookup(r);
+  b->ret = rec ? rec->value : std::string();
+  return b->ret.c_str();
+}
+}  // namespace
+
+int jsArgCount(jsExecState /*es*/) {
+  return static_cast<int>(CurrentArgs().size());
+}
+
+jsValue jsArg(jsExecState /*es*/, int idx) {
+  const std::vector<jsValue>& a = CurrentArgs();
+  if (idx < 0 || idx >= static_cast<int>(a.size()))
+    return MakeLiteral("undefined", "undefined", "undefined");
+  return a[idx];
+}
+
+void wkeJsBindFunction(wkeWebView webView, const char* name,
+                       wkeJsNativeFunction fn, void* param) {
+  // Bind `fn` as window[name](...): JS calls it synchronously, reading its args
+  // via jsArg/jsArgCount and returning a jsValue (delivered to JS as a string).
+  if (!webView || !webView->view || !name || !fn)
+    return;
+  auto b = std::make_unique<WkeBinding>();
+  b->fn = fn;
+  b->param = param;
+  b->wv = webView;
+  WkeBinding* raw = b.get();
+  WkeBindings().push_back(std::move(b));
+  mbJsBindFunction(webView->view, name, &WkeNativeShim, raw);
+}
+
 int jsToInt(jsExecState /*es*/, jsValue v) {
   const JsRecord* r = JsLookup(v);
   return r ? std::atoi(r->value.c_str()) : 0;

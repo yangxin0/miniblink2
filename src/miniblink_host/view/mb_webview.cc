@@ -79,6 +79,9 @@
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/geometry/size_f.h"
 #include "v8/include/v8-context.h"
+#include "v8/include/v8-external.h"
+#include "v8/include/v8-function.h"
+#include "v8/include/v8-function-callback.h"
 #include "v8/include/v8-isolate.h"
 #include "v8/include/v8-local-handle.h"
 #include "v8/include/v8-primitive.h"
@@ -852,13 +855,91 @@ void MbWebView::SetInitScript(const char* utf8_script) {
   init_script_ = utf8_script ? utf8_script : "";
 }
 
+namespace {
+// v8 callback for a bound native function: coerce args to UTF-8 strings, call the
+// C function, return its UTF-8 string result (or undefined). The NativeBinding*
+// rides in the function's External data slot.
+void MbNativeTrampoline(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Isolate* isolate = info.GetIsolate();
+  auto* b = static_cast<MbWebView::NativeBinding*>(
+      info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault));
+  if (!b || !b->fn)
+    return;
+  std::vector<std::string> args;
+  args.reserve(info.Length());
+  for (int i = 0; i < info.Length(); ++i) {
+    v8::String::Utf8Value s(isolate, info[i]);
+    args.emplace_back(*s ? *s : "");
+  }
+  std::vector<const char*> argv;
+  argv.reserve(args.size());
+  for (const std::string& a : args)
+    argv.push_back(a.c_str());
+  const char* result = b->fn(b->userdata, static_cast<int>(args.size()),
+                             argv.empty() ? nullptr : argv.data());
+  if (result) {
+    v8::Local<v8::String> rs;
+    if (v8::String::NewFromUtf8(isolate, result).ToLocal(&rs))
+      info.GetReturnValue().Set(rs);
+  }
+}
+}  // namespace
+
+void MbWebView::InstallJsBindings() {
+  // Install each bound native function onto the main world's window. Runs at
+  // document-element-available. NB: uses CreateDataProperty, not Object::Set —
+  // the public v8 [[Set]] API traps in this hardened build (verified by probe),
+  // while the define-own-property path works.
+  if (js_bindings_.empty() || !main_frame_)
+    return;
+  v8::Isolate* isolate = v8::Isolate::GetCurrent();
+  if (!isolate)
+    return;
+  v8::HandleScope handle_scope(isolate);
+  v8::Local<v8::Context> context = main_frame_->MainWorldScriptContext();
+  if (context.IsEmpty())
+    return;
+  v8::Context::Scope context_scope(context);
+  v8::Local<v8::Object> global = context->Global();
+  for (const std::unique_ptr<NativeBinding>& b : js_bindings_) {
+    v8::Local<v8::Function> fn;
+    if (!v8::Function::New(
+             context, &MbNativeTrampoline,
+             v8::External::New(isolate, b.get(),
+                               v8::kExternalPointerTypeTagDefault))
+             .ToLocal(&fn)) {
+      continue;
+    }
+    v8::Local<v8::String> name;
+    if (!v8::String::NewFromUtf8(isolate, b->name.c_str()).ToLocal(&name))
+      continue;
+    v8::Maybe<bool> ok = global->CreateDataProperty(context, name, fn);
+    (void)ok;  // best-effort
+  }
+}
+
+void MbWebView::BindJsFunction(const char* name, MbJsNativeFn fn,
+                               void* userdata) {
+  if (!name || !fn)
+    return;
+  auto b = std::make_unique<NativeBinding>();
+  b->name = name;
+  b->fn = fn;
+  b->userdata = userdata;
+  js_bindings_.push_back(std::move(b));
+}
+
 void MbWebView::RunDocumentStartScript() {
   // Called at document-element-available (before the page's own scripts). Run the
-  // host init script so it can set globals / override APIs the page then observes.
-  if (init_script_.empty() || !main_frame_)
+  // host init script, then install bound native functions, so both are present
+  // before the page's own scripts run.
+  if (!main_frame_)
     return;
-  main_frame_->ExecuteScript(
-      blink::WebScriptSource(blink::WebString::FromUtf8(init_script_)));
+  if (!init_script_.empty()) {
+    main_frame_->ExecuteScript(
+        blink::WebScriptSource(blink::WebString::FromUtf8(init_script_)));
+  }
+  InstallJsBindings();
 }
 
 std::string MbWebView::EvalToString(const char* utf8_script) {

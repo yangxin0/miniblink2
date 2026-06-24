@@ -53,7 +53,21 @@ class MbWebView {
   void RunJS(const char* utf8_script);  // execute JS in the main frame
   // Set a script to run on every new document BEFORE its own scripts (init/inject).
   void SetInitScript(const char* utf8_script);
-  // Called by the frame client at document-element-available; runs the init script.
+  // Bind a native C function callable from JS as window[name](...). JS args are
+  // coerced to UTF-8 strings; the function returns a UTF-8 string (or NULL ->
+  // undefined). Synchronous (JS gets the return value inline). Installed into
+  // each new document's main world. `userdata` is passed through to the callback.
+  using MbJsNativeFn = const char* (*)(void* userdata, int argc,
+                                       const char** argv);
+  void BindJsFunction(const char* name, MbJsNativeFn fn, void* userdata);
+  // A bound native function (public so the install trampoline can read it).
+  struct NativeBinding {
+    std::string name;
+    MbJsNativeFn fn = nullptr;
+    void* userdata = nullptr;
+  };
+  // Called by the frame client at document-element-available; runs the init
+  // script and installs bound native functions.
   void RunDocumentStartScript();
   void SendMouseClick(int x, int y);
   // Click the center of the first element matching `css_selector`. Resolves the
@@ -246,6 +260,8 @@ class MbWebView {
   [[maybe_unused]] blink::WebLocalFrame* main_frame_ = nullptr; // owned by blink
   float dsf_ = 1.0f;  // device pixel ratio; PaintInto scales the canvas by it
   std::string init_script_;  // runs before each new document's own scripts
+  std::vector<std::unique_ptr<NativeBinding>> js_bindings_;  // BindJsFunction
+  void InstallJsBindings();  // install all bindings into the current main world
   bool transparent_bg_ = false;  // omitBackground: clear to alpha 0
 
   std::vector<std::string> history_;  // main-frame navigation stack (URLs)

@@ -360,6 +360,18 @@ WKE_API jsValue jsEval(jsExecState es, const utf8* str);
 // slice the result is carried by the jsValue handle, so the state is a token).
 WKE_API jsExecState wkeGlobalExec(wkeWebView webView);
 
+// Native function binding: expose a C function to JS as window[name](...), called
+// synchronously (JS gets the return value inline). The callback reads its args
+// with jsArg(es, i) / jsArgCount(es) and returns a jsValue. Installed into each
+// new document (bind before navigating; works from page scripts and handlers).
+// In this port args arrive as strings and the returned jsValue is delivered to
+// JS as a string (the host bridge is string-valued). `param` is passed through.
+typedef jsValue (*wkeJsNativeFunction)(jsExecState es, void* param);
+WKE_API void wkeJsBindFunction(wkeWebView webView, const char* name,
+                               wkeJsNativeFunction fn, void* param);
+WKE_API int jsArgCount(jsExecState es);
+WKE_API jsValue jsArg(jsExecState es, int idx);
+
 // Coerce a wkeRunJS result. jsToTempString returns a pointer owned by the library,
 // valid until the next jsToTempString call (the classic wke "temp" contract).
 WKE_API int jsToInt(jsExecState es, jsValue v);

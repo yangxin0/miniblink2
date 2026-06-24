@@ -212,6 +212,12 @@ void mbSetFocus(mbView* v, int focused) {
     v->impl->SetFocus(focused != 0);
 }
 
+void mbJsBindFunction(mbView* v, const char* name, mbJsNativeFn fn,
+                      void* userdata) {
+  if (v && v->impl)
+    v->impl->BindJsFunction(name, fn, userdata);
+}
+
 void mbSetLocale(mbView* v, const char* utf8_languages) {
   if (v && v->impl)
     v->impl->SetLocale(utf8_languages);

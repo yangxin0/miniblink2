@@ -22,6 +22,16 @@ static void OnBridge(wkeWebView, void*, const utf8* channel,
                 message ? message : "");
 }
 
+// Native function bound via wkeJsBindFunction: sums its integer args + a base
+// passed through `param`, returning the total as a jsValue.
+static int g_bind_base = 100;
+static jsValue WkeAdd(jsExecState es, void* param) {
+  int sum = param ? *static_cast<int*>(param) : 0;
+  for (int i = 0; i < jsArgCount(es); ++i)
+    sum += jsToInt(es, jsArg(es, i));
+  return jsInt(sum);
+}
+
 int main() {
   int pass = 0, fail = 0;
   auto check = [&](bool ok, const char* name) {
@@ -905,6 +915,22 @@ int main() {
     const bool refocused = jsToBoolean(es, wkeRunJS(wv, "document.hasFocus()"));
     check(focused && blurred && refocused,
           "wkeSetFocus/wkeKillFocus toggle document.hasFocus()");
+  }
+
+  // wkeJsBindFunction (offline): a bound C function is callable from JS
+  // synchronously — reads args via jsArg/jsArgCount, returns a jsValue inline.
+  {
+    wkeJsBindFunction(wv, "wkeAdd", WkeAdd, &g_bind_base);
+    wkeLoadHTML(wv, "<body>bind</body>");  // installs window.wkeAdd
+    const bool defined =
+        std::strcmp(jsToTempString(es, wkeRunJS(wv, "typeof window.wkeAdd")),
+                    "function") == 0;
+    // 2 + 3 + base(100) = 105, returned inline within a JS expression.
+    const bool called =
+        std::strcmp(jsToTempString(es, wkeRunJS(wv, "'r='+window.wkeAdd(2,3)")),
+                    "r=105") == 0;
+    check(defined && called,
+          "wkeJsBindFunction: JS synchronously calls a bound C function");
   }
 
   // wkeOnJsBridge (offline): window.mbBridge(channel,message) is installed before
