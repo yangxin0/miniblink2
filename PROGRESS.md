@@ -63,7 +63,7 @@ the deliverable surface (C API, CLI, wke layer).
   blob: URLs (`fetch` + `<img>`), Intersection/Resize/Mutation observers, WAAPI,
   forms + submit-navigation, mouse/keyboard input, host-side history. CJK/i18n +
   system web fonts render.
-- **`mb_capi` C API — 99 functions:** lifecycle, load, JS eval, scraping
+- **`mb_capi` C API — 100 functions:** lifecycle, load, JS eval, scraping
   (text/attr/computed-style/count by selector), input (mouse/key/text/scroll +
   click/fill/select/focus/hover/scroll-into-view by selector), screenshots
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
@@ -107,7 +107,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **152/152** (default, network-free), `wke_smoke` **91/91**,
+- **Tests:** `mb_smoke` **153/153** (default, network-free), `wke_smoke` **92/92**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -125,6 +125,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- capi+wke: mbDispatchEvent / wkeDispatchEvent — fire arbitrary synthetic DOM events (2026-06-24). The action surface only fired fixed events (click; input+change via fill/select); this dispatches a bubbling, cancelable Event of any type on the first match — trigger handlers click/fill don't (mouseover/mouseenter hover menus, focus/blur, submit, custom framework events). Synchronous DOM dispatch (no compositor). Returns 1/0 (matched). 🎉 ABI crosses 100 functions. VERIFIED in both suites: a #d with mouseover + custom 'ping' listeners — dispatch each -> the handler ran (counter==1); no-match -> 0. wke_smoke 92/92, mb_smoke 153/153, no survivors. ABI now 100 fns.
 - capi+wke: mbGetAllValueForSelector / wkeGetAllValueForSelector — serialize a form's live values (2026-06-24). Completes the all-matches family (text/attr/value): the live .value of EVERY match as a JSON array — capture a whole form's current state in one call, distinct from GetAllAttribute(...,"value") which gives the static initial attribute. Absent value -> null; "[]" none; -1 invalid selector. VERIFIED in both suites: three inputs (a,b,c) with the 2nd filled to "B2" -> ["a","B2","c"]; no-match -> []. (Considered mbSetNetworkTimeout this tick but deferred it — the curl timeout path is http-only and untestable offline, and the net suite is down with httpbin out, so it couldn't be cleanly verified.) wke_smoke 91/91, mb_smoke 152/152, no survivors. ABI now 99 fns.
 - test: end-to-end integration case on a real https page (MB_NET_TESTS, 2026-06-24). Added mb_smoke case 44: one real-TLS load of https://example.com that cross-checks the recent scraping readers AGREE on the same <h1> — mbGetTextForSelector ("Example Domain"), mbGetHtmlForSelector (<h1>…Example Domain…), mbGetElementRect (w>0/h>0), mbGetComputedStyle(display=="block"). Gated + skips when status!=200. Default suite unaffected (mb_smoke 151/151, network-free). NOTE: the full MB_NET_TESTS suite currently can't run to completion — httpbin.org is DOWN (all its cases SKIP "host unhealthy/unreachable") and the stacked connect-timeouts exceed the 280s watchdog (exit 137) before reaching case 44. So case 44's LOGIC was verified live via the mb_shot CLI instead (one fast load, no httpbin): example.com -> textContent "Example Domain", rect 240,120,720,28, display block, PNG OK. The test compiles, mirrors existing verified net-case buffer handling, and skips gracefully — committed on that basis. wke_smoke 90/90, no survivors.
 - capi+wke: mbSetHtmlForSelector / wkeSetHtmlForSelector — set an element's innerHTML (2026-06-24). The DOM-write peer of GetHtmlForSelector (and a sibling of SetAttribute): replace the first match's innerHTML to template or redact a fragment before a capture. A normal page-context property assignment via eval — not a C++ v8 [[Set]] on the global — so safe in this build. Returns 1/0 (matched). VERIFIED in both suites: #x innerHTML <b>old</b> -> set to <i>new</i>, then textContent=="new" AND GetHtmlForSelector shows <i>new</i>; no-match -> 0. wke_smoke 90/90, mb_smoke 151/151, no survivors. ABI now 98 fns.

@@ -105,6 +105,12 @@ MB_EXPORT void mbSendMouseClick(mbView*, int x, int y);
 // (display:none / zero-size). Pair with mbWaitForSelector for dynamic content.
 MB_EXPORT int mbClickSelector(mbView*, const char* css_selector);
 
+// Dispatch a synthetic bubbling, cancelable DOM event of `type` (e.g. "mouseover",
+// "focus", "submit", or a custom event name) on the first element matching
+// `css_selector` — trigger handlers that mbClickSelector / mbFillSelector don't.
+// Returns 1 if an element matched, 0 if not.
+MB_EXPORT int mbDispatchEvent(mbView*, const char* css_selector, const char* type);
+
 // Move the pointer onto the first element matching `css_selector` (its center),
 // generating mousemove + mouseover/mouseenter and applying :hover — to open
 // hover menus, reveal tooltips, etc. Returns 1 on success, 0 if nothing matches

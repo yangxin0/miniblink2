@@ -123,6 +123,12 @@ int mbClickSelector(mbView* v, const char* css_selector) {
   return v->impl->ClickSelector(css_selector) ? 1 : 0;
 }
 
+int mbDispatchEvent(mbView* v, const char* css_selector, const char* type) {
+  if (!v || !v->impl || !css_selector || !type)
+    return 0;
+  return v->impl->DispatchEvent(css_selector, type) ? 1 : 0;
+}
+
 int mbHoverSelector(mbView* v, const char* css_selector) {
   if (!v || !v->impl || !css_selector)
     return 0;

@@ -264,6 +264,10 @@ WKE_API const utf8* wkeGetComputedStyle(wkeWebView webView, const char* selector
 // input+change (React-friendly); wkeSelectOption picks a <select> option by
 // value or visible text, firing input+change.
 WKE_API bool wkeClickSelector(wkeWebView webView, const char* selector);
+// Dispatch a synthetic bubbling DOM event of `type` (mouseover/focus/submit/
+// custom) on the first match — trigger handlers click/fill don't. True if matched.
+WKE_API bool wkeDispatchEvent(wkeWebView webView, const char* selector,
+                              const char* type);
 WKE_API bool wkeFillSelector(wkeWebView webView, const char* selector,
                              const utf8* text);
 WKE_API bool wkeSelectOption(wkeWebView webView, const char* selector,

@@ -1471,6 +1471,25 @@ int main() {
            "mbFillSelector: sets value + fires input event; 0 when no match");
   }
 
+  // 62b. mbDispatchEvent fires arbitrary DOM events that click/fill don't — a
+  // mouseover handler and a custom-event handler both run; no-match -> 0.
+  {
+    mbLoadHTML(v,
+      "<body><div id='d'>x</div><script>window.__o=0;window.__c=0;"
+      "document.getElementById('d').addEventListener('mouseover',function(){window.__o++;});"
+      "document.getElementById('d').addEventListener('ping',function(){window.__c++;});"
+      "</script></body>", "about:blank");
+    const bool over = mbDispatchEvent(v, "#d", "mouseover") == 1 &&
+                      Eval(v, "String(window.__o)") == "1";
+    const bool custom = mbDispatchEvent(v, "#d", "ping") == 1 &&
+                        Eval(v, "String(window.__c)") == "1";
+    const bool none_ok = mbDispatchEvent(v, "#none", "click") == 0;
+    Expect(over && custom && none_ok,
+           "mbDispatchEvent fires mouseover + custom events; 0 on no match",
+           std::string("over=") + (over ? "1" : "0") + " custom=" +
+               (custom ? "1" : "0") + " none=" + (none_ok ? "1" : "0"));
+  }
+
   // 63. mbWaitForFunction polls a JS predicate until truthy (general wait). A
   // setTimeout sets a flag after 50ms; waitForFunction must return 1 once it
   // flips. A condition that never holds must time out -> 0 (and not hang past

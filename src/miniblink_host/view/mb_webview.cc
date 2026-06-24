@@ -336,6 +336,20 @@ bool MbWebView::ScrollIntoView(const char* css_selector) {
   return EvalToString(js.c_str()) == "1";
 }
 
+bool MbWebView::DispatchEvent(const char* css_selector, const char* type) {
+  if (!css_selector || !type)
+    return false;
+  // Dispatch a bubbling, cancelable Event of `type` on the first match — trigger
+  // handlers that click/fill don't (mouseover/mouseenter hover menus, focus/blur,
+  // submit, custom framework events). Synchronous DOM dispatch (no compositor).
+  // Returns true if an element matched.
+  std::string js =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+      "\");if(!e)return '0';e.dispatchEvent(new Event(\"" + JsEscape(type) +
+      "\",{bubbles:true,cancelable:true}));return '1';})()";
+  return EvalToString(js.c_str()) == "1";
+}
+
 bool MbWebView::ClickSelector(const char* css_selector) {
   if (!css_selector || !widget_)
     return false;

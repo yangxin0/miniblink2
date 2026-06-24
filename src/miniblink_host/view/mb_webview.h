@@ -81,6 +81,10 @@ class MbWebView {
   // / zero-size). Puppeteer-style page.click(selector) — saves callers computing
   // coordinates by hand.
   bool ClickSelector(const char* css_selector);
+  // Dispatch a bubbling, cancelable DOM Event of `type` on the first match —
+  // trigger handlers click/fill don't (mouseover/focus/blur/submit/custom events).
+  // Returns true if an element matched.
+  bool DispatchEvent(const char* css_selector, const char* type);
   // Move the pointer to the first match's center (mousemove + mouseover + :hover).
   bool HoverSelector(const char* css_selector);
   // Double-click the first match's center (fires dblclick).

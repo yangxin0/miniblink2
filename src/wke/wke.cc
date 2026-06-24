@@ -815,6 +815,16 @@ bool wkeClickSelector(wkeWebView webView, const char* selector) {
   return ok;
 }
 
+bool wkeDispatchEvent(wkeWebView webView, const char* selector, const char* type) {
+  // Dispatch a synthetic DOM event of `type` on the first match; true if matched.
+  // (Port extension.)
+  if (!webView || !webView->view || !selector || !type)
+    return false;
+  const bool ok = mbDispatchEvent(webView->view, selector, type) != 0;
+  DrainPageEvents(webView);
+  return ok;
+}
+
 bool wkeFillSelector(wkeWebView webView, const char* selector,
                      const utf8* text) {
   // Set the value of the first matching input/textarea and fire input+change

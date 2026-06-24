@@ -1080,6 +1080,23 @@ int main() {
           "wkeClickSelector/wkeFillSelector/wkeSelectOption drive the page");
   }
 
+  // wkeDispatchEvent fires arbitrary DOM events that click/fill don't — a
+  // mouseover handler and a custom-event handler both run; no-match returns false.
+  {
+    wkeLoadHTML(wv,
+        "<body><div id='d'>x</div><script>window.__o=0;window.__c=0;"
+        "document.getElementById('d').addEventListener('mouseover',function(){window.__o++;});"
+        "document.getElementById('d').addEventListener('ping',function(){window.__c++;});"
+        "</script></body>");
+    const bool over = wkeDispatchEvent(wv, "#d", "mouseover") &&
+                      jsToInt(es, wkeRunJS(wv, "window.__o")) == 1;
+    const bool custom = wkeDispatchEvent(wv, "#d", "ping") &&
+                        jsToInt(es, wkeRunJS(wv, "window.__c")) == 1;
+    const bool none_ok = !wkeDispatchEvent(wv, "#none", "click");
+    check(over && custom && none_ok,
+          "wkeDispatchEvent fires mouseover + custom events (false on no match)");
+  }
+
   // wkeGetValueForSelector reads a control's LIVE .value (post-typing/selection),
   // which differs from the static "value" attribute that wkeGetAttribute reads.
   {
