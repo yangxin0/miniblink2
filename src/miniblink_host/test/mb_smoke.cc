@@ -2133,6 +2133,31 @@ int main() {
     mbResize(v, W, H);  // restore the shared viewport for later cases
   }
 
+  // 75a3. mbScrollToBottom drives IntersectionObserver-based lazy loading — the
+  // dominant modern pattern (loading="lazy" / IO libraries), distinct from 75a2's
+  // scroll-event approach (it exercises ForceUpdateViewportIntersections between
+  // scrolls). A below-fold element watched by an IO flips a flag only once it
+  // scrolls into view, so the flag must be false before auto-scroll and true after.
+  {
+    mbResize(v, W, 300);  // #lz sits ~3000px down, well below this viewport
+    mbLoadHTML(v,
+        "<body style='margin:0'><div style='height:3000px'></div>"
+        "<div id='lz' style='height:40px'></div>"
+        "<script>window.__seen=false;"
+        "new IntersectionObserver(function(es){es.forEach(function(e){"
+        "if(e.isIntersecting)window.__seen=true;});})"
+        ".observe(document.getElementById('lz'));</script></body>",
+        "about:blank");
+    const bool before = Eval(v, "String(window.__seen)") == "false";  // below fold
+    mbScrollToBottom(v, 10);  // reveals #lz; this page doesn't grow (flag-only)
+    const bool after = Eval(v, "String(window.__seen)") == "true";     // IO fired
+    Expect(before && after,
+           "mbScrollToBottom drives IntersectionObserver lazy-load (below-fold IO)",
+           std::string("before_unseen=") + (before ? "1" : "0") + " after_seen=" +
+               (after ? "1" : "0"));
+    mbResize(v, W, H);  // restore the shared viewport for later cases
+  }
+
   // 75b. Request log: the loader records every subresource it fetches. Clear it,
   // load a page that links a file:// stylesheet, and confirm the log captured the
   // stylesheet URL; then clear and confirm it empties. (Offline — file:// flows
