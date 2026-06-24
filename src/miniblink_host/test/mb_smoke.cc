@@ -2507,6 +2507,22 @@ int main() {
                (none_ok ? "1" : "0") + " bad=" + (bad_ok ? "1" : "0"));
   }
 
+  // 102b3b. mbGetHtmlForSelector returns a fragment's outerHTML (element + markup),
+  // distinct from innerText; -1 on no match.
+  {
+    mbLoadHTML(v, "<body><div id='card'><b>Hi</b> there</div></body>", "about:blank");
+    char hb[256] = {0};
+    int hlen = mbGetHtmlForSelector(v, "#card", hb, sizeof(hb));
+    const std::string html(hb);
+    const bool has_tag = hlen > 0 && html.find("id=\"card\"") != std::string::npos;
+    const bool has_inner = html.find("<b>Hi</b> there") != std::string::npos;
+    const bool none_ok = mbGetHtmlForSelector(v, "#none", hb, sizeof(hb)) == -1;
+    Expect(has_tag && has_inner && none_ok,
+           "mbGetHtmlForSelector returns the element's outerHTML",
+           std::string("tag=") + (has_tag ? "1" : "0") + " inner=" +
+               (has_inner ? "1" : "0") + " none=" + (none_ok ? "1" : "0"));
+  }
+
   // 102b4. mbGetAllAttributeForSelector scrapes one attribute across all matches
   // as a JSON array; a missing attribute -> null; raw value (href stays "/3").
   {

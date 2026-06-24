@@ -161,6 +161,10 @@ class MbWebView {
   // (one call for list scraping, vs count + :nth-of-type loop). Returns false on
   // an invalid selector; zero matches yields the valid "[]".
   bool GetAllTextForSelector(const char* css_selector, std::string* out);
+  // outerHTML of the first match (element + its markup) — extract a fragment to
+  // re-parse, vs GetTextForSelector (plain text) or GetHTML (whole document).
+  // Returns false if no element matches.
+  bool GetHtmlForSelector(const char* css_selector, std::string* out);
   // getAttribute(attr) of EVERY match as a JSON array string (absent attr ->
   // null, preserving index alignment); raw value, not the resolved property.
   // Returns false on an invalid selector; "[]" for zero matches.

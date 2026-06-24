@@ -1229,6 +1229,18 @@ int main() {
           "wkeGetAllTextForSelector returns a JSON array of every match's text");
   }
 
+  // wkeGetHtmlForSelector returns a fragment's outerHTML (element + markup),
+  // distinct from innerText; "" on no match.
+  {
+    wkeLoadHTML(wv, "<body><div id='card'><b>Hi</b> there</div></body>");
+    const char* html = wkeGetHtmlForSelector(wv, "#card");
+    const bool has_tag = std::strstr(html, "id=\"card\"") != nullptr;
+    const bool has_inner = std::strstr(html, "<b>Hi</b> there") != nullptr;
+    const bool none_ok = std::strcmp(wkeGetHtmlForSelector(wv, "#none"), "") == 0;
+    check(has_tag && has_inner && none_ok,
+          "wkeGetHtmlForSelector returns the element's outerHTML");
+  }
+
   // wkeGetAllAttributeForSelector scrapes one attribute across all matches as a
   // JSON array; a missing attribute becomes null; raw value (href stays "/3").
   {

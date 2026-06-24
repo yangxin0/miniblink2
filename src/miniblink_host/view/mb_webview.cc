@@ -671,6 +671,24 @@ bool MbWebView::GetAllAttributeForSelector(const char* css_selector,
   return true;
 }
 
+bool MbWebView::GetHtmlForSelector(const char* css_selector, std::string* out) {
+  if (!css_selector)
+    return false;
+  // outerHTML of the first match (the element + its markup) — extract a fragment
+  // (article body, table, card) to re-parse, vs GetTextForSelector's plain text or
+  // GetHTML's whole document. Same '1'-flag trick so an empty element is distinct
+  // from no-match (though outerHTML always includes the tag, so it's never empty).
+  std::string js =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+      "\");if(!e)return '';return '1'+e.outerHTML;})()";
+  std::string s = EvalToString(js.c_str());
+  if (s.empty())
+    return false;  // no element matched
+  if (out)
+    *out = s.substr(1);
+  return true;
+}
+
 bool MbWebView::GetAttribute(const char* css_selector, const char* attr,
                              std::string* out) {
   if (!css_selector || !attr)

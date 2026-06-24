@@ -63,7 +63,7 @@ the deliverable surface (C API, CLI, wke layer).
   blob: URLs (`fetch` + `<img>`), Intersection/Resize/Mutation observers, WAAPI,
   forms + submit-navigation, mouse/keyboard input, host-side history. CJK/i18n +
   system web fonts render.
-- **`mb_capi` C API — 96 functions:** lifecycle, load, JS eval, scraping
+- **`mb_capi` C API — 97 functions:** lifecycle, load, JS eval, scraping
   (text/attr/computed-style/count by selector), input (mouse/key/text/scroll +
   click/fill/select/focus/hover/scroll-into-view by selector), screenshots
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
@@ -107,7 +107,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **149/149** (default, network-free), `wke_smoke` **88/88**,
+- **Tests:** `mb_smoke` **150/150** (default, network-free), `wke_smoke` **89/89**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -125,6 +125,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- capi+wke: mbGetHtmlForSelector / wkeGetHtmlForSelector — a fragment's outerHTML (2026-06-24). Fills the scraping gap between mbGetTextForSelector (plain text of one element) and mbGetHTML (whole document): the first match's outerHTML (element + its markup) to extract a fragment — article body, table, card — for re-parsing. -1/"" on no match. VERIFIED in both suites: <div id=card><b>Hi</b> there</div> -> outerHTML contains id="card" AND <b>Hi</b> there; no-match -> -1/"". wke_smoke 89/89, mb_smoke 150/150, no survivors. ABI now 97 fns.
 - mb_shot: --user-agent / --ua — set the User-Agent on the CLI (2026-06-24). Real scraper gap: many sites serve different markup by UA (mobile vs desktop), but the CLI couldn't override it. Wraps mbSetUserAgent, applied before navigation. VERIFIED end-to-end offline with a clean A/B: default navigator.userAgent is the Chrome/150 string; --user-agent 'MyScraper/2.0 (mobile)' makes navigator.userAgent return exactly that. No survivors. mb_shot.cc + usage only; both suites unchanged (wke 88/88, mb 149/149).
 - docs: re-sync the README wke-layer section (2026-06-24). The wke surface grew across ~15 ticks but the README's grouped wke list had drifted — 32 of the 116 wke exports were undocumented (storage, request log/block, value/checked/visible readers, all-text/attr, wait-visible/hidden, scroll-to-bottom, insert-css, UA getter, focus, full key-event names, …). Added them under the right groups (a new Storage bullet; broadened DOM-automation / Networking / Scripting / Geometry), and corrected the stale "63 default cases" -> 88. Cross-checked: all 116 unique wke functions now appear in README (0 missing), restoring the same "every export documented" invariant the mb_capi list holds. Docs-only — no code, suites unchanged (wke 88/88, mb 149/149).
 - mb_shot: --block SUBSTR — request blocking on the CLI (2026-06-24). Threads last tick's mbBlockUrl into the deliverable: repeatable --block registers URL substrings (applied before navigation) to drop ads/trackers/images for faster, cleaner shots. VERIFIED end-to-end offline with a clean A/B: a page linking a file:// stylesheet renders rgb(4,4,4) WITHOUT --block, but rgb(0,0,0) (default — request dropped) WITH --block 'ad.css'. No survivors. mb_shot.cc + usage only; both suites unchanged (wke 88/88, mb 149/149).

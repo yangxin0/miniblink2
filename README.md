@@ -176,7 +176,7 @@ See `docs/interface-surface.md` for the exact minimal Blink embedding surface, a
 
 ## Public C ABI (`src/miniblink_host/capi/mb_capi.h`)
 
-96 functions; the header has the full, commented signatures. The canonical flow —
+97 functions; the header has the full, commented signatures. The canonical flow —
 boot, render, read back, screenshot, shut down:
 
 ```c
@@ -204,7 +204,8 @@ Grouped overview (see `mb_capi.h` for the exact signatures):
   type) `mbEvalJSIsolated` `mbDrainConsole` `mbJsBindFunction` (native C function
   callable from JS; returns string/number/boolean/null/JSON-object)
 - **Scraping:** `mbGetText` `mbGetHTML` `mbGetTextForSelector`
-  `mbGetAllTextForSelector` (JSON array, all matches) `mbGetAttribute`
+  `mbGetAllTextForSelector` (JSON array, all matches)
+  `mbGetHtmlForSelector` (element outerHTML) `mbGetAttribute`
   `mbGetAllAttributeForSelector` (JSON array of an attr, all matches)
   `mbSetAttribute` `mbGetValueForSelector` (live `.value`) `mbGetCheckedForSelector`
   (`.checked`) `mbIsVisibleForSelector` `mbGetComputedStyle` `mbCountSelector`

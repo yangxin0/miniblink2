@@ -346,6 +346,14 @@ MB_EXPORT int mbGetTextForSelector(mbView*, const char* css_selector, char* out,
 MB_EXPORT int mbGetAllTextForSelector(mbView*, const char* css_selector,
                                       char* out, int out_cap);
 
+// Write the outerHTML of the first element matching `css_selector` (the element
+// plus its markup) into `out` — extract a fragment (article body, table, card) to
+// re-parse, vs mbGetTextForSelector (plain text) or mbGetHTML (whole document).
+// Returns the length in bytes (>=0) or -1 if no element matches. Size first with
+// out=NULL/out_cap=0.
+MB_EXPORT int mbGetHtmlForSelector(mbView*, const char* css_selector, char* out,
+                                   int out_cap);
+
 // Write attribute `attr` of EVERY element matching `css_selector` as a JSON array
 // string (e.g. ["/a","/b"] for all link hrefs) into `out` — list scraping of an
 // attribute in one call. An element missing the attribute contributes JSON null
