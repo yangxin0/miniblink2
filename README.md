@@ -173,7 +173,7 @@ See `docs/interface-surface.md` for the exact minimal Blink embedding surface, a
 
 ## Public C ABI (`src/miniblink_host/capi/mb_capi.h`)
 
-72 functions; the header has the full, commented signatures. The canonical flow —
+75 functions; the header has the full, commented signatures. The canonical flow —
 boot, render, read back, screenshot, shut down:
 
 ```c
@@ -195,7 +195,8 @@ Grouped overview (see `mb_capi.h` for the exact signatures):
   `mbGoBack`/`mbGoForward`/`mbCanGoBack`/`mbCanGoForward` `mbGetURL` `mbGetTitle`
   `mbGetHttpStatus` `mbGetResponseHeaders`
 - **Scripting:** `mbRunJS` `mbSetInitScript` `mbEvalJS` `mbEvalJSEx` (value + JS
-  type) `mbEvalJSIsolated` `mbDrainConsole`
+  type) `mbEvalJSIsolated` `mbDrainConsole` `mbJsBindFunction` (native C function
+  callable from JS)
 - **Scraping:** `mbGetText` `mbGetHTML` `mbGetTextForSelector` `mbGetAttribute`
   `mbGetComputedStyle` `mbCountSelector` `mbGetElementRect` `mbGetContentSize`
 - **Input:** `mbSendMouseClick` `mbSendMouseMove` `mbSendText` `mbSendKey`
@@ -205,12 +206,12 @@ Grouped overview (see `mb_capi.h` for the exact signatures):
   `mbScrollIntoView`
 - **Capture / output:** `mbPaintToBitmap` `mbPaintRectToBitmap` `mbSavePng`
   `mbSavePngRect` `mbSavePdf` `mbEncodePng` (in-memory PNG bytes)
-- **Cookies / session:** `mbGetCookies` `mbSetCookie` `mbClearCookies`
-  `mbSaveCookies`/`mbLoadCookies` (file jar)
+- **Cookies / session:** `mbGetCookies` `mbGetAllCookies` (whole jar)
+  `mbSetCookie` `mbClearCookies` `mbSaveCookies`/`mbLoadCookies` (file jar)
 - **Network config:** `mbSetProxy` `mbSetIgnoreCertErrors` `mbSetFollowRedirects`
   `mbSetExtraHeaders` `mbSetUserAgent` `mbSetLoadImages`
 - **Page config:** `mbSetDeviceScaleFactor` `mbSetTransparentBackground`
-  `mbSetDarkMode` `mbSetLocale` `mbSetTimezone`
+  `mbSetDarkMode` `mbSetLocale` `mbSetTimezone` `mbSetFocus` (window focus)
 
 ## wke compatibility layer (`src/wke/wke.h`)
 
