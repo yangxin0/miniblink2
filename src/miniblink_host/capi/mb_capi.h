@@ -90,6 +90,12 @@ MB_EXPORT void mbRunJS(mbView*, const char* utf8_script);
 // to clear. Set before navigating.
 MB_EXPORT void mbSetInitScript(mbView*, const char* utf8_script);
 
+// Append a <style> element holding `css` to the document head (like Puppeteer's
+// addStyleTag) — restyle or hide elements (cookie banners, ads, fixed headers)
+// before a screenshot. Returns 1 on success, 0 on failure. Applies to the
+// current document; re-apply after a navigation.
+MB_EXPORT int mbInsertCSS(mbView*, const char* css);
+
 // Synthesize a left mouse click (down+up) at (x,y) in the view.
 MB_EXPORT void mbSendMouseClick(mbView*, int x, int y);
 

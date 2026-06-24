@@ -1098,6 +1098,17 @@ int main() {
           "wkeSetAttribute writes the attribute (href/data-*/boolean), false on no match");
   }
 
+  // wkeInsertCSS appends a <style> that actually applies: a rule hiding #x flips
+  // it from visible to hidden (verified through wkeIsVisibleForSelector).
+  {
+    wkeLoadHTML(wv, "<body><div id='x'>v</div></body>");
+    const bool before = wkeIsVisibleForSelector(wv, "#x") == 1;
+    const bool inserted = wkeInsertCSS(wv, "#x{display:none}");
+    const bool after = wkeIsVisibleForSelector(wv, "#x") == 0;
+    check(before && inserted && after,
+          "wkeInsertCSS injects a stylesheet that takes effect (#x hidden)");
+  }
+
   // wkeGetAllTextForSelector scrapes a whole list in one call, returning a JSON
   // array of each match's innerText; "[]" for no matches, "" for a bad selector.
   {

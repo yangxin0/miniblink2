@@ -2438,6 +2438,19 @@ int main() {
                (none_ok ? "1" : "0") + " bad=" + (bad_ok ? "1" : "0"));
   }
 
+  // 102b5. mbInsertCSS appends a <style> that actually applies: a rule hiding #x
+  // flips it from visible to hidden (verified via mbIsVisibleForSelector).
+  {
+    mbLoadHTML(v, "<body><div id='x'>v</div></body>", "about:blank");
+    const bool before = mbIsVisibleForSelector(v, "#x") == 1;
+    const bool inserted = mbInsertCSS(v, "#x{display:none}") == 1;
+    const bool after = mbIsVisibleForSelector(v, "#x") == 0;
+    Expect(before && inserted && after,
+           "mbInsertCSS injects a stylesheet that takes effect (#x hidden)",
+           std::string("before=") + (before ? "1" : "0") + " inserted=" +
+               (inserted ? "1" : "0") + " after=" + (after ? "1" : "0"));
+  }
+
   // 102c. mbGetValueForSelector reads the LIVE .value (post-typing/selection),
   // distinct from mbGetAttribute's static "value" attribute, with the same
   // -1 no-match / no-value-property sentinel.

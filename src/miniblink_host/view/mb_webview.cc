@@ -690,6 +690,20 @@ bool MbWebView::GetAttribute(const char* css_selector, const char* attr,
   return true;
 }
 
+bool MbWebView::InsertCSS(const char* css) {
+  if (!css)
+    return false;
+  // Append a <style> with `css` to <head> (Puppeteer's addStyleTag) — restyle or
+  // hide noise (cookie banners, ads) before a screenshot. Returns true on
+  // success. A plain DOM append, no v8 [[Set]] trap.
+  std::string js =
+      "(function(){try{var s=document.createElement('style');s.textContent=\"" +
+      JsEscape(css) +
+      "\";(document.head||document.documentElement).appendChild(s);"
+      "return '1';}catch(e){return '0';}})()";
+  return EvalToString(js.c_str()) == "1";
+}
+
 bool MbWebView::SetAttribute(const char* css_selector, const char* attr,
                              const char* value) {
   if (!css_selector || !attr)

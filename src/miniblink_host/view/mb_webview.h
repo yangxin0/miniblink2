@@ -173,6 +173,10 @@ class MbWebView {
   // property (use FillSelector for a control's value).
   bool SetAttribute(const char* css_selector, const char* attr,
                     const char* value);
+  // Append a <style> with `css` to the document head (Puppeteer addStyleTag) —
+  // restyle or hide elements (cookie banners, ads) before a capture. Returns
+  // true on success.
+  bool InsertCSS(const char* css);
   // The first match's LIVE .value property (what an <input>/<textarea>/<select>
   // currently holds after typing or selection) — distinct from GetAttribute,
   // which reads the static "value" HTML attribute (the initial value). Returns

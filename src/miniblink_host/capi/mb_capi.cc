@@ -106,6 +106,12 @@ void mbSetInitScript(mbView* v, const char* utf8_script) {
     v->impl->SetInitScript(utf8_script);
 }
 
+int mbInsertCSS(mbView* v, const char* css) {
+  if (!v || !v->impl || !css)
+    return 0;
+  return v->impl->InsertCSS(css) ? 1 : 0;
+}
+
 void mbSendMouseClick(mbView* v, int x, int y) {
   if (v && v->impl)
     v->impl->SendMouseClick(x, y);

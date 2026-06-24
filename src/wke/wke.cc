@@ -498,6 +498,12 @@ void wkeSetInitScript(wkeWebView webView, const utf8* script) {
   ApplyInitScript(webView);  // re-combine with the bridge bootstrap (if any)
 }
 
+bool wkeInsertCSS(wkeWebView webView, const utf8* css) {
+  // Append a <style> with `css` to the document head; true on success. (Port ext.)
+  return webView && webView->view && css &&
+         mbInsertCSS(webView->view, css) != 0;
+}
+
 void wkeOnJsBridge(wkeWebView webView, wkeJsBridgeCallback callback,
                    void* param) {
   // Register a host callback for page->host messages sent via
