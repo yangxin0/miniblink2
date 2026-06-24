@@ -291,6 +291,37 @@ int main() {
           "jsGetKeys enumerates object property names (empty for non-objects)");
   }
 
+  // jsEmptyObject/jsEmptyArray + jsSet/jsSetAt/jsSetGlobal build values that the
+  // read side (jsGet/jsGetAt/jsGetGlobal) and jsCall then observe.
+  {
+    jsValue obj = jsEmptyObject(es);
+    jsSet(es, obj, "name", jsString(es, "Ada"));
+    jsSet(es, obj, "n", jsInt(7));
+    const bool obj_ok =
+        std::strcmp(jsToTempString(es, jsGet(es, obj, "name")), "Ada") == 0 &&
+        jsToInt(es, jsGet(es, obj, "n")) == 7;
+
+    jsValue arr = jsEmptyArray(es);
+    jsSetAt(es, arr, 0, jsInt(10));
+    jsSetAt(es, arr, 1, jsInt(20));
+    const bool arr_ok = jsGetLength(es, arr) == 2 &&
+                        jsToInt(es, jsGetAt(es, arr, 0)) == 10 &&
+                        jsToInt(es, jsGetAt(es, arr, 1)) == 20;
+
+    jsSetGlobal(es, "mbBuilt", jsInt(99));
+    const bool glob_ok = jsToInt(es, jsGetGlobal(es, "mbBuilt")) == 99;
+
+    // The built object survives a round-trip through jsCall as an argument.
+    jsValue fn = wkeRunJS(wv, "(function(o){return o.name+':'+o.n})");
+    jsValue cargs[1] = {obj};
+    const bool call_ok =
+        std::strcmp(jsToTempString(es, jsCallGlobal(es, fn, cargs, 1)),
+                    "Ada:7") == 0;
+
+    check(obj_ok && arr_ok && glob_ok && call_ok,
+          "jsEmptyObject/Array + jsSet/jsSetAt/jsSetGlobal build & pass values");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {

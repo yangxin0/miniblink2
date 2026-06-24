@@ -678,6 +678,56 @@ jsValue jsNull() {
   return MakeLiteral("null", "null", "null");
 }
 
+// --- Building structured values (object/array) to pass INTO JS -----------------
+jsValue jsEmptyObject(jsExecState es) {
+  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  if (!wv || !wv->view)
+    return 0;
+  return StoreEval(wv, "({})");  // a fresh, navigable object handle
+}
+
+jsValue jsEmptyArray(jsExecState es) {
+  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  if (!wv || !wv->view)
+    return 0;
+  return StoreEval(wv, "([])");  // a fresh, navigable array handle
+}
+
+namespace {
+// Mutate the live slot object in place (no new slot). The IIFE never throws, so
+// a bad target/value is a silent no-op rather than a script error.
+void EvalVoid(wkeWebView wv, const std::string& script) {
+  char buf[8] = {0};
+  mbEvalJS(wv->view, script.c_str(), buf, sizeof(buf));
+}
+}  // namespace
+
+void jsSet(jsExecState es, jsValue object, const char* prop, jsValue value) {
+  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  if (!wv || !wv->view || !prop)
+    return;
+  EvalVoid(wv, "(function(){try{window.__mbslots[" + std::to_string(object) +
+                   "][" + JsStringLiteral(prop) + "]=(" + LiteralOf(value) +
+                   ")}catch(e){}})()");
+}
+
+void jsSetAt(jsExecState es, jsValue object, int index, jsValue value) {
+  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  if (!wv || !wv->view)
+    return;
+  EvalVoid(wv, "(function(){try{window.__mbslots[" + std::to_string(object) +
+                   "][" + std::to_string(index) + "]=(" + LiteralOf(value) +
+                   ")}catch(e){}})()");
+}
+
+void jsSetGlobal(jsExecState es, const char* prop, jsValue value) {
+  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  if (!wv || !wv->view || !prop)
+    return;
+  EvalVoid(wv, "(function(){try{window[" + JsStringLiteral(prop) + "]=(" +
+                   LiteralOf(value) + ")}catch(e){}})()");
+}
+
 // --- Calling JS functions ------------------------------------------------------
 namespace {
 std::string ArgList(jsValue* args, int argCount) {

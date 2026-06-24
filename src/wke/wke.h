@@ -217,6 +217,17 @@ WKE_API jsValue jsString(jsExecState es, const utf8* str);
 WKE_API jsValue jsUndefined(void);
 WKE_API jsValue jsNull(void);
 
+// Build structured values to populate and pass INTO JS. jsEmptyObject/
+// jsEmptyArray return a fresh, navigable {}/[] handle; jsSet/jsSetAt mutate it
+// in place by property name / index; jsSetGlobal assigns a window global. The
+// assigned `value` may be any jsValue (a constructor result or another handle).
+WKE_API jsValue jsEmptyObject(jsExecState es);
+WKE_API jsValue jsEmptyArray(jsExecState es);
+WKE_API void jsSet(jsExecState es, jsValue object, const char* prop,
+                   jsValue value);
+WKE_API void jsSetAt(jsExecState es, jsValue object, int index, jsValue value);
+WKE_API void jsSetGlobal(jsExecState es, const char* prop, jsValue value);
+
 // Call a JS function value with the given args, returning its result as a new
 // jsValue. jsCall binds `thisObject`; jsCallGlobal uses the global `this`.
 WKE_API jsValue jsCall(jsExecState es, jsValue func, jsValue thisObject,

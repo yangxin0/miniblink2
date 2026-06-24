@@ -77,13 +77,14 @@ the deliverable surface (C API, CLI, wke layer).
   paint (`wkePaint`), mouse (`wkeFireMouseEvent`), keyboard (`wkeFireKey*`),
   scripting (`wkeRunJS` + `jsToInt/Double/Boolean/TempString` + `jsTypeOf` +
   the full jsValue object model — reads `jsGetLength`/`jsGetAt`/`jsGet`/
-  `jsGetGlobal` + `jsGetKeys`, constructors `jsInt`/`jsString`/…, and
+  `jsGetGlobal` + `jsGetKeys`, constructors `jsInt`/`jsString`/…, builders
+  `jsEmptyObject`/`jsEmptyArray` + setters `jsSet`/`jsSetAt`/`jsSetGlobal`, and
   `jsCall`/`jsCallGlobal`),
   POST (`wkePostURL`), navigation history,
   rendering accessors (`wkeSetTransparent`, `wkeGetContentWidth/Height`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **25/25**,
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **26/26**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin cases (143 total).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
@@ -99,6 +100,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke jsValue WRITE SIDE: jsEmptyObject/jsEmptyArray + jsSet/jsSetAt/jsSetGlobal (2026-06-24). Builders StoreEval "({})"/"([])" into fresh navigable slots; setters mutate the live slot object in place via a void IIFE eval (window.__mbslots[obj][prop|index]=(LiteralOf(value)) / window[prop]=...), so any jsValue — a constructor result or another handle — can be assigned. Closes the loop: a built object round-trips through jsCall (passed as arg, read back) and through jsGet/jsGetAt/jsGetGlobal. wke_smoke 26/26 (obj{name,n} + arr[10,20] + global + jsCallGlobal(fn,[obj])=="Ada:7"), mb_smoke 132/132, no survivors.
 - wke jsValue: jsGetKeys — enumerates an object's own-enumerable property names in Object.keys order (2026-06-24). Parks Object.keys(obj) in a slot, reads each name back via jsGetAt, copies into a thread-local leaked KeysHolder (vector<string> storage + vector<const char*> ptrs) so the returned `jsKeys*` and its strings stay valid until the next call on that thread. Empty list for non-objects. Faithful to the classic wke jsKeys contract. wke_smoke 25/25 (alpha/beta/gamma order + empty for `42`), mb_smoke 132/132, no survivors.
 - ✅✅ wke jsValue: CALL + CONSTRUCTORS — jsCall/jsCallGlobal + jsInt/jsDouble/jsBoolean/jsString/jsUndefined/jsNull (2026-06-24). Completes the jsValue object model. Each JsRecord now carries a `literal` (a JS expr reproducing it): slot-backed values use "window.__mbslots[h]", primitives (no jsExecState, no eval) store their JS literal ("5"/"true"/"\"x\"") — so jsCall builds "(func)(a0,a1,...)" / "(func).apply(this,[...])" by inlining each arg's literal, then StoreEval runs it. All via the safe JS-slot pattern (no C++ v8). wke_smoke 24/24, no crash: jsCallGlobal(add,[jsInt(10),jsInt(32)])=42, greet(jsString"Ada")="hi Ada", jsCall(obj.add, this=obj, [jsInt(5)])=105. mb_smoke 132/132.
 - wke jsValue: jsGet + jsGetGlobal — object property reads by name + window globals, via the same safe JS-slot pattern (StoreEval of "__mbslots[obj][\"prop\"]" / "window[\"prop\"]", property name escaped as a JS string literal). Completes object+array reads. wke_smoke 23/23 (obj name/age/nested + a global), no crash; mb_smoke 132/132. Remaining jsValue gap: jsCall (invoke a function).
