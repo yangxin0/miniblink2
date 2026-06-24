@@ -425,6 +425,11 @@ int main() {
   if (std::getenv("MB_NET_TESTS")) {
   const std::string host =
       std::getenv("MB_NET_HOST") ? std::getenv("MB_NET_HOST") : "https://httpbin.org";
+  // httpbin is a flaky public host: probe its health once so the cases that
+  // assert specific httpbin shapes (status/redirect) SKIP — not fail — when it
+  // is degraded (e.g. returning 503 for everything) rather than misbehaving.
+  mbLoadURL(v, (host + "/get").c_str());
+  const bool hb_ok = mbGetHttpStatus(v) == 200;
   // 31. Cookie jar: set a cookie via a redirecting endpoint, then a SEPARATE request
   // must still send it — Set-Cookie survives the redirect and the jar is shared.
   mbLoadURL(v, (host + "/cookies/set?mbck=val99").c_str());  // 302 -> /cookies
@@ -605,12 +610,12 @@ int main() {
     mbWait(v, 1800);  // two async round-trips
     std::string st = Eval(v, "String(window.__rs)");
     std::string hd = Eval(v, "String(window.__rh)");
-    if (!st.empty() && st.rfind("ERR:", 0) != 0) {  // host responded
+    if (hb_ok && !st.empty() && st.rfind("ERR:", 0) != 0) {  // host healthy
       Expect(st == "404/false" && hd == "sv1",
              "fetch sees real HTTP status (404, !ok) + response headers",
              st + " hdr=" + hd);
     } else {
-      std::fprintf(stderr, "  [SKIP] response status/headers (unreachable: %s)\n",
+      std::fprintf(stderr, "  [SKIP] response status/headers (host unhealthy: %s)\n",
                    st.c_str());
     }
   }
@@ -623,13 +628,13 @@ int main() {
               (host + "/redirect-to?url=" + host + "/get&status_code=302").c_str());
     mbWait(v, 700);
     std::string loc = Eval(v, "String(location.href)");
-    if (loc.find("/get") != std::string::npos ||
-        loc.find("/redirect-to") != std::string::npos) {  // host responded
+    if (hb_ok && (loc.find("/get") != std::string::npos ||
+                  loc.find("/redirect-to") != std::string::npos)) {  // healthy
       Expect(loc.find("/get") != std::string::npos &&
                  loc.find("/redirect-to") == std::string::npos,
              "navigation redirect commits the final URL as location.href", loc);
     } else {
-      std::fprintf(stderr, "  [SKIP] nav redirect (host unreachable: %s)\n",
+      std::fprintf(stderr, "  [SKIP] nav redirect (host unhealthy: %s)\n",
                    loc.c_str());
     }
   }
@@ -647,13 +652,13 @@ int main() {
          "window.__rr='ERR:'+e.name;});").c_str());
     mbWait(v, 1500);
     std::string rr = Eval(v, "String(window.__rr)");
-    if (!rr.empty() && rr.rfind("ERR:", 0) != 0) {  // host responded
+    if (hb_ok && !rr.empty() && rr.rfind("ERR:", 0) != 0) {  // host healthy
       Expect(rr.find("/get") != std::string::npos &&
                  rr.find("/redirect-to") == std::string::npos &&
                  rr.find("|true") != std::string::npos,
              "fetch() redirect exposes final url + redirected=true", rr);
     } else {
-      std::fprintf(stderr, "  [SKIP] fetch redirect (host unreachable: %s)\n",
+      std::fprintf(stderr, "  [SKIP] fetch redirect (host unhealthy: %s)\n",
                    rr.c_str());
     }
   }
