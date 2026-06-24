@@ -33,6 +33,8 @@ struct _tagWkeWebView {
   wkeTitleChangedCallback on_title_changed = nullptr;
   void* title_param = nullptr;
   std::string last_title;  // so a title callback only fires on a real change
+  wkeConsoleCallback on_console = nullptr;
+  void* console_param = nullptr;
 };
 
 namespace {
@@ -40,11 +42,48 @@ bool IsHttpUrl(const utf8* url) {
   return url && (std::strncmp(url, "http://", 7) == 0 ||
                  std::strncmp(url, "https://", 8) == 0);
 }
+// Drain captured page console output and deliver it to the wkeOnConsole callback,
+// one message per line ("level: text"). Only drains when a callback is set, so the
+// buffer is preserved otherwise. Called after a load and after wkeRunJS.
+void DrainConsoleToCallback(wkeWebView wv) {
+  if (!wv || !wv->view || !wv->on_console)
+    return;
+  std::vector<char> buf(1 << 16, 0);
+  mbDrainConsole(wv->view, buf.data(), static_cast<int>(buf.size()));
+  const std::string all(buf.data());
+  std::string::size_type start = 0;
+  for (std::string::size_type i = 0; i <= all.size(); ++i) {
+    if (i != all.size() && all[i] != '\n')
+      continue;
+    const std::string line = all.substr(start, i - start);
+    start = i + 1;
+    if (line.empty())
+      continue;
+    wkeConsoleLevel level = wkeLevelLog;
+    std::string msg = line;
+    const std::string::size_type colon = line.find(": ");
+    if (colon != std::string::npos) {
+      const std::string lv = line.substr(0, colon);
+      msg = line.substr(colon + 2);
+      if (lv == "warn")
+        level = wkeLevelWarning;
+      else if (lv == "error")
+        level = wkeLevelError;
+      else if (lv == "verbose")
+        level = wkeLevelDebug;
+    }
+    _tagWkeString m{msg};
+    _tagWkeString empty{std::string()};
+    wv->on_console(wv, wv->console_param, level, &m, &empty, 0, &empty);
+  }
+}
+
 // Fire the title-changed then loading-finish callbacks after a load completes.
 // (The load is synchronous, so this is the faithful "loading finished" moment.)
 void FireLoadCallbacks(wkeWebView wv) {
   if (!wv || !wv->view)
     return;
+  DrainConsoleToCallback(wv);
   if (wv->on_title_changed) {
     char tb[2048] = {0};
     mbGetTitle(wv->view, tb, sizeof(tb));
@@ -367,6 +406,7 @@ jsValue wkeRunJS(wkeWebView webView, const utf8* script) {
     reg.clear();  // bound the (non-GC'd) registry; very old handles expire to ""
   const jsValue handle = g_next_js_value++;
   reg[handle] = buf.data();  // up to the first NUL
+  DrainConsoleToCallback(webView);  // deliver any console output the script logged
   return handle;
 }
 
@@ -420,4 +460,11 @@ void wkeOnLoadingFinish(wkeWebView webView, wkeLoadingFinishCallback callback,
     return;
   webView->on_loading_finish = callback;
   webView->loading_param = param;
+}
+
+void wkeOnConsole(wkeWebView webView, wkeConsoleCallback callback, void* param) {
+  if (!webView)
+    return;
+  webView->on_console = callback;
+  webView->console_param = param;
 }

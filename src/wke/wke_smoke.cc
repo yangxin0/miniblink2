@@ -170,6 +170,28 @@ int main() {
             cbs.title_text == "CbTitle",
         "wkeOnLoadingFinish + wkeOnTitleChanged fire with URL/title/result");
 
+  // Console callback: capture the page's console.log/error and their levels.
+  struct ConState {
+    std::string all;
+    int saw_error = 0;
+  };
+  ConState con;
+  wkeOnConsole(wv, [](wkeWebView, void* p, wkeConsoleLevel level,
+                      const wkeString message, const wkeString, unsigned,
+                      const wkeString) {
+    auto* s = static_cast<ConState*>(p);
+    s->all += wkeGetString(message);
+    s->all += "|";
+    if (level == wkeLevelError)
+      s->saw_error = 1;
+  }, &con);
+  wkeLoadHTML(wv,
+              "<body><script>console.log('hello console');"
+              "console.error('boom');</script></body>");
+  check(con.all.find("hello console") != std::string::npos &&
+            con.all.find("boom") != std::string::npos && con.saw_error,
+        "wkeOnConsole captures console.log/error with levels");
+
   wkeDestroyWebView(wv);
   wkeFinalize();
 

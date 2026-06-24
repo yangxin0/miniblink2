@@ -190,4 +190,25 @@ WKE_API void wkeOnTitleChanged(wkeWebView webView,
 WKE_API void wkeOnLoadingFinish(wkeWebView webView,
                                 wkeLoadingFinishCallback callback, void* param);
 
+typedef enum _wkeConsoleLevel {
+  wkeLevelLog = 1,
+  wkeLevelWarning = 2,
+  wkeLevelError = 3,
+  wkeLevelDebug = 4,
+  wkeLevelInfo = 5,
+  wkeLevelRevokedError = 6,
+} wkeConsoleLevel;
+
+// Fired for each page console message (console.log/warn/error). In this slice
+// `message` and `level` are populated; sourceName/sourceLine/stackTrace are empty
+// (mb_capi's console capture is message+level only). Messages are delivered after
+// a load settles and after wkeRunJS.
+typedef void (*wkeConsoleCallback)(wkeWebView webView, void* param,
+                                   wkeConsoleLevel level, const wkeString message,
+                                   const wkeString sourceName,
+                                   unsigned sourceLine,
+                                   const wkeString stackTrace);
+WKE_API void wkeOnConsole(wkeWebView webView, wkeConsoleCallback callback,
+                          void* param);
+
 #endif  // MINIBLINK_WKE_WKE_H_
