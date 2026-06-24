@@ -123,6 +123,18 @@ run 40 "$URL" "$PNG" --mobile \
     --eval "window.innerWidth+','+window.devicePixelRatio+','+/iPhone/.test(navigator.userAgent)"
 check "--mobile preset (390/DPR3/iPhone UA)" "390,3,true" "$(cat "$TMP/out")"
 
+# --mobile + --full compose: a full-page mobile screenshot must keep the mobile
+# width (390), capture the full height, and apply the mobile media-query rule.
+TALL="$TMP/tall.html"
+cat > "$TALL" <<'HTML'
+<!doctype html><html><head><style>body{margin:0}#m{height:40px;background:red}
+@media (max-width:500px){#m{background:lime}}</style></head>
+<body><div style="height:1500px"></div><div id="m"></div></body></html>
+HTML
+run 40 "file://$TALL" "$PNG" --mobile --full \
+    --eval "window.innerWidth+'|'+(document.body.scrollHeight>1000)+'|'+getComputedStyle(document.getElementById('m')).backgroundColor"
+check "--mobile + --full compose" "390|true|rgb(0, 255, 0)" "$(cat "$TMP/out")"
+
 # --require: assert a scrape target is present; exit 3 when it isn't (for scripting)
 run 40 "$URL" "$PNG" --require "#msg";          check "--require present -> exit 0" "0" "$RC"
 run 40 "$URL" "$PNG" --require ".nonexistent";  check "--require absent -> exit 3" "3" "$RC"
