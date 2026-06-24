@@ -306,7 +306,7 @@ checkc "bad-size guard message" "must be positive" "$(cat "$TMP/err")"
 # and offline (build.sh runs it network-free). Each host is reachability-gated, so
 # a down host SKIPs (not fails). curl gates the reachability probe.
 if [ -n "${MB_NET_TESTS:-}" ] && command -v curl >/dev/null 2>&1; then
-  netok() { curl -s -o /dev/null --max-time 8 "$1" 2>/dev/null; }
+  netok() { curl -sk -o /dev/null --max-time 8 "$1" 2>/dev/null; }  # -k: reachability, not cert
   if netok "https://example.com/"; then
     run 60 "https://example.com/" "$PNG" --title
     check "net: example.com loads (--title)" "Example Domain" "$(cat "$TMP/out")"
@@ -316,7 +316,15 @@ if [ -n "${MB_NET_TESTS:-}" ] && command -v curl >/dev/null 2>&1; then
     checkc "net: --header reaches the server (httpbin echo)" "hello42" "$(cat "$TMP/out")"
     run 60 "https://httpbin.org/post" "$PNG" --post "field=val99" --text
     checkc "net: --post body reaches the server (httpbin echo)" "val99" "$(cat "$TMP/out")"
+    # --no-follow: stop at the 3xx instead of following Location (--headers -> stderr)
+    run 60 "https://httpbin.org/redirect/1" "$PNG" --no-follow --headers
+    checkc "net: --no-follow stops at the 3xx redirect" "302" "$(cat "$TMP/err")"
   else echo "  [SKIP] net: httpbin unreachable"; fi
+  # --insecure: load past a TLS error (self-signed cert) — fails without it
+  if netok "https://self-signed.badssl.com/"; then
+    run 60 "https://self-signed.badssl.com/" "$PNG" --insecure --eval "document.title"
+    checkc "net: --insecure loads a bad-cert (self-signed) site" "badssl" "$(cat "$TMP/out")"
+  else echo "  [SKIP] net: badssl unreachable"; fi
 fi
 
 echo "mb_shot_smoke: $PASS passed, $FAIL failed"

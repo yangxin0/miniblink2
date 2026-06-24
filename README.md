@@ -457,5 +457,6 @@ bad-size guard, the capture modes (PNG dimensions for default/`--scale`/`--clip`
 end-to-end `fill`→`click`→`wait-selector`→`eval` integration flow (the canonical
 scrape, extracting result rows as JSON) — coverage the C++ suites can't give the
 command-line tool itself. It runs 62 deterministic offline cases by default;
-`MB_NET_TESTS=1` adds reachability-gated live-network cases (loading `example.com`,
-and `--header`/`--post` echoed by httpbin).
+`MB_NET_TESTS=1` adds reachability-gated live-network cases (loading `example.com`;
+`--header`/`--post` echoed by httpbin; `--no-follow` stopping at a 3xx; `--insecure`
+loading a self-signed cert site).
