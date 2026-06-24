@@ -63,7 +63,8 @@ mb_shot \
   # prepare the view
   [--css STYLES] [--auto-scroll] [--scroll-to Y] [--scroll-to-selector CSS] \
   # extract (to stdout)
-  [--title] [--url] [--cookies URL] [--text] [--html] [--eval JS] [--value CSS] [--checked CSS] [--count CSS] [--visible CSS] \
+  [--title] [--url] [--cookies URL] [--local-storage KEY] [--session-storage KEY] \
+  [--text] [--html] [--eval JS] [--value CSS] [--checked CSS] [--count CSS] [--visible CSS] \
   [--rect CSS] [--style CSS PROP] [--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] \
   [--requests] [--console] [--headers] \
   # capture
@@ -128,7 +129,9 @@ server's HTTP response headers (Content-Type, caching, custom/API headers) to st
 landing URL after any redirects) to stdout — the basic page-metadata fields. `--cookies
 URL` prints the jar's cookies for that origin (`name=value; name2=value2`) — the
 inspection peer of `--set-cookie`/`--save-cookies`, e.g. read a session token after a
-login flow. `--text`
+login flow. `--local-storage KEY` / `--session-storage KEY` print a Web Storage value
+for the document's origin (an SPA's auth token / app state); an absent key prints an
+empty line and warns on stderr. `--text`
 prints the page's visible text (post-JS `document.body.innerText`) to stdout, so
 `mb_shot` doubles as a simple scraper/text extractor. `--html` prints the rendered
 (post-JS) DOM as serialized HTML — useful for SPAs whose fetched source is near-empty.

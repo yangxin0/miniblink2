@@ -54,6 +54,8 @@ int main(int argc, char** argv) {
   bool print_title = false;     // print document.title to stdout
   bool print_url = false;       // print the current document URL (post-redirect)
   std::string cookies_url;      // print the jar's cookies for this origin to stdout
+  std::string local_storage_key;    // print localStorage[key] for the doc origin
+  std::string session_storage_key;  // print sessionStorage[key] for the doc origin
   bool print_requests = false;  // dump the subresource request log to stdout
   bool wait_idle = false;       // wait for network idle before capture (networkidle)
   bool auto_scroll = false;     // scroll through the page to load lazy content
@@ -193,6 +195,10 @@ int main(int argc, char** argv) {
       print_url = true;
     } else if (a == "--cookies" && i + 1 < argc) {
       cookies_url = argv[++i];
+    } else if (a == "--local-storage" && i + 1 < argc) {
+      local_storage_key = argv[++i];
+    } else if (a == "--session-storage" && i + 1 < argc) {
+      session_storage_key = argv[++i];
     } else if (a == "--requests") {
       print_requests = true;
     } else if (a == "--auto-scroll") {
@@ -223,7 +229,8 @@ int main(int argc, char** argv) {
     std::fprintf(
         stderr,
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
-        "[--transparent] [--title] [--url] [--cookies URL] [--text] [--html] [--requests] [--eval JS] [--value CSS] "
+        "[--transparent] [--title] [--url] [--cookies URL] "
+        "[--local-storage KEY] [--session-storage KEY] [--text] [--html] [--requests] [--eval JS] [--value CSS] "
         "[--checked CSS] [--count CSS] [--visible CSS] [--rect CSS] [--style CSS PROP] "
         "[--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
@@ -497,6 +504,31 @@ int main(int argc, char** argv) {
     mbGetCookies(view, cookies_url.c_str(), cbuf.data(),
                  static_cast<int>(cbuf.size()));
     std::fwrite(cbuf.data(), 1, std::strlen(cbuf.data()), stdout);
+    std::fputc('\n', stdout);
+  }
+
+  // --local-storage KEY / --session-storage KEY: print a Web Storage value for
+  // the document's origin to stdout (an SPA's auth token / app state). Empty line
+  // + stderr warning when the key is absent (getter returns -1), distinct from a
+  // genuinely empty stored value. Origin-scoped, like cookies.
+  if (!local_storage_key.empty()) {
+    std::vector<char> lbuf(1 << 16, 0);  // 64 KiB
+    int n = mbGetLocalStorage(view, local_storage_key.c_str(), lbuf.data(),
+                              static_cast<int>(lbuf.size()));
+    if (n < 0)
+      std::fprintf(stderr, "mb_shot: --local-storage '%s' not set\n",
+                   local_storage_key.c_str());
+    std::fwrite(lbuf.data(), 1, std::strlen(lbuf.data()), stdout);
+    std::fputc('\n', stdout);
+  }
+  if (!session_storage_key.empty()) {
+    std::vector<char> sbuf(1 << 16, 0);  // 64 KiB
+    int n = mbGetSessionStorage(view, session_storage_key.c_str(), sbuf.data(),
+                                static_cast<int>(sbuf.size()));
+    if (n < 0)
+      std::fprintf(stderr, "mb_shot: --session-storage '%s' not set\n",
+                   session_storage_key.c_str());
+    std::fwrite(sbuf.data(), 1, std::strlen(sbuf.data()), stdout);
     std::fputc('\n', stdout);
   }
 
