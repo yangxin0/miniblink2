@@ -587,6 +587,13 @@ int wkeGetCheckedForSelector(wkeWebView webView, const char* selector) {
   return mbGetCheckedForSelector(webView->view, selector);
 }
 
+int wkeIsVisibleForSelector(wkeWebView webView, const char* selector) {
+  // Visibility of the first match: 1 visible, 0 hidden, -1 no match.
+  if (!webView || !webView->view || !selector)
+    return -1;
+  return mbIsVisibleForSelector(webView->view, selector);
+}
+
 const utf8* wkeGetTextForSelector(wkeWebView webView, const char* selector) {
   // innerText of the FIRST element matching `selector` ("" if none). Owned by
   // the view, valid until the next wkeGetTextForSelector on it. (Port extension.)

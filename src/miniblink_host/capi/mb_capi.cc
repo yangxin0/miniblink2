@@ -442,6 +442,12 @@ int mbGetCheckedForSelector(mbView* v, const char* css_selector) {
   return v->impl->GetCheckedForSelector(css_selector);
 }
 
+int mbIsVisibleForSelector(mbView* v, const char* css_selector) {
+  if (!v || !v->impl || !css_selector)
+    return -1;
+  return v->impl->IsVisibleForSelector(css_selector);
+}
+
 int mbCountSelector(mbView* v, const char* css_selector) {
   if (!v || !v->impl || !css_selector)
     return -1;

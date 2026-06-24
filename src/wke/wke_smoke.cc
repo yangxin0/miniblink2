@@ -1095,6 +1095,27 @@ int main() {
           "wkeGetCheckedForSelector reads .checked and tracks a toggling click");
   }
 
+  // wkeIsVisibleForSelector distinguishes "exists in the DOM" from "actually
+  // shown": a visible element is 1; display:none / visibility:hidden / opacity:0
+  // are 0 (even though they all match a selector); no match is -1.
+  {
+    wkeLoadHTML(wv,
+                "<body><div id='vis'>shown</div>"
+                "<div id='dn' style='display:none'>x</div>"
+                "<div id='vh' style='visibility:hidden'>x</div>"
+                "<div id='op' style='opacity:0'>x</div></body>");
+    const bool shown = wkeIsVisibleForSelector(wv, "#vis") == 1;
+    const bool hidden_ok = wkeIsVisibleForSelector(wv, "#dn") == 0 &&
+                           wkeIsVisibleForSelector(wv, "#vh") == 0 &&
+                           wkeIsVisibleForSelector(wv, "#op") == 0;
+    // Exists but hidden -> wkeCountSelector still finds it (existence != shown).
+    const bool exists_distinct =
+        wkeCountSelector(wv, "#dn") == 1 && wkeIsVisibleForSelector(wv, "#dn") == 0;
+    const bool nomatch = wkeIsVisibleForSelector(wv, "#none") == -1;
+    check(shown && hidden_ok && exists_distinct && nomatch,
+          "wkeIsVisibleForSelector separates visibility from existence");
+  }
+
   // wkeScrollIntoView (offline): a target far below the fold scrolls into the
   // viewport (scrollY rises from 0, and the element's box lands within height).
   {

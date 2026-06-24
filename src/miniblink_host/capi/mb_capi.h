@@ -301,6 +301,12 @@ MB_EXPORT int mbGetValueForSelector(mbView*, const char* css_selector, char* out
 // (checkbox/radio). Pairs with mbClickSelector, which toggles a checkbox.
 MB_EXPORT int mbGetCheckedForSelector(mbView*, const char* css_selector);
 
+// Whether the first element matching `css_selector` is actually visible: 1 yes,
+// 0 hidden (display:none, visibility:hidden, content-visibility, or opacity:0),
+// -1 if no element matches. Existence != visibility — use after a toggle or a
+// CSS transition, or to confirm an element mbWaitForSelector found is shown.
+MB_EXPORT int mbIsVisibleForSelector(mbView*, const char* css_selector);
+
 // Number of elements matching `css_selector` (querySelectorAll length). Returns
 // the count (>=0; 0 is valid) or -1 for a null/invalid selector. Use with
 // :nth-of-type(n)/:nth-child(n) selectors on mbGetTextForSelector/mbGetAttribute

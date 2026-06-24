@@ -2424,6 +2424,30 @@ int main() {
                (toggled ? "1" : "0") + " noncheck=" + (noncheck ? "1" : "0"));
   }
 
+  // 102e. mbIsVisibleForSelector: existence (a selector matches) is NOT visibility.
+  // display:none / visibility:hidden / opacity:0 all match yet report 0 (hidden);
+  // a shown element is 1; no match is -1.
+  {
+    mbLoadHTML(v,
+        "<body><div id='vis'>shown</div>"
+        "<div id='dn' style='display:none'>x</div>"
+        "<div id='vh' style='visibility:hidden'>x</div>"
+        "<div id='op' style='opacity:0'>x</div></body>", "about:blank");
+    const bool shown = mbIsVisibleForSelector(v, "#vis") == 1;
+    const bool hidden_ok = mbIsVisibleForSelector(v, "#dn") == 0 &&
+                           mbIsVisibleForSelector(v, "#vh") == 0 &&
+                           mbIsVisibleForSelector(v, "#op") == 0;
+    // The hidden element still EXISTS (count==1) — proving the distinction.
+    const bool exists_distinct =
+        mbCountSelector(v, "#dn") == 1 && mbIsVisibleForSelector(v, "#dn") == 0;
+    const bool nomatch = mbIsVisibleForSelector(v, "#none") == -1;
+    Expect(shown && hidden_ok && exists_distinct && nomatch,
+           "mbIsVisibleForSelector separates visibility from existence",
+           std::string("shown=") + (shown ? "1" : "0") + " hidden=" +
+               (hidden_ok ? "1" : "0") + " distinct=" +
+               (exists_distinct ? "1" : "0") + " nomatch=" + (nomatch ? "1" : "0"));
+  }
+
   // 102b. mbCountSelector + indexed list scraping. Count the matches, then read
   // each one via :nth-of-type(n) selectors on mbGetTextForSelector — the standard
   // "scrape a list" pattern. Also: 0 for no matches, -1 for an invalid selector.

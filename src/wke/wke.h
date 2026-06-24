@@ -207,6 +207,10 @@ WKE_API const utf8* wkeGetValueForSelector(wkeWebView webView,
 // The first match's .checked state: 1 checked, 0 unchecked, -1 on no match or a
 // non-checkable element. Pairs with wkeClickSelector (which toggles a checkbox).
 WKE_API int wkeGetCheckedForSelector(wkeWebView webView, const char* selector);
+// Whether the first match is actually visible: 1 yes, 0 hidden (display:none,
+// visibility:hidden, content-visibility, opacity:0), -1 on no match. Existence
+// (wkeWaitForSelector) is not visibility — use this to confirm an element shows.
+WKE_API int wkeIsVisibleForSelector(wkeWebView webView, const char* selector);
 // Write the first match's viewport-relative bounding box (logical px) into
 // *x/*y/*w/*h (any may be NULL); returns whether an element matched. Compose
 // with wkeSavePngRect for an element screenshot or with wkeFireMouseEvent for a

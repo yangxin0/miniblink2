@@ -166,6 +166,11 @@ class MbWebView {
   // The first match's .checked state: 1 checked, 0 unchecked, -1 if no element
   // matches or it isn't a checkable control (checkbox/radio).
   int GetCheckedForSelector(const char* css_selector);
+  // The first match's actual visibility: 1 visible, 0 hidden (display:none,
+  // visibility:hidden, content-visibility, or opacity:0), -1 if no element
+  // matches. Existence (querySelector) is not visibility — use this for "is it
+  // really shown", e.g. after a CSS transition or a toggle.
+  int IsVisibleForSelector(const char* css_selector);
   // Number of elements matching `css_selector` (querySelectorAll length). 0 is a
   // valid result; returns -1 on a null or syntactically invalid selector. Paired
   // with :nth-of-type(n) selectors on the per-element accessors above, this drives

@@ -681,6 +681,26 @@ int MbWebView::GetCheckedForSelector(const char* css_selector) {
   return std::atoi(s.c_str());
 }
 
+int MbWebView::IsVisibleForSelector(const char* css_selector) {
+  if (!css_selector)
+    return -1;
+  // The first match's actual visibility: 1 visible, 0 hidden, -1 if no element
+  // matches. Uses Element.checkVisibility (M150) with checkOpacity +
+  // checkVisibilityCSS so display:none, visibility:hidden, content-visibility,
+  // and opacity:0 all count as hidden. Falls back to layout-box presence on the
+  // (unexpected) chance the API is absent.
+  std::string js =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+      "\");if(!e)return '-1';var v=(typeof e.checkVisibility==='function')?"
+      "e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}):"
+      "!!(e.offsetWidth||e.offsetHeight||e.getClientRects().length);"
+      "return v?'1':'0';})()";
+  std::string s = EvalToString(js.c_str());
+  if (s.empty())
+    return -1;
+  return std::atoi(s.c_str());
+}
+
 int MbWebView::CountSelector(const char* css_selector) {
   if (!css_selector)
     return -1;
