@@ -134,9 +134,14 @@ WKE_API const utf8* wkeGetSource(wkeWebView webView);
 WKE_API const utf8* wkeGetCookie(wkeWebView webView);
 WKE_API void wkeSetCookie(wkeWebView webView, const utf8* url,
                           const utf8* cookie);
+// Set the cookie jar file path (Flush/Reload persist to/from it). This port
+// takes a utf8 path rather than the Windows wke WCHAR. The path is process-wide
+// (the jar is shared); the webView arg is accepted for signature compatibility.
+WKE_API void wkeSetCookieJarPath(wkeWebView webView, const utf8* path);
 // wkePerformCookieCommand drives the whole jar (no view: it acts on the last
-// live webView). The clear commands reset the jar; the file flush/reload
-// commands are not yet wired (no jar-path setter) and are currently no-ops.
+// live webView). The clear commands reset the jar; FlushCookiesToFile /
+// ReloadCookiesFromFile persist to/from the wkeSetCookieJarPath file (a no-op
+// until a path is set), in curl's Netscape jar format.
 typedef enum _wkeCookieCommand {
   wkeCookieCommandClearAllCookies,
   wkeCookieCommandClearSessionCookies,

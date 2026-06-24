@@ -333,6 +333,43 @@ int main() {
           "wkeGetCookie/wkeSetCookie/wkePerformCookieCommand are safe + consistent");
   }
 
+  // Cookie persistence (offline): inject a cookie, flush the jar to a file, and
+  // inspect the file; then clear + reload and re-flush to prove it round-trips.
+  {
+    auto slurp = [](const char* path) -> std::string {
+      std::string out;
+      if (FILE* f = std::fopen(path, "rb")) {
+        char b[4096];
+        size_t n;
+        while ((n = std::fread(b, 1, sizeof(b), f)) > 0)
+          out.append(b, n);
+        std::fclose(f);
+      }
+      return out;
+    };
+    const char* jar1 = "/private/tmp/claude-501/wke_jar1.txt";
+    const char* jar2 = "/private/tmp/claude-501/wke_jar2.txt";
+    std::remove(jar1);
+    std::remove(jar2);
+
+    wkeSetCookie(wv, "http://persist.test/",
+                 "psid=jar987; expires=Fri, 31 Dec 2027 23:59:59 GMT");
+    wkeSetCookieJarPath(wv, jar1);
+    wkePerformCookieCommand(wkeCookieCommandFlushCookiesToFile);
+    const bool flushed = slurp(jar1).find("jar987") != std::string::npos;
+
+    wkePerformCookieCommand(wkeCookieCommandClearAllCookies);
+    wkePerformCookieCommand(wkeCookieCommandReloadCookiesFromFile);
+    wkeSetCookieJarPath(wv, jar2);
+    wkePerformCookieCommand(wkeCookieCommandFlushCookiesToFile);
+    const bool reloaded = slurp(jar2).find("jar987") != std::string::npos;
+
+    std::remove(jar1);
+    std::remove(jar2);
+    check(flushed && reloaded,
+          "wkeSetCookieJarPath + Flush/Reload persist the jar to/from a file");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {

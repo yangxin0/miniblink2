@@ -46,6 +46,13 @@ struct _tagWkeWebView {
 // to drive the (process-wide) cookie jar. Set on create, cleared on destroy.
 namespace {
 wkeWebView g_last_webview = nullptr;
+// The cookie jar file path (process-wide, matching mbSave/LoadCookies). Set via
+// wkeSetCookieJarPath; the Flush/Reload cookie commands persist to/from it.
+// Leaked (never destroyed) to avoid an exit-time destructor.
+std::string& CookieJarPath() {
+  static auto* p = new std::string();
+  return *p;
+}
 }  // namespace
 
 namespace {
@@ -327,21 +334,31 @@ void wkeSetCookie(wkeWebView webView, const utf8* url, const utf8* cookie) {
     mbSetCookie(webView->view, url, cookie);
 }
 
+void wkeSetCookieJarPath(wkeWebView /*webView*/, const utf8* path) {
+  // Process-wide jar path (this port uses a utf8 path, not the Win wke WCHAR).
+  // Drives the Flush/Reload cookie commands below.
+  CookieJarPath() = path ? path : "";
+}
+
 void wkePerformCookieCommand(wkeCookieCommand command) {
-  // The jar is process-wide; drive it through the last live webView. The two
-  // clear commands map to a full jar reset (we don't distinguish session vs
-  // persistent cookies). The file flush/reload commands need a configured jar
-  // path (no wke setter yet), so they are currently no-ops.
-  if (!g_last_webview || !g_last_webview->view)
-    return;
+  // The jar is process-wide. The two clear commands map to a full jar reset
+  // (driven through the last live webView; we don't distinguish session vs
+  // persistent cookies). Flush/Reload persist to/from the path set by
+  // wkeSetCookieJarPath (no-op until one is configured).
   switch (command) {
     case wkeCookieCommandClearAllCookies:
     case wkeCookieCommandClearSessionCookies:
-      mbClearCookies(g_last_webview->view);
+      if (g_last_webview && g_last_webview->view)
+        mbClearCookies(g_last_webview->view);
       return;
     case wkeCookieCommandFlushCookiesToFile:
+      if (!CookieJarPath().empty())
+        mbSaveCookies(CookieJarPath().c_str());
+      return;
     case wkeCookieCommandReloadCookiesFromFile:
-      return;  // no jar-path API wired yet
+      if (!CookieJarPath().empty())
+        mbLoadCookies(CookieJarPath().c_str());
+      return;
   }
 }
 
