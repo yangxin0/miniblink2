@@ -671,20 +671,8 @@ int mbEvalJSEx(mbView* v, const char* utf8_script, char* out_value,
     return 0;
   std::string type;
   std::string value = v->impl->EvalWithType(utf8_script, &type);
-  if (out_value && value_cap > 0) {
-    int n = static_cast<int>(value.size());
-    int copy = n < value_cap - 1 ? n : value_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out_value[i] = value[i];
-    out_value[copy] = '\0';
-  }
-  if (out_type && type_cap > 0) {
-    int n = static_cast<int>(type.size());
-    int copy = n < type_cap - 1 ? n : type_cap - 1;
-    for (int i = 0; i < copy; ++i)
-      out_type[i] = type[i];
-    out_type[copy] = '\0';
-  }
+  CopyToBuffer(value, out_value, value_cap);  // value is arbitrary page content
+  CopyToBuffer(type, out_type, type_cap);      // type is ASCII, but stay uniform
   return static_cast<int>(value.size());
 }
 

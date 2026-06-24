@@ -176,6 +176,23 @@ int main() {
            "mbGetTextForSelector truncates at a UTF-8 boundary (no split char)",
            std::string("full=") + std::to_string((int)full_s.size()) + " got='" +
                got + "' (" + std::to_string((int)got.size()) + "B)");
+
+    // mbEvalJSEx's value buffer is the same path (arbitrary result content) —
+    // verify it also truncates at a boundary, not mid-multibyte.
+    char vbig[64] = {0}, tbig[16] = {0};
+    mbEvalJSEx(v, "'café'", vbig, sizeof(vbig), tbig, sizeof(tbig));
+    const std::string vfull(vbig);
+    char vsmall[5] = {0};
+    mbEvalJSEx(v, "'café'", vsmall, sizeof(vsmall), nullptr, 0);
+    const std::string vgot(vsmall);
+    const bool ev_boundary =
+        vgot.size() == vfull.size() ||
+        (static_cast<unsigned char>(vfull[vgot.size()]) & 0xC0) != 0x80;
+    Expect(vgot.size() < vfull.size() && ev_boundary &&
+               vfull.compare(0, vgot.size(), vgot) == 0,
+           "mbEvalJSEx value buffer truncates at a UTF-8 boundary",
+           std::string("vfull=") + std::to_string((int)vfull.size()) + " vgot='" +
+               vgot + "'");
   }
 
   // 11. Scroll: a tall page, synthesize a downward gesture scroll, verify scrollY.
