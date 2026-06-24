@@ -218,6 +218,28 @@ int main() {
           "bindings freed on destroy; survivor's bindings intact under churn");
   }
 
+  // User-Agent: the default is a real UA, and wkeGetUserAgent reports exactly what
+  // the page's navigator.userAgent sees — both for the default and an override.
+  // Uses a throwaway view so wv's UA stays untouched for later cases.
+  {
+    wkeWebView uv = wkeCreateWebView();
+    jsExecState ue = wkeGlobalExec(uv);
+    wkeLoadHTML(uv, "<body>ua</body>");
+    const std::string def = wkeGetUserAgent(uv);
+    const bool def_ok =
+        def.find("Mozilla") != std::string::npos &&
+        def == jsToTempString(ue, wkeRunJS(uv, "navigator.userAgent"));
+    wkeSetUserAgent(uv, "WkeUA/1.0 (smoke)");
+    wkeLoadHTML(uv, "<body>ua</body>");  // re-navigate to apply the override
+    const bool over_ok =
+        std::string(wkeGetUserAgent(uv)) == "WkeUA/1.0 (smoke)" &&
+        std::string("WkeUA/1.0 (smoke)") ==
+            jsToTempString(ue, wkeRunJS(uv, "navigator.userAgent"));
+    wkeDestroyWebView(uv);
+    check(def_ok && over_ok,
+          "wkeGetUserAgent matches navigator.userAgent (default + override)");
+  }
+
   // The cookie jar is process-wide (shared across views) — the complement to the
   // per-view JS/binding isolation above: a login in one view is seen by another.
   {

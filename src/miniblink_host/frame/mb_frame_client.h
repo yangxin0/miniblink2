@@ -103,6 +103,9 @@ class MbFrameClient : public blink::WebLocalFrameClient {
 
   void SetUserAgent(const std::string& ua) { user_agent_ = ua; }
   const std::string& user_agent() const { return user_agent_; }
+  // The UA actually sent to servers and reported to navigator.userAgent: the
+  // override if set, else the built-in default (matches UserAgentOverride()).
+  const std::string& EffectiveUserAgent() const;
 
   void SetExtraHeaders(const std::string& h) { extra_headers_ = h; }
   const std::string& extra_headers() const { return extra_headers_; }

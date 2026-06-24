@@ -241,11 +241,24 @@ int main() {
   mbLoadHTML(v, "<body>x</body>", "about:blank");  // default UA
   Expect(Eval(v, "String((navigator.userAgent||'').includes('Mozilla'))") == "true",
          "user-agent: default is non-empty");
+  {
+    // mbGetUserAgent reports the SAME effective UA the page sees.
+    char ua[1024] = {0};
+    mbGetUserAgent(v, ua, sizeof(ua));
+    Expect(std::string(ua) == Eval(v, "navigator.userAgent"),
+           "user-agent: mbGetUserAgent matches navigator.userAgent (default)", ua);
+  }
   mbSetUserAgent(v, "MiniblinkBot/9.9 (test)");
   mbLoadHTML(v, "<body>x</body>", "about:blank");  // re-navigate to pick up the UA
   Expect(Eval(v, "navigator.userAgent") == "MiniblinkBot/9.9 (test)",
          "user-agent: override reflected in navigator.userAgent",
          Eval(v, "navigator.userAgent"));
+  {
+    char ua[1024] = {0};
+    mbGetUserAgent(v, ua, sizeof(ua));
+    Expect(std::string(ua) == "MiniblinkBot/9.9 (test)",
+           "user-agent: mbGetUserAgent returns the override", ua);
+  }
 
   // 20. Clip capture: a green box at logical (50,60,100,40). Clipping exactly to it
   // must yield an all-green bitmap (proves the region offset lands at the origin).

@@ -124,6 +124,9 @@ WKE_API int wkeGetContentHeight(wkeWebView webView);
 WKE_API const utf8* wkeGetURL(wkeWebView webView);
 WKE_API const utf8* wkeGetTitle(wkeWebView webView);
 WKE_API void wkeSetUserAgent(wkeWebView webView, const utf8* userAgent);
+// The effective User-Agent (the override if set, else the built-in default) —
+// what navigator.userAgent and outgoing requests carry. Owned by the view.
+WKE_API const utf8* wkeGetUserAgent(wkeWebView webView);
 // Window-focus control: wkeSetFocus gives the view focus (document.hasFocus()
 // true, :focus-within active); wkeKillFocus drops it (hasFocus false, blurs the
 // active element) — simulate the embedding window gaining/losing focus.

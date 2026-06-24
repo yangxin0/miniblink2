@@ -28,6 +28,7 @@ struct _tagWkeWebView {
   bool last_was_http = false;  // success reporting: http uses the status code
   std::string url_cache;       // backs wkeGetURL's const utf8* return
   std::string title_cache;     // backs wkeGetTitle's const utf8* return
+  std::string ua_cache;        // backs wkeGetUserAgent's const utf8* return
   // Async callbacks (the wke event model).
   wkeLoadingFinishCallback on_loading_finish = nullptr;
   void* loading_param = nullptr;
@@ -423,6 +424,15 @@ const utf8* wkeGetTitle(wkeWebView webView) {
 void wkeSetUserAgent(wkeWebView webView, const utf8* userAgent) {
   if (webView && webView->view)
     mbSetUserAgent(webView->view, userAgent);
+}
+
+const utf8* wkeGetUserAgent(wkeWebView webView) {
+  if (!webView || !webView->view)
+    return "";
+  char buf[1024] = {0};
+  mbGetUserAgent(webView->view, buf, sizeof(buf));
+  webView->ua_cache.assign(buf);
+  return webView->ua_cache.c_str();
 }
 
 void wkeSetExtraHeaders(wkeWebView webView, const utf8* headers) {

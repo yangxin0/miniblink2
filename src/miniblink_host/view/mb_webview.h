@@ -119,6 +119,9 @@ class MbWebView {
   // Override the User-Agent for navigator.userAgent and outgoing requests. Set
   // before LoadURL/LoadHTML to take effect for that navigation.
   void SetUserAgent(const char* utf8_ua);
+  // The effective User-Agent (the override if set, else the built-in default) —
+  // exactly what navigator.userAgent and outgoing requests carry.
+  std::string GetUserAgent();
   // Enable/disable automatic image loading (off = faster text/HTML scraping).
   void SetLoadImages(bool enabled);
   // Emulate prefers-color-scheme: dark (true) or light (false). Set before loading.

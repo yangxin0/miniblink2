@@ -235,8 +235,11 @@ std::unique_ptr<blink::URLLoader> MbFrameClient::CreateURLLoaderForTesting() {
 }
 
 blink::WebString MbFrameClient::UserAgentOverride() {
-  return blink::WebString::FromUtf8(
-      user_agent_.empty() ? MbDefaultUserAgent() : user_agent_);
+  return blink::WebString::FromUtf8(EffectiveUserAgent());
+}
+
+const std::string& MbFrameClient::EffectiveUserAgent() const {
+  return user_agent_.empty() ? MbDefaultUserAgent() : user_agent_;
 }
 
 void MbFrameClient::DidAddMessageToConsole(const blink::WebConsoleMessage& msg,

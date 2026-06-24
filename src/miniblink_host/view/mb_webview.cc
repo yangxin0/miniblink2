@@ -514,6 +514,10 @@ void MbWebView::SetUserAgent(const char* utf8_ua) {
     frame_client_->SetUserAgent(utf8_ua ? utf8_ua : "");
 }
 
+std::string MbWebView::GetUserAgent() {
+  return frame_client_ ? frame_client_->EffectiveUserAgent() : std::string();
+}
+
 void MbWebView::SetLoadImages(bool enabled) {
   // Disabling image auto-loading speeds up text/HTML scraping (no image fetch or
   // decode). Set before navigating to apply to that load.

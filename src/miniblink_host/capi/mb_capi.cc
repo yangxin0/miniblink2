@@ -174,6 +174,20 @@ void mbSetUserAgent(mbView* v, const char* utf8_ua) {
     v->impl->SetUserAgent(utf8_ua);
 }
 
+int mbGetUserAgent(mbView* v, char* out, int out_cap) {
+  if (!v || !v->impl)
+    return 0;
+  std::string result = v->impl->GetUserAgent();
+  if (out && out_cap > 0) {
+    int n = static_cast<int>(result.size());
+    int copy = n < out_cap - 1 ? n : out_cap - 1;
+    for (int i = 0; i < copy; ++i)
+      out[i] = result[i];
+    out[copy] = '\0';
+  }
+  return static_cast<int>(result.size());
+}
+
 void mbSetProxy(const char* proxy) {
   // Process-wide (no view param): applies to every network fetch. A proxy string
   // routes traffic through it; NULL or "" forces a direct connection (overriding

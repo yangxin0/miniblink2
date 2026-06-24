@@ -142,6 +142,10 @@ MB_EXPORT void mbSetDeviceScaleFactor(mbView*, float scale);
 // restore the built-in default.
 MB_EXPORT void mbSetUserAgent(mbView*, const char* utf8_ua);
 
+// Read the effective User-Agent (the override if set, else the built-in default)
+// into `out` (NUL-terminated, truncated to out_cap). Returns the full length.
+MB_EXPORT int mbGetUserAgent(mbView*, char* out, int out_cap);
+
 // Route all network fetches through a proxy (process-wide; no view param). `proxy`
 // is a libcurl proxy string: "http://host:port", "socks5://host:port", or
 // "host:port" (http assumed). NULL or "" forces a direct connection (overriding
