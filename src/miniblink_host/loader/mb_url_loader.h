@@ -79,6 +79,17 @@ void MbBlockUrl(const std::string& substring);
 void MbClearUrlBlocks();
 bool MbIsUrlBlocked(const std::string& url);
 
+// Response mocking: serve a canned body for any request whose URL contains
+// `substring`, WITHOUT a real fetch (run offline, substitute an API response).
+// content_type defaults to text/html, status to 200. MbAddMock registers one
+// (last matching entry wins); MbClearMocks removes all; MbFindMock is the loader's
+// lookup. Process-wide, like the blocklist.
+void MbAddMock(const std::string& substring, const std::string& body,
+               const std::string& content_type, int status);
+void MbClearMocks();
+bool MbFindMock(const std::string& url, std::string* body,
+                std::string* content_type, int* status);
+
 // Process-wide HTTP(S) proxy for all network fetches, as a libcurl proxy string:
 // "http://host:port", "socks5://host:port", "host:port" (defaults to http), or
 // "" to force a direct connection (overriding any *_proxy env vars). Once set

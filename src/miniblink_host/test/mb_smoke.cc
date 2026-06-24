@@ -2282,6 +2282,37 @@ int main() {
     std::remove(bl_css);
   }
 
+  // 75d. Response mocking (mbMockResponse) — the #1 interception feature. A
+  // registered https URL serves a canned stylesheet body WITHOUT any real fetch
+  // (so it works fully offline): a <link> to the never-served URL turns #q green.
+  // Then mbClearMocks + a re-mock with red proves clearing works and a later mock
+  // overrides — all offline, no network. (https subresources route through the
+  // loader's Deliver chokepoint, same as the block/log cases.)
+  {
+    const char* doc =
+        "<head><link rel='stylesheet' href='https://mock.test/s.css'></head>"
+        "<body><b id='q'>x</b></body>";
+    mbClearMocks();
+    mbMockResponse("https://mock.test/s.css", "#q{color:rgb(0,170,0)}", "text/css",
+                   200);
+    mbLoadHTML(v, doc, "https://mock.test/p1.html");
+    const bool green = mbWaitForFunction(
+        v, "getComputedStyle(document.getElementById('q')).color==='rgb(0, 170, 0)'",
+        2000) == 1;
+    mbClearMocks();  // drop the green mock...
+    mbMockResponse("https://mock.test/s.css", "#q{color:rgb(170,0,0)}", "text/css",
+                   200);  // ...and replace with red
+    mbLoadHTML(v, doc, "https://mock.test/p2.html");
+    const bool red = mbWaitForFunction(
+        v, "getComputedStyle(document.getElementById('q')).color==='rgb(170, 0, 0)'",
+        2000) == 1;
+    mbClearMocks();
+    Expect(green && red,
+           "mbMockResponse serves a canned body with no fetch; clear/re-mock works",
+           std::string("green=") + (green ? "1" : "0") + " red=" +
+               (red ? "1" : "0"));
+  }
+
   // 76. CSS background-image renders (data: SVG). Distinct from <img>: exercises
   // the CSS background paint path + a data: URL image + SVG-as-image. A 30x30 div
   // with a green-SVG background should paint green at its center.

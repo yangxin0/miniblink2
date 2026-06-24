@@ -351,6 +351,17 @@ MB_EXPORT void mbClearRequestLog(void);
 MB_EXPORT void mbBlockUrl(const char* substring);
 MB_EXPORT void mbClearUrlBlocks(void);
 
+// Response mocking — the signature interception feature. Any request whose URL
+// CONTAINS `url_substring` is served `body` WITHOUT a real network fetch: run a
+// page fully offline, or substitute an API/XHR/fetch response in tests/automation.
+// `content_type` defaults to "text/html" when NULL/empty; `status` defaults to 200
+// when <= 0. Register several (last matching wins on overlap); mbClearMocks removes
+// all. Process-wide, applied at the loader, before the blocklist's blocked URLs.
+// Set before navigating to affect that page's requests.
+MB_EXPORT void mbMockResponse(const char* url_substring, const char* body,
+                              const char* content_type, int status);
+MB_EXPORT void mbClearMocks(void);
+
 // localStorage access for the current document's origin — inject an auth token /
 // app state before an SPA boots (pair with mbSetInitScript), or read it back.
 // mbGetLocalStorage writes the value of `key` into `out` and returns its length

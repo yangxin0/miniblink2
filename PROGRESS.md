@@ -49,11 +49,14 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
 **START HERE — high value, tractable, in code we own, headlessly verifiable:**
 
 1. **Network request/response interception & mocking** — THE signature miniblink feature
-   and #1 in the audit. Today the loader is block-only (`loader/mb_url_loader.cc`). Add a
-   pre-request hook (rewrite URL / headers / method / body) and a response hook
-   (substitute body + headers) — the `wkeNetHookRequest` / `wkeNetOnResponse` /
-   `wkeNetSetData` / `wkeNetSetURL` / `wkeNetSetHTTPHeaderField` family + `mb_capi` peers.
-   All in our libcurl loader, no mojo. Verify: mock a response body, assert the page sees it.
+   and #1 in the audit. In our libcurl loader (`loader/mb_url_loader.cc`), no mojo.
+   - [DONE] **Response mocking** — `mbMockResponse(url_substr, body, content_type, status)`
+     + `mbClearMocks()`: a matching URL serves a canned body with NO real fetch (offline
+     runs / API substitution). Checked first in `Deliver`. mb_smoke case 75d (mock a
+     stylesheet → element turns green; clear/re-mock → red), all offline.
+   - [NEXT] pre-request rewrite hook (URL / method / headers / body) + a dynamic callback
+     model (`wkeNetHookRequest`/`wkeNetOnResponse`/`wkeNetSetData`/`wkeNetSetURL`/
+     `wkeNetSetHTTPHeaderField`) + the `mb_shot --mock URL FILE` CLI flag + wke peers.
 
 2. **Quick-win correctness bugs** (real defects; fast; each independently verifiable —
    NOTE several have *existing tests that assert the stubbed/fake behavior* and must be

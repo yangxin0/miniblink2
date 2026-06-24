@@ -649,6 +649,52 @@ bool MbIsUrlBlocked(const std::string& url) {
   return false;
 }
 
+// --- Response mocking --------------------------------------------------------
+// Serve a canned body for any request whose URL contains a registered substring,
+// WITHOUT a real fetch — run a page offline or substitute an API response. The
+// signature miniblink/automation feature; pure in-loader data, like the blocklist.
+namespace {
+struct MockEntry {
+  std::string substring;
+  std::string body;
+  std::string content_type;
+  int status;
+};
+std::vector<MockEntry>& MockList() {
+  static std::vector<MockEntry>* m = new std::vector<MockEntry>();
+  return *m;
+}
+}  // namespace
+
+void MbAddMock(const std::string& substring, const std::string& body,
+               const std::string& content_type, int status) {
+  if (!substring.empty())
+    MockList().push_back({substring, body, content_type, status});
+}
+
+void MbClearMocks() {
+  MockList().clear();
+}
+
+bool MbFindMock(const std::string& url, std::string* body,
+                std::string* content_type, int* status) {
+  // Last matching entry wins, so a later mbMockResponse overrides an earlier
+  // overlapping one (intuitive "re-mock to replace").
+  const MockEntry* hit = nullptr;
+  for (const MockEntry& e : MockList())
+    if (url.find(e.substring) != std::string::npos)
+      hit = &e;
+  if (!hit)
+    return false;
+  if (body)
+    *body = hit->body;
+  if (content_type)
+    *content_type = hit->content_type;
+  if (status)
+    *status = hit->status;
+  return true;
+}
+
 bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* content_type, const std::string& user_agent,
                 const std::string& extra_headers, const std::string& post_body,
@@ -720,7 +766,16 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   std::string resp_headers;       // raw final-response header block (http only)
   std::string final_url;          // URL after manual redirect following (http)
   bool ok = false;
-  if (url.SchemeIsFile()) {
+  // Response mocking: a registered URL substring serves its canned body without a
+  // real fetch (offline tests, API substitution). Checked before any scheme fetch.
+  std::string mock_body, mock_ct;
+  int mock_status = 0;
+  if (MbFindMock(url.spec(), &mock_body, &mock_ct, &mock_status)) {
+    contents = std::move(mock_body);
+    http_content_type = mock_ct.empty() ? std::string("text/html") : mock_ct;
+    http_status = mock_status > 0 ? mock_status : 200;
+    ok = true;
+  } else if (url.SchemeIsFile()) {
     base::FilePath fp;  // net path conversion percent-decodes (spaces etc.)
     ok = net::FileURLToFilePath(url, &fp) &&
          base::ReadFileToString(fp, &contents);

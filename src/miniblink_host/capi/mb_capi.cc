@@ -420,6 +420,17 @@ void mbClearUrlBlocks(void) {
   mb::MbClearUrlBlocks();
 }
 
+void mbMockResponse(const char* url_substring, const char* body,
+                    const char* content_type, int status) {
+  if (url_substring)
+    mb::MbAddMock(url_substring, body ? body : "",
+                  content_type ? content_type : "", status);
+}
+
+void mbClearMocks(void) {
+  mb::MbClearMocks();
+}
+
 int mbGetLocalStorage(mbView* v, const char* key, char* out, int out_cap) {
   if (!v || !v->impl || !key)
     return -1;
