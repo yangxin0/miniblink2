@@ -45,6 +45,7 @@ struct _tagWkeWebView {
   std::string name;
   bool transparent = false;
   std::map<std::string, void*> user_kv;
+  double zoom_factor = 1.0;  // wkeSetZoomFactor; re-applied after each load
 };
 
 // The last live webView, so the view-less wkePerformCookieCommand has a handle
@@ -101,11 +102,24 @@ void DrainConsoleToCallback(wkeWebView wv) {
   }
 }
 
+// Re-apply the view's zoom to the current document. This port models wke's page
+// zoom as CSS zoom on the document element, which scales layout (and the
+// coordinates getBoundingClientRect reports). A factor of 1.0 is a no-op.
+void ApplyZoom(wkeWebView wv) {
+  if (!wv || !wv->view || wv->zoom_factor == 1.0)
+    return;
+  const std::string js = "try{document.documentElement.style.zoom='" +
+                         std::to_string(wv->zoom_factor) + "'}catch(e){}";
+  char buf[8] = {0};
+  mbEvalJS(wv->view, js.c_str(), buf, sizeof(buf));
+}
+
 // Fire the title-changed then loading-finish callbacks after a load completes.
 // (The load is synchronous, so this is the faithful "loading finished" moment.)
 void FireLoadCallbacks(wkeWebView wv) {
   if (!wv || !wv->view)
     return;
+  ApplyZoom(wv);  // a non-default zoom persists across navigations
   DrainConsoleToCallback(wv);
   if (wv->on_title_changed) {
     char tb[2048] = {0};
@@ -337,6 +351,17 @@ void* wkeGetUserKeyValue(wkeWebView webView, const char* key) {
     return nullptr;
   auto it = webView->user_kv.find(key);
   return it == webView->user_kv.end() ? nullptr : it->second;
+}
+
+void wkeSetZoomFactor(wkeWebView webView, float factor) {
+  if (!webView)
+    return;
+  webView->zoom_factor = factor > 0.0f ? factor : 1.0;  // ignore non-positive
+  ApplyZoom(webView);  // apply to the current document now (and again on reload)
+}
+
+float wkeGetZoomFactor(wkeWebView webView) {
+  return webView ? static_cast<float>(webView->zoom_factor) : 1.0f;
 }
 
 const utf8* wkeGetSource(wkeWebView webView) {

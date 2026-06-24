@@ -132,6 +132,11 @@ WKE_API const char* wkeGetName(wkeWebView webView);
 WKE_API void wkeSetName(wkeWebView webView, const char* name);
 WKE_API void wkeSetUserKeyValue(wkeWebView webView, const char* key, void* value);
 WKE_API void* wkeGetUserKeyValue(wkeWebView webView, const char* key);
+// Page zoom factor (1.0 = 100%). This port models it as CSS zoom on the document
+// element, scaling layout (and the rects getBoundingClientRect reports); it is
+// re-applied after each navigation. Non-positive factors are ignored.
+WKE_API void wkeSetZoomFactor(wkeWebView webView, float factor);
+WKE_API float wkeGetZoomFactor(wkeWebView webView);
 // The current document's HTML (the rendered, post-JS DOM serialized to HTML).
 // Owned by the view, valid until the next wkeGetSource on it.
 WKE_API const utf8* wkeGetSource(wkeWebView webView);

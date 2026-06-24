@@ -84,13 +84,14 @@ the deliverable surface (C API, CLI, wke layer).
   `wkePerformCookieCommand` + jar persistence via `wkeSetCookieJarPath`),
   proxy (`wkeSetProxy`, HTTP/SOCKS + auth), navigation history,
   rendering accessors (`wkeSetTransparent`/`wkeIsTransparent`,
-  `wkeGetContentWidth/Height`), view-state (`wkeSetName`/`wkeGetName`,
+  `wkeSetZoomFactor`/`wkeGetZoomFactor`, `wkeGetContentWidth/Height`),
+  view-state (`wkeSetName`/`wkeGetName`,
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **30/30**,
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **31/31**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com cases
-  (wke_smoke 33; mb_smoke ~145).
+  (wke_smoke 34; mb_smoke ~145).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
 
@@ -105,6 +106,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke RENDERING: wkeSetZoomFactor/wkeGetZoomFactor (2026-06-24). Page zoom modeled as CSS `zoom` on the document element (scales layout + the rects getBoundingClientRect reports), stored per-view and re-applied after every navigation via a new ApplyZoom() in FireLoadCallbacks. Non-positive factors ignored. VERIFIED observably + offline: a 100px div reports width 100 at 1.0, 200 at 2.0, and stays 200 after loading a fresh document (proves persistence). wke_smoke 31/31, mb_smoke 132/132, no survivors. (Honest deviation documented: real wke uses Blink page zoom; this port approximates via CSS zoom on the current document.)
 - wke VIEW-STATE: wkeIsTransparent + wkeSetName/wkeGetName + wkeSetUserKeyValue/wkeGetUserKeyValue (2026-06-24). Pure wke view-state accessors (no engine backing, 100% faithful semantics): wkeSetTransparent now mirrors its flag for wkeIsTransparent; name labels the view (default ""); the per-view std::map<string,void*> user store lets an app thread its own context through wke callbacks (app-owned, unset→NULL). Caught a real test bug — an earlier test left the view transparent, so the new test now asserts both transition directions rather than the initial state. wke_smoke 30/30, mb_smoke 132/132, no survivors.
 - wke NETWORK: wkeSetProxy (HTTP/SOCKS + auth) (2026-06-24). Faithful wke proxy API — wkeProxyType enum + wkeProxy struct {type, hostname[100], port, username[50], password[50]}. Builds a curl proxy URL "scheme://[user[:pass]@]host:port" (http/socks4/socks4a/socks5/socks5h) and hands it to mbSetProxy → CURLOPT_PROXY; NULL/WKE_PROXY_NONE forces a direct connection. Fixed-buffer fields copied into +1 NUL-terminated locals before use. Verified offline (null/NONE safe, local loads still work) and over the network (MB_NET_TESTS): a bogus unresolvable proxy makes http://example.com FAIL, clearing it makes the same load SUCCEED — proving the proxy is genuinely applied. wke_smoke 29/29 default, 32/32 net, mb_smoke 132/132, no survivors.
 - wke COOKIE PERSISTENCE: wkeSetCookieJarPath + Flush/Reload wired (2026-06-24). Closes last tick's loose end — wkePerformCookieCommand's FlushCookiesToFile/ReloadCookiesFromFile now persist the process-wide jar to/from a file via mbSaveCookies/mbLoadCookies. Path set by wkeSetCookieJarPath (utf8, not the Win wke WCHAR — documented; held in a leaked CookieJarPath() to dodge the exit-time-destructor -Werror). Tested OFFLINE deterministically by inspecting the saved curl/Netscape jar file: inject psid=jar987 → Flush to jar1 (file contains it) → ClearAll → Reload → re-Flush to jar2 (still contains it). wke_smoke 28/28, mb_smoke 132/132, no survivors.

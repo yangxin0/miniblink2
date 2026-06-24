@@ -407,6 +407,31 @@ int main() {
           "wkeIsTransparent/wkeSetName/wkeSetUserKeyValue track view-state");
   }
 
+  // wkeSetZoomFactor scales layout observably (getBoundingClientRect) and the
+  // factor persists across a navigation.
+  {
+    const char* page =
+        "<body style='margin:0'>"
+        "<div id='d' style='width:100px;height:10px'></div></body>";
+    auto divw = [&]() {
+      return jsToInt(es, wkeRunJS(wv, "Math.round(document.getElementById('d')"
+                                      ".getBoundingClientRect().width)"));
+    };
+    wkeSetZoomFactor(wv, 1.0f);
+    wkeLoadHTML(wv, page);
+    const bool base_ok = divw() == 100 && wkeGetZoomFactor(wv) == 1.0f;
+
+    wkeSetZoomFactor(wv, 2.0f);
+    const bool zoomed = divw() == 200 && wkeGetZoomFactor(wv) == 2.0f;
+
+    wkeLoadHTML(wv, page);  // a fresh document — zoom must re-apply
+    const bool persists = divw() == 200;
+
+    wkeSetZoomFactor(wv, 1.0f);  // restore so later loads aren't zoomed
+    check(base_ok && zoomed && persists,
+          "wkeSetZoomFactor scales layout + persists across navigations");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {
