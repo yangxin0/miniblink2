@@ -63,7 +63,7 @@ the deliverable surface (C API, CLI, wke layer).
   blob: URLs (`fetch` + `<img>`), Intersection/Resize/Mutation observers, WAAPI,
   forms + submit-navigation, mouse/keyboard input, host-side history. CJK/i18n +
   system web fonts render.
-- **`mb_capi` C API — 85 functions:** lifecycle, load, JS eval, scraping
+- **`mb_capi` C API — 86 functions:** lifecycle, load, JS eval, scraping
   (text/attr/computed-style/count by selector), input (mouse/key/text/scroll +
   click/fill/select/focus/hover/scroll-into-view by selector), screenshots
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
@@ -106,7 +106,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **142/142** (default, network-free), `wke_smoke` **81/81**,
+- **Tests:** `mb_smoke` **143/143** (default, network-free), `wke_smoke` **82/82**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -124,6 +124,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- capi+wke: mbWaitForSelectorHidden / wkeWaitForSelectorHidden — wait for gone/hidden (2026-06-24). The inverse of WaitForVisibleSelector and the canonical "wait for the loading spinner to disappear before scraping" primitive (previously only via a hand-written WaitForFunction). Same poll loop, inverted checkVisibility probe: succeeds when the first match is absent OR hidden (display:none / visibility:hidden / opacity:0). Returns 1 gone/hidden, 0 timeout. VERIFIED in both suites: an absent #never is instantly hidden (deterministic), a #spin removed by a 300ms timer makes the wait resolve (then IsVisible==-1), a permanently shown #stay times out. wke_smoke 82/82, mb_smoke 143/143, no survivors. ABI now 86 fns.
 - mb_shot: --text-all / --attr-all — one-shot list scraping on the CLI (2026-06-24). Threads the last two ticks' query-all readers into the deliverable (pattern of --value/--checked/--visible). --text-all CSS prints the JSON array of every match's innerText; --attr-all CSS NAME prints the JSON array of attribute NAME across all matches (absent->null). VERIFIED end-to-end vs a local list page: --text-all '.r'→["alpha","beta","gamma"], --attr-all '.l' href→["/1","/2",null] (3rd <a> has no href), --text-all '.none'→[], invalid selector→empty+warning. No survivors. mb_shot.cc + usage only; both suites unchanged (wke 81/81, mb 142/142).
 - capi+wke: mbGetAllAttributeForSelector / wkeGetAllAttributeForSelector — list attr scraping (2026-06-24). Complement to last tick's all-text: getAttribute(attr) of EVERY match as a JSON array (all link hrefs / img srcs in one call). An element missing the attribute contributes JSON null, keeping index alignment with the all-text array; raw value (getAttribute), not the resolved property, so href stays "/3". "[]" for none, -1/"" for an invalid selector. VERIFIED in both suites: three <a class=l> (two with href, one without) → ["/1","/2",null], .none → [], "(((" → -1. wke_smoke 81/81, mb_smoke 142/142, no survivors. ABI now 85 fns.
 - capi+wke: mbGetAllTextForSelector / wkeGetAllTextForSelector — list scraping in one call (2026-06-24). The per-selector readers all returned the FIRST match; scraping a list meant mbCountSelector + an :nth-of-type loop (N+1 calls, fragile). Added a query-all that returns the innerText of EVERY match as a JSON.stringify'd array (embedded commas/newlines/quotes survive). "[]" for zero matches, -1/"" for an invalid selector (querySelectorAll throws). VERIFIED in both suites: <li class=r>a/b/c → ["a","b","c"], .none → [], "(((" → -1. wke_smoke 80/80, mb_smoke 141/141, no survivors. ABI now 84 fns.

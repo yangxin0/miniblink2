@@ -1419,6 +1419,25 @@ int main() {
           "wkeWaitForVisibleSelector waits for visibility, not just existence");
   }
 
+  // wkeWaitForSelectorHidden is the inverse: it resolves when an element goes
+  // away (the "spinner disappeared" signal). A timer removes #spin; an
+  // already-absent selector is instantly hidden; a shown element times out.
+  {
+    wkeLoadHTML(wv,
+                "<body><div id='spin'>loading</div><div id='stay'>x</div>"
+                "<script>setTimeout(function(){"
+                "document.getElementById('spin').remove();},300);</script></body>");
+    // An absent selector is "hidden" right away (deterministic, no race).
+    const bool gone_now = wkeWaitForSelectorHidden(wv, "#never", 500);
+    // #spin starts visible; the wait resolves once the timer removes it.
+    const bool became_hidden = wkeWaitForSelectorHidden(wv, "#spin", 4000) &&
+                               wkeIsVisibleForSelector(wv, "#spin") == -1;
+    // A permanently shown element never hides -> timeout.
+    const bool stays_shown = !wkeWaitForSelectorHidden(wv, "#stay", 120);
+    check(gone_now && became_hidden && stays_shown,
+          "wkeWaitForSelectorHidden resolves when an element goes away/hidden");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {

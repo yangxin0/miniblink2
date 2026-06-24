@@ -49,6 +49,12 @@ int mbWaitForVisibleSelector(mbView* v, const char* css_selector, int timeout_ms
   return v->impl->WaitForVisibleSelector(css_selector, timeout_ms) ? 1 : 0;
 }
 
+int mbWaitForSelectorHidden(mbView* v, const char* css_selector, int timeout_ms) {
+  if (!v || !v->impl || !css_selector)
+    return 0;
+  return v->impl->WaitForSelectorHidden(css_selector, timeout_ms) ? 1 : 0;
+}
+
 int mbWaitForFunction(mbView* v, const char* js_expr, int timeout_ms) {
   if (!v || !v->impl || !js_expr)
     return 0;

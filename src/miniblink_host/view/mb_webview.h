@@ -252,6 +252,10 @@ class MbWebView {
   // mere existence — waits out a fade-in / display toggle / lazy reveal. Returns
   // true once the first match is shown, false on timeout.
   bool WaitForVisibleSelector(const char* css, int timeout_ms);
+  // The inverse: wait until the first match is NOT visible — gone from the DOM
+  // or hidden (display:none / visibility:hidden / opacity:0). The "wait for the
+  // loading spinner to disappear" primitive. True once gone/hidden, else timeout.
+  bool WaitForSelectorHidden(const char* css, int timeout_ms);
   bool PaintToBitmap(void* out_bgra, int w, int h, int stride);
   bool SavePng(const char* path, int w, int h);  // render + encode PNG to disk
   // Render the full view to a w×h PNG held in memory (encoded_png_) — for

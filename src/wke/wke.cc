@@ -839,6 +839,14 @@ bool wkeWaitForVisibleSelector(wkeWebView webView, const char* selector,
          mbWaitForVisibleSelector(webView->view, selector, timeoutMs) != 0;
 }
 
+bool wkeWaitForSelectorHidden(wkeWebView webView, const char* selector,
+                              int timeoutMs) {
+  // Pump until the first match is gone or hidden, or timeoutMs elapses. True
+  // once it's no longer visible (the spinner-gone signal). (Port ext.)
+  return webView && webView->view && selector &&
+         mbWaitForSelectorHidden(webView->view, selector, timeoutMs) != 0;
+}
+
 bool wkeWaitForFunction(wkeWebView webView, const utf8* jsExpr, int timeoutMs) {
   // Pump until `jsExpr` evaluates truthy (exceptions count as false), or
   // timeoutMs elapses. True if it became truthy. Generalizes the selector wait.

@@ -1331,6 +1331,30 @@ bool MbWebView::WaitForVisibleSelector(const char* css, int timeout_ms) {
   }
 }
 
+bool MbWebView::WaitForSelectorHidden(const char* css, int timeout_ms) {
+  if (!main_frame_ || !css)
+    return false;
+  // The inverse of WaitForVisibleSelector: succeed once the first match is NOT
+  // visible — either it never matches / was removed, OR it exists but is hidden
+  // (display:none / visibility:hidden / opacity:0). The canonical "wait for the
+  // loading spinner to disappear" before scraping. "1" = gone-or-hidden.
+  const std::string probe =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css) +
+      "\");if(!e)return '1';return (typeof e.checkVisibility==='function'?"
+      "e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}):"
+      "!!(e.offsetWidth||e.offsetHeight||e.getClientRects().length))?'0':'1';})()";
+  const base::TimeTicks deadline =
+      base::TimeTicks::Now() + base::Milliseconds(timeout_ms > 0 ? timeout_ms : 0);
+  for (;;) {
+    base::RunLoop().RunUntilIdle();
+    if (EvalToString(probe.c_str()) == "1")
+      return true;
+    if (base::TimeTicks::Now() >= deadline)
+      return false;
+    base::PlatformThread::Sleep(base::Milliseconds(10));
+  }
+}
+
 void MbWebView::ServiceAnimations() {
   // Run rAF callbacks. The compositor normally drives this via BeginMainFrame; with
   // no compositor we call the page animator directly so requestAnimationFrame fires

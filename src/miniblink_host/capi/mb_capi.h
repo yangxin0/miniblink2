@@ -56,6 +56,13 @@ MB_EXPORT int mbWaitForFunction(mbView*, const char* js_expr, int timeout_ms);
 MB_EXPORT int mbWaitForVisibleSelector(mbView*, const char* css_selector,
                                        int timeout_ms);
 
+// The inverse of mbWaitForVisibleSelector: wait until the first match is NOT
+// visible — gone from the DOM or hidden (display:none / visibility:hidden /
+// opacity:0). The "wait for the loading spinner to disappear" primitive before
+// scraping. Returns 1 once gone/hidden, 0 on timeout.
+MB_EXPORT int mbWaitForSelectorHidden(mbView*, const char* css_selector,
+                                      int timeout_ms);
+
 // View lifecycle. A view owns one WebView + main LocalFrame + WebFrameWidget.
 MB_EXPORT mbView* mbCreateView(int width, int height);
 MB_EXPORT void    mbDestroyView(mbView*);

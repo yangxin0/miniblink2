@@ -274,6 +274,10 @@ WKE_API bool wkeWaitForFunction(wkeWebView webView, const utf8* jsExpr,
 // once it's shown. For content that mounts hidden then fades/toggles in.
 WKE_API bool wkeWaitForVisibleSelector(wkeWebView webView, const char* selector,
                                        int timeoutMs);
+// The inverse: wait until the first match is NOT visible (gone or hidden) — the
+// "wait for the loading spinner to disappear" primitive. True once gone/hidden.
+WKE_API bool wkeWaitForSelectorHidden(wkeWebView webView, const char* selector,
+                                      int timeoutMs);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);

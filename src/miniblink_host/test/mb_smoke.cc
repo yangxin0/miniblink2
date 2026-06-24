@@ -2535,6 +2535,26 @@ int main() {
                " stays_hidden=" + (stays_hidden ? "1" : "0"));
   }
 
+  // 102g. mbWaitForSelectorHidden is the inverse: it resolves when an element
+  // goes away/hidden (the "spinner disappeared" signal). A timer removes #spin;
+  // an absent selector is instantly hidden; a shown element times out.
+  {
+    mbLoadHTML(v,
+        "<body><div id='spin'>loading</div><div id='stay'>x</div>"
+        "<script>setTimeout(function(){"
+        "document.getElementById('spin').remove();},300);</script></body>",
+        "about:blank");
+    const bool gone_now = mbWaitForSelectorHidden(v, "#never", 500) == 1;
+    const bool became_hidden = mbWaitForSelectorHidden(v, "#spin", 4000) == 1 &&
+                               mbIsVisibleForSelector(v, "#spin") == -1;
+    const bool stays_shown = mbWaitForSelectorHidden(v, "#stay", 120) == 0;
+    Expect(gone_now && became_hidden && stays_shown,
+           "mbWaitForSelectorHidden resolves when an element goes away/hidden",
+           std::string("gone_now=") + (gone_now ? "1" : "0") + " became_hidden=" +
+               (became_hidden ? "1" : "0") + " stays_shown=" +
+               (stays_shown ? "1" : "0"));
+  }
+
   // 102b. mbCountSelector + indexed list scraping. Count the matches, then read
   // each one via :nth-of-type(n) selectors on mbGetTextForSelector — the standard
   // "scrape a list" pattern. Also: 0 for no matches, -1 for an invalid selector.
