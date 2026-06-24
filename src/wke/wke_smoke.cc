@@ -252,6 +252,28 @@ int main() {
           "jsGet reads object properties (nested) + jsGetGlobal reads a global");
   }
 
+  // jsCall / jsCallGlobal with constructed args (jsInt/jsString) + a bound `this`.
+  {
+    jsValue add = wkeRunJS(wv, "(function(a,b){return a+b})");
+    jsValue iargs[2] = {jsInt(10), jsInt(32)};
+    const bool sum_ok = jsToInt(es, jsCallGlobal(es, add, iargs, 2)) == 42;
+
+    jsValue greet = wkeRunJS(wv, "(function(n){return 'hi '+n})");
+    jsValue sargs[1] = {jsString(es, "Ada")};
+    const bool str_ok = std::strcmp(
+                            jsToTempString(es, jsCallGlobal(es, greet, sargs, 1)),
+                            "hi Ada") == 0;
+
+    jsValue obj = wkeRunJS(
+        wv, "({base:100,add:function(x){return this.base+x}})");
+    jsValue addfn = jsGet(es, obj, "add");
+    jsValue cargs[1] = {jsInt(5)};
+    const bool this_ok = jsToInt(es, jsCall(es, addfn, obj, cargs, 1)) == 105;
+
+    check(sum_ok && str_ok && this_ok,
+          "jsCall/jsCallGlobal invoke functions with constructed args + this");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {

@@ -198,6 +198,21 @@ WKE_API jsValue jsGetAt(jsExecState es, jsValue object, int index);
 WKE_API jsValue jsGet(jsExecState es, jsValue object, const char* prop);
 WKE_API jsValue jsGetGlobal(jsExecState es, const char* prop);
 
+// Construct jsValues to pass as arguments INTO JS (e.g. to jsCall).
+WKE_API jsValue jsInt(int n);
+WKE_API jsValue jsDouble(double d);
+WKE_API jsValue jsBoolean(bool b);
+WKE_API jsValue jsString(jsExecState es, const utf8* str);
+WKE_API jsValue jsUndefined(void);
+WKE_API jsValue jsNull(void);
+
+// Call a JS function value with the given args, returning its result as a new
+// jsValue. jsCall binds `thisObject`; jsCallGlobal uses the global `this`.
+WKE_API jsValue jsCall(jsExecState es, jsValue func, jsValue thisObject,
+                       jsValue* args, int argCount);
+WKE_API jsValue jsCallGlobal(jsExecState es, jsValue func, jsValue* args,
+                             int argCount);
+
 // --- Paint (pull model): render the view into a caller BGRA buffer -------------
 // `bits` must hold width*height*4 bytes; `pitch` is the row stride in bytes
 // (pass width*4 for a tightly-packed buffer).

@@ -76,12 +76,13 @@ the deliverable surface (C API, CLI, wke layer).
   the full headless-automation surface — lifecycle, load, loading-state polling,
   paint (`wkePaint`), mouse (`wkeFireMouseEvent`), keyboard (`wkeFireKey*`),
   scripting (`wkeRunJS` + `jsToInt/Double/Boolean/TempString` + `jsTypeOf` +
-  `jsGetLength`/`jsGetAt`/`jsGet`/`jsGetGlobal` object+array reads),
+  the full jsValue object model — reads `jsGetLength`/`jsGetAt`/`jsGet`/
+  `jsGetGlobal`, constructors `jsInt`/`jsString`/…, and `jsCall`/`jsCallGlobal`),
   POST (`wkePostURL`), navigation history,
   rendering accessors (`wkeSetTransparent`, `wkeGetContentWidth/Height`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **23/23**,
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **24/24**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin cases (143 total).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
@@ -97,6 +98,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- ✅✅ wke jsValue: CALL + CONSTRUCTORS — jsCall/jsCallGlobal + jsInt/jsDouble/jsBoolean/jsString/jsUndefined/jsNull (2026-06-24). Completes the jsValue object model. Each JsRecord now carries a `literal` (a JS expr reproducing it): slot-backed values use "window.__mbslots[h]", primitives (no jsExecState, no eval) store their JS literal ("5"/"true"/"\"x\"") — so jsCall builds "(func)(a0,a1,...)" / "(func).apply(this,[...])" by inlining each arg's literal, then StoreEval runs it. All via the safe JS-slot pattern (no C++ v8). wke_smoke 24/24, no crash: jsCallGlobal(add,[jsInt(10),jsInt(32)])=42, greet(jsString"Ada")="hi Ada", jsCall(obj.add, this=obj, [jsInt(5)])=105. mb_smoke 132/132.
 - wke jsValue: jsGet + jsGetGlobal — object property reads by name + window globals, via the same safe JS-slot pattern (StoreEval of "__mbslots[obj][\"prop\"]" / "window[\"prop\"]", property name escaped as a JS string literal). Completes object+array reads. wke_smoke 23/23 (obj name/age/nested + a global), no crash; mb_smoke 132/132. Remaining jsValue gap: jsCall (invoke a function).
 - ✅✅ wke jsValue OBJECT MODEL — jsGetLength + jsGetAt (2026-06-24). Landed the capability that CRASHED two ticks ago, via the SAFE approach the revert's lesson pointed to: the slot store happens IN JS (a wrapper assignment "window.__mbslots[H]=(expr)" through the proven mbEvalJSEx), NEVER from C++. wke.cc-only, no host/v8 changes. StoreEval wraps each result into __mbslots[handle] (handle==slot); the wrapper only parses for an EXPRESSION, so a statement (parse error -> empty type) falls back to a plain eval (no slot, no double-execution — the empty-type check distinguishes a parse error from a valid undefined result). jsGetAt indexes __mbslots[obj][i] into a fresh navigable handle (IIFE try/catch -> undefined out of range); jsGetLength reads .length. VERIFIED in wke_smoke (now 22/22, deterministic x2, NO crash): ['ant','bee','cat'] -> len 3, [1]=="bee"; nested [[10,20],[30,40]] -> jsGetAt(1) is an array, [0]==30. Existing scripting tests still pass through the new wrapper path. mb_smoke 132/132. Deferred: jsGet-by-name + jsCall.
 - mb_shot: --post BODY — POST navigation from the CLI (→mbPostURL), completing POST across mb_capi + wke + CLI. Verified vs httpbin/post (doc echoes the body). mb_shot.cc only; mb_smoke 132/132, wke_smoke 21/21 unaffected.

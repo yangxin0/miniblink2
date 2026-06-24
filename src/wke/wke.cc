@@ -416,7 +416,9 @@ namespace {
 // no destructor (Blink builds with -Wexit-time-destructors).
 struct JsRecord {
   std::string value;
-  std::string type;  // "number"/"string"/.../"array"/"null" from mbEvalJSEx
+  std::string type;     // "number"/"string"/.../"array"/"null" from mbEvalJSEx
+  std::string literal;  // a JS expression reproducing this value: a slot ref
+                        // "window.__mbslots[h]" or a primitive literal ("5"/"x").
 };
 std::map<jsValue, JsRecord>& JsRegistry() {
   static auto* r = new std::map<jsValue, JsRecord>();
@@ -433,6 +435,26 @@ const JsRecord* JsLookup(jsValue v) {
   auto& reg = JsRegistry();
   auto it = reg.find(v);
   return it == reg.end() ? nullptr : &it->second;
+}
+
+// A JS expression that reproduces jsValue `v` (for embedding it in a call). For a
+// slot-backed value it's the slot ref; for a primitive constructor it's the
+// stored literal; unknown handles read as undefined.
+std::string LiteralOf(jsValue v) {
+  const JsRecord* r = JsLookup(v);
+  return (r && !r->literal.empty()) ? r->literal : std::string("undefined");
+}
+
+// Register a primitive jsValue (jsInt/jsString/...) with no eval — value, type,
+// and the JS literal that reproduces it (so it can be inlined into a jsCall).
+jsValue MakeLiteral(const std::string& value, const std::string& type,
+                    const std::string& literal) {
+  auto& reg = JsRegistry();
+  if (reg.size() >= 4096)
+    reg.clear();
+  const jsValue h = g_next_js_value++;
+  reg[h] = JsRecord{value, type, literal};
+  return h;
 }
 
 // Quote `s` as a JS string literal (for embedding a property name safely).
@@ -470,12 +492,19 @@ jsValue StoreEval(wkeWebView wv, const std::string& script) {
   char type[16] = {0};
   mbEvalJSEx(wv->view, wrapped.c_str(), value.data(),
              static_cast<int>(value.size()), type, sizeof(type));
+  bool slotted = true;
   if (type[0] == '\0') {  // wrapper didn't parse/run (a statement) -> plain eval
+    slotted = false;
     std::fill(value.begin(), value.end(), 0);
     mbEvalJSEx(wv->view, script.c_str(), value.data(),
                static_cast<int>(value.size()), type, sizeof(type));
   }
-  reg[handle] = JsRecord{std::string(value.data()), std::string(type)};
+  // A slotted result is navigable/callable via its slot ref; a fallback isn't.
+  std::string literal =
+      slotted ? ("window.__mbslots[" + std::to_string(handle) + "]")
+              : std::string();
+  reg[handle] =
+      JsRecord{std::string(value.data()), std::string(type), std::move(literal)};
   return handle;
 }
 }  // namespace
@@ -587,6 +616,61 @@ jsValue jsGetGlobal(jsExecState es, const char* prop) {
   const std::string expr = "(function(){try{return window[" +
                            JsStringLiteral(prop) +
                            "]}catch(e){return undefined}})()";
+  return StoreEval(wv, expr);
+}
+
+// --- jsValue constructors (build args to pass INTO JS) -------------------------
+jsValue jsInt(int n) {
+  return MakeLiteral(std::to_string(n), "number", std::to_string(n));
+}
+jsValue jsDouble(double d) {
+  return MakeLiteral(std::to_string(d), "number", std::to_string(d));
+}
+jsValue jsBoolean(bool b) {
+  return MakeLiteral(b ? "true" : "false", "boolean", b ? "true" : "false");
+}
+jsValue jsString(jsExecState /*es*/, const utf8* str) {
+  const std::string s = str ? str : "";
+  return MakeLiteral(s, "string", JsStringLiteral(str ? str : ""));
+}
+jsValue jsUndefined() {
+  return MakeLiteral("undefined", "undefined", "undefined");
+}
+jsValue jsNull() {
+  return MakeLiteral("null", "null", "null");
+}
+
+// --- Calling JS functions ------------------------------------------------------
+namespace {
+std::string ArgList(jsValue* args, int argCount) {
+  std::string a;
+  for (int i = 0; i < argCount; ++i) {
+    if (i)
+      a += ",";
+    a += LiteralOf(args[i]);
+  }
+  return a;
+}
+}  // namespace
+
+jsValue jsCallGlobal(jsExecState es, jsValue func, jsValue* args, int argCount) {
+  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  if (!wv || !wv->view)
+    return 0;
+  const std::string expr = "(function(){try{return (" + LiteralOf(func) + ")(" +
+                           ArgList(args, argCount) + ")}catch(e){return undefined}})()";
+  return StoreEval(wv, expr);
+}
+
+jsValue jsCall(jsExecState es, jsValue func, jsValue thisObject, jsValue* args,
+               int argCount) {
+  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  if (!wv || !wv->view)
+    return 0;
+  const std::string expr = "(function(){try{return (" + LiteralOf(func) +
+                           ").apply(" + LiteralOf(thisObject) + ",[" +
+                           ArgList(args, argCount) +
+                           "])}catch(e){return undefined}})()";
   return StoreEval(wv, expr);
 }
 
