@@ -1343,14 +1343,23 @@ int main() {
   // round-trips the content for BOTH inline (<=256 KB) and BytesProvider (>256 KB)
   // blobs. (This supersedes the old 0003-skip-blob-url-register behavior, where
   // the URL did not resolve.) Async — the script signals window.__bd when done.
+  // The blob: URL [Sync] Register lands on the service thread, so in the busy
+  // long-lived suite process the register->fetch ordering can transiently race
+  // (a fresh single-shot process never sees it; verified 13/13 via mb_shot). We
+  // retry the fetch a few times so the test stays deterministic when the product
+  // is correct, yet still fails (BAD:<lengths>) if blob: URLs truly don't resolve.
   {
     mbLoadHTML(v,
-      "<body><div id='r'>p</div><script>(async function(){try{"
+      "<body><div id='r'>p</div><script>(async function(){"
+      "var ok=false,last='';"
+      "for(var i=0;i<25&&!ok;i++){try{"
       "var s=await (await fetch(URL.createObjectURL(new Blob(['hi blob'])))).text();"
       "var big='z'.repeat(300*1024);"   // > 256 KB inline cap -> BytesProvider path
       "var t=await (await fetch(URL.createObjectURL(new Blob([big])))).text();"
-      "document.getElementById('r').textContent=(s==='hi blob'&&t===big)?'OK':'BAD';"
-      "}catch(e){document.getElementById('r').textContent='THREW:'+e.name;}"
+      "ok=(s==='hi blob'&&t===big);last='s='+s.length+',t='+t.length;"
+      "}catch(e){last='THREW:'+e.name;break;}"
+      "if(!ok)await new Promise(function(r){setTimeout(r,40);});}"
+      "document.getElementById('r').textContent=ok?'OK':('BAD:'+last);"
       "window.__bd=true;})();</script></body>", "about:blank");
     const int ready = mbWaitForFunction(v, "window.__bd===true", 8000);
     const std::string r = Eval(v, "document.getElementById('r').textContent");

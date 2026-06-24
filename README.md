@@ -64,7 +64,7 @@ mb_shot \
   [--css STYLES] [--auto-scroll] [--scroll-to Y] [--scroll-to-selector CSS] \
   # extract (to stdout)
   [--title] [--url] [--cookies URL] [--local-storage KEY] [--session-storage KEY] \
-  [--text] [--html] [--eval JS] [--value CSS] [--checked CSS] [--count CSS] [--visible CSS] \
+  [--text] [--html] [--html-for CSS] [--eval JS] [--value CSS] [--checked CSS] [--count CSS] [--visible CSS] \
   [--rect CSS] [--style CSS PROP] [--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] \
   [--requests] [--console] [--headers] \
   # capture
@@ -140,7 +140,9 @@ for the document's origin (an SPA's auth token / app state); an absent key print
 empty line and warns on stderr. `--text`
 prints the page's visible text (post-JS `document.body.innerText`) to stdout, so
 `mb_shot` doubles as a simple scraper/text extractor. `--html` prints the rendered
-(post-JS) DOM as serialized HTML — useful for SPAs whose fetched source is near-empty.
+(post-JS) DOM as serialized HTML — useful for SPAs whose fetched source is near-empty —
+and `--html-for CSS` prints just the first match's `outerHTML` (one fragment: an article
+body, a table, a card) instead of the whole document.
 `--eval JS` runs an arbitrary JS expression against the settled page and prints its string
 result to stdout — the whole scripting surface from the command line, e.g.
 `mb_shot --eval "document.querySelectorAll('.item').length" page.html out.png` for a count,
@@ -429,6 +431,6 @@ run so an unreachable host can't make it crawl. The `wke` layer has its own
 `build.sh` also runs `src/miniblink_host/test/mb_shot_smoke.sh`, a CLI regression
 test that drives the `mb_shot` binary against a local fixture and asserts the exact
 stdout of the extraction flags (`--title`/`--count`/`--attr`/`--text`/`--eval`/
-`--visible`/`--value`/`--checked`/`--style`/`--html`/`--rect`/`--local-storage`/
+`--visible`/`--value`/`--checked`/`--style`/`--html`/`--html-for`/`--rect`/`--local-storage`/
 `--session-storage`/`--url`/`--cookies`/`--click`/`--press`/`--wait-eval`) plus the
 bad-size guard — coverage the C++ suites can't give the command-line tool itself.

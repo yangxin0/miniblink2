@@ -84,6 +84,7 @@ int main(int argc, char** argv) {
   std::string press_key;       // named key to press after interacting (--press KEY)
   std::string eval_js;         // JS to run after load; result printed to stdout
   std::string value_selector;  // print this control's live .value to stdout
+  std::string html_for_selector;  // print the first match's outerHTML to stdout
   std::string checked_selector;  // print this control's .checked (1/0) to stdout
   std::string count_selector;    // print querySelectorAll length (>=0) to stdout
   std::string visible_selector;  // print this selector's visibility (1/0/-1)
@@ -149,6 +150,8 @@ int main(int argc, char** argv) {
       eval_js = argv[++i];
     } else if (a == "--value" && i + 1 < argc) {
       value_selector = argv[++i];
+    } else if (a == "--html-for" && i + 1 < argc) {
+      html_for_selector = argv[++i];
     } else if (a == "--checked" && i + 1 < argc) {
       checked_selector = argv[++i];
     } else if (a == "--count" && i + 1 < argc) {
@@ -236,7 +239,7 @@ int main(int argc, char** argv) {
         stderr,
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
         "[--transparent] [--title] [--url] [--cookies URL] "
-        "[--local-storage KEY] [--session-storage KEY] [--text] [--html] [--requests] [--eval JS] [--value CSS] "
+        "[--local-storage KEY] [--session-storage KEY] [--text] [--html] [--html-for CSS] [--requests] [--eval JS] [--value CSS] "
         "[--checked CSS] [--count CSS] [--visible CSS] [--rect CSS] [--style CSS PROP] "
         "[--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
@@ -576,6 +579,20 @@ int main(int argc, char** argv) {
     mbEvalJS(view, "document.documentElement ? document.documentElement.outerHTML : ''",
              hbuf.data(), static_cast<int>(hbuf.size()));
     std::fwrite(hbuf.data(), 1, std::strlen(hbuf.data()), stdout);
+    std::fputc('\n', stdout);
+  }
+
+  // --html-for CSS: print the first match's outerHTML (the element + its markup)
+  // — extract one fragment (article body, a table, a card) instead of the whole
+  // document. Empty line + stderr warning on no match (mbGetHtmlForSelector -1).
+  if (!html_for_selector.empty()) {
+    std::vector<char> hfb(1 << 21, 0);  // 2 MiB
+    int n = mbGetHtmlForSelector(view, html_for_selector.c_str(), hfb.data(),
+                                 static_cast<int>(hfb.size()));
+    if (n < 0)
+      std::fprintf(stderr, "mb_shot: --html-for '%s' matched no element\n",
+                   html_for_selector.c_str());
+    std::fwrite(hfb.data(), 1, std::strlen(hfb.data()), stdout);
     std::fputc('\n', stdout);
   }
 

@@ -80,6 +80,7 @@ run 40 "$URL" "$PNG" --value "#pv";           check "--value" "preset" "$(cat "$
 run 40 "$URL" "$PNG" --checked "#cb";         check "--checked" "1" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --style "#msg" "display"; check "--style" "block" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --html;                  checkc "--html" "hello world" "$(cat "$TMP/out")"
+run 40 "$URL" "$PNG" --html-for "#msg";       check "--html-for" '<p id="msg">hello world</p>' "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --rect "#msg";           checkre "--rect" '^[0-9]+,[0-9]+,[0-9]+,[0-9]+$' "$(cat "$TMP/out")"
 # --click: a button's onclick mutates #cr; read it back via --eval
 run 40 "$URL" "$PNG" --click "#btn" --eval "document.getElementById('cr').textContent"
