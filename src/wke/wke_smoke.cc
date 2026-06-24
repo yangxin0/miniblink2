@@ -35,6 +35,14 @@ static jsValue WkeAdd(jsExecState es, void* param) {
 static jsValue WkeArg0IsNumber(jsExecState es, void*) {
   return jsBoolean(jsIsNumber(jsArg(es, 0)));
 }
+// Returns its argument count (edge: 0 args, many args).
+static jsValue WkeArgc(jsExecState es, void*) {
+  return jsInt(jsArgCount(es));
+}
+// Returns nothing — JS should see undefined.
+static jsValue WkeNothing(jsExecState, void*) {
+  return jsUndefined();
+}
 
 int main() {
   int pass = 0, fail = 0;
@@ -935,7 +943,9 @@ int main() {
   {
     wkeJsBindFunction(wv, "wkeAdd", WkeAdd, &g_bind_base);
     wkeJsBindFunction(wv, "wkeIsNum", WkeArg0IsNumber, nullptr);
-    wkeLoadHTML(wv, "<body>bind</body>");  // installs window.wkeAdd/wkeIsNum
+    wkeJsBindFunction(wv, "wkeArgc", WkeArgc, nullptr);
+    wkeJsBindFunction(wv, "wkeNothing", WkeNothing, nullptr);
+    wkeLoadHTML(wv, "<body>bind</body>");  // installs the bound functions
     const bool defined =
         std::strcmp(jsToTempString(es, wkeRunJS(wv, "typeof window.wkeAdd")),
                     "function") == 0;
@@ -950,8 +960,13 @@ int main() {
         jsToBoolean(es, wkeRunJS(wv, "window.wkeIsNum(5)")) &&
         !jsToBoolean(es, wkeRunJS(wv, "window.wkeIsNum('x')")) &&
         !jsToBoolean(es, wkeRunJS(wv, "window.wkeIsNum(true)"));
-    check(defined && typed && arith && args_typed,
-          "wkeJsBindFunction: typed args (jsArg) + typed number return");
+    // Edge cases: 0-arg and many-arg calls (jsArgCount), and an undefined return.
+    const bool argc_ok = jsToInt(es, wkeRunJS(wv, "window.wkeArgc()")) == 0 &&
+                         jsToInt(es, wkeRunJS(wv, "window.wkeArgc(1,2,3,4)")) == 4;
+    const bool undef_ok = jsToBoolean(
+        es, wkeRunJS(wv, "typeof window.wkeNothing()==='undefined'"));
+    check(defined && typed && arith && args_typed && argc_ok && undef_ok,
+          "wkeJsBindFunction: typed args/return + 0/N-arg + undefined edge cases");
   }
 
   // wkeOnJsBridge (offline): window.mbBridge(channel,message) is installed before
