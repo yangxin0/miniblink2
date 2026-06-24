@@ -156,6 +156,14 @@ run 40 "$URL" "$PNG" --wait-selector "#never-appears" --wait-ms 300
 check "--wait-selector timeout exit 0" "0" "$RC"
 checkc "--wait-selector timeout warns" "never appeared" "$(cat "$TMP/err")"
 
+# --scroll-to-selector: bring a below-fold element into view before extract (scrollY>0)
+TALL2="$TMP/tall2.html"
+cat > "$TALL2" <<'HTML'
+<!doctype html><body style="margin:0"><div style="height:2500px"></div><div id="x">target</div></body>
+HTML
+run 40 "file://$TALL2" "$PNG" --scroll-to-selector "#x" --eval "String(window.scrollY>0)" 400 300
+check "--scroll-to-selector scrolls below-fold into view" "true" "$(cat "$TMP/out")"
+
 # --requests: the subresource fetch log. A dedicated fixture <link>s a file:// CSS,
 # which routes through the loader and is logged (a small data: URI is inlined, not).
 REQH="$TMP/req.html"; printf '#m{color:red}' > "$TMP/style.css"
@@ -219,6 +227,10 @@ HTML
   check "capture: .jpg output format" "JPEG" "$(imginfo "$TMP/o.jpg")"
   run 40 "file://$CAP" "$TMP/o.pdf" 300 200
   check "capture: .pdf output format" "PDF" "$(imginfo "$TMP/o.pdf")"
+  # --full: the PNG height grows to the full content height (>> the 300 viewport);
+  # a 2500px-tall page yields a 4+-digit height (a viewport shot would be 300).
+  run 40 "file://$TALL2" "$TMP/f.png" --full 400 300
+  checkre "capture: --full grows to content height" '^PNG 400x[0-9]{4,}$' "$(imginfo "$TMP/f.png")"
 else
   echo "  [SKIP] capture-mode dimension/format checks (no python3)"
 fi
