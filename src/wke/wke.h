@@ -123,6 +123,9 @@ WKE_API void wkeSetUserAgent(wkeWebView webView, const utf8* userAgent);
 // newline-separated "Name: Value" lines (NULL/"" clears them). Set before
 // loading. Port extension — classic wke injects per-request via the net hook.
 WKE_API void wkeSetExtraHeaders(wkeWebView webView, const utf8* headers);
+// Emulate prefers-color-scheme: dark (true) or light (false) so a page renders
+// its dark theme. Persists across loads; set before navigating. Port extension.
+WKE_API void wkeSetDarkMode(wkeWebView webView, bool dark);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);

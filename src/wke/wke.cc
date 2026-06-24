@@ -340,6 +340,14 @@ void wkeSetExtraHeaders(wkeWebView webView, const utf8* headers) {
     mbSetExtraHeaders(webView->view, headers ? headers : "");
 }
 
+void wkeSetDarkMode(wkeWebView webView, bool dark) {
+  // Drive the prefers-color-scheme media feature so a page renders its dark (or
+  // light) theme. The setting persists across loads; set it before navigating
+  // for it to apply to that document. (Port extension — modern, not classic wke.)
+  if (webView && webView->view)
+    mbSetDarkMode(webView->view, dark ? 1 : 0);
+}
+
 void wkeSetTransparent(wkeWebView webView, bool transparent) {
   if (!webView || !webView->view)
     return;

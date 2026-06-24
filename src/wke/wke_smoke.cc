@@ -466,6 +466,34 @@ int main() {
           "wkeSetExtraHeaders(set/clear/null) is safe; local loads still work");
   }
 
+  // wkeSetDarkMode (offline): prefers-color-scheme flips a media query and the
+  // computed style that depends on it. Set before loading to apply to that doc.
+  {
+    const char* page =
+        "<style>#d{color:rgb(1,1,1)}"
+        "@media (prefers-color-scheme:dark){#d{color:rgb(2,2,2)}}</style>"
+        "<body><div id='d'>x</div></body>";
+    auto matches = [&]() {
+      return jsToBoolean(
+          es, wkeRunJS(wv, "matchMedia('(prefers-color-scheme:dark)').matches"));
+    };
+    auto color = [&]() {
+      return jsToTempString(
+          es, wkeRunJS(wv, "getComputedStyle(document.getElementById('d')).color"));
+    };
+    wkeSetDarkMode(wv, false);
+    wkeLoadHTML(wv, page);
+    const bool light_ok = !matches() && std::strcmp(color(), "rgb(1, 1, 1)") == 0;
+
+    wkeSetDarkMode(wv, true);
+    wkeLoadHTML(wv, page);
+    const bool dark_ok = matches() && std::strcmp(color(), "rgb(2, 2, 2)") == 0;
+
+    wkeSetDarkMode(wv, false);  // restore for any later cases
+    check(light_ok && dark_ok,
+          "wkeSetDarkMode drives prefers-color-scheme (CSS flips dark/light)");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {
