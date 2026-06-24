@@ -59,6 +59,9 @@ int main(int argc, char** argv) {
   std::string headers;   // extra request headers, "Name: Value" per line
   std::string wait_selector;  // wait for this selector before capture
   std::string click_selector;  // click this selector before capture
+  std::string fill_selector;   // fill this field before capture (with fill_text)
+  std::string fill_text;       // value for --fill
+  std::string eval_js;         // JS to run after load; result printed to stdout
   int wait_ms = 0;            // fixed wait before capture
   std::vector<const char*> pos;  // positional args, flags filtered out
   for (int i = 1; i < argc; ++i) {
@@ -79,6 +82,11 @@ int main(int argc, char** argv) {
       wait_selector = argv[++i];
     } else if (a == "--click" && i + 1 < argc) {
       click_selector = argv[++i];
+    } else if (a == "--fill" && i + 2 < argc) {
+      fill_selector = argv[++i];
+      fill_text = argv[++i];
+    } else if (a == "--eval" && i + 1 < argc) {
+      eval_js = argv[++i];
     } else if (a == "--wait-ms" && i + 1 < argc) {
       wait_ms = std::atoi(argv[++i]);
     } else if (a == "--console") {
@@ -107,8 +115,9 @@ int main(int argc, char** argv) {
     std::fprintf(
         stderr,
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
-        "[--transparent] <input.html|file://URL|http(s)://URL> <out.png> "
-        "[width height]\n",
+        "[--transparent] [--text] [--html] [--eval JS] [--fill CSS TEXT] "
+        "[--click CSS] [--wait-selector CSS] [--wait-ms N] "
+        "<input.html|file://URL|http(s)://URL> <out.png> [width height]\n",
         argv[0]);
     return 2;
   }
@@ -188,6 +197,15 @@ int main(int argc, char** argv) {
     mbWait(view, wait_ms);
   }
 
+  // Optionally fill a field before interacting/capturing (e.g. type a query, then
+  // --click the submit button). Runs before --click so a fill+submit flow works.
+  if (!fill_selector.empty()) {
+    if (!mbFillSelector(view, fill_selector.c_str(), fill_text.c_str())) {
+      std::fprintf(stderr, "mb_shot: WARNING — --fill '%s' matched no element\n",
+                   fill_selector.c_str());
+    }
+  }
+
   // Optionally click an element (e.g. to expand a menu / dismiss a banner) before
   // capturing, then let the result settle.
   if (!click_selector.empty()) {
@@ -223,6 +241,17 @@ int main(int argc, char** argv) {
     mbEvalJS(view, "document.documentElement ? document.documentElement.outerHTML : ''",
              hbuf.data(), static_cast<int>(hbuf.size()));
     std::fwrite(hbuf.data(), 1, std::strlen(hbuf.data()), stdout);
+    std::fputc('\n', stdout);
+  }
+
+  // --eval: run arbitrary JS after the page settles and print the string result
+  // to stdout. Exposes the whole scripting/scraping surface from the CLI — element
+  // counts (document.querySelectorAll('.x').length), computed styles, attribute
+  // reads, any page state — without needing a dedicated flag per query.
+  if (!eval_js.empty()) {
+    std::vector<char> ebuf(1 << 20, 0);  // 1 MiB
+    mbEvalJS(view, eval_js.c_str(), ebuf.data(), static_cast<int>(ebuf.size()));
+    std::fwrite(ebuf.data(), 1, std::strlen(ebuf.data()), stdout);
     std::fputc('\n', stdout);
   }
 

@@ -1999,6 +1999,20 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   "none". Smoke case 102c covers a visibility check (display=none), color + font-weight, and no-match
   -1. 127/127, no survivors, pure scraping path (no threading). C API now 61 fns.
 
+- ✅ DONE: mb_shot CLI — expose the scripting/interaction surface (--eval, --fill) (2026-06-24).
+  Stepped back from adding more C API functions: the recent reads (mbGetTextForSelector/Attribute/
+  CountSelector/ComputedStyle) were NOT reachable from the deliverable CLI tool (mb_shot), so a
+  command-line user couldn't use them. Added two flags that wire the existing tested C API into
+  mb_shot: --eval <js> runs an arbitrary expression against the settled page and prints the string
+  result to stdout (the WHOLE scripting/scraping surface from the CLI — counts, computed styles,
+  attribute reads, page state — no per-query flag needed); --fill <css> <text> types into a field
+  (mbFillSelector, firing input/change) before capture, running before --click so a fill-then-submit
+  flow works. VERIFIED end-to-end via mb_shot: --eval ".r length"=3, --eval getComputedStyle display=
+  none; --fill "#q" "hello world" -> value=="hello world" AND the input handler fired ("typed:hello
+  world"). Updated the usage string + README flag docs. mb_shot.cc only (separate executable) — lib
+  unchanged, smoke still 127/127, no survivors. mb_shot now a full CLI scraper/automator: interact
+  (--fill/--click/--wait-*) then extract (--text/--html/--eval) or capture (--full/--clip/--selector).
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

@@ -49,7 +49,7 @@ The deliverable example app — a standalone headless screenshot renderer:
 
 ```sh
 mb_shot [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
-        [--wait-selector CSS] [--click CSS] [--wait-ms N] [--console] [--header "N: V"] [--text] [--html] [--no-images] [--dark] [--lang L,L2] [--tz Area/City] \
+        [--wait-selector CSS] [--fill CSS TEXT] [--click CSS] [--wait-ms N] [--eval JS] [--console] [--header "N: V"] [--text] [--html] [--no-images] [--dark] [--lang L,L2] [--tz Area/City] \
         <input.html | file://URL | http(s)://URL> <out.png> [width height]
 ```
 
@@ -73,8 +73,10 @@ the page doesn't paint keep alpha 0, so the PNG can be composited over other con
 
 `--wait-selector CSS` waits (driving timers/async) until an element matching the selector
 exists before capturing — for JS-rendered content (Puppeteer's `waitForSelector`); `--wait-ms
-N` just settles the page for N ms. Both compose with the capture options. `--click CSS` clicks
-the element matching the selector before capturing (e.g. expand a menu, dismiss a banner).
+N` just settles the page for N ms. Both compose with the capture options. `--fill CSS TEXT`
+types `TEXT` into the field matching the selector (firing `input`/`change`, so frameworks
+react), and `--click CSS` clicks the matching element before capturing (e.g. fill a search
+box then click submit, expand a menu, dismiss a banner). `--fill` runs before `--click`.
 
 `--console` prints the page's captured console output (`console.log`/`warn`/`error`) to
 stderr — useful for debugging a page or scripting against its logs.
@@ -82,6 +84,11 @@ stderr — useful for debugging a page or scripting against its logs.
 `--text` prints the page's visible text (post-JS `document.body.innerText`) to stdout, so
 `mb_shot` doubles as a simple scraper/text extractor. `--html` prints the rendered
 (post-JS) DOM as serialized HTML — useful for SPAs whose fetched source is near-empty.
+`--eval JS` runs an arbitrary JS expression against the settled page and prints its string
+result to stdout — the whole scripting surface from the command line, e.g.
+`mb_shot --eval "document.querySelectorAll('.item').length" page.html out.png` for a count,
+or reading a computed style / attribute. Compose with `--fill`/`--click`/`--wait-*` to
+interact first, then extract.
 
 `--no-images` disables network image loading (faster text/HTML scraping; inline `data:`
 images are unaffected). `--dark` emulates `prefers-color-scheme: dark` so pages render their
