@@ -207,6 +207,11 @@ void mbSetDarkMode(mbView* v, int dark) {
     v->impl->SetDarkMode(dark != 0);
 }
 
+void mbSetFocus(mbView* v, int focused) {
+  if (v && v->impl)
+    v->impl->SetFocus(focused != 0);
+}
+
 void mbSetLocale(mbView* v, const char* utf8_languages) {
   if (v && v->impl)
     v->impl->SetLocale(utf8_languages);

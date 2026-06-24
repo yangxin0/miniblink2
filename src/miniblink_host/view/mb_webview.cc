@@ -834,6 +834,16 @@ void MbWebView::RunJS(const char* utf8_script) {
       /*settle=*/true);
 }
 
+void MbWebView::SetFocus(bool focused) {
+  // Mirror the creation-time focus setup (SetIsActive + SetPageFocus), so an app
+  // can simulate the view's window gaining/losing focus — toggling
+  // document.hasFocus(), :focus-within, and blur/focus events.
+  if (web_view_) {
+    web_view_->SetIsActive(focused);
+    web_view_->SetPageFocus(focused);
+  }
+}
+
 void MbWebView::SetInitScript(const char* utf8_script) {
   init_script_ = utf8_script ? utf8_script : "";
 }

@@ -398,6 +398,18 @@ void wkeSetExtraHeaders(wkeWebView webView, const utf8* headers) {
     mbSetExtraHeaders(webView->view, headers ? headers : "");
 }
 
+void wkeSetFocus(wkeWebView webView) {
+  // Give the view window-focus (document.hasFocus() true, :focus-within active).
+  if (webView && webView->view)
+    mbSetFocus(webView->view, 1);
+}
+
+void wkeKillFocus(wkeWebView webView) {
+  // Drop window-focus (document.hasFocus() false; blurs the active element).
+  if (webView && webView->view)
+    mbSetFocus(webView->view, 0);
+}
+
 void wkeSetLoadImages(wkeWebView webView, bool enable) {
   // Enable (default) or disable automatic image loading — disabling speeds up
   // text/HTML scraping (no image fetch/decode). Inline data: images are

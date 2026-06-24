@@ -108,6 +108,10 @@ class MbWebView {
   void SetLocale(const char* langs);
   // Override the timezone for Date/Intl (e.g. "America/New_York"). Process-global.
   void SetTimezone(const char* tz);
+  // Set the view's window-focus state (page active + focused). The view starts
+  // focused; clearing it makes document.hasFocus() false and blurs the active
+  // element, like a real window losing focus.
+  void SetFocus(bool focused);
   // Return captured console output ("level: text" per line) and clear the buffer.
   std::string DrainConsole();
   // Return the HTTP cookie jar's cookies for `url` ("name=value; ..."), for session export.

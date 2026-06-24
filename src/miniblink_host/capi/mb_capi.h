@@ -174,6 +174,11 @@ MB_EXPORT void mbSetLoadImages(mbView*, int enabled);
 // so pages render their dark theme. Call before mbLoadURL/mbLoadHTML.
 MB_EXPORT void mbSetDarkMode(mbView*, int dark);
 
+// Set the view's window-focus state: focused (1, the default) or blurred (0).
+// Clearing it makes document.hasFocus() false and blurs the active element, as
+// if the window lost focus; setting it restores focus. For simulating focus/blur.
+MB_EXPORT void mbSetFocus(mbView*, int focused);
+
 // Set navigator.language / navigator.languages (a comma-separated list, e.g.
 // "fr-FR,fr,en"), for JS that localizes by the user's languages. Before navigating.
 MB_EXPORT void mbSetLocale(mbView*, const char* utf8_languages);

@@ -878,6 +878,19 @@ int main() {
               "True/False classify values");
   }
 
+  // wkeSetFocus/wkeKillFocus (offline): window focus toggles document.hasFocus().
+  {
+    wkeLoadHTML(wv, "<body>focus</body>");
+    wkeSetFocus(wv);
+    const bool focused = jsToBoolean(es, wkeRunJS(wv, "document.hasFocus()"));
+    wkeKillFocus(wv);
+    const bool blurred = !jsToBoolean(es, wkeRunJS(wv, "document.hasFocus()"));
+    wkeSetFocus(wv);  // restore (focus-dependent later cases expect it)
+    const bool refocused = jsToBoolean(es, wkeRunJS(wv, "document.hasFocus()"));
+    check(focused && blurred && refocused,
+          "wkeSetFocus/wkeKillFocus toggle document.hasFocus()");
+  }
+
   // wkeOnJsBridge (offline): window.mbBridge(channel,message) is installed before
   // page scripts and delivers calls to the host callback (one-way page->host).
   {
