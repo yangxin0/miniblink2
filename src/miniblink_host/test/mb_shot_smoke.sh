@@ -133,6 +133,13 @@ check "--click fires handler" "clicked" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --set-cookie "https://t.test/" "s=1; Path=/" --cookies "https://t.test/"
 check "--cookies round-trip" "s=1" "$(cat "$TMP/out")"
 
+# cookie FILE round-trip: --save-cookies persists the jar to a Netscape file, then a
+# fresh run --load-cookies + --cookies reads it back (the "reuse a login" workflow)
+run 40 "$URL" "$PNG" --set-cookie "https://jar.test/" "tok=xyz9" --save-cookies "$TMP/jar.txt"
+checkc "--save-cookies writes the jar file" "xyz9" "$(cat "$TMP/jar.txt" 2>/dev/null)"
+run 40 "$URL" "$PNG" --load-cookies "$TMP/jar.txt" --cookies "https://jar.test/"
+check "--load-cookies restores the jar" "tok=xyz9" "$(cat "$TMP/out")"
+
 # --press: fill focuses #kq, then a trusted key event fires its keydown handler,
 # which records e.key into #krec (read back via --eval)
 run 40 "$URL" "$PNG" --fill "#kq" "x" --press "ArrowDown" \
@@ -142,6 +149,20 @@ check "--press delivers the key" "ArrowDown" "$(cat "$TMP/out")"
 # --dispatch: fire a custom DOM event; its listener rewrites #dt (read via --eval)
 run 40 "$URL" "$PNG" --dispatch "#dt" "myevt" --eval "document.getElementById('dt').textContent"
 check "--dispatch fires a custom event" "dispatched" "$(cat "$TMP/out")"
+
+# --drag FROM TO: mouse-drag one element's center onto another; the target's mouseup
+# handler fires (slider/sortable/map-pan flows)
+DRAGH="$TMP/drag.html"
+cat > "$DRAGH" <<'HTML'
+<!doctype html><body style="margin:0">
+<div id="from" style="position:absolute;left:0;top:0;width:80px;height:80px"></div>
+<div id="to" style="position:absolute;left:150px;top:0;width:80px;height:80px"></div>
+<div id="r">nodrag</div>
+<script>document.getElementById('to').addEventListener('mouseup',function(){
+  document.getElementById('r').textContent='dropped';});</script></body>
+HTML
+run 40 "file://$DRAGH" "$PNG" --drag "#from" "#to" --eval "document.getElementById('r').textContent" 400 300
+check "--drag fires target mouseup" "dropped" "$(cat "$TMP/out")"
 
 # --console: the page's console output is dumped to stderr
 run 40 "$URL" "$PNG" --console
