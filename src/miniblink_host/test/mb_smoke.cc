@@ -398,6 +398,35 @@ int main() {
            "full-page: resize captures below-the-fold");
   }
 
+  // 14c. position:fixed in a full-page (resized) capture. mb_shot --full resizes
+  // the view to the content height and paints at scroll 0; a fixed top:0 header
+  // then sits at y=0 of that tall viewport. It must paint ONCE at the top — not
+  // vanish, and not repeat down the page (a real screenshot-correctness concern
+  // for sticky headers on long pages).
+  {
+    mbLoadHTML(v,
+        "<body style='margin:0'>"
+        "<div style='position:fixed;top:0;left:0;width:100%;height:50px;"
+        "background:#00ff00'></div>"
+        "<div style='height:1500px;background:#ffffff'></div></body>",
+        "about:blank");
+    mbResize(v, W, 1500);
+    std::vector<uint8_t> tall(static_cast<size_t>(W) * 1500 * 4, 0);
+    mbPaintToBitmap(v, tall.data(), W, 1500, W * 4);
+    const size_t top = (static_cast<size_t>(10) * W + 10) * 4;   // inside the header
+    const size_t mid = (static_cast<size_t>(800) * W + 10) * 4;  // content, far below
+    auto green = [](const uint8_t* p) { return p[2] == 0 && p[1] == 255 && p[0] == 0; };
+    const bool header_top = green(&tall[top]);
+    const bool no_repeat = !green(&tall[mid]);
+    Expect(header_top && no_repeat,
+           "full-page capture: position:fixed header paints once at top (no repeat)",
+           std::string("top=rgb(") + std::to_string(tall[top + 2]) + "," +
+               std::to_string(tall[top + 1]) + "," + std::to_string(tall[top]) +
+               ") mid=rgb(" + std::to_string(tall[mid + 2]) + "," +
+               std::to_string(tall[mid + 1]) + "," + std::to_string(tall[mid]) + ")");
+    mbResize(v, W, H);  // restore the shared viewport
+  }
+
   // 14b. mbGetViewSize reads back the viewport set via mbResize (window.inner*).
   {
     mbResize(v, 640, 480);
