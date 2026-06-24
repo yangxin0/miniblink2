@@ -82,6 +82,7 @@ int main(int argc, char** argv) {
   int wait_ms = 0;            // fixed wait before capture
   int scroll_to_y = -1;       // absolute scroll Y before capture (-1 = none)
   std::string post_body;       // when set, POST this body to the URL (vs GET)
+  std::vector<const char*> blocks;  // URL substrings to block (repeatable)
   std::vector<const char*> pos;  // positional args, flags filtered out
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
@@ -159,6 +160,8 @@ int main(int argc, char** argv) {
       lang = argv[++i];
     } else if (a == "--tz" && i + 1 < argc) {
       tz = argv[++i];
+    } else if (a == "--block" && i + 1 < argc) {
+      blocks.push_back(argv[++i]);
     } else if (a == "--header" && i + 1 < argc) {
       if (!headers.empty())
         headers += "\n";
@@ -179,7 +182,7 @@ int main(int argc, char** argv) {
         "[--scroll-to Y] "
         "[--post BODY] [--proxy URL] "
         "[--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] "
-        "[--no-follow] "
+        "[--no-follow] [--block SUBSTR] "
         "<input.html|file://URL|http(s)://URL> <out.png> [width height]\n",
         argv[0]);
     return 2;
@@ -218,6 +221,8 @@ int main(int argc, char** argv) {
     mbSetIgnoreCertErrors(1);  // skip TLS cert verification (self-signed/expired)
   if (no_follow)
     mbSetFollowRedirects(0);  // stop at the redirect (see status + Location)
+  for (const char* b : blocks)
+    mbBlockUrl(b);  // drop matching subresources (ads/trackers/images) before load
   if (!load_cookies.empty()) {
     if (!mbLoadCookies(load_cookies.c_str()))  // restore a saved session
       std::fprintf(stderr, "mb_shot: WARNING — --load-cookies '%s' unreadable\n",
