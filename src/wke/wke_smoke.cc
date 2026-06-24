@@ -35,6 +35,9 @@ static jsValue WkeAdd(jsExecState es, void* param) {
 static jsValue WkeArg0IsNumber(jsExecState es, void*) {
   return jsBoolean(jsIsNumber(jsArg(es, 0)));
 }
+// Distinct constants for the per-view native-binding isolation test.
+static jsValue WkeRet111(jsExecState, void*) { return jsInt(111); }
+static jsValue WkeRet222(jsExecState, void*) { return jsInt(222); }
 // Returns its argument count (edge: 0 args, many args).
 static jsValue WkeArgc(jsExecState es, void*) {
   return jsInt(jsArgCount(es));
@@ -166,6 +169,30 @@ int main() {
                           jsToInt(es, wkeRunJS(wv, "5+5")) == 10;
     check(indep && survives,
           "multiple concurrent webViews are independent + outlive each other");
+  }
+
+  // Native bindings are per-view: a function bound on one view is NOT installed
+  // on another (the binding registry is global, but install is per-view).
+  {
+    wkeWebView va = wkeCreateWebView();
+    wkeWebView vb = wkeCreateWebView();
+    wkeJsBindFunction(va, "onlyA", WkeRet111, nullptr);
+    wkeJsBindFunction(vb, "onlyB", WkeRet222, nullptr);
+    wkeLoadHTML(va, "<body>a</body>");
+    wkeLoadHTML(vb, "<body>b</body>");
+    jsExecState ea = wkeGlobalExec(va), eb = wkeGlobalExec(vb);
+    const bool a_ok =
+        jsToInt(ea, wkeRunJS(va, "window.onlyA?window.onlyA():0")) == 111 &&
+        std::strcmp(jsToTempString(ea, wkeRunJS(va, "typeof window.onlyB")),
+                    "undefined") == 0;
+    const bool b_ok =
+        jsToInt(eb, wkeRunJS(vb, "window.onlyB?window.onlyB():0")) == 222 &&
+        std::strcmp(jsToTempString(eb, wkeRunJS(vb, "typeof window.onlyA")),
+                    "undefined") == 0;
+    wkeDestroyWebView(va);
+    wkeDestroyWebView(vb);
+    check(a_ok && b_ok,
+          "native bindings are per-view (no cross-view leak)");
   }
 
   // Modern web-platform JS works headlessly: structuredClone deep-clones nested

@@ -105,7 +105,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **133/133** (default, network-free), `wke_smoke` **70/70**,
+- **Tests:** `mb_smoke` **133/133** (default, network-free), `wke_smoke` **71/71**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -123,6 +123,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- test: native bindings are per-view (2026-06-24). Verified an embedding-specific correctness property of the wkeJsBindFunction implementation: the WkeBindings registry is global but each binding installs per-view via mbJsBindFunction, so a function bound on view A must not appear on view B. Confirmed: onlyA (→111) exists on va and is undefined on vb; onlyB (→222) exists on vb and is undefined on va; both views torn down cleanly. No cross-view leak. wke_smoke 71/71, mb_smoke 133/133, no survivors. Test-only.
 - test: localStorage persistence + origin isolation (2026-06-24). Verified a real app dependency now testable via wkeLoadHtmlWithBaseUrl's real origins: localStorage set on https://ls.test/a survives a navigation to https://ls.test/b (same origin) and is NOT visible from https://other.test/ (origin-isolated). Confirms storage is process/origin-scoped, not cleared per-navigation. Caught (and fixed) a test-ordering coupling: my case navigated the shared view away, breaking the next test's title assumption → restore the JSDoc page at the end. wke_smoke 70/70, mb_smoke 133/133, no survivors. Test-only.
 - test: multiple concurrent webViews are independent (2026-06-24). The suites had only ever used one view; added a real multi-view case — create a 2nd wkeWebView alongside the 1st, load distinct docs, and confirm independent titles + JS globals (wv.__v=='A' while wv2.__v=='B'), then destroy wv2 and confirm wv still runs JS/reads state. Verifies the engine has no single-view assumption (multiple Blink WebViews coexist in the one process/isolate) and that teardown of one doesn't disturb the other. wke_smoke 69/69, mb_smoke 133/133, no survivors. Test-only.
 - wke PAINT: wkePaintRect + wke↔mb_capi coverage audit (2026-06-24). Systematic check: of 75 mb_capi exports, the wke layer now wraps all but 3 — mbRunJS (redundant with wkeRunJS), mbPumpMessages (no need in the synchronous model), and mbPaintRectToBitmap. Exposed the last as wkePaintRect (composite a logical rect into a caller BGRA8888 buffer — partial/dirty-rect capture to memory without encoding), completing wke's paint surface. Port extension. VERIFIED offline: painting a 20x10 sub-rect of an rgb(10,200,30) page yields the right BGRA pixels (B≈30,G≈200,R≈10). Fixed a -Wshadow (renamed a `c` local). wke_smoke 68/68, mb_smoke 133/133, no survivors.
