@@ -76,8 +76,9 @@ the deliverable surface (C API, CLI, wke layer).
   the full headless-automation surface — lifecycle, load, loading-state polling,
   paint (`wkePaint`), mouse (`wkeFireMouseEvent`), keyboard (`wkeFireKey*`),
   scripting (`wkeRunJS` + `jsToInt/Double/Boolean/TempString`), navigation history,
-  rendering accessors (`wkeSetTransparent`, `wkeGetContentWidth/Height`).
-- **Tests:** `mb_smoke` **131/131** (default, network-free), `wke_smoke` **16/16**,
+  rendering accessors (`wkeSetTransparent`, `wkeGetContentWidth/Height`), and the
+  async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged` + `wkeString`).
+- **Tests:** `mb_smoke` **131/131** (default, network-free), `wke_smoke` **17/17**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin cases (143 total).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
@@ -93,6 +94,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke: async callbacks — wkeOnLoadingFinish + wkeOnTitleChanged + wkeString/wkeGetString + wkeLoadingResult; fired (synchronously, since load is sync) at the end of wkeLoadURL/LoadHTML. wke_smoke 17/17 (both callbacks fire with the title + SUCCEEDED via the void* param).
 - wke: rendering accessors — wkeSetTransparent (→mbSetTransparentBackground) + wkeGetContentWidth/Height (→mbGetContentSize). wke_smoke 16/16 (content size of a tall doc; transparent unpainted alpha 0).
 - wke: navigation history — wkeCanGoBack/GoBack/CanGoForward/GoForward over mbGo*. wke_smoke 14/14.
 - wke: keyboard — wkeFireKeyDown/Up/PressEvent (charCode→UTF-8→mbSendText; VK→mbSendKey). 13/13.
@@ -109,10 +111,11 @@ the deliverable surface (C API, CLI, wke layer).
 - earlier: mbGetComputedStyle, mbCountSelector, mbGetTextForSelector/mbGetAttribute, mbScrollIntoView (below-fold click auto-scroll), fetch(blob:) + <img src=blob:>, mb_shot --eval/--fill, text-render + form-nav smoke guards. (older still: full bring-up + render + the automation/network surface — see archive.)
 
 ## REMAINING ROADMAP
-- **wke layer (active):** grow the slice — more accessors (cookies/transparent/
-  content-size), then the async callback model (`wkeOnLoadingFinish`/`PaintBitUpdated`
-  — needs a `wkeString` type), then the full V8-backed `jsValue` object model
-  (`jsObject`/`jsArray`/`jsCall`, `jsTypeOf`). Each an incremental, testable slice.
+- **wke layer (active):** the async callback model is started (wkeString +
+  wkeOnLoadingFinish/wkeOnTitleChanged). Next: more callbacks (wkeOnConsoleMessage/
+  wkeOnURLChanged/wkeOnDocumentReady), more accessors (wkeGetCookie/wkeGetSource),
+  and the full V8-backed `jsValue` object model (`jsObject`/`jsArray`/`jsCall`,
+  `jsTypeOf`). Each an incremental, testable slice.
 - **Heavy items (own focused efforts):** page-driven history.back/forward
   (LocalFrameHost shim); Web Workers; WebGL (GPU pipeline); a Cocoa windowed port
   app under `port/mac`.

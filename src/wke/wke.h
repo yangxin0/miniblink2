@@ -34,6 +34,9 @@
 typedef char utf8;
 typedef struct _tagWkeWebView* wkeWebView;
 
+// Opaque string handle passed to callbacks; read it with wkeGetString.
+typedef struct _tagWkeString* wkeString;
+
 // Scripting handle types (upstream: jsExecState = void*, jsValue = __int64). In
 // this slice a jsValue is an opaque handle to the string result of a wkeRunJS
 // call; the jsToXxx readers below coerce it. The full V8-backed jsValue object
@@ -158,5 +161,33 @@ WKE_API const utf8* jsToTempString(jsExecState es, jsValue v);
 // `bits` must hold width*height*4 bytes; `pitch` is the row stride in bytes
 // (pass width*4 for a tightly-packed buffer).
 WKE_API void wkePaint(wkeWebView webView, void* bits, int pitch);
+
+// --- Callbacks (the async event model) -----------------------------------------
+// Read the text of a wkeString passed to a callback (owned by the library, valid
+// for the duration of the callback).
+WKE_API const utf8* wkeGetString(const wkeString string);
+
+typedef enum _wkeLoadingResult {
+  WKE_LOADING_SUCCEEDED,
+  WKE_LOADING_FAILED,
+  WKE_LOADING_CANCELED
+} wkeLoadingResult;
+
+// Fired when the document's title changes (after a load, in this slice).
+typedef void (*wkeTitleChangedCallback)(wkeWebView webView, void* param,
+                                        const wkeString title);
+// Fired when a load finishes (synchronously at the end of wkeLoadURL/LoadHTML
+// here, since the load is synchronous). `result` is SUCCEEDED/FAILED; `url` is
+// the committed URL; `failedReason` is empty on success.
+typedef void (*wkeLoadingFinishCallback)(wkeWebView webView, void* param,
+                                         const wkeString url,
+                                         wkeLoadingResult result,
+                                         const wkeString failedReason);
+
+WKE_API void wkeOnTitleChanged(wkeWebView webView,
+                               wkeTitleChangedCallback callback,
+                               void* callbackParam);
+WKE_API void wkeOnLoadingFinish(wkeWebView webView,
+                                wkeLoadingFinishCallback callback, void* param);
 
 #endif  // MINIBLINK_WKE_WKE_H_

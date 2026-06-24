@@ -141,6 +141,35 @@ int main() {
   check(tb[corner + 3] == 0,
         "wkeSetTransparent: unpainted area keeps alpha 0");
 
+  // Async callbacks: wkeOnLoadingFinish + wkeOnTitleChanged fire after a load,
+  // carrying the URL/title as wkeStrings. State travels through the void* param
+  // (non-capturing lambdas, so they convert to the C function pointers).
+  struct CbState {
+    int load = 0;
+    int title = 0;
+    std::string title_text;
+    int result = -1;
+  };
+  CbState cbs;
+  wkeOnLoadingFinish(
+      wv,
+      [](wkeWebView, void* p, const wkeString /*url*/, wkeLoadingResult r,
+         const wkeString) {
+        auto* s = static_cast<CbState*>(p);
+        s->load = 1;
+        s->result = r;
+      },
+      &cbs);
+  wkeOnTitleChanged(wv, [](wkeWebView, void* p, const wkeString title) {
+    auto* s = static_cast<CbState*>(p);
+    s->title = 1;
+    s->title_text = wkeGetString(title);
+  }, &cbs);
+  wkeLoadHTML(wv, "<title>CbTitle</title><body>cb</body>");
+  check(cbs.load == 1 && cbs.result == WKE_LOADING_SUCCEEDED && cbs.title == 1 &&
+            cbs.title_text == "CbTitle",
+        "wkeOnLoadingFinish + wkeOnTitleChanged fire with URL/title/result");
+
   wkeDestroyWebView(wv);
   wkeFinalize();
 

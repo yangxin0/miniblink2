@@ -15,6 +15,11 @@
 
 #include "miniblink_host/capi/mb_capi.h"
 
+// Opaque string handle passed to callbacks (backs wkeGetString).
+struct _tagWkeString {
+  std::string s;
+};
+
 struct _tagWkeWebView {
   mbView* view = nullptr;
   int width = 0;
@@ -22,12 +27,42 @@ struct _tagWkeWebView {
   bool last_was_http = false;  // success reporting: http uses the status code
   std::string url_cache;       // backs wkeGetURL's const utf8* return
   std::string title_cache;     // backs wkeGetTitle's const utf8* return
+  // Async callbacks (the wke event model).
+  wkeLoadingFinishCallback on_loading_finish = nullptr;
+  void* loading_param = nullptr;
+  wkeTitleChangedCallback on_title_changed = nullptr;
+  void* title_param = nullptr;
+  std::string last_title;  // so a title callback only fires on a real change
 };
 
 namespace {
 bool IsHttpUrl(const utf8* url) {
   return url && (std::strncmp(url, "http://", 7) == 0 ||
                  std::strncmp(url, "https://", 8) == 0);
+}
+// Fire the title-changed then loading-finish callbacks after a load completes.
+// (The load is synchronous, so this is the faithful "loading finished" moment.)
+void FireLoadCallbacks(wkeWebView wv) {
+  if (!wv || !wv->view)
+    return;
+  if (wv->on_title_changed) {
+    char tb[2048] = {0};
+    mbGetTitle(wv->view, tb, sizeof(tb));
+    if (tb[0] && wv->last_title != tb) {
+      wv->last_title = tb;
+      _tagWkeString title{std::string(tb)};
+      wv->on_title_changed(wv, wv->title_param, &title);
+    }
+  }
+  if (wv->on_loading_finish) {
+    char ub[4096] = {0};
+    mbGetURL(wv->view, ub, sizeof(ub));
+    _tagWkeString url{std::string(ub)};
+    _tagWkeString reason{std::string()};
+    const wkeLoadingResult result =
+        wkeIsLoadingSucceeded(wv) ? WKE_LOADING_SUCCEEDED : WKE_LOADING_FAILED;
+    wv->on_loading_finish(wv, wv->loading_param, &url, result, &reason);
+  }
 }
 }  // namespace
 
@@ -65,6 +100,7 @@ void wkeLoadURL(wkeWebView webView, const utf8* url) {
   webView->last_was_http = IsHttpUrl(url);
   mbLoadURL(webView->view, url);
   mbWait(webView->view, 60);  // let async parsing/subresources settle (sync model)
+  FireLoadCallbacks(webView);
 }
 
 void wkeLoadHTML(wkeWebView webView, const utf8* html) {
@@ -73,6 +109,7 @@ void wkeLoadHTML(wkeWebView webView, const utf8* html) {
   webView->last_was_http = false;
   mbLoadHTML(webView->view, html, "about:blank");
   mbWait(webView->view, 30);
+  FireLoadCallbacks(webView);
 }
 
 void wkeReload(wkeWebView webView) {
@@ -362,4 +399,25 @@ const utf8* jsToTempString(jsExecState /*es*/, jsValue v) {
   const std::string* s = JsLookup(v);
   JsTempBuf() = s ? *s : std::string();
   return JsTempBuf().c_str();
+}
+
+// --- Callbacks -----------------------------------------------------------------
+const utf8* wkeGetString(const wkeString string) {
+  return string ? string->s.c_str() : "";
+}
+
+void wkeOnTitleChanged(wkeWebView webView, wkeTitleChangedCallback callback,
+                       void* callbackParam) {
+  if (!webView)
+    return;
+  webView->on_title_changed = callback;
+  webView->title_param = callbackParam;
+}
+
+void wkeOnLoadingFinish(wkeWebView webView, wkeLoadingFinishCallback callback,
+                        void* param) {
+  if (!webView)
+    return;
+  webView->on_loading_finish = callback;
+  webView->loading_param = param;
 }
