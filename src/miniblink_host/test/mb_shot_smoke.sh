@@ -87,6 +87,13 @@ elif d[:2]==b"\xff\xd8": print("JPEG")
 elif d[:4]==b"%PDF": print("PDF")
 else: print("other")' "$1" 2>/dev/null
 }
+# pngctype <file> : PNG color type (IHDR byte 25; 2=RGB opaque, 6=RGBA) via python3
+pngctype() {
+  python3 -c '
+import sys
+d=open(sys.argv[1],"rb").read(26)
+print(d[25] if d[:8]==b"\x89PNG\r\n\x1a\n" else -1)' "$1" 2>/dev/null
+}
 
 URL="file://$FIX"
 
@@ -280,6 +287,12 @@ open(sys.argv[1],"wb").write(png)' "$TMP/pic.png"
   # which drops all). Blocking "pic.png" leaves the <img> unloaded (naturalWidth 0).
   run 40 "file://$TMP/fimg.html" "$TMP/o.png" --block "pic.png" --eval "String(document.getElementById('im').naturalWidth)"
   check "--block drops the matching subresource" "0" "$(cat "$TMP/out")"
+  # --transparent: the PNG gains an alpha channel (color type 6 RGBA) vs the default
+  # opaque RGB (color type 2) — exactly what omitting the background needs.
+  run 40 "file://$CAP" "$TMP/op.png" 200 100
+  check "capture: default PNG is opaque RGB (type 2)" "2" "$(pngctype "$TMP/op.png")"
+  run 40 "file://$CAP" "$TMP/tr.png" --transparent 200 100
+  check "capture: --transparent yields RGBA (type 6)" "6" "$(pngctype "$TMP/tr.png")"
 else
   echo "  [SKIP] capture-mode dimension/format checks (no python3)"
 fi
