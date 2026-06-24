@@ -8,8 +8,7 @@
 // Both blob sizes and blob: URL resolution are supported: a DataElement arrives
 // inline (embedded_data, <=256 KB) or via a BytesProvider (>256 KB), and the
 // in-process MbBlobURLStore (below) resolves blob: URLs so createObjectURL + a
-// blob: fetch round-trips. Verified by mb_smoke cases 46/46b (see also
-// docs/design-blob-service-host.md).
+// blob: fetch round-trips. Verified by mb_smoke cases 46/46b.
 
 #ifndef MINIBLINK_HOST_BLOB_MB_BLOB_REGISTRY_H_
 #define MINIBLINK_HOST_BLOB_MB_BLOB_REGISTRY_H_

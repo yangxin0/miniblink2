@@ -7,7 +7,7 @@
 //                      tokens, /*policy_container=*/nullptr, ...) (:489)
 //   3. create MbWidget, InitializeCompositing
 //   4. web_view->DidAttachLocalMainFrame()
-// All browser-side handles are null/default — no browser process (see interface-surface.md).
+// All browser-side handles are null/default — no browser process.
 //
 // This is what the C ABI mbView wraps 1:1.
 // Status: Phase 1 scaffold.

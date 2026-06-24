@@ -245,8 +245,8 @@ JavaScript mutating the DOM (bg→blue, text→"JS WORKS"):
 The **C ABI** dissolves the GN↔CMake build mismatch: GN builds everything that touches
 Blink/base/mojo C++ types; the outer shell links only the pure-C `mb_capi.h`.
 
-See `docs/interface-surface.md` for the exact minimal Blink embedding surface, and
-`PROGRESS.md` for the full build journal (every fix, file:line-cited).
+See `PROGRESS.md` for the current state, plan, and build/test commands; the full
+per-tick build journal lives in the git history.
 
 ## Public C ABI (`src/miniblink_host/capi/mb_capi.h`)
 
@@ -417,7 +417,7 @@ value back — e.g. `window.fn(2,3) + 1` does arithmetic.
 ## Build
 
 Currently built as a GN target inside a configured Chromium M150 checkout (the engine is
-too large to vendor as source). See `build.sh` and `docs/phase-1-spec.md`. The
+too large to vendor as source). See `build.sh` and `PROGRESS.md`. The
 "standalone" deliverable = this project's source + the GN-built `libminiblink_host.dylib`
 + `blink_resources.pak` (vendored next to the binary).
 
