@@ -742,6 +742,39 @@ int main() {
       std::fprintf(stderr, "  [SKIP] mbPostURL (host unreachable)\n");
     }
   }
+
+  // 44 (net). End-to-end integration on a REAL https page: one fetch over real
+  // TLS exercises the whole stack together — load -> parse -> layout -> the recent
+  // scraping readers (text/html/rect/style). example.com is a stable target whose
+  // <h1> says "Example Domain". Skips if the host is unreachable.
+  {
+    mbLoadURL(v, "https://example.com");
+    mbWaitForSelector(v, "h1", 4000);
+    const int status = mbGetHttpStatus(v);
+    if (status == 200) {
+      char tb[256] = {0};
+      mbGetTextForSelector(v, "h1", tb, sizeof(tb));
+      const bool text_ok = std::string(tb).find("Example Domain") != std::string::npos;
+      char hb[512] = {0};
+      mbGetHtmlForSelector(v, "h1", hb, sizeof(hb));
+      const std::string html(hb);
+      const bool html_ok = html.find("<h1") != std::string::npos &&
+                           html.find("Example Domain") != std::string::npos;
+      int rw = 0, rh = 0;
+      const bool rect_ok =
+          mbGetElementRect(v, "h1", nullptr, nullptr, &rw, &rh) && rw > 0 && rh > 0;
+      char sb[64] = {0};
+      mbGetComputedStyle(v, "h1", "display", sb, sizeof(sb));
+      const bool style_ok = std::string(sb) == "block";
+      Expect(text_ok && html_ok && rect_ok && style_ok,
+             "integration: real-TLS load + text/html/rect/style readers agree",
+             std::string("text=") + (text_ok ? "1" : "0") + " html=" +
+                 (html_ok ? "1" : "0") + " rect=" + (rect_ok ? "1" : "0") +
+                 " style=" + (style_ok ? "1" : "0"));
+    } else {
+      std::fprintf(stderr, "  [SKIP] integration (example.com unreachable)\n");
+    }
+  }
   }  // MB_NET_TESTS
 
   // 33. document.cookie (JS): write then read round-trips through the in-process
