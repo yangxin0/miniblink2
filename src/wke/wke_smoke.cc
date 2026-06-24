@@ -125,6 +125,16 @@ int main() {
                     "JSDoc") == 0,
         "wkeRunJS reads the DOM (document.title)");
 
+  // Modern web-platform JS works headlessly: structuredClone deep-clones nested
+  // structures. (Web Crypto SubtleCrypto also works but is secure-context-gated —
+  // present on https/file://, absent on this about:blank page — verified via
+  // mb_shot on a file:// page, so not asserted on this insecure-context load.)
+  check(std::strcmp(
+            jsToTempString(es, wkeRunJS(wv,
+                "JSON.stringify(structuredClone({a:[1,2],b:'x'}))")),
+            "{\"a\":[1,2],\"b\":\"x\"}") == 0,
+        "structuredClone deep-clones a nested object (modern JS)");
+
   // Keyboard: type into a focused field, then submit with Enter — verified by
   // reading the field value and the form's submit flag through wkeRunJS.
   wkeLoadHTML(wv,
