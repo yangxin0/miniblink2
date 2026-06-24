@@ -95,7 +95,8 @@ the deliverable surface (C API, CLI, wke layer).
   (`wkeSetExtraHeaders`), i18n emulation (`wkeSetLocale`/`wkeSetTimezone`),
   HTTP introspection (`wkeGetHttpStatusCode`/`wkeGetResponseHeaders`),
   redirect control (`wkeSetFollowRedirects`), TLS-error bypass
-  (`wkeSetIgnoreCertErrors`), navigation history,
+  (`wkeSetIgnoreCertErrors`), image-loading toggle (`wkeSetLoadImages`),
+  navigation history,
   page text (`wkeGetText`), rendering accessors
   (`wkeSetTransparent`/`wkeIsTransparent`,
   `wkeSetZoomFactor`/`wkeGetZoomFactor`, `wkeSetEditable`, `wkeSetDarkMode`,
@@ -104,9 +105,9 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **56/56**,
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **57/57**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
-  cases (wke_smoke up to 63; use a generous watchdog ≥180s — cumulative loads +
+  cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
@@ -122,6 +123,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke NETWORK: wkeSetLoadImages (2026-06-24). Toggle automatic image loading (wraps mbSetLoadImages) — disabling speeds up text/HTML scraping; inline data: images unaffected. The last unexposed mb_capi page toggle. Documented PORT EXTENSION. VERIFIED offline (toggle safe + local loads work, 57/57) AND over the network this run: images-on loads httpbin.org/image/png (naturalWidth>0), images-off skips it (naturalWidth==0) → 65/65. mb_smoke 132/132, no survivors. The remaining substantial gap is native function binding (wkeJsBindFunction) — synchronous C-from-JS needs careful in-context v8 work (the safe JS-slot pattern can't do it), so it's deferred, not a bounded tick.
 - docs: README wke section rewritten to match reality (2026-06-24). The old section listed only the early subset and called the jsValue object model + jsGet/jsCall + cookies/proxy "deferred" — all long since shipped. Rewrote it to the full current surface (scripting model, DOM automation, output, networking, rendering, i18n, HTTP introspection), marked port extensions *(ext)*, pointed at wke_demo, and replaced the stale "Deferred" note (native function binding wkeJsBindFunction is the real remaining gap). VERIFIED: cross-checked all 67 listed function names exist in wke.h (none missing). Docs-only — no code touched, last green build stands (wke_smoke 56/56, mb_smoke 132/132).
 - wke NETWORK: wkeSetIgnoreCertErrors (2026-06-24). Accept invalid TLS certs (self-signed/expired) — curl -k / ignoreHTTPSErrors equivalent (wraps mbSetIgnoreCertErrors; process-wide). Completes the network-config set (proxy/headers/redirects/cert). Documented PORT EXTENSION. VERIFIED offline (toggle safe + local loads work, 56/56) AND over the network this run (badssl reachable while httpbin wasn't): ignore-on loads https://self-signed.badssl.com, ignore-off REJECTS it → 58/58. mb_smoke 132/132, no survivors.
 - wke EXAMPLE: wke_demo end-to-end automation sample (2026-06-24). New runnable example + build target (src/wke/wke_demo.cc; executable("wke_demo") in miniblink_host/BUILD.gn; staged with src/wke; added to build.sh ninja line). Drives an offline form the way a real app would — fill #name, select #role, click #go, waitForSelector #out (async/SPA-like via setTimeout), scrape text ("Hello Ada (admin)") + computed color (rgb(0, 128, 0)), count options, screenshot — asserting each step (returns 0/1) so it doubles as an integration check + usage doc. VERIFIED: all 10 steps OK, no survivors. wke_smoke 55/55 + mb_smoke 132/132 unregressed. NOTE: adding a GN target requires staging miniblink_host/BUILD.gn into the tree + gn gen (build.sh does both; an in-place ninja needs the BUILD.gn re-copied first).

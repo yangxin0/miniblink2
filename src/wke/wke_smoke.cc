@@ -900,6 +900,17 @@ int main() {
           "wkeSetFollowRedirects toggle is safe; local loads still work");
   }
 
+  // wkeSetLoadImages (offline): toggling is safe and leaves local loads working
+  // (the network image-skip proof is network-gated below).
+  {
+    wkeSetLoadImages(wv, false);
+    wkeSetLoadImages(wv, true);  // restore default
+    wkeLoadHTML(wv, "<title>ImgOK</title><body>i</body>");
+    check(wkeIsLoadingSucceeded(wv) &&
+              std::strcmp(wkeGetTitle(wv), "ImgOK") == 0,
+          "wkeSetLoadImages toggle is safe; local loads still work");
+  }
+
   // wkeSetIgnoreCertErrors (offline): toggling is safe and leaves local loads
   // working (the self-signed-cert proof is network-gated below).
   {
@@ -1029,6 +1040,25 @@ int main() {
       std::printf("  [SKIP] wkeSetIgnoreCertErrors (badssl unreachable)\n");
     }
     wkeSetIgnoreCertErrors(false);  // restore secure default
+
+    // Image-loading toggle: a network <img> loads (naturalWidth>0) with images
+    // on, but is skipped (naturalWidth==0) when disabled.
+    const char* img_page =
+        "<body><img id='i' src='http://httpbin.org/image/png'></body>";
+    wkeSetLoadImages(wv, true);
+    wkeLoadHTML(wv, img_page);
+    if (wkeWaitForFunction(
+            wv, "document.getElementById('i').naturalWidth>0", 4000)) {
+      wkeSetLoadImages(wv, false);
+      wkeLoadHTML(wv, img_page);  // images disabled — must not fetch
+      const bool off =
+          jsToInt(es, wkeRunJS(
+                          wv, "document.getElementById('i').naturalWidth")) == 0;
+      check(off, "wkeSetLoadImages(false) skips a network image");
+      wkeSetLoadImages(wv, true);  // restore default
+    } else {
+      std::printf("  [SKIP] wkeSetLoadImages (image host unreachable)\n");
+    }
   }
 
   wkeDestroyWebView(wv);

@@ -345,6 +345,14 @@ void wkeSetExtraHeaders(wkeWebView webView, const utf8* headers) {
     mbSetExtraHeaders(webView->view, headers ? headers : "");
 }
 
+void wkeSetLoadImages(wkeWebView webView, bool enable) {
+  // Enable (default) or disable automatic image loading — disabling speeds up
+  // text/HTML scraping (no image fetch/decode). Inline data: images are
+  // unaffected. Set before navigating. (Port extension.)
+  if (webView && webView->view)
+    mbSetLoadImages(webView->view, enable ? 1 : 0);
+}
+
 void wkeSetDarkMode(wkeWebView webView, bool dark) {
   // Drive the prefers-color-scheme media feature so a page renders its dark (or
   // light) theme. The setting persists across loads; set it before navigating
