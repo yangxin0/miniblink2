@@ -345,6 +345,7 @@ WKE_API jsExecState wkeGlobalExec(wkeWebView webView);
 // valid until the next jsToTempString call (the classic wke "temp" contract).
 WKE_API int jsToInt(jsExecState es, jsValue v);
 WKE_API double jsToDouble(jsExecState es, jsValue v);
+WKE_API float jsToFloat(jsExecState es, jsValue v);
 WKE_API bool jsToBoolean(jsExecState es, jsValue v);
 WKE_API const utf8* jsToTempString(jsExecState es, jsValue v);
 // Like jsToTempString, but object/array values are JSON-serialized (e.g.

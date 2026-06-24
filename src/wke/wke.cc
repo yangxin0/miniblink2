@@ -1008,6 +1008,11 @@ double jsToDouble(jsExecState /*es*/, jsValue v) {
   return r ? std::atof(r->value.c_str()) : 0.0;
 }
 
+float jsToFloat(jsExecState /*es*/, jsValue v) {
+  const JsRecord* r = JsLookup(v);
+  return r ? static_cast<float>(std::atof(r->value.c_str())) : 0.0f;
+}
+
 bool jsToBoolean(jsExecState /*es*/, jsValue v) {
   const JsRecord* r = JsLookup(v);
   if (!r)

@@ -102,9 +102,9 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **54/54**,
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **55/55**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com cases
-  (wke_smoke up to 60; use a generous watchdog ≥180s — cumulative loads + the
+  (wke_smoke up to 61; use a generous watchdog ≥180s — cumulative loads + the
   15s failing-proxy connect; cases SKIP when a host is unreachable).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
@@ -120,6 +120,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke jsValue: jsToFloat (2026-06-24). Completes the numeric coercion set (jsToInt/jsToDouble/jsToFloat/jsToBoolean) — float cast of the stored value. Faithful wke API, offline. VERIFIED: 7/2 → jsToFloat 3.5f vs jsToInt 3. wke_smoke 55/55, mb_smoke 132/132, no survivors.
 - wke jsValue: jsToString (JSON view) (2026-06-24). Like jsToTempString but object/array values are JSON-serialized via their slot (JSON.stringify(literal)) instead of coercing to "[object Object]"; primitives return the coerced value. Separate JsStringBuf() temp. Offline + deterministic. VERIFIED: ({a:1,b:'x'})→{"a":1,"b":"x"}, [1,2,3]→[1,2,3], 42→"42", 'hi'→"hi". wke_smoke 54/54, mb_smoke 132/132, no survivors.
 - wke jsValue: jsIs* type predicates (2026-06-24). FAITHFUL (not extension) — the ten classic wke predicates jsIsNumber/String/Boolean/Object/Function/Undefined/Null/Array/True/False, built on jsTypeOf (+ jsToBoolean for True/False). Arrays report jsIsArray not jsIsObject (matches this port's jsTypeOf). Deterministic + OFFLINE. VERIFIED: one value of each JS type classifies correctly, with cross-type negatives + the array-vs-object and true-vs-false distinctions. Deliberately pivoted off network-gated work after last tick. wke_smoke 53/53, mb_smoke 132/132, no survivors.
 - wke NETWORK: wkeSetFollowRedirects (2026-06-24). Process-wide toggle (wraps mbSetFollowRedirects) to follow HTTP 3xx (default) or stop at the redirect so wkeGetHttpStatusCode/wkeGetResponseHeaders expose the 30x + Location. Documented PORT EXTENSION. VERIFIED offline (toggle safe, local loads still work → wke_smoke 52/52). Network proof (MB_NET_TESTS: follow-on /redirect/1→200, follow-off→30x) is correctly gated but SKIPPED this run as httpbin was unreachable; the underlying redirect behavior is already covered by mb_smoke (case 40, 132/132). NOTE: with the larger net suite + a slow-but-reachable httpbin, the net run can exceed a 90s watchdog (cumulative loads + the 15s failing-proxy connect) — use a longer watchdog for MB_NET_TESTS; it killed cleanly with no survivors. mb_smoke 132/132.
