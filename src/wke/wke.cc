@@ -357,6 +357,16 @@ const char* VkToKeyName(unsigned int vk) {
 }
 }  // namespace
 
+bool wkeFireMouseWheelEvent(wkeWebView webView, int x, int y, int delta,
+                            unsigned int /*flags*/) {
+  if (!webView || !webView->view)
+    return false;
+  // Win32 wheel delta is positive-up; mbSendScroll's dy is positive-down.
+  mbSendScroll(webView->view, x, y, 0, -delta);
+  mbWait(webView->view, 20);  // let the scroll apply before the next read/paint
+  return true;
+}
+
 bool wkeFireKeyDownEvent(wkeWebView webView, unsigned int virtualKeyCode,
                          unsigned int /*flags*/, bool /*systemKey*/) {
   if (!webView || !webView->view)

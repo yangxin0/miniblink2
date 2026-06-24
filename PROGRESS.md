@@ -79,7 +79,7 @@ the deliverable surface (C API, CLI, wke layer).
   rendering accessors (`wkeSetTransparent`, `wkeGetContentWidth/Height`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **131/131** (default, network-free), `wke_smoke` **19/19**,
+- **Tests:** `mb_smoke` **131/131** (default, network-free), `wke_smoke` **20/20**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin cases (143 total).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
@@ -95,6 +95,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke: mouse-wheel input — wkeFireMouseWheelEvent (→mbSendScroll, dy=-delta; Win32 positive=up). Completes mouse+keyboard+wheel. wke_smoke 20/20 (tall page scrolls down, scrollY>0).
 - wke: document-ready callback + page source — wkeOnDocumentReady (fires in FireLoadCallbacks) + wkeGetSource (→mbGetHTML, cached). wke_smoke 19/19 (callback fires; source contains the post-JS markup).
 - wke: console callback — wkeOnConsole + wkeConsoleLevel; drains mbDrainConsole after load + after wkeRunJS, one msg per "level: text" line, mapping mb levels (log/warn/error/verbose) to the wke enum. wke_smoke 18/18 (console.log/error captured with levels).
 - wke: async callbacks — wkeOnLoadingFinish + wkeOnTitleChanged + wkeString/wkeGetString + wkeLoadingResult; fired (synchronously, since load is sync) at the end of wkeLoadURL/LoadHTML. wke_smoke 17/17 (both callbacks fire with the title + SUCCEEDED via the void* param).

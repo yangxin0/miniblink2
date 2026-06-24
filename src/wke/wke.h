@@ -129,6 +129,12 @@ WKE_API const utf8* wkeGetSource(wkeWebView webView);
 WKE_API bool wkeFireMouseEvent(wkeWebView webView, unsigned int message, int x,
                                int y, unsigned int flags);
 
+// Deliver a mouse-wheel event at (x, y). `delta` follows the Win32 convention:
+// positive scrolls up / away from the user, negative scrolls down (one notch is
+// ~120). Returns true if handled.
+WKE_API bool wkeFireMouseWheelEvent(wkeWebView webView, int x, int y, int delta,
+                                    unsigned int flags);
+
 // Keyboard events to the focused element. wkeFireKeyPressEvent inserts the
 // character `charCode` (the text-producing event). wkeFireKeyDownEvent maps the
 // common special virtual-key codes (VK_RETURN=0x0D, VK_TAB=0x09, VK_BACK=0x08,

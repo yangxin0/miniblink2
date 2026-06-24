@@ -203,6 +203,14 @@ int main() {
             std::strstr(src, "id=\"sg\"") != nullptr,
         "wkeOnDocumentReady fires + wkeGetSource returns the page HTML");
 
+  // Mouse wheel: a tall page scrolls down (a negative delta) — scrollY increases.
+  wkeResize(wv, 200, 150);
+  wkeLoadHTML(wv,
+              "<body style='margin:0'><div style='height:3000px'></div></body>");
+  wkeFireMouseWheelEvent(wv, 100, 75, -300, 0);  // negative delta -> down
+  check(jsToInt(es, wkeRunJS(wv, "Math.round(window.scrollY)")) > 0,
+        "wkeFireMouseWheelEvent scrolls the page (scrollY > 0)");
+
   wkeDestroyWebView(wv);
   wkeFinalize();
 
