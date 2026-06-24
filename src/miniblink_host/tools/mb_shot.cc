@@ -51,6 +51,7 @@ int main(int argc, char** argv) {
   bool print_text = false;
   bool print_html = false;
   bool print_requests = false;  // dump the subresource request log to stdout
+  bool wait_idle = false;       // wait for network idle before capture (networkidle)
   bool auto_scroll = false;     // scroll through the page to load lazy content
   bool no_images = false;
   bool dark_mode = false;
@@ -108,6 +109,8 @@ int main(int argc, char** argv) {
       wait_visible = argv[++i];
     } else if (a == "--wait-hidden" && i + 1 < argc) {
       wait_hidden = argv[++i];
+    } else if (a == "--wait-idle") {
+      wait_idle = true;
     } else if (a == "--css" && i + 1 < argc) {
       inject_css = argv[++i];
     } else if (a == "--click" && i + 1 < argc) {
@@ -190,7 +193,8 @@ int main(int argc, char** argv) {
         "[--text-all CSS] [--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
         "[--click CSS] [--wait-selector CSS] [--wait-visible CSS] "
-        "[--wait-hidden CSS] [--css STYLES] [--auto-scroll] [--wait-ms N] "
+        "[--wait-hidden CSS] [--wait-idle] [--css STYLES] [--auto-scroll] "
+        "[--wait-ms N] "
         "[--scroll-to Y] "
         "[--post BODY] [--proxy URL] "
         "[--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] "
@@ -243,7 +247,7 @@ int main(int argc, char** argv) {
                    load_cookies.c_str());
   }
 
-  if (print_requests)
+  if (print_requests || wait_idle)
     mbClearRequestLog();  // scope the log to this navigation's subresources
 
   const bool is_http = input.rfind("http", 0) == 0;
@@ -324,6 +328,13 @@ int main(int argc, char** argv) {
                    "mb_shot: WARNING — --wait-hidden '%s' still visible at timeout\n",
                    wait_hidden.c_str());
     }
+  }
+  // --wait-idle: let the page's deferred fetches / lazy images settle (Puppeteer
+  // networkidle) before scraping/capturing — for SPAs that fetch after load.
+  if (wait_idle) {
+    if (!mbWaitForNetworkIdle(view, 500, wait_ms > 0 ? wait_ms : 10000))
+      std::fprintf(stderr,
+                   "mb_shot: WARNING — --wait-idle still busy at timeout\n");
   }
   // --css: inject a stylesheet (hide cookie banners / ads / sticky headers, or
   // restyle) before capture. Applied after the waits so it lands on settled DOM.
