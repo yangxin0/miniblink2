@@ -63,7 +63,7 @@ mb_shot \
   # prepare the view
   [--css STYLES] [--auto-scroll] [--scroll-to Y] [--scroll-to-selector CSS] \
   # extract (to stdout)
-  [--text] [--html] [--eval JS] [--value CSS] [--checked CSS] [--count CSS] [--visible CSS] \
+  [--title] [--url] [--text] [--html] [--eval JS] [--value CSS] [--checked CSS] [--count CSS] [--visible CSS] \
   [--rect CSS] [--style CSS PROP] [--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] \
   [--requests] [--console] [--headers] \
   # capture
@@ -124,7 +124,9 @@ scraping), and `--requests` (the subresource URLs the page fetched).
 stderr — useful for debugging a page or scripting against its logs. `--headers` prints the
 server's HTTP response headers (Content-Type, caching, custom/API headers) to stderr.
 
-`--text` prints the page's visible text (post-JS `document.body.innerText`) to stdout, so
+`--title` prints `document.title` and `--url` prints the current document URL (the
+landing URL after any redirects) to stdout — the basic page-metadata fields. `--text`
+prints the page's visible text (post-JS `document.body.innerText`) to stdout, so
 `mb_shot` doubles as a simple scraper/text extractor. `--html` prints the rendered
 (post-JS) DOM as serialized HTML — useful for SPAs whose fetched source is near-empty.
 `--eval JS` runs an arbitrary JS expression against the settled page and prints its string

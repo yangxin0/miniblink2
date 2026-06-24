@@ -51,6 +51,8 @@ int main(int argc, char** argv) {
   bool print_headers = false;  // dump the response headers to stderr
   bool print_text = false;
   bool print_html = false;
+  bool print_title = false;     // print document.title to stdout
+  bool print_url = false;       // print the current document URL (post-redirect)
   bool print_requests = false;  // dump the subresource request log to stdout
   bool wait_idle = false;       // wait for network idle before capture (networkidle)
   bool auto_scroll = false;     // scroll through the page to load lazy content
@@ -184,6 +186,10 @@ int main(int argc, char** argv) {
       print_text = true;
     } else if (a == "--html") {
       print_html = true;
+    } else if (a == "--title") {
+      print_title = true;
+    } else if (a == "--url") {
+      print_url = true;
     } else if (a == "--requests") {
       print_requests = true;
     } else if (a == "--auto-scroll") {
@@ -214,7 +220,7 @@ int main(int argc, char** argv) {
     std::fprintf(
         stderr,
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
-        "[--transparent] [--text] [--html] [--requests] [--eval JS] [--value CSS] "
+        "[--transparent] [--title] [--url] [--text] [--html] [--requests] [--eval JS] [--value CSS] "
         "[--checked CSS] [--count CSS] [--visible CSS] [--rect CSS] [--style CSS PROP] "
         "[--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
@@ -459,6 +465,23 @@ int main(int argc, char** argv) {
     mbDrainConsole(view, cbuf, sizeof(cbuf));
     if (cbuf[0])
       std::fprintf(stderr, "---- page console ----\n%s----------------------\n", cbuf);
+  }
+
+  // --title: print document.title to stdout (the most basic scrape field).
+  if (print_title) {
+    char tbuf[2048] = {0};
+    mbGetTitle(view, tbuf, sizeof(tbuf));
+    std::fwrite(tbuf, 1, std::strlen(tbuf), stdout);
+    std::fputc('\n', stdout);
+  }
+
+  // --url: print the current document URL — the landing URL after any redirects,
+  // distinct from the input (e.g. http->https or a login bounce).
+  if (print_url) {
+    char ubuf[4096] = {0};
+    mbGetURL(view, ubuf, sizeof(ubuf));
+    std::fwrite(ubuf, 1, std::strlen(ubuf), stdout);
+    std::fputc('\n', stdout);
   }
 
   // --text: dump the page's visible text to stdout (a scraping mode). innerText
