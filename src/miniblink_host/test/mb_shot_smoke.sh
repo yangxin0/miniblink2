@@ -31,11 +31,15 @@ cat > "$FIX" <<'HTML'
 <div id="cr">no</div>
 <input id="sq" value=""><button id="go" type="button" onclick="render()">go</button>
 <div id="results"></div>
+<div id="dt">nodisp</div>
 <script>
 localStorage.setItem('auth','tok-99');
 sessionStorage.setItem('cart','3 items');
 document.getElementById('kq').addEventListener('keydown',function(e){
   document.getElementById('krec').textContent=e.key;});
+document.getElementById('dt').addEventListener('myevt',function(){   // for --dispatch
+  this.textContent='dispatched';});
+console.log('CONSOLE_MARKER_42');                                    // for --console
 setTimeout(function(){window.delayedReady=true;},150);  // for --wait-eval
 function render(){  // a search form that renders result rows on submit
   var q=document.getElementById('sq').value, box=document.getElementById('results');
@@ -121,6 +125,14 @@ check "--cookies round-trip" "s=1" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --fill "#kq" "x" --press "ArrowDown" \
     --eval "document.getElementById('krec').textContent"
 check "--press delivers the key" "ArrowDown" "$(cat "$TMP/out")"
+
+# --dispatch: fire a custom DOM event; its listener rewrites #dt (read via --eval)
+run 40 "$URL" "$PNG" --dispatch "#dt" "myevt" --eval "document.getElementById('dt').textContent"
+check "--dispatch fires a custom event" "dispatched" "$(cat "$TMP/out")"
+
+# --console: the page's console output is dumped to stderr
+run 40 "$URL" "$PNG" --console
+checkc "--console dumps page console" "CONSOLE_MARKER_42" "$(cat "$TMP/err")"
 
 # --wait-eval: block until a deferred (150ms setTimeout) flag is truthy, then read
 # it. Proves the wait actually blocked — the page settles before the timer fires.
