@@ -177,6 +177,12 @@ MB_EXPORT int mbBlurSelector(mbView*, const char* css_selector);
 // mbResize(view, w, h) -> mbPaintToBitmap. Returns 1 on success.
 MB_EXPORT int mbGetContentSize(mbView*, int* w, int* h);
 
+// Write the current viewport size in logical (CSS) px into *w/*h (either may be
+// NULL) — window.innerWidth/Height, the read-back peer of mbResize/mbCreateView
+// (DPR-independent). Distinct from mbGetContentSize (the full scrollable doc).
+// Returns 1 on success. (Needs a committed document.)
+MB_EXPORT int mbGetViewSize(mbView*, int* w, int* h);
+
 // Fill the first <input>/<textarea> matching `css_selector` with `utf8_text`
 // (Playwright-style fill): focuses it, sets the value via the native setter so
 // frameworks like React observe it, and fires input+change. Returns 1 on

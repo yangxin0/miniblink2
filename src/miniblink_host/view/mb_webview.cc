@@ -478,6 +478,21 @@ bool MbWebView::GetContentSize(int* w, int* h) {
   return true;
 }
 
+bool MbWebView::GetViewSize(int* w, int* h) {
+  // The current viewport size in logical (CSS) px — window.innerWidth/Height,
+  // i.e. what was last set via mbCreateView/mbResize (DPR-independent). The
+  // read-back peer of mbResize; distinct from GetContentSize (the full scrollable
+  // document). Needs a committed document. Returns false if unavailable.
+  std::string s = EvalToString(
+      "(function(){return window.innerWidth+','+window.innerHeight;})()");
+  std::string::size_type comma = s.find(',');
+  if (comma == std::string::npos)
+    return false;
+  if (w) *w = std::atoi(s.substr(0, comma).c_str());
+  if (h) *h = std::atoi(s.substr(comma + 1).c_str());
+  return true;
+}
+
 bool MbWebView::SelectOption(const char* css_selector, const char* value) {
   // Select a <select>'s option whose value OR visible text equals `value`, then
   // fire input+change (so framework-bound selects react) — like Puppeteer's

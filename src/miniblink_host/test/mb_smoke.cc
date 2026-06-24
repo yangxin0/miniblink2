@@ -335,6 +335,17 @@ int main() {
            "full-page: resize captures below-the-fold");
   }
 
+  // 14b. mbGetViewSize reads back the viewport set via mbResize (window.inner*).
+  {
+    mbResize(v, 640, 480);
+    mbLoadHTML(v, "<body>x</body>", "about:blank");
+    int vw = 0, vh = 0;
+    const bool got = mbGetViewSize(v, &vw, &vh) == 1 && vw == 640 && vh == 480;
+    Expect(got, "mbGetViewSize reads the viewport (640x480)",
+           std::string("vw=") + std::to_string(vw) + " vh=" + std::to_string(vh));
+    mbResize(v, W, H);  // restore the shared viewport for later cases
+  }
+
   // 15. HiDPI: setting device scale factor makes window.devicePixelRatio report it
   // and resolution media queries re-evaluate (without zooming layout).
   mbSetDeviceScaleFactor(v, 2.0f);

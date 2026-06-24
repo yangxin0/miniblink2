@@ -119,6 +119,9 @@ class MbWebView {
   // Full scrollable document size (logical px), >= viewport — for full-page
   // capture (resize to this height, then paint).
   bool GetContentSize(int* w, int* h);
+  // Current viewport size in logical px (window.innerWidth/Height) — the read-back
+  // peer of Resize; distinct from GetContentSize (full scrollable document).
+  bool GetViewSize(int* w, int* h);
   // First match's viewport-relative bounding box (logical px) via out-params;
   // false if no element matches. Composes with PaintRectToBitmap (element shot).
   bool GetElementRect(const char* css_selector, int* x, int* y, int* w, int* h);
