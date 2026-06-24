@@ -377,6 +377,14 @@ bool wkeSavePdf(wkeWebView webView, const utf8* path) {
          mbSavePdf(webView->view, path) != 0;
 }
 
+bool wkeSavePng(wkeWebView webView, const utf8* path, int width, int height) {
+  // Render the current frame at width x height and encode to `path`; the format
+  // follows the extension (.jpg/.jpeg -> JPEG, else PNG). Returns whether it was
+  // written. (Port extension — classic wke captures via wkePaint then app-encodes.)
+  return webView && webView->view && path && width > 0 && height > 0 &&
+         mbSavePng(webView->view, path, width, height) != 0;
+}
+
 void wkeSetTransparent(wkeWebView webView, bool transparent) {
   if (!webView || !webView->view)
     return;

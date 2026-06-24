@@ -565,6 +565,42 @@ int main() {
           "wkeSavePdf prints a valid, non-trivial %PDF file");
   }
 
+  // wkeSavePng (offline): saves a real PNG, and a .jpg extension yields JPEG.
+  {
+    const char* png = "/private/tmp/claude-501/wke_smoke.png";
+    const char* jpg = "/private/tmp/claude-501/wke_smoke.jpg";
+    std::remove(png);
+    std::remove(jpg);
+    wkeLoadHTML(wv, "<body style='background:#3050ff'>shot</body>");
+
+    const bool wrote_png = wkeSavePng(wv, png, 200, 100);
+    unsigned char sig[8] = {0};
+    long psz = 0;
+    if (FILE* f = std::fopen(png, "rb")) {
+      std::fread(sig, 1, 8, f);
+      std::fseek(f, 0, SEEK_END);
+      psz = std::ftell(f);
+      std::fclose(f);
+    }
+    const bool png_ok = wrote_png && sig[0] == 0x89 && sig[1] == 'P' &&
+                        sig[2] == 'N' && sig[3] == 'G' && psz > 100;
+
+    const bool wrote_jpg = wkeSavePng(wv, jpg, 200, 100);  // extension -> JPEG
+    unsigned char jsig[2] = {0};
+    if (FILE* f = std::fopen(jpg, "rb")) {
+      std::fread(jsig, 1, 2, f);
+      std::fclose(f);
+    }
+    const bool jpg_ok = wrote_jpg && jsig[0] == 0xFF && jsig[1] == 0xD8;
+
+    const bool nullsafe =
+        !wkeSavePng(wv, nullptr, 200, 100) && !wkeSavePng(nullptr, png, 200, 100);
+    std::remove(png);
+    std::remove(jpg);
+    check(png_ok && jpg_ok && nullsafe,
+          "wkeSavePng writes a PNG (and JPEG by extension)");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {
