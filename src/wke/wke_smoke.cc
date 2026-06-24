@@ -797,6 +797,34 @@ int main() {
           "wkeScrollIntoView brings an element into the viewport");
   }
 
+  // Pointer/focus selector actions (offline): hover/dblclick/contextmenu fire
+  // their handlers; focus/blur move document.activeElement; misses return false.
+  {
+    wkeLoadHTML(wv,
+                "<body><div id='h' onmouseover='window.__h=1'>h</div>"
+                "<div id='d' ondblclick='window.__d=1'>d</div>"
+                "<div id='r' oncontextmenu='window.__r=1'>r</div>"
+                "<input id='f'></body>");
+    auto flag = [&](const char* g) {
+      return jsToInt(es, wkeRunJS(wv, g)) == 1;
+    };
+    const bool hover = wkeHoverSelector(wv, "#h") && flag("window.__h||0");
+    const bool dbl = wkeDoubleClickSelector(wv, "#d") && flag("window.__d||0");
+    const bool rc = wkeRightClickSelector(wv, "#r") && flag("window.__r||0");
+    const bool foc =
+        wkeFocusSelector(wv, "#f") &&
+        std::strcmp(jsToTempString(es, wkeRunJS(wv, "document.activeElement.id")),
+                    "f") == 0;
+    const bool blu =
+        wkeBlurSelector(wv, "#f") &&
+        std::strcmp(jsToTempString(es, wkeRunJS(wv, "document.activeElement.id")),
+                    "f") != 0;
+    const bool miss =
+        !wkeHoverSelector(wv, "#none") && !wkeFocusSelector(wv, "#none");
+    check(hover && dbl && rc && foc && blu && miss,
+          "wkeHover/DoubleClick/RightClick/Focus/BlurSelector dispatch events");
+  }
+
   // Waits (offline): a setTimeout adds a delayed element / flag; the wait pumps
   // until it appears, and times out on a condition that never holds.
   {

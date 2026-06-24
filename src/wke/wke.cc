@@ -535,6 +535,30 @@ bool wkeScrollIntoView(wkeWebView webView, const char* selector) {
          mbScrollIntoView(webView->view, selector) != 0;
 }
 
+// Additional pointer/focus actions on the first selector match (each false if
+// nothing matches). Hover fires mouseover/enter; double/right-click fire dblclick
+// /contextmenu; focus/blur move the active element. (Port extensions.)
+bool wkeHoverSelector(wkeWebView webView, const char* selector) {
+  return webView && webView->view && selector &&
+         mbHoverSelector(webView->view, selector) != 0;
+}
+bool wkeDoubleClickSelector(wkeWebView webView, const char* selector) {
+  return webView && webView->view && selector &&
+         mbDoubleClickSelector(webView->view, selector) != 0;
+}
+bool wkeRightClickSelector(wkeWebView webView, const char* selector) {
+  return webView && webView->view && selector &&
+         mbRightClickSelector(webView->view, selector) != 0;
+}
+bool wkeFocusSelector(wkeWebView webView, const char* selector) {
+  return webView && webView->view && selector &&
+         mbFocusSelector(webView->view, selector) != 0;
+}
+bool wkeBlurSelector(wkeWebView webView, const char* selector) {
+  return webView && webView->view && selector &&
+         mbBlurSelector(webView->view, selector) != 0;
+}
+
 // --- Waits (pump the loop until a condition or timeout) ------------------------
 bool wkeWaitForSelector(wkeWebView webView, const char* selector,
                         int timeoutMs) {
