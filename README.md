@@ -57,7 +57,7 @@ mb_shot \
   [--block SUBSTR] [--load-cookies FILE] [--save-cookies FILE] [--post BODY] \
   [--no-images] [--dark] [--lang L,L2] [--tz Area/City] \
   # interact
-  [--fill CSS TEXT] [--click CSS] [--drag FROM TO] [--dispatch CSS EVT] \
+  [--fill CSS TEXT] [--click CSS] [--drag FROM TO] [--dispatch CSS EVT] [--press KEY] \
   # synchronize
   [--wait-selector CSS] [--wait-visible CSS] [--wait-hidden CSS] [--wait-idle] [--wait-ms N] \
   # prepare the view
@@ -98,7 +98,10 @@ react), and `--click CSS` clicks the matching element before capturing (e.g. fil
 box then click submit, expand a menu, dismiss a banner). `--fill` runs before `--click`.
 `--drag FROM TO` mouse-drags one element's center onto another's (slider, sortable,
 map pan); `--dispatch CSS EVT` fires a synthetic DOM event (e.g. `mouseover` to open
-a hover menu, or a custom event) that click/fill don't.
+a hover menu, or a custom event) that click/fill don't. `--press KEY` presses a named
+non-text key as a trusted event so its default action fires — `Enter` to submit
+(`--fill q --press Enter`), `Tab` to advance focus, `Escape`, arrows; it runs last in
+the interact phase, after `--fill`/`--click`.
 
 Beyond `--wait-selector`, the synchronization set covers the appear/disappear/quiet
 lifecycle: `--wait-visible CSS` waits until the element is actually shown (not just
@@ -423,5 +426,5 @@ run so an unreachable host can't make it crawl. The `wke` layer has its own
 `build.sh` also runs `src/miniblink_host/test/mb_shot_smoke.sh`, a CLI regression
 test that drives the `mb_shot` binary against a local fixture and asserts the exact
 stdout of the extraction flags (`--title`/`--count`/`--attr`/`--text`/`--eval`/
-`--visible`/`--local-storage`/`--session-storage`/`--url`/`--cookies`) plus the
-bad-size guard — coverage the C++ suites can't give the command-line tool itself.
+`--visible`/`--local-storage`/`--session-storage`/`--url`/`--cookies`/`--press`) plus
+the bad-size guard — coverage the C++ suites can't give the command-line tool itself.

@@ -80,6 +80,7 @@ int main(int argc, char** argv) {
   std::string drag_to;         // ...onto this one before capture (--drag FROM TO)
   std::string fill_selector;   // fill this field before capture (with fill_text)
   std::string fill_text;       // value for --fill
+  std::string press_key;       // named key to press after interacting (--press KEY)
   std::string eval_js;         // JS to run after load; result printed to stdout
   std::string value_selector;  // print this control's live .value to stdout
   std::string checked_selector;  // print this control's .checked (1/0) to stdout
@@ -139,6 +140,8 @@ int main(int argc, char** argv) {
     } else if (a == "--fill" && i + 2 < argc) {
       fill_selector = argv[++i];
       fill_text = argv[++i];
+    } else if (a == "--press" && i + 1 < argc) {
+      press_key = argv[++i];
     } else if (a == "--eval" && i + 1 < argc) {
       eval_js = argv[++i];
     } else if (a == "--value" && i + 1 < argc) {
@@ -234,7 +237,7 @@ int main(int argc, char** argv) {
         "[--checked CSS] [--count CSS] [--visible CSS] [--rect CSS] [--style CSS PROP] "
         "[--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
-        "[--click CSS] [--drag FROM TO] [--dispatch CSS EVT] "
+        "[--click CSS] [--drag FROM TO] [--dispatch CSS EVT] [--press KEY] "
         "[--wait-selector CSS] [--wait-visible CSS] "
         "[--wait-hidden CSS] [--wait-idle] [--css STYLES] [--auto-scroll] "
         "[--wait-ms N] "
@@ -446,6 +449,16 @@ int main(int argc, char** argv) {
     } else {
       mbWait(view, wait_ms > 0 ? wait_ms : 100);
     }
+  }
+
+  // --press KEY: press a named non-text key as a trusted event so its default
+  // action fires — "Enter" to submit a search/form, "Tab" to advance focus,
+  // "Escape" to dismiss a modal, arrows, etc. Runs last in the interact phase so
+  // it follows --fill/--click (the canonical "--fill q --press Enter" submit), then
+  // settles. Unknown key names are a no-op (per mbSendKey).
+  if (!press_key.empty()) {
+    mbSendKey(view, press_key.c_str());
+    mbWait(view, wait_ms > 0 ? wait_ms : 100);  // let the default action render
   }
 
   // --auto-scroll: scroll through the page to trigger lazy-load / infinite-scroll

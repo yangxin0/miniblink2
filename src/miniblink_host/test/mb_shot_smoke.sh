@@ -25,9 +25,12 @@ cat > "$FIX" <<'HTML'
 <ul><li class="row">a</li><li class="row">b</li><li class="row">c</li></ul>
 <a id="lnk" href="https://example.com/x">link</a>
 <p id="msg">hello world</p>
+<input id="kq" type="text"><div id="krec">nokey</div>
 <script>
 localStorage.setItem('auth','tok-99');
 sessionStorage.setItem('cart','3 items');
+document.getElementById('kq').addEventListener('keydown',function(e){
+  document.getElementById('krec').textContent=e.key;});
 </script></body></html>
 HTML
 
@@ -68,6 +71,12 @@ run 40 "$URL" "$PNG" --url;                   checkc "--url" "fixture.html" "$(c
 # cookie round-trip: inject then read back the same origin from the in-memory jar
 run 40 "$URL" "$PNG" --set-cookie "https://t.test/" "s=1; Path=/" --cookies "https://t.test/"
 check "--cookies round-trip" "s=1" "$(cat "$TMP/out")"
+
+# --press: fill focuses #kq, then a trusted key event fires its keydown handler,
+# which records e.key into #krec (read back via --eval)
+run 40 "$URL" "$PNG" --fill "#kq" "x" --press "ArrowDown" \
+    --eval "document.getElementById('krec').textContent"
+check "--press delivers the key" "ArrowDown" "$(cat "$TMP/out")"
 
 # bad-size guard: a non-numeric width positional must fail fast (exit 2), not crash
 run 40 "$URL" --out "$PNG"; check "bad-size guard exit code" "2" "$RC"
