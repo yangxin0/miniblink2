@@ -634,6 +634,13 @@ const utf8* wkeGetTextForSelector(wkeWebView webView, const char* selector) {
   return webView->selector_text_cache.c_str();
 }
 
+bool wkeSetHtmlForSelector(wkeWebView webView, const char* selector,
+                           const char* html) {
+  // Set the first match's innerHTML; true if matched. (Port extension.)
+  return webView && webView->view && selector &&
+         mbSetHtmlForSelector(webView->view, selector, html) != 0;
+}
+
 const utf8* wkeGetHtmlForSelector(wkeWebView webView, const char* selector) {
   // outerHTML of the FIRST match ("" if none). Owned by the view until the next
   // call. (Port extension.)

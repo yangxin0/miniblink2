@@ -513,6 +513,12 @@ int mbGetAllTextForSelector(mbView* v, const char* css_selector, char* out,
   return static_cast<int>(result.size());
 }
 
+int mbSetHtmlForSelector(mbView* v, const char* css_selector, const char* html) {
+  if (!v || !v->impl || !css_selector)
+    return 0;
+  return v->impl->SetHtmlForSelector(css_selector, html) ? 1 : 0;
+}
+
 int mbGetHtmlForSelector(mbView* v, const char* css_selector, char* out,
                          int out_cap) {
   if (!v || !v->impl)

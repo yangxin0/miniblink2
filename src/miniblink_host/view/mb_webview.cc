@@ -671,6 +671,20 @@ bool MbWebView::GetAllAttributeForSelector(const char* css_selector,
   return true;
 }
 
+bool MbWebView::SetHtmlForSelector(const char* css_selector, const char* html) {
+  if (!css_selector)
+    return false;
+  // Set the first match's innerHTML (replace its contents) — template or redact a
+  // fragment before a capture. The write side of GetHtmlForSelector. A normal
+  // page-context property assignment (eval), not a C++ v8 [[Set]] on the global,
+  // so it's safe in this build. Returns true if an element matched.
+  std::string js =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+      "\");if(!e)return '0';e.innerHTML=\"" + JsEscape(html ? html : "") +
+      "\";return '1';})()";
+  return EvalToString(js.c_str()) == "1";
+}
+
 bool MbWebView::GetHtmlForSelector(const char* css_selector, std::string* out) {
   if (!css_selector)
     return false;

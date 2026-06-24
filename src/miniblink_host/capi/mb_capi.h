@@ -354,6 +354,12 @@ MB_EXPORT int mbGetAllTextForSelector(mbView*, const char* css_selector,
 MB_EXPORT int mbGetHtmlForSelector(mbView*, const char* css_selector, char* out,
                                    int out_cap);
 
+// Set the innerHTML of the first element matching `css_selector` (replace its
+// contents) — template or redact a fragment before a capture. The write side of
+// mbGetHtmlForSelector. Returns 1 if an element matched, 0 if not.
+MB_EXPORT int mbSetHtmlForSelector(mbView*, const char* css_selector,
+                                   const char* html);
+
 // Write attribute `attr` of EVERY element matching `css_selector` as a JSON array
 // string (e.g. ["/a","/b"] for all link hrefs) into `out` — list scraping of an
 // attribute in one call. An element missing the attribute contributes JSON null

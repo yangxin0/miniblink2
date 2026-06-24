@@ -1241,6 +1241,19 @@ int main() {
           "wkeGetHtmlForSelector returns the element's outerHTML");
   }
 
+  // wkeSetHtmlForSelector replaces an element's innerHTML; the new markup is then
+  // visible to the readers. No-match returns false.
+  {
+    wkeLoadHTML(wv, "<body><div id='x'><b>old</b></div></body>");
+    const bool set_ok = wkeSetHtmlForSelector(wv, "#x", "<i>new</i>");
+    const bool reflected =
+        std::strcmp(wkeGetTextForSelector(wv, "#x"), "new") == 0 &&
+        std::strstr(wkeGetHtmlForSelector(wv, "#x"), "<i>new</i>") != nullptr;
+    const bool none_ok = !wkeSetHtmlForSelector(wv, "#none", "x");
+    check(set_ok && reflected && none_ok,
+          "wkeSetHtmlForSelector replaces innerHTML (readers see the new markup)");
+  }
+
   // wkeGetAllAttributeForSelector scrapes one attribute across all matches as a
   // JSON array; a missing attribute becomes null; raw value (href stays "/3").
   {

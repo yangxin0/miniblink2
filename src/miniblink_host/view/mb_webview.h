@@ -165,6 +165,10 @@ class MbWebView {
   // re-parse, vs GetTextForSelector (plain text) or GetHTML (whole document).
   // Returns false if no element matches.
   bool GetHtmlForSelector(const char* css_selector, std::string* out);
+  // Set the first match's innerHTML (replace contents) — template or redact a
+  // fragment before a capture. The write side of GetHtmlForSelector. Returns true
+  // if an element matched.
+  bool SetHtmlForSelector(const char* css_selector, const char* html);
   // getAttribute(attr) of EVERY match as a JSON array string (absent attr ->
   // null, preserving index alignment); raw value, not the resolved property.
   // Returns false on an invalid selector; "[]" for zero matches.

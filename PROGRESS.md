@@ -63,7 +63,7 @@ the deliverable surface (C API, CLI, wke layer).
   blob: URLs (`fetch` + `<img>`), Intersection/Resize/Mutation observers, WAAPI,
   forms + submit-navigation, mouse/keyboard input, host-side history. CJK/i18n +
   system web fonts render.
-- **`mb_capi` C API — 97 functions:** lifecycle, load, JS eval, scraping
+- **`mb_capi` C API — 98 functions:** lifecycle, load, JS eval, scraping
   (text/attr/computed-style/count by selector), input (mouse/key/text/scroll +
   click/fill/select/focus/hover/scroll-into-view by selector), screenshots
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
@@ -107,7 +107,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **150/150** (default, network-free), `wke_smoke` **89/89**,
+- **Tests:** `mb_smoke` **151/151** (default, network-free), `wke_smoke` **90/90**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -125,6 +125,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- capi+wke: mbSetHtmlForSelector / wkeSetHtmlForSelector — set an element's innerHTML (2026-06-24). The DOM-write peer of GetHtmlForSelector (and a sibling of SetAttribute): replace the first match's innerHTML to template or redact a fragment before a capture. A normal page-context property assignment via eval — not a C++ v8 [[Set]] on the global — so safe in this build. Returns 1/0 (matched). VERIFIED in both suites: #x innerHTML <b>old</b> -> set to <i>new</i>, then textContent=="new" AND GetHtmlForSelector shows <i>new</i>; no-match -> 0. wke_smoke 90/90, mb_smoke 151/151, no survivors. ABI now 98 fns.
 - mb_shot: --style SELECTOR PROP — print a computed style value on the CLI (2026-06-24). Wraps mbGetComputedStyle: prints the resolved value of CSS property PROP on the first match (color -> rgb(...), display:none -> none) — CSS/visual assertions from the command line, completing the element-inspection family (text/html/value/checked/visible/rect/style). VERIFIED end-to-end offline: --style '#t' color -> "rgb(9, 8, 7)", --style '#t' display -> "none". No survivors. mb_shot.cc + usage only; both suites unchanged (wke 89/89, mb 150/150).
 - mb_shot: --rect SELECTOR — print an element's bounding box on the CLI (2026-06-24). Wraps mbGetElementRect: prints the first match's viewport-relative box as "x,y,w,h" (logical px) — locate elements, compute crops, feed coordinates to downstream tooling. VERIFIED end-to-end offline: a div at left:40 top:60 width:120 height:30 prints exactly "40,60,120,30"; a no-match selector prints nothing + a stderr warning. No survivors. mb_shot.cc + usage only; both suites unchanged (wke 89/89, mb 150/150).
 - capi+wke: mbGetHtmlForSelector / wkeGetHtmlForSelector — a fragment's outerHTML (2026-06-24). Fills the scraping gap between mbGetTextForSelector (plain text of one element) and mbGetHTML (whole document): the first match's outerHTML (element + its markup) to extract a fragment — article body, table, card — for re-parsing. -1/"" on no match. VERIFIED in both suites: <div id=card><b>Hi</b> there</div> -> outerHTML contains id="card" AND <b>Hi</b> there; no-match -> -1/"". wke_smoke 89/89, mb_smoke 150/150, no survivors. ABI now 97 fns.

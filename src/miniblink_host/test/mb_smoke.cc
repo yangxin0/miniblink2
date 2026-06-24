@@ -2523,6 +2523,23 @@ int main() {
                (has_inner ? "1" : "0") + " none=" + (none_ok ? "1" : "0"));
   }
 
+  // 102b3c. mbSetHtmlForSelector replaces an element's innerHTML; the new markup
+  // is then visible to the readers. No-match -> 0.
+  {
+    mbLoadHTML(v, "<body><div id='x'><b>old</b></div></body>", "about:blank");
+    const bool set_ok = mbSetHtmlForSelector(v, "#x", "<i>new</i>") == 1;
+    const bool reflected = Eval(v, "document.getElementById('x').textContent") == "new";
+    char hb2[128] = {0};
+    mbGetHtmlForSelector(v, "#x", hb2, sizeof(hb2));
+    const bool html_ok = std::string(hb2).find("<i>new</i>") != std::string::npos;
+    const bool none_ok = mbSetHtmlForSelector(v, "#none", "x") == 0;
+    Expect(set_ok && reflected && html_ok && none_ok,
+           "mbSetHtmlForSelector replaces innerHTML (readers see the new markup)",
+           std::string("set=") + (set_ok ? "1" : "0") + " text=" +
+               (reflected ? "1" : "0") + " html=" + (html_ok ? "1" : "0") +
+               " none=" + (none_ok ? "1" : "0"));
+  }
+
   // 102b4. mbGetAllAttributeForSelector scrapes one attribute across all matches
   // as a JSON array; a missing attribute -> null; raw value (href stays "/3").
   {

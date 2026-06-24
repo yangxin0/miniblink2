@@ -209,6 +209,10 @@ WKE_API const utf8* wkeGetTextForSelector(wkeWebView webView,
 // match; owned by the view until the next call.
 WKE_API const utf8* wkeGetHtmlForSelector(wkeWebView webView,
                                           const char* selector);
+// Set the first match's innerHTML (replace contents) — template/redact before a
+// capture. The write side of wkeGetHtmlForSelector. True if an element matched.
+WKE_API bool wkeSetHtmlForSelector(wkeWebView webView, const char* selector,
+                                   const char* html);
 // innerText of EVERY match as a JSON array string ("[]" for none, "" for an
 // invalid selector) — list scraping in one call. Owned by the view.
 WKE_API const utf8* wkeGetAllTextForSelector(wkeWebView webView,
