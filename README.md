@@ -41,7 +41,8 @@ that satisfies modern Blink so it runs without the full browser.
 | Isolated-world eval (content-script model: separate globals, shared DOM) | ✅ |
 | **Cookies**: HTTP jar + JS `document.cookie`; JS→jar bridge; jar export (`mbGetCookies`) | ✅ |
 | Custom request headers + default `Accept-Language` | ✅ |
-| On-screen window, GPU compositing, IndexedDB | ⏳ roadmap |
+| On-screen window, GPU compositing | ⏳ roadmap |
+| IndexedDB (API present; `open()` degrades gracefully via `onerror` — needs an in-process `IDBFactory` backing store wired through the frame broker) | ⏳ roadmap |
 
 ## Tool: `mb_shot` (headless HTML → PNG)
 
