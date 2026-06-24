@@ -182,6 +182,12 @@ WKE_API const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,
 // precise click. Port extension.
 WKE_API bool wkeGetElementRect(wkeWebView webView, const char* selector, int* x,
                                int* y, int* w, int* h);
+// Resolved computed value of CSS `property` for the first match ("" on no
+// match), e.g. color -> "rgb(r, g, b)", display:none -> "none". Owned by the
+// view, valid until the next call to this getter on it. For visibility/style
+// assertions without writing JS. Port extension.
+WKE_API const utf8* wkeGetComputedStyle(wkeWebView webView, const char* selector,
+                                        const char* property);
 
 // DOM action helpers — drive the page without writing JS (port extensions), each
 // returning whether it acted. wkeClickSelector clicks the first match (false if

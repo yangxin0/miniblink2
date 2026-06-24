@@ -83,8 +83,9 @@ the deliverable surface (C API, CLI, wke layer).
   `jsEmptyObject`/`jsEmptyArray` + setters `jsSet`/`jsSetAt`/`jsSetGlobal`, and
   `jsCall`/`jsCallGlobal`, plus `wkeSetInitScript` evaluateOnNewDocument),
   DOM query (`wkeCountSelector`/`wkeGetTextForSelector`/`wkeGetAttribute`/
-  `wkeGetElementRect`) + actions (`wkeClickSelector`/`wkeFillSelector`/
-  `wkeSelectOption`) + waits (`wkeWaitForSelector`/`wkeWaitForFunction`),
+  `wkeGetElementRect`/`wkeGetComputedStyle`) + actions (`wkeClickSelector`/
+  `wkeFillSelector`/`wkeSelectOption`) + waits (`wkeWaitForSelector`/
+  `wkeWaitForFunction`),
   POST (`wkePostURL`), cookies (`wkeGetCookie`/`wkeSetCookie`/
   `wkePerformCookieCommand` + jar persistence via `wkeSetCookieJarPath`),
   proxy (`wkeSetProxy`, HTTP/SOCKS + auth), request headers
@@ -97,9 +98,9 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **46/46**,
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **47/47**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com cases
-  (wke_smoke 50; mb_smoke ~145).
+  (wke_smoke 51; mb_smoke ~145).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
 
@@ -114,6 +115,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke DOM STYLE: wkeGetComputedStyle (2026-06-24). Resolved computed value of a CSS property for the first selector match (getComputedStyle→getPropertyValue: color→"rgb(r, g, b)", display:none→"none"), view-owned temp string, "" on miss — wraps mbGetComputedStyle. For visibility/style assertions without writing JS. New computed_style_cache backs the return. Documented PORT EXTENSION. VERIFIED offline: #d color=="rgb(1, 2, 3)", display=="none", #none=="". wke_smoke 47/47, mb_smoke 132/132, no survivors.
 - wke DOM GEOMETRY: wkeGetElementRect (2026-06-24). Viewport-relative bounding box (logical px) of the first selector match into *x/*y/*w/*h (any NULL OK) — wraps mbGetElementRect; compose with wkeSavePngRect (element shot) or wkeFireMouseEvent (precise click). Documented PORT EXTENSION. VERIFIED offline: a position:absolute div at 30,40 sized 120x60 reports exactly that; NULL out-params tolerated; non-match returns false. wke_smoke 46/46, mb_smoke 132/132, no survivors.
 - wke WAITS: wkeWaitForSelector + wkeWaitForFunction (2026-06-24). Pump the loop until a condition holds or timeoutMs elapses (wrap mbWaitForSelector/mbWaitForFunction) — the missing piece for SPA/dynamic content. Selector wait = first match exists; function wait = JS expr truthy (exceptions=false). Documented PORT EXTENSIONS. VERIFIED offline: a setTimeout(50ms) adds #ready / sets window.__ready2 and the waits catch them (true), while #never/window.__never time out (false). wke_smoke 45/45, mb_smoke 132/132, no survivors.
 - wke DOM ACTIONS: wkeClickSelector + wkeFillSelector + wkeSelectOption (2026-06-24). Drive the page without writing JS (wrap mbClickSelector/mbFillSelector/mbSelectOption); each returns whether it acted. Click resolves the element box + dispatches a real click; fill sets an input value and fires input+change (React-friendly); select picks a <select> option by value/visible text. Documented PORT EXTENSIONS. VERIFIED offline: #go click bumps window.__c to 1, #name fill sets .value=="Ada Lovelace" + fires oninput, #sel select sets .value=="y"; every miss returns false. wke_smoke 44/44, mb_smoke 132/132, no survivors.

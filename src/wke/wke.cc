@@ -49,6 +49,7 @@ struct _tagWkeWebView {
   bool editable = false;     // wkeSetEditable; re-applied after each load
   std::string selector_text_cache;  // backs wkeGetTextForSelector's return
   std::string selector_attr_cache;  // backs wkeGetAttribute's return
+  std::string computed_style_cache;  // backs wkeGetComputedStyle's return
 };
 
 // The last live webView, so the view-less wkePerformCookieCommand has a handle
@@ -468,6 +469,29 @@ const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,
   mbGetAttribute(webView->view, selector, attr, buf.data(), len + 1);
   webView->selector_attr_cache.assign(buf.data());
   return webView->selector_attr_cache.c_str();
+}
+
+const utf8* wkeGetComputedStyle(wkeWebView webView, const char* selector,
+                                const char* property) {
+  // Resolved computed value of CSS `property` for the first match (color ->
+  // "rgb(r, g, b)", display:none -> "none"); "" if no element matches. Owned by
+  // the view, valid until the next wkeGetComputedStyle on it. For visibility /
+  // style assertions without writing JS. (Port extension.)
+  if (!webView || !webView->view || !selector || !property) {
+    if (webView)
+      webView->computed_style_cache.clear();
+    return webView ? webView->computed_style_cache.c_str() : "";
+  }
+  const int len =
+      mbGetComputedStyle(webView->view, selector, property, nullptr, 0);
+  if (len <= 0) {  // -1 no match, or 0 empty value
+    webView->computed_style_cache.clear();
+    return webView->computed_style_cache.c_str();
+  }
+  std::vector<char> buf(static_cast<size_t>(len) + 1, 0);
+  mbGetComputedStyle(webView->view, selector, property, buf.data(), len + 1);
+  webView->computed_style_cache.assign(buf.data());
+  return webView->computed_style_cache.c_str();
 }
 
 bool wkeGetElementRect(wkeWebView webView, const char* selector, int* x, int* y,

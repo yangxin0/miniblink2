@@ -734,6 +734,20 @@ int main() {
           "wkeGetElementRect returns the element's bounding box");
   }
 
+  // wkeGetComputedStyle (offline): resolved color + display values; "" on miss.
+  {
+    wkeLoadHTML(wv, "<body><div id='d' style='color:rgb(1,2,3);display:none'>"
+                    "x</div></body>");
+    const bool color_ok =
+        std::strcmp(wkeGetComputedStyle(wv, "#d", "color"), "rgb(1, 2, 3)") == 0;
+    const bool disp_ok =
+        std::strcmp(wkeGetComputedStyle(wv, "#d", "display"), "none") == 0;
+    const bool miss_ok =
+        std::strcmp(wkeGetComputedStyle(wv, "#none", "color"), "") == 0;
+    check(color_ok && disp_ok && miss_ok,
+          "wkeGetComputedStyle returns resolved CSS values");
+  }
+
   // DOM actions (offline): click fires a handler, fill sets value + fires input,
   // select changes the <select> value; misses return false.
   {
