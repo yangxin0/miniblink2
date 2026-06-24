@@ -163,6 +163,9 @@ class MbWebView {
   // which reads the static "value" HTML attribute (the initial value). Returns
   // false if no element matches or the element has no value property.
   bool GetValueForSelector(const char* css_selector, std::string* out);
+  // The first match's .checked state: 1 checked, 0 unchecked, -1 if no element
+  // matches or it isn't a checkable control (checkbox/radio).
+  int GetCheckedForSelector(const char* css_selector);
   // Number of elements matching `css_selector` (querySelectorAll length). 0 is a
   // valid result; returns -1 on a null or syntactically invalid selector. Paired
   // with :nth-of-type(n) selectors on the per-element accessors above, this drives

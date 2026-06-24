@@ -2405,6 +2405,25 @@ int main() {
                (nomatch2 ? "1" : "0"));
   }
 
+  // 102d. mbGetCheckedForSelector: a checkbox/radio's .checked state (1/0), -1 for
+  // a non-checkable element or no match, and it tracks a click that toggles it.
+  {
+    mbLoadHTML(v,
+        "<body><input type='checkbox' id='c1' checked>"
+        "<input type='checkbox' id='c2'><div id='d'>x</div></body>",
+        "about:blank");
+    const bool init_ok = mbGetCheckedForSelector(v, "#c1") == 1 &&
+                         mbGetCheckedForSelector(v, "#c2") == 0;
+    mbClickSelector(v, "#c2");  // toggles it on
+    const bool toggled = mbGetCheckedForSelector(v, "#c2") == 1;
+    const bool noncheck = mbGetCheckedForSelector(v, "#d") == -1 &&
+                          mbGetCheckedForSelector(v, "#none") == -1;
+    Expect(init_ok && toggled && noncheck,
+           "mbGetCheckedForSelector reads .checked and tracks a toggling click",
+           std::string("init=") + (init_ok ? "1" : "0") + " toggled=" +
+               (toggled ? "1" : "0") + " noncheck=" + (noncheck ? "1" : "0"));
+  }
+
   // 102b. mbCountSelector + indexed list scraping. Count the matches, then read
   // each one via :nth-of-type(n) selectors on mbGetTextForSelector — the standard
   // "scrape a list" pattern. Also: 0 for no matches, -1 for an invalid selector.

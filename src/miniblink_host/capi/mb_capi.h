@@ -296,6 +296,11 @@ MB_EXPORT int mbGetAttribute(mbView*, const char* css_selector, const char* attr
 MB_EXPORT int mbGetValueForSelector(mbView*, const char* css_selector, char* out,
                                     int out_cap);
 
+// The .checked state of the first element matching `css_selector`: 1 if checked,
+// 0 if unchecked, -1 if no element matches or it isn't a checkable control
+// (checkbox/radio). Pairs with mbClickSelector, which toggles a checkbox.
+MB_EXPORT int mbGetCheckedForSelector(mbView*, const char* css_selector);
+
 // Number of elements matching `css_selector` (querySelectorAll length). Returns
 // the count (>=0; 0 is valid) or -1 for a null/invalid selector. Use with
 // :nth-of-type(n)/:nth-child(n) selectors on mbGetTextForSelector/mbGetAttribute

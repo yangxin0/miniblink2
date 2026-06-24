@@ -665,6 +665,22 @@ bool MbWebView::GetValueForSelector(const char* css_selector, std::string* out) 
   return true;
 }
 
+int MbWebView::GetCheckedForSelector(const char* css_selector) {
+  if (!css_selector)
+    return -1;
+  // The first match's .checked state: 1 checked, 0 unchecked, -1 if no element
+  // matches or it isn't a checkable control (.checked not a boolean). The flag
+  // string maps directly so there's no empty-vs-no-match ambiguity.
+  std::string js =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+      "\");if(!e||typeof e.checked!=='boolean')return '-1';"
+      "return e.checked?'1':'0';})()";
+  std::string s = EvalToString(js.c_str());
+  if (s.empty())
+    return -1;
+  return std::atoi(s.c_str());
+}
+
 int MbWebView::CountSelector(const char* css_selector) {
   if (!css_selector)
     return -1;

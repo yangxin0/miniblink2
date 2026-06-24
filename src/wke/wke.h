@@ -204,6 +204,9 @@ WKE_API const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,
 // "" on no match or no value property; owned by the view until the next call.
 WKE_API const utf8* wkeGetValueForSelector(wkeWebView webView,
                                            const char* selector);
+// The first match's .checked state: 1 checked, 0 unchecked, -1 on no match or a
+// non-checkable element. Pairs with wkeClickSelector (which toggles a checkbox).
+WKE_API int wkeGetCheckedForSelector(wkeWebView webView, const char* selector);
 // Write the first match's viewport-relative bounding box (logical px) into
 // *x/*y/*w/*h (any may be NULL); returns whether an element matched. Compose
 // with wkeSavePngRect for an element screenshot or with wkeFireMouseEvent for a

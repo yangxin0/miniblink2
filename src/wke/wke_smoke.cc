@@ -1078,6 +1078,23 @@ int main() {
           "wkeGetValueForSelector reads live .value (distinct from the attribute)");
   }
 
+  // wkeGetCheckedForSelector reports a checkbox/radio's live .checked state
+  // (1/0), -1 for a non-checkable element, and tracks a click that toggles it.
+  {
+    wkeLoadHTML(wv,
+                "<body><input type='checkbox' id='c1' checked>"
+                "<input type='checkbox' id='c2'>"
+                "<div id='d'>x</div></body>");
+    const bool init_ok = wkeGetCheckedForSelector(wv, "#c1") == 1 &&
+                         wkeGetCheckedForSelector(wv, "#c2") == 0;
+    wkeClickSelector(wv, "#c2");  // toggles it on
+    const bool toggled = wkeGetCheckedForSelector(wv, "#c2") == 1;
+    const bool noncheck_ok = wkeGetCheckedForSelector(wv, "#d") == -1 &&
+                             wkeGetCheckedForSelector(wv, "#none") == -1;
+    check(init_ok && toggled && noncheck_ok,
+          "wkeGetCheckedForSelector reads .checked and tracks a toggling click");
+  }
+
   // wkeScrollIntoView (offline): a target far below the fold scrolls into the
   // viewport (scrollY rises from 0, and the element's box lands within height).
   {
