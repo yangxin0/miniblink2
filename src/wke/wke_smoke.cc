@@ -322,6 +322,17 @@ int main() {
           "jsEmptyObject/Array + jsSet/jsSetAt/jsSetGlobal build & pass values");
   }
 
+  // Cookies (offline): a fresh view's current doc (about:blank) has no jar
+  // cookies; the setter + clear-command exercise their paths without crashing.
+  {
+    const bool empty_ok = std::strcmp(wkeGetCookie(wv), "") == 0;
+    wkeSetCookie(wv, "http://wke.test/", "wkesid=abc123");  // injects into jar
+    wkePerformCookieCommand(wkeCookieCommandClearAllCookies);  // null-safe drive
+    const bool still_empty = std::strcmp(wkeGetCookie(wv), "") == 0;  // not page url
+    check(empty_ok && still_empty,
+          "wkeGetCookie/wkeSetCookie/wkePerformCookieCommand are safe + consistent");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {
@@ -334,6 +345,19 @@ int main() {
             "wkePostURL posts a body (httpbin echoes it)");
     } else {
       std::printf("  [SKIP] wkePostURL (host unreachable)\n");
+    }
+
+    // Cookie round-trip: httpbin sets a cookie, then wkeGetCookie reads it back
+    // from the jar for the (now httpbin) current URL; the clear command drops it.
+    wkeLoadURL(wv, "http://httpbin.org/cookies/set?wkeck=ok42");
+    if (wkeIsLoadingSucceeded(wv)) {
+      const bool set_ok = std::strstr(wkeGetCookie(wv), "wkeck=ok42") != nullptr;
+      wkePerformCookieCommand(wkeCookieCommandClearAllCookies);
+      const bool cleared = std::strstr(wkeGetCookie(wv), "wkeck") == nullptr;
+      check(set_ok && cleared,
+            "wkeGetCookie reads a server-set cookie; clear command drops it");
+    } else {
+      std::printf("  [SKIP] wkeGetCookie round-trip (host unreachable)\n");
     }
   }
 

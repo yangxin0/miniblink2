@@ -39,7 +39,14 @@ struct _tagWkeWebView {
   wkeDocumentReadyCallback on_document_ready = nullptr;
   void* document_ready_param = nullptr;
   std::string source_cache;  // backs wkeGetSource's const utf8* return
+  std::string cookie_cache;  // backs wkeGetCookie's const utf8* return
 };
+
+// The last live webView, so the view-less wkePerformCookieCommand has a handle
+// to drive the (process-wide) cookie jar. Set on create, cleared on destroy.
+namespace {
+wkeWebView g_last_webview = nullptr;
+}  // namespace
 
 namespace {
 bool IsHttpUrl(const utf8* url) {
@@ -128,12 +135,15 @@ wkeWebView wkeCreateWebView(void) {
     delete wv;
     return nullptr;
   }
+  g_last_webview = wv;
   return wv;
 }
 
 void wkeDestroyWebView(wkeWebView webView) {
   if (!webView)
     return;
+  if (g_last_webview == webView)
+    g_last_webview = nullptr;
   if (webView->view)
     mbDestroyView(webView->view);
   delete webView;
@@ -297,6 +307,42 @@ const utf8* wkeGetSource(wkeWebView webView) {
   mbGetHTML(webView->view, buf.data(), len + 1);
   webView->source_cache.assign(buf.data());
   return webView->source_cache.c_str();
+}
+
+// --- Cookies (wrap the libcurl jar via mb_capi) --------------------------------
+const utf8* wkeGetCookie(wkeWebView webView) {
+  if (!webView || !webView->view)
+    return "";
+  char url[4096] = {0};
+  mbGetURL(webView->view, url, sizeof(url));  // cookies for the current document
+  std::vector<char> buf(1 << 14, 0);          // 16 KiB; cookie strings are small
+  mbGetCookies(webView->view, url, buf.data(), static_cast<int>(buf.size()));
+  webView->cookie_cache.assign(buf.data());
+  return webView->cookie_cache.c_str();
+}
+
+void wkeSetCookie(wkeWebView webView, const utf8* url, const utf8* cookie) {
+  // `cookie` is a single "name=value[; Path=/; Domain=...]" set-cookie string.
+  if (webView && webView->view && url && cookie)
+    mbSetCookie(webView->view, url, cookie);
+}
+
+void wkePerformCookieCommand(wkeCookieCommand command) {
+  // The jar is process-wide; drive it through the last live webView. The two
+  // clear commands map to a full jar reset (we don't distinguish session vs
+  // persistent cookies). The file flush/reload commands need a configured jar
+  // path (no wke setter yet), so they are currently no-ops.
+  if (!g_last_webview || !g_last_webview->view)
+    return;
+  switch (command) {
+    case wkeCookieCommandClearAllCookies:
+    case wkeCookieCommandClearSessionCookies:
+      mbClearCookies(g_last_webview->view);
+      return;
+    case wkeCookieCommandFlushCookiesToFile:
+    case wkeCookieCommandReloadCookiesFromFile:
+      return;  // no jar-path API wired yet
+  }
 }
 
 bool wkeFireMouseEvent(wkeWebView webView, unsigned int message, int x, int y,

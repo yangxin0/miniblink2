@@ -126,6 +126,25 @@ WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);
 // Owned by the view, valid until the next wkeGetSource on it.
 WKE_API const utf8* wkeGetSource(wkeWebView webView);
 
+// Cookies, backed by the (process-wide) libcurl cookie jar.
+// wkeGetCookie returns the jar's cookies for the CURRENT document's URL as
+// "name=value; name2=value2" (owned by the view, valid until the next call).
+// wkeSetCookie injects a single "name=value[; Path=/; Domain=...]" set-cookie
+// string for `url`'s origin — useful for restoring a saved session.
+WKE_API const utf8* wkeGetCookie(wkeWebView webView);
+WKE_API void wkeSetCookie(wkeWebView webView, const utf8* url,
+                          const utf8* cookie);
+// wkePerformCookieCommand drives the whole jar (no view: it acts on the last
+// live webView). The clear commands reset the jar; the file flush/reload
+// commands are not yet wired (no jar-path setter) and are currently no-ops.
+typedef enum _wkeCookieCommand {
+  wkeCookieCommandClearAllCookies,
+  wkeCookieCommandClearSessionCookies,
+  wkeCookieCommandFlushCookiesToFile,
+  wkeCookieCommandReloadCookiesFromFile,
+} wkeCookieCommand;
+WKE_API void wkePerformCookieCommand(wkeCookieCommand command);
+
 // --- Input ---------------------------------------------------------------------
 // Deliver a mouse event at (x, y). `message` is one of the WKE_MSG_* codes;
 // `flags` carries WKE_LBUTTON/etc. (currently advisory). Supported in this slice:
