@@ -2219,6 +2219,14 @@ int main() {
     Expect(std::string(cb).find("sid=abc123") != std::string::npos &&
                std::string(cb).find("theme=dark") != std::string::npos,
            "mbSetCookie injects cookies that mbGetCookies reads back", cb);
+    // mbGetCookie reads one cookie by name; an absent name returns -1.
+    char one[64] = {0};
+    const int slen = mbGetCookie(v, kurl, "sid", one, sizeof(one));
+    const bool one_ok = slen == 6 && std::string(one) == "abc123";
+    const bool absent = mbGetCookie(v, kurl, "nope", one, sizeof(one)) == -1;
+    Expect(one_ok && absent,
+           "mbGetCookie reads a single cookie by name (-1 when absent)",
+           std::string("sid=") + one + " absent=" + (absent ? "1" : "0"));
     mbClearCookies(v);
     char cb2[512] = {0};
     mbGetCookies(v, kurl, cb2, sizeof(cb2));

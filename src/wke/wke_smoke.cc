@@ -627,6 +627,19 @@ int main() {
           "wkeGetCookie/wkeSetCookie/wkePerformCookieCommand are safe + consistent");
   }
 
+  // wkeGetCookieValue (offline): inject a cookie for an origin, navigate there so
+  // it's the current document, and read that one cookie by name; absent -> "".
+  {
+    wkePerformCookieCommand(wkeCookieCommandClearAllCookies);
+    wkeSetCookie(wv, "http://ckval.test/", "auth=tok9");
+    wkeLoadHtmlWithBaseUrl(wv, "<body>x</body>", "http://ckval.test/");
+    const bool got = std::strcmp(wkeGetCookieValue(wv, "auth"), "tok9") == 0;
+    const bool absent = std::strcmp(wkeGetCookieValue(wv, "nope"), "") == 0;
+    check(got && absent,
+          "wkeGetCookieValue reads one cookie by name for the current document");
+    wkePerformCookieCommand(wkeCookieCommandClearAllCookies);
+  }
+
   // wkeGetAllCookie (offline): the whole jar (Netscape format) lists an injected
   // cookie regardless of the current document URL (unlike wkeGetCookie).
   {

@@ -687,6 +687,32 @@ std::string MbWebView::GetCookies(const char* url) {
   return url ? MbGetCookiesForUrl(url) : std::string();
 }
 
+bool MbWebView::GetCookieValue(const char* url, const char* name,
+                               std::string* out) {
+  if (!url || !name || !*name)
+    return false;
+  // Pull one cookie's value out of the "n1=v1; n2=v2" jar string for `url` (the
+  // common "read the session/auth cookie" check, without caller-side parsing).
+  // Returns false if `name` isn't present; an empty value (name=) returns true.
+  const std::string jar = MbGetCookiesForUrl(url);
+  const std::string key(name);
+  for (size_t i = 0; i < jar.size();) {
+    size_t semi = jar.find("; ", i);
+    const std::string tok =
+        jar.substr(i, semi == std::string::npos ? std::string::npos : semi - i);
+    const size_t eq = tok.find('=');
+    if (eq != std::string::npos && tok.substr(0, eq) == key) {
+      if (out)
+        *out = tok.substr(eq + 1);
+      return true;
+    }
+    if (semi == std::string::npos)
+      break;
+    i = semi + 2;
+  }
+  return false;
+}
+
 std::string MbWebView::GetAllCookies() {
   return MbGetAllCookies();  // whole jar as a Netscape cookie file (in memory)
 }

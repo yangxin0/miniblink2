@@ -354,6 +354,9 @@ WKE_API const utf8* wkeGetResponseHeaders(wkeWebView webView);
 // wkeSetCookie injects a single "name=value[; Path=/; Domain=...]" set-cookie
 // string for `url`'s origin — useful for restoring a saved session.
 WKE_API const utf8* wkeGetCookie(wkeWebView webView);
+// The value of a single cookie `name` for the current document ("" if absent) —
+// e.g. read the session/auth cookie. Owned by the view. Port extension.
+WKE_API const utf8* wkeGetCookieValue(wkeWebView webView, const utf8* name);
 // The WHOLE cookie jar (every host, session + persistent) as a Netscape cookie
 // file, in memory — for full session export without a temp file. Owned by the
 // view, valid until the next wkeGetAllCookie on it. Port extension.

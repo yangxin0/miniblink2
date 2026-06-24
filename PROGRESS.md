@@ -63,7 +63,7 @@ the deliverable surface (C API, CLI, wke layer).
   blob: URLs (`fetch` + `<img>`), Intersection/Resize/Mutation observers, WAAPI,
   forms + submit-navigation, mouse/keyboard input, host-side history. CJK/i18n +
   system web fonts render.
-- **`mb_capi` C API — 109 functions:** lifecycle, load, JS eval, scraping
+- **`mb_capi` C API — 110 functions:** lifecycle, load, JS eval, scraping
   (text/attr/computed-style/count by selector), input (mouse/key/text/scroll +
   click/fill/select/focus/hover/scroll-into-view by selector), screenshots
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
@@ -107,7 +107,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **161/161** (default, network-free), `wke_smoke` **99/99**,
+- **Tests:** `mb_smoke` **162/162** (default, network-free), `wke_smoke` **100/100**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -125,6 +125,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- capi+wke: mbGetCookie / wkeGetCookieValue — read one cookie by name (2026-06-25). Convenience over mbGetCookies' whole-jar string for the common "read the session/auth cookie to check login" check — host-side parse of the "n=v; n2=v2" jar; -1 (capi) / "" (wke) when the name is absent. wke variant uses the current document URL (like wkeGetCookie). VERIFIED offline (in-memory jar): set sid/theme -> mbGetCookie("sid")=="abc123", missing->-1; wke set+navigate to the origin -> wkeGetCookieValue("auth")=="tok9". wke_smoke 100/100 (milestone), mb_smoke 162/162, no survivors. ABI now 110 fns.
 - capi: mbGetViewSize — viewport size read-back (2026-06-25). The C ABI could SET the view size (mbCreateView/mbResize) but not read it (wke already had wkeGetWidth/Height; mb_capi had no peer — a gap I hit building SaveElementPng). Reads window.innerWidth/Height (logical px, DPR-independent), the read-back peer of mbResize, distinct from mbGetContentSize (full scrollable doc). VERIFIED: mbResize(640,480) -> mbGetViewSize reads 640x480. No wke change (it has the getters). wke_smoke 99/99, mb_smoke 161/161, no survivors. ABI now 109 fns.
 - capi+wke: mbClearStorage / wkeClearStorage — reset Web Storage (2026-06-25). Completes the storage surface (get/set local+session, now clear): empties BOTH localStorage and sessionStorage for the document origin — test isolation between scrapes, or a logout. Best-effort per store (opaque-origin throw ignored); the cookie-jar peer mbClearCookies + this = a full session reset. Safe eval-based (no native-API risk). VERIFIED in both suites: after setting local 'auth'/'pref' + session 'sk', mbClearStorage -> localStorage.length==0 && sessionStorage.length==0. wke_smoke 99/99, mb_smoke 160/160, no survivors. ABI now 108 fns.
 - maint: trim the Recent log into the archive (2026-06-25). PROGRESS.md had grown to 93KB / 164 log entries — loaded into context every iteration. Moved the 122 oldest recent-log entries (the bulk of the 2026-06-24 per-tick log) into docs/progress-archive-2026-06.md under a dated "archived 2026-06-25" header, keeping the ~20 newest + the "earlier:" rollup here. Conservation checked (21 kept + 122 moved = 143; spot-checked a moved entry is in the archive and gone from here). PROGRESS.md now 24KB. Docs-only — no code, suites unchanged (mb_smoke 159/159, wke_smoke 98/98).

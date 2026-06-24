@@ -161,6 +161,9 @@ class MbWebView {
   std::string DrainConsole();
   // Return the HTTP cookie jar's cookies for `url` ("name=value; ..."), for session export.
   std::string GetCookies(const char* url);
+  // The value of a single cookie `name` for `url` (vs GetCookies' whole jar
+  // string) — e.g. read the session/auth cookie. False if `name` is absent.
+  bool GetCookieValue(const char* url, const char* name, std::string* out);
   // Return the WHOLE jar (every host, session + persistent) as a Netscape cookie
   // file, in memory — for full session export without a temp file.
   std::string GetAllCookies();

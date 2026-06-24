@@ -307,6 +307,12 @@ MB_EXPORT int mbScrollToBottom(mbView*, int max_steps);
 // Returns the full length in bytes; empty for non-http(s) URLs.
 MB_EXPORT int mbGetCookies(mbView*, const char* url, char* out, int out_cap);
 
+// Write the value of a single cookie `name` for `url` into `out` (vs mbGetCookies'
+// whole jar) — e.g. read the session/auth cookie to check login state without
+// parsing. Returns the value length (>=0), or -1 if `name` isn't set for `url`.
+MB_EXPORT int mbGetCookie(mbView*, const char* url, const char* name, char* out,
+                          int out_cap);
+
 // Write the WHOLE cookie jar (every host, session + persistent) into `out` as a
 // Netscape cookie file (NUL-terminated, up to out_cap; size first with
 // out=NULL/out_cap=0). Returns the full length. For exporting an entire session

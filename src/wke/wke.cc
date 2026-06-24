@@ -1070,6 +1070,27 @@ const utf8* wkeGetCookie(wkeWebView webView) {
   return webView->cookie_cache.c_str();
 }
 
+const utf8* wkeGetCookieValue(wkeWebView webView, const utf8* name) {
+  // The value of a single cookie `name` for the current document ("" if absent) —
+  // e.g. read the session/auth cookie. Owned by the view. (Port extension.)
+  if (!webView || !webView->view || !name) {
+    if (webView)
+      webView->cookie_cache.clear();
+    return webView ? webView->cookie_cache.c_str() : "";
+  }
+  char url[4096] = {0};
+  mbGetURL(webView->view, url, sizeof(url));
+  const int len = mbGetCookie(webView->view, url, name, nullptr, 0);
+  if (len < 0) {  // not set
+    webView->cookie_cache.clear();
+    return webView->cookie_cache.c_str();
+  }
+  std::vector<char> buf(static_cast<size_t>(len) + 1, 0);
+  mbGetCookie(webView->view, url, name, buf.data(), len + 1);
+  webView->cookie_cache.assign(buf.data(), len);
+  return webView->cookie_cache.c_str();
+}
+
 const utf8* wkeGetAllCookie(wkeWebView webView) {
   // The WHOLE jar (every host, session + persistent) as a Netscape cookie file,
   // in memory — for full session export. Owned by the view, valid until the next
