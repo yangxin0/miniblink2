@@ -99,6 +99,28 @@ int main() {
   check(jsToInt(es, wkeRunJS(wv, "window.__sub|0")) == 1,
         "wkeFireKeyDownEvent Enter triggers the form submit handler");
 
+  // Navigation history: load two distinct file pages, then go back/forward and
+  // confirm the title follows. (file:// gives distinct URLs the history records.)
+  if (FILE* fa = std::fopen("/tmp/wke_nav_a.html", "wb")) {
+    std::fputs("<title>PageA</title><body>a</body>", fa);
+    std::fclose(fa);
+  }
+  if (FILE* fb = std::fopen("/tmp/wke_nav_b.html", "wb")) {
+    std::fputs("<title>PageB</title><body>b</body>", fb);
+    std::fclose(fb);
+  }
+  wkeLoadURL(wv, "file:///tmp/wke_nav_a.html");
+  wkeLoadURL(wv, "file:///tmp/wke_nav_b.html");
+  const bool on_b = std::strcmp(wkeGetTitle(wv), "PageB") == 0;
+  const bool can_back = wkeCanGoBack(wv);
+  wkeGoBack(wv);
+  const bool back_a = std::strcmp(wkeGetTitle(wv), "PageA") == 0;
+  const bool can_fwd = wkeCanGoForward(wv);
+  wkeGoForward(wv);
+  const bool fwd_b = std::strcmp(wkeGetTitle(wv), "PageB") == 0;
+  check(on_b && can_back && back_a && can_fwd && fwd_b,
+        "wkeGoBack/GoForward navigate the history (A<->B)");
+
   wkeDestroyWebView(wv);
   wkeFinalize();
 

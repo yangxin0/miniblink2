@@ -78,6 +78,15 @@ WKE_API void wkeLoadURL(wkeWebView webView, const utf8* url);
 WKE_API void wkeLoadHTML(wkeWebView webView, const utf8* html);
 WKE_API void wkeReload(wkeWebView webView);
 
+// --- Navigation history --------------------------------------------------------
+// Back/forward over the view's navigation history. The Can* queries report
+// whether a step is available; wkeGoBack/wkeGoForward perform it (re-navigating to
+// that entry's URL) and return true on success.
+WKE_API bool wkeCanGoBack(wkeWebView webView);
+WKE_API bool wkeGoBack(wkeWebView webView);
+WKE_API bool wkeCanGoForward(wkeWebView webView);
+WKE_API bool wkeGoForward(wkeWebView webView);
+
 // --- Loading state (poll these; load is synchronous in this slice) -------------
 WKE_API bool wkeIsLoading(wkeWebView webView);
 WKE_API bool wkeIsLoadingCompleted(wkeWebView webView);

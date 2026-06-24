@@ -80,6 +80,28 @@ void wkeReload(wkeWebView webView) {
     mbReload(webView->view);
 }
 
+bool wkeCanGoBack(wkeWebView webView) {
+  return webView && webView->view && mbCanGoBack(webView->view);
+}
+
+bool wkeGoBack(wkeWebView webView) {
+  if (!webView || !webView->view || !mbGoBack(webView->view))
+    return false;
+  mbWait(webView->view, 30);  // settle the re-navigation (synchronous load model)
+  return true;
+}
+
+bool wkeCanGoForward(wkeWebView webView) {
+  return webView && webView->view && mbCanGoForward(webView->view);
+}
+
+bool wkeGoForward(wkeWebView webView) {
+  if (!webView || !webView->view || !mbGoForward(webView->view))
+    return false;
+  mbWait(webView->view, 30);
+  return true;
+}
+
 bool wkeIsLoading(wkeWebView /*webView*/) {
   // The load is synchronous here: by the time wkeLoadURL/wkeLoadHTML returns the
   // document is committed, so nothing is ever still loading.
