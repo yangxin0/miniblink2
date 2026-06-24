@@ -168,6 +168,12 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   if (!curl)
     return false;
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  // Host-configured proxy (mbSetProxy). When set, applies to every request — an
+  // explicit "" forces a direct connection (overriding *_proxy env vars). When
+  // never set, libcurl's default proxy resolution (env vars) is left untouched.
+  std::string proxy;
+  if (mb::MbProxyConfigured(&proxy))
+    curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str());
   std::string header_block;  // final response's raw header lines (for the caller)
   curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, CurlHeaderWrite);
   curl_easy_setopt(curl, CURLOPT_HEADERDATA, &header_block);
@@ -318,6 +324,30 @@ const std::string& MbDefaultUserAgent() {
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36");
   return *kUa;
+}
+
+namespace {
+// Process-wide proxy. Set on the main thread (host config) before navigating;
+// read on the fetch path. A NoDestructor string (no exit-time dtor) plus a flag
+// distinguishing "never set" (honor libcurl defaults) from "set to ''" (force
+// direct). The single bool is touched only around config + fetch on the same
+// thread, so no synchronization is needed beyond the cookie jar's existing model.
+std::string& ProxyStorage() {
+  static base::NoDestructor<std::string> s;
+  return *s;
+}
+bool g_proxy_set = false;
+}  // namespace
+
+void MbSetProxy(const std::string& proxy) {
+  ProxyStorage() = proxy;
+  g_proxy_set = true;
+}
+
+bool MbProxyConfigured(std::string* out) {
+  if (g_proxy_set && out)
+    *out = ProxyStorage();
+  return g_proxy_set;
 }
 
 namespace {

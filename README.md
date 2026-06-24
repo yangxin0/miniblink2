@@ -49,7 +49,7 @@ The deliverable example app — a standalone headless screenshot renderer:
 
 ```sh
 mb_shot [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
-        [--wait-selector CSS] [--fill CSS TEXT] [--click CSS] [--wait-ms N] [--eval JS] [--console] [--header "N: V"] [--text] [--html] [--no-images] [--dark] [--lang L,L2] [--tz Area/City] \
+        [--wait-selector CSS] [--fill CSS TEXT] [--click CSS] [--wait-ms N] [--eval JS] [--console] [--header "N: V"] [--proxy URL] [--text] [--html] [--no-images] [--dark] [--lang L,L2] [--tz Area/City] \
         <input.html | file://URL | http(s)://URL> <out.png> [width height]
 ```
 
@@ -93,7 +93,8 @@ interact first, then extract.
 `--no-images` disables network image loading (faster text/HTML scraping; inline `data:`
 images are unaffected). `--dark` emulates `prefers-color-scheme: dark` so pages render their
 dark theme. `--lang "fr-FR,fr,en"` sets `navigator.language(s)` for locale-aware pages, and
-`--tz "America/New_York"` overrides the timezone for `Date`/`Intl`.
+`--tz "America/New_York"` overrides the timezone for `Date`/`Intl`. `--proxy
+"http://host:port"` (or `socks5://host:port`) routes all network fetches through a proxy.
 
 The output format follows the file extension: `.png` (lossless, alpha), `.jpg`/`.jpeg`
 (quality 90, much smaller), or `.pdf` (a paginated US-Letter PDF via Blink's print path) —

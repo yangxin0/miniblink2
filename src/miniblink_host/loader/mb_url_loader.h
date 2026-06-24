@@ -45,6 +45,17 @@ std::string MbGetCookiesForUrl(const std::string& url);
 // Erase all cookies from the shared HTTP jar (e.g. to reset a session).
 void MbClearCookieJar();
 
+// Process-wide HTTP(S) proxy for all network fetches, as a libcurl proxy string:
+// "http://host:port", "socks5://host:port", "host:port" (defaults to http), or
+// "" to force a direct connection (overriding any *_proxy env vars). Once set
+// (even to ""), the choice is applied to every request; if never set, libcurl's
+// default proxy resolution (env vars) is honored. Affects http(s) only — file://
+// and data: are served directly.
+void MbSetProxy(const std::string& proxy);
+// If a proxy was explicitly set, copies it into *out and returns true; otherwise
+// returns false (honor libcurl defaults). Used by the fetch path.
+bool MbProxyConfigured(std::string* out);
+
 // Fetch a file:// or http(s):// URL into `body` (+ server Content-Type if any).
 // Shared by the subresource loader and the top-level navigation in MbWebView::LoadURL.
 // `user_agent` sets the HTTP User-Agent (empty -> MbDefaultUserAgent()).

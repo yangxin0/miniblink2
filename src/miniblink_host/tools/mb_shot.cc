@@ -62,6 +62,7 @@ int main(int argc, char** argv) {
   std::string fill_selector;   // fill this field before capture (with fill_text)
   std::string fill_text;       // value for --fill
   std::string eval_js;         // JS to run after load; result printed to stdout
+  std::string proxy;           // libcurl proxy string for network fetches
   int wait_ms = 0;            // fixed wait before capture
   std::vector<const char*> pos;  // positional args, flags filtered out
   for (int i = 1; i < argc; ++i) {
@@ -87,6 +88,8 @@ int main(int argc, char** argv) {
       fill_text = argv[++i];
     } else if (a == "--eval" && i + 1 < argc) {
       eval_js = argv[++i];
+    } else if (a == "--proxy" && i + 1 < argc) {
+      proxy = argv[++i];
     } else if (a == "--wait-ms" && i + 1 < argc) {
       wait_ms = std::atoi(argv[++i]);
     } else if (a == "--console") {
@@ -116,7 +119,7 @@ int main(int argc, char** argv) {
         stderr,
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
         "[--transparent] [--text] [--html] [--eval JS] [--fill CSS TEXT] "
-        "[--click CSS] [--wait-selector CSS] [--wait-ms N] "
+        "[--click CSS] [--wait-selector CSS] [--wait-ms N] [--proxy URL] "
         "<input.html|file://URL|http(s)://URL> <out.png> [width height]\n",
         argv[0]);
     return 2;
@@ -149,6 +152,8 @@ int main(int argc, char** argv) {
     mbSetTimezone(view, tz.c_str());  // Date/Intl timezone
   if (!headers.empty())
     mbSetExtraHeaders(view, headers.c_str());  // before load so the navigation uses them
+  if (!proxy.empty())
+    mbSetProxy(proxy.c_str());  // route fetches through the proxy (process-wide)
 
   const bool is_http = input.rfind("http", 0) == 0;
   if (input.rfind("file://", 0) == 0 || is_http) {

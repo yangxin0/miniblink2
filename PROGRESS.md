@@ -2026,6 +2026,19 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   mbWaitForFunction (waits out the async nav); 128/128 deterministic across 2 runs, no survivors.
   Test-only, lib unchanged.
 
+- ✅ DONE: proxy support — mbSetProxy + mb_shot --proxy (2026-06-24). A genuinely MISSING capability
+  (not another read helper): the libcurl loader configured URL/headers/UA/cookies but had no
+  CURLOPT_PROXY, so a headless scraper/automator couldn't route through a proxy — a core need, and
+  also wke parity (wkeSetProxy). Process-wide (matches the single-proxy common case + the shared
+  loader): mb::MbSetProxy/MbProxyConfigured in mb_url_loader (NoDestructor string + a set-flag that
+  distinguishes "never set" = honor env from "set to ''" = force direct), applied via CURLOPT_PROXY in
+  FetchHttp only when configured (so the default path is byte-for-byte unchanged — no regression).
+  C API mbSetProxy(const char*) (NULL/""=direct) + mb_shot --proxy URL (libcurl string: http://,
+  socks5://, or host:port). VERIFIED end-to-end via an A/B against a real host: no proxy -> example.com
+  loads ("Example Domain", 544B); --proxy http://127.0.0.1:1 (dead) -> fetch FAILS (39B empty doc +
+  warning), proving the proxy is actually applied to the request. Full default smoke still 128/128
+  (network-free, proxy never set), no survivors. README + usage updated. C API now 62 fns.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

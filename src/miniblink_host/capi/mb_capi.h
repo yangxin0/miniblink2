@@ -135,6 +135,13 @@ MB_EXPORT void mbSetDeviceScaleFactor(mbView*, float scale);
 // restore the built-in default.
 MB_EXPORT void mbSetUserAgent(mbView*, const char* utf8_ua);
 
+// Route all network fetches through a proxy (process-wide; no view param). `proxy`
+// is a libcurl proxy string: "http://host:port", "socks5://host:port", or
+// "host:port" (http assumed). NULL or "" forces a direct connection (overriding
+// *_proxy env vars); never calling this honors libcurl's env-var defaults. Affects
+// http(s) only — file:// and data: are served directly. Set before navigating.
+MB_EXPORT void mbSetProxy(const char* proxy);
+
 // Capture with a transparent background (1) or opaque white (0, default). With
 // transparency on, areas the page does not paint keep alpha 0 in the output.
 MB_EXPORT void mbSetTransparentBackground(mbView*, int transparent);

@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 
+#include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/runtime/mb_runtime.h"
 #include "miniblink_host/view/mb_webview.h"
 
@@ -163,6 +164,13 @@ void mbSetDeviceScaleFactor(mbView* v, float scale) {
 void mbSetUserAgent(mbView* v, const char* utf8_ua) {
   if (v && v->impl)
     v->impl->SetUserAgent(utf8_ua);
+}
+
+void mbSetProxy(const char* proxy) {
+  // Process-wide (no view param): applies to every network fetch. A proxy string
+  // routes traffic through it; NULL or "" forces a direct connection (overriding
+  // *_proxy env vars). Never calling this honors libcurl's env-var defaults.
+  mb::MbSetProxy(proxy ? proxy : "");
 }
 
 void mbSetTransparentBackground(mbView* v, int transparent) {
