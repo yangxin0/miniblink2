@@ -69,12 +69,20 @@ the deliverable surface (C API, CLI, wke layer).
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
   network config (proxy / cert-bypass / follow-redirects / status / response-headers),
   config (UA/headers/locale/tz/dark/DPR/transparent/images), history.
-- **`mb_shot` CLI (the deliverable tool):** a full scraper/automator — interact
-  (`--fill`/`--click`/`--drag`/`--dispatch`/`--wait-selector`/`--wait-visible`/
-  `--wait-hidden`/`--wait-idle`/`--css`/`--auto-scroll`/`--wait-ms`) → extract (`--text`/`--html`/`--eval`/`--value`/`--checked`/
-  `--visible`/`--rect`/`--style`/`--text-all`/`--attr-all`/`--requests`) → capture (`--full`/`--clip`/
-  `--selector`); plus `--proxy`/`--insecure`/`--no-follow`/`--headers`/
-  `--block`/`--user-agent`/`--set-cookie`/`--load-cookies`/`--save-cookies`.
+- **`mb_shot` CLI (the deliverable tool) — 58 flags, phase-ordered:** a full
+  scraper/automator. Request-config: `--user-agent`(`--ua`)/`--header`/`--proxy`/
+  `--insecure`/`--no-follow`/`--no-images`/`--post`/`--block`/`--dark`/`--lang`/
+  `--tz`/`--set-cookie`/`--load-cookies`/`--save-cookies`. Interact:
+  `--fill`/`--click`/`--drag`/`--dispatch`/`--press`. Synchronize:
+  `--wait-selector`/`--wait-visible`/`--wait-hidden`/`--wait-eval`/`--wait-idle`/
+  `--wait-ms`. Prepare-view: `--css`/`--auto-scroll`/`--scroll-to`/
+  `--scroll-to-selector`. Extract (to stdout): `--text`/`--html`/`--html-for`/
+  `--title`/`--url`/`--eval`/`--value`/`--checked`/`--count`/`--visible`/`--rect`/
+  `--style`/`--attr`/`--text-all`/`--attr-all`/`--cookies`/`--local-storage`/
+  `--session-storage`/`--requests`/`--console`/`--headers`. Capture:
+  `--full`/`--scale`/`--mobile`/`--clip`/`--selector`/`--transparent` (PNG/JPEG/PDF
+  by out extension). Assert (scripting): `--require` (exit 3 if absent). Exit codes:
+  0 ok / 1 load+capture fail (incl. a missing local input file) / 2 usage / 3 require.
 - **wke compatibility layer (`src/wke/`):** a faithful subset over `mb_capi` covering
   the full headless-automation surface — lifecycle, load, loading-state polling,
   paint (`wkePaint`), PDF/PNG export (`wkeSavePdf`/`wkeSavePng`/
@@ -129,6 +137,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- docs: refresh the stale CURRENT STATE mb_shot bullet (now all 58 flags) (2026-06-25). The loop-state "read first" doc's CLI section had drifted ~15 flags behind the binary over the recent run (missing --attr/--count/--title/--url/--cookies/--html-for/--press/--wait-eval/--require/--mobile/--local+session-storage/--scroll-to*/--console/--transparent/--scale/--dark/--lang/--tz/--no-images/--post/--header). Rewrote it phase-ordered (request-config / interact / synchronize / prepare-view / extract / capture / assert) covering all 58, plus the exit-code contract (0/1/2/3). Cross-checked programmatically: 0 of 58 flags missing from the bullet. Docs-only (git: just PROGRESS.md); binaries + suites unchanged, mb_smoke 176/176, wke_smoke 100/100, no survivors. ABI unchanged (108).
 - test: lock in --mobile + --full composition (full-page mobile screenshot) (2026-06-25). The full-page mobile screenshot is a top real workflow, and --mobile (narrow view) composing with --full (resize to content height) could interact badly. Verified it doesn't: a tall responsive page under --mobile --full keeps innerWidth 390, captures the full height (PNG 1170x4620 = 390x3 wide by 1540x3 tall), and applies the mobile media-query rule (marker rgb(0,255,0)). Locked in as an mb_shot_smoke case (now 29/29) asserting innerWidth 390 + full-height available + mobile rule via --eval. Test-only (git: just the .sh); binaries + lib unchanged, mb_smoke 176/176, wke_smoke 100/100. no survivors. ABI unchanged (108).
 - mb_shot: --mobile — one-flag phone emulation preset (2026-06-25). Builds on last tick's verified recipe (mobile = narrow view + mobile UA, since width media queries track the view size). --mobile presets a 390x844 viewport + devicePixelRatio 3 + an iPhone Safari UA. Override semantics: an explicit width/height positional, --scale, or --user-agent each still wins (tracked scale_set so --scale 1 isn't mistaken for the default). No new ABI. VERIFIED: --mobile alone -> innerWidth 390, DPR 3, /iPhone/ UA true, @media(max-width:500px) mobile rule rgb(2,2,2); --mobile 700 500 --scale 1 --user-agent Custom -> 700/DPR1/CustomUA/desktop rule (all overrides win). Added mb_shot_smoke case (now 28/28). mb_smoke 176/176, wke_smoke 100/100, no survivors. ABI unchanged (108).
 - test: characterize viewport handling — media queries track view size; <meta viewport> ignored (2026-06-25). Probed mobile-emulation viability. Finding: <meta name=viewport content="width=980"> is IGNORED (innerWidth stays at the view width 400, not 980) — desktop-mode WebView, layout viewport == view size. BUT the practically-important path works: width media queries track the VIEW width, so a narrow view renders the mobile layout. Clean A/B: @media(max-width:500px) -> view 400 gives the mobile rule rgb(2,2,2), view 800 gives the desktop rule rgb(1,1,1). Locked both in as mb_smoke case 14d (narrow/wide media-query flip + innerWidth==400 under a width=980 meta), and recorded the <meta viewport>-ignored limitation under Known gaps. So mobile screenshots = set a narrow view (+ mobile UA); viewport-meta-driven layout is the one caveat. mb_smoke 176/176, wke_smoke 100/100, no survivors. ABI unchanged (108).
