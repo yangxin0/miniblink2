@@ -544,6 +544,27 @@ int main() {
           "wkeSetInitScript runs before page scripts (evaluateOnNewDocument)");
   }
 
+  // wkeSavePdf (offline): printing a document yields a real, non-trivial PDF.
+  {
+    const char* pdf = "/private/tmp/claude-501/wke_smoke.pdf";
+    std::remove(pdf);
+    wkeLoadHTML(wv, "<body style='font:30px sans-serif'>"
+                    "<h1>PDF</h1><p>page content</p></body>");
+    const bool wrote = wkeSavePdf(wv, pdf);
+    char hdr[6] = {0};
+    long sz = 0;
+    if (FILE* f = std::fopen(pdf, "rb")) {
+      std::fread(hdr, 1, 5, f);
+      std::fseek(f, 0, SEEK_END);
+      sz = std::ftell(f);
+      std::fclose(f);
+    }
+    const bool nullsafe = !wkeSavePdf(wv, nullptr) && !wkeSavePdf(nullptr, pdf);
+    std::remove(pdf);
+    check(wrote && std::strcmp(hdr, "%PDF-") == 0 && sz > 500 && nullsafe,
+          "wkeSavePdf prints a valid, non-trivial %PDF file");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {

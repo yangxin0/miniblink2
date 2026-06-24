@@ -136,6 +136,9 @@ WKE_API void wkeSetTimezone(wkeWebView webView, const utf8* ianaTimezone);
 // Puppeteer's evaluateOnNewDocument): set globals, stub/override APIs, or
 // install a harness the page observes. NULL/"" clears. Port extension.
 WKE_API void wkeSetInitScript(wkeWebView webView, const utf8* script);
+// Print the current document to a multi-page US-Letter PDF at `path`; returns
+// whether the file was written. Port extension (no classic wke print API).
+WKE_API bool wkeSavePdf(wkeWebView webView, const utf8* path);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);

@@ -370,6 +370,13 @@ void wkeSetInitScript(wkeWebView webView, const utf8* script) {
     mbSetInitScript(webView->view, script ? script : "");
 }
 
+bool wkeSavePdf(wkeWebView webView, const utf8* path) {
+  // Print the current document to a multi-page US-Letter PDF at `path`.
+  // Returns whether it was written. (Port extension — no classic wke print API.)
+  return webView && webView->view && path &&
+         mbSavePdf(webView->view, path) != 0;
+}
+
 void wkeSetTransparent(wkeWebView webView, bool transparent) {
   if (!webView || !webView->view)
     return;
