@@ -122,6 +122,16 @@ WKE_API void wkeSetUserAgent(wkeWebView webView, const utf8* userAgent);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);
+// Whether wkeSetTransparent(true) was last set on this view.
+WKE_API bool wkeIsTransparent(wkeWebView webView);
+// Pure wke view-state. wkeSetName/wkeGetName label the view (default ""). The
+// user key/value store lets an app attach its own context to a view (e.g. to
+// recover it inside a callback); wkeGetUserKeyValue returns NULL for an unset
+// key. Values are owned by the app — wke neither copies nor frees them.
+WKE_API const char* wkeGetName(wkeWebView webView);
+WKE_API void wkeSetName(wkeWebView webView, const char* name);
+WKE_API void wkeSetUserKeyValue(wkeWebView webView, const char* key, void* value);
+WKE_API void* wkeGetUserKeyValue(wkeWebView webView, const char* key);
 // The current document's HTML (the rendered, post-JS DOM serialized to HTML).
 // Owned by the view, valid until the next wkeGetSource on it.
 WKE_API const utf8* wkeGetSource(wkeWebView webView);

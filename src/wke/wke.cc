@@ -40,6 +40,11 @@ struct _tagWkeWebView {
   void* document_ready_param = nullptr;
   std::string source_cache;  // backs wkeGetSource's const utf8* return
   std::string cookie_cache;  // backs wkeGetCookie's const utf8* return
+  // Pure wke view-state (not backed by the engine): an app-name, a transparent
+  // flag mirror, and an app-owned key/value store threaded through callbacks.
+  std::string name;
+  bool transparent = false;
+  std::map<std::string, void*> user_kv;
 };
 
 // The last live webView, so the view-less wkePerformCookieCommand has a handle
@@ -302,8 +307,36 @@ void wkeSetUserAgent(wkeWebView webView, const utf8* userAgent) {
 }
 
 void wkeSetTransparent(wkeWebView webView, bool transparent) {
-  if (webView && webView->view)
-    mbSetTransparentBackground(webView->view, transparent ? 1 : 0);
+  if (!webView || !webView->view)
+    return;
+  webView->transparent = transparent;  // mirror for wkeIsTransparent
+  mbSetTransparentBackground(webView->view, transparent ? 1 : 0);
+}
+
+bool wkeIsTransparent(wkeWebView webView) {
+  return webView && webView->transparent;
+}
+
+// --- Pure wke view-state (app name + app-owned key/value store) -----------------
+void wkeSetName(wkeWebView webView, const char* name) {
+  if (webView)
+    webView->name = name ? name : "";
+}
+
+const char* wkeGetName(wkeWebView webView) {
+  return webView ? webView->name.c_str() : "";
+}
+
+void wkeSetUserKeyValue(wkeWebView webView, const char* key, void* value) {
+  if (webView && key)
+    webView->user_kv[key] = value;
+}
+
+void* wkeGetUserKeyValue(wkeWebView webView, const char* key) {
+  if (!webView || !key)
+    return nullptr;
+  auto it = webView->user_kv.find(key);
+  return it == webView->user_kv.end() ? nullptr : it->second;
 }
 
 const utf8* wkeGetSource(wkeWebView webView) {

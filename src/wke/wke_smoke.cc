@@ -384,6 +384,29 @@ int main() {
           "wkeSetProxy(null/NONE) is safe and leaves local loads working");
   }
 
+  // Pure view-state: transparent mirror, name, and the app key/value store.
+  {
+    // The mirror tracks both directions (prior tests may have left it set).
+    wkeSetTransparent(wv, true);
+    const bool now_transparent = wkeIsTransparent(wv);
+    wkeSetTransparent(wv, false);
+    const bool now_opaque = !wkeIsTransparent(wv);
+
+    const bool default_name = std::strcmp(wkeGetName(wv), "") == 0;
+    wkeSetName(wv, "miniwin");
+    const bool name_ok = std::strcmp(wkeGetName(wv), "miniwin") == 0;
+
+    int slot = 7;
+    const bool unset_null = wkeGetUserKeyValue(wv, "ctx") == nullptr;
+    wkeSetUserKeyValue(wv, "ctx", &slot);
+    const bool kv_ok = wkeGetUserKeyValue(wv, "ctx") == &slot &&
+                       *static_cast<int*>(wkeGetUserKeyValue(wv, "ctx")) == 7;
+
+    check(now_transparent && now_opaque && default_name && name_ok &&
+              unset_null && kv_ok,
+          "wkeIsTransparent/wkeSetName/wkeSetUserKeyValue track view-state");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {
