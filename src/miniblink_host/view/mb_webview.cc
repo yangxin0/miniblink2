@@ -628,6 +628,27 @@ bool MbWebView::GetTextForSelector(const char* css_selector, std::string* out) {
   return true;
 }
 
+bool MbWebView::GetAllTextForSelector(const char* css_selector,
+                                      std::string* out) {
+  if (!css_selector)
+    return false;
+  // innerText of EVERY match, as a JSON array string (so embedded commas /
+  // newlines / quotes survive intact). One call replaces the count-then-
+  // :nth-of-type loop for list scraping. An invalid selector throws -> "" ->
+  // false; zero matches is the valid "[]". JSON.stringify handles the escaping.
+  std::string js =
+      "(function(){try{var ns=document.querySelectorAll(\"" +
+      JsEscape(css_selector) +
+      "\");var a=[];for(var i=0;i<ns.length;i++)a.push(ns[i].innerText);"
+      "return JSON.stringify(a);}catch(e){return '';}})()";
+  std::string s = EvalToString(js.c_str());
+  if (s.empty())
+    return false;  // invalid selector (querySelectorAll threw)
+  if (out)
+    *out = s;
+  return true;
+}
+
 bool MbWebView::GetAttribute(const char* css_selector, const char* attr,
                              std::string* out) {
   if (!css_selector || !attr)

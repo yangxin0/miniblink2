@@ -2400,6 +2400,24 @@ int main() {
                " nomatch=" + (nomatch_set ? "1" : "0"));
   }
 
+  // 102b3. mbGetAllTextForSelector scrapes a whole list in one call: a JSON array
+  // of each match's innerText; "[]" for no matches, -1 for an invalid selector.
+  {
+    mbLoadHTML(v, "<body><ul><li class='r'>a</li><li class='r'>b</li>"
+                  "<li class='r'>c</li></ul></body>", "about:blank");
+    char jb[256] = {0};
+    int jlen = mbGetAllTextForSelector(v, ".r", jb, sizeof(jb));
+    const bool all_ok = jlen > 0 && std::string(jb) == "[\"a\",\"b\",\"c\"]";
+    char nb[16] = {0};
+    mbGetAllTextForSelector(v, ".none", nb, sizeof(nb));
+    const bool none_ok = std::string(nb) == "[]";
+    const bool bad_ok = mbGetAllTextForSelector(v, "(((", jb, sizeof(jb)) == -1;
+    Expect(all_ok && none_ok && bad_ok,
+           "mbGetAllTextForSelector returns a JSON array of every match's text",
+           std::string("all=") + (all_ok ? "1" : "0") + " none=" +
+               (none_ok ? "1" : "0") + " bad=" + (bad_ok ? "1" : "0"));
+  }
+
   // 102c. mbGetValueForSelector reads the LIVE .value (post-typing/selection),
   // distinct from mbGetAttribute's static "value" attribute, with the same
   // -1 no-match / no-value-property sentinel.

@@ -157,6 +157,10 @@ class MbWebView {
   // matches (GetAttribute also returns false if the attribute is absent). *out is
   // only written on success.
   bool GetTextForSelector(const char* css_selector, std::string* out);
+  // innerText of EVERY element matching `css_selector`, as a JSON array string
+  // (one call for list scraping, vs count + :nth-of-type loop). Returns false on
+  // an invalid selector; zero matches yields the valid "[]".
+  bool GetAllTextForSelector(const char* css_selector, std::string* out);
   bool GetAttribute(const char* css_selector, const char* attr, std::string* out);
   // setAttribute(attr, value) on the first match (value="" for a bare boolean
   // attribute like 'disabled'). Returns true if an element matched. The write

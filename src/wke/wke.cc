@@ -55,6 +55,7 @@ struct _tagWkeWebView {
   double zoom_factor = 1.0;  // wkeSetZoomFactor; re-applied after each load
   bool editable = false;     // wkeSetEditable; re-applied after each load
   std::string selector_text_cache;  // backs wkeGetTextForSelector's return
+  std::string selector_alltext_cache;  // backs wkeGetAllTextForSelector's return
   std::string selector_attr_cache;  // backs wkeGetAttribute's return
   std::string selector_value_cache; // backs wkeGetValueForSelector's return
   std::string computed_style_cache;  // backs wkeGetComputedStyle's return
@@ -611,6 +612,25 @@ const utf8* wkeGetTextForSelector(wkeWebView webView, const char* selector) {
   mbGetTextForSelector(webView->view, selector, buf.data(), len + 1);
   webView->selector_text_cache.assign(buf.data());
   return webView->selector_text_cache.c_str();
+}
+
+const utf8* wkeGetAllTextForSelector(wkeWebView webView, const char* selector) {
+  // innerText of EVERY match as a JSON array string ("[]" for none, "" for an
+  // invalid selector). Owned by the view until the next call. (Port extension.)
+  if (!webView || !webView->view || !selector) {
+    if (webView)
+      webView->selector_alltext_cache.clear();
+    return webView ? webView->selector_alltext_cache.c_str() : "";
+  }
+  const int len = mbGetAllTextForSelector(webView->view, selector, nullptr, 0);
+  if (len <= 0) {  // -1 invalid selector
+    webView->selector_alltext_cache.clear();
+    return webView->selector_alltext_cache.c_str();
+  }
+  std::vector<char> buf(static_cast<size_t>(len) + 1, 0);
+  mbGetAllTextForSelector(webView->view, selector, buf.data(), len + 1);
+  webView->selector_alltext_cache.assign(buf.data());
+  return webView->selector_alltext_cache.c_str();
 }
 
 const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,

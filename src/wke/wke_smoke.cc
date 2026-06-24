@@ -1098,6 +1098,20 @@ int main() {
           "wkeSetAttribute writes the attribute (href/data-*/boolean), false on no match");
   }
 
+  // wkeGetAllTextForSelector scrapes a whole list in one call, returning a JSON
+  // array of each match's innerText; "[]" for no matches, "" for a bad selector.
+  {
+    wkeLoadHTML(wv, "<body><ul><li class='r'>a</li><li class='r'>b</li>"
+                    "<li class='r'>c</li></ul></body>");
+    const bool all_ok =
+        std::strcmp(wkeGetAllTextForSelector(wv, ".r"), "[\"a\",\"b\",\"c\"]") == 0;
+    const bool none_ok =
+        std::strcmp(wkeGetAllTextForSelector(wv, ".none"), "[]") == 0;
+    const bool bad_ok = std::strcmp(wkeGetAllTextForSelector(wv, "((("), "") == 0;
+    check(all_ok && none_ok && bad_ok,
+          "wkeGetAllTextForSelector returns a JSON array of every match's text");
+  }
+
   // wkeGetCheckedForSelector reports a checkbox/radio's live .checked state
   // (1/0), -1 for a non-checkable element, and tracks a click that toggles it.
   {

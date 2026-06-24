@@ -288,6 +288,14 @@ MB_EXPORT int mbGetHTML(mbView*, char* out, int out_cap);
 MB_EXPORT int mbGetTextForSelector(mbView*, const char* css_selector, char* out,
                                    int out_cap);
 
+// Write the innerText of EVERY element matching `css_selector` as a JSON array
+// string (e.g. ["row 1","row 2"]) into `out` — one call for list scraping
+// instead of mbCountSelector + an :nth-of-type loop. JSON keeps embedded commas/
+// newlines/quotes intact. Returns the length in bytes (>=0; "[]" when nothing
+// matches), or -1 on an invalid selector. Size first with out=NULL/out_cap=0.
+MB_EXPORT int mbGetAllTextForSelector(mbView*, const char* css_selector,
+                                      char* out, int out_cap);
+
 // Write the value of attribute `attr` on the first element matching
 // `css_selector` into `out`. Returns the value's length in bytes (>=0), or -1 if
 // no element matches OR the attribute is absent (null). Size first with

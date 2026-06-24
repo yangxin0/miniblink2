@@ -197,6 +197,10 @@ WKE_API int wkeEncodePng(wkeWebView webView, int width, int height,
 WKE_API int wkeCountSelector(wkeWebView webView, const char* selector);
 WKE_API const utf8* wkeGetTextForSelector(wkeWebView webView,
                                           const char* selector);
+// innerText of EVERY match as a JSON array string ("[]" for none, "" for an
+// invalid selector) — list scraping in one call. Owned by the view.
+WKE_API const utf8* wkeGetAllTextForSelector(wkeWebView webView,
+                                             const char* selector);
 WKE_API const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,
                                     const char* attr);
 // setAttribute(attr, value) on the first match (value "" for a bare boolean

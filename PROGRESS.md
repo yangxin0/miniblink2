@@ -63,7 +63,7 @@ the deliverable surface (C API, CLI, wke layer).
   blob: URLs (`fetch` + `<img>`), Intersection/Resize/Mutation observers, WAAPI,
   forms + submit-navigation, mouse/keyboard input, host-side history. CJK/i18n +
   system web fonts render.
-- **`mb_capi` C API — 83 functions:** lifecycle, load, JS eval, scraping
+- **`mb_capi` C API — 84 functions:** lifecycle, load, JS eval, scraping
   (text/attr/computed-style/count by selector), input (mouse/key/text/scroll +
   click/fill/select/focus/hover/scroll-into-view by selector), screenshots
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
@@ -106,7 +106,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **140/140** (default, network-free), `wke_smoke` **79/79**,
+- **Tests:** `mb_smoke` **141/141** (default, network-free), `wke_smoke` **80/80**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -124,6 +124,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- capi+wke: mbGetAllTextForSelector / wkeGetAllTextForSelector — list scraping in one call (2026-06-24). The per-selector readers all returned the FIRST match; scraping a list meant mbCountSelector + an :nth-of-type loop (N+1 calls, fragile). Added a query-all that returns the innerText of EVERY match as a JSON.stringify'd array (embedded commas/newlines/quotes survive). "[]" for zero matches, -1/"" for an invalid selector (querySelectorAll throws). VERIFIED in both suites: <li class=r>a/b/c → ["a","b","c"], .none → [], "(((" → -1. wke_smoke 80/80, mb_smoke 141/141, no survivors. ABI now 84 fns.
 - capi+wke: mbSetAttribute / wkeSetAttribute — the attribute WRITER (+ README ABI re-sync) (2026-06-24). We could read attributes (mbGetAttribute) and set a control's .value (mbFillSelector) but not set an arbitrary HTML attribute — a real write gap. Added setAttribute(attr, value) on the first match (value "" = a bare boolean attr like disabled); a plain method call, no v8 [[Set]] trap. Returns matched/1 or not/0. VERIFIED in both suites: a changed href reads back via GetAttribute, a data-* round-trips, disabled="" takes LIVE effect (button.disabled===true), no-match→0. Also re-synced the README grouped ABI list, which had drifted: the 5 prior exports (mbGetUserAgent/Value/Checked/Visible/WaitForVisible) were missing — added them + mbSetAttribute and cross-checked all 83 exports now appear (0 missing), restoring the "every export documented" invariant. wke_smoke 79/79, mb_smoke 140/140, no survivors. ABI now 83 fns.
 - mb_shot: --visible / --wait-visible — expose the visibility primitives on the CLI (2026-06-24). The last two ticks added the visibility check + wait to the C API; this threads them into the deliverable (same pattern as --value/--checked). --wait-visible CSS runs in the interact phase (alongside --wait-selector) blocking until shown; --visible CSS prints 1/0/-1 in the extract phase. VERIFIED end-to-end vs a local page: --visible '#shown'→1, '#ghost'(visibility:hidden)→0, '#none'→-1+warning; --wait-visible '#lazy' (display:none, revealed by a 300ms timer) then --visible '#lazy'→1. No survivors. mb_shot.cc + usage only; both suites unchanged (wke 78/78, mb 139/139).
 - capi+wke: mbWaitForVisibleSelector / wkeWaitForVisibleSelector — wait for SHOWN, not just present (2026-06-24). Builds on last tick's visibility check: a visibility-aware wait (same poll cadence/loop-pumping as WaitForSelector, same checkVisibility probe as IsVisibleForSelector) that blocks until the first match is actually visible — for content that mounts hidden then fades/toggles in (modals, lazy panels, spinners). Returns 1 once shown, 0 on timeout. VERIFIED in both suites: a permanently visibility:hidden #ghost is FOUND by WaitForSelector yet IsVisible==0 (existence != visibility, deterministic); a display:none #m revealed by a 300ms timer makes WaitForVisible resolve→IsVisible==1; #ghost times out (0). Caught a test-timing bug first: an 80ms reveal fired during mbLoadHTML's own load-pump, so the "exists-but-hidden" assertion was nondeterministic → switched that assertion to the permanently-hidden #ghost. wke_smoke 78/78, mb_smoke 139/139, no survivors. ABI now 82 fns.
