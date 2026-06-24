@@ -146,6 +146,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- deferred: START page-driven history.back/forward — safety anchor + scoping (2026-06-25). Began the heavy deferred item (multi-tick focused effort). Scoped it: page-initiated session history routes through LocalFrameHost.GoToEntryAtOffset (1 of 76 methods on blink::mojom::LocalFrameHost in frame.mojom — the "~171" estimate was high), which the host doesn't bind, so it drops (graceful no-op). First bounded step landed: mb_smoke case 86b anchors the safety invariant — an untrusted page calling history.back()/forward()/go() is crash-safe (returns "ok", host stays alive), which must hold before AND after the wiring. Next steps recorded in the roadmap: scaffold a 76-method MbLocalFrameHost stub bound via the existing MbNavAssociatedInterfaceProvider, then wire GoToEntryAtOffset to the mbGoBack navigation path. Also marked the wke-layer roadmap item DONE (callbacks + jsValue object model all shipped + tested). mb_smoke 179/179, wke_smoke 100/100, no survivors. ABI unchanged (108).
 - maint: full health-check + trim the recent log (2026-06-25). After 12 test-only ticks (the mb_shot CLI-coverage sweep), re-verified the whole target set for bit-rot: all 6 targets link clean, both demos run end-to-end (mb_demo + wke_demo all steps OK), all 3 suites green (mb_smoke 178/178, wke_smoke 100/100, mb_shot_smoke 62/62), no survivors. Then trimmed PROGRESS.md (had regrown to 48KB / 47 dated entries): moved the 27 oldest into the archive under a dated batch header, kept the newest 20 + the rollup; conservation-checked. 48KB -> 24KB. Also refreshed the stale CURRENT STATE Tests line (mb_smoke 173->178, mb_shot_smoke 22->62 + the 5 network cases). Verification + docs only; no code change. ABI unchanged (108).
 - test: net cases for --no-follow + --insecure (MB_NET_TESTS, now 5 net cases) (2026-06-25). Extended the opt-in network block with the last two CLI flags that need a live host. Verified live: --no-follow on httpbin/redirect/1 stops at the HTTP/2 302 (Location not followed; --headers shows it) and --insecure loads self-signed.badssl.com (control fails with a TLS WARNING). Fixed netok to curl -sk (reachability, not cert validation) so the bad-cert host isn't wrongly skipped. Default offline 62/62 (network skipped), MB_NET_TESTS=1 67/67. Test-only (git: just the .sh); binaries + lib unchanged, mb_smoke 178/178, wke_smoke 100/100, no survivors. ABI unchanged (108).
 - test: opt-in network cases for mb_shot's real-network path (MB_NET_TESTS) (2026-06-25). The CLI network request-config flags had no coverage (they need a live echo host). Added an MB_NET_TESTS-gated block (default run stays 62 offline/deterministic — build.sh runs it network-free): each host reachability-gated (SKIP not fail). Verified live (both hosts up today): example.com loads -> --title "Example Domain"; httpbin echoes --header "X-Mb-Test: hello42" and --post "field=val99" back in the response. Default 62/62 (0 net cases run), MB_NET_TESTS=1 65/65. Test-only (git: just the .sh); binaries + lib unchanged, mb_smoke 178/178, wke_smoke 100/100, no survivors. ABI unchanged (108).
@@ -170,13 +171,25 @@ the deliverable surface (C API, CLI, wke layer).
 - earlier (all in the archive): the full mb_shot CLI feature build-out (--attr/--count/--title/--url/--cookies/--html-for/--press/--wait-eval/--require/--mobile/--eval-json/storage), the exit-code contract + missing-file fixes, and the capability/limitation audits (blob/history/SVG/fonts/CJK/iframe/CSP/popup/viewport/emoji). (older still: full bring-up + render + the automation/network surface — see archive.)
 
 ## REMAINING ROADMAP
-- **wke layer (active):** the async callback model is started (wkeString +
-  wkeOnLoadingFinish/wkeOnTitleChanged). Next: more callbacks (wkeOnConsoleMessage/
-  wkeOnURLChanged/wkeOnDocumentReady), more accessors (wkeGetCookie/wkeGetSource),
-  and the full V8-backed `jsValue` object model (`jsObject`/`jsArray`/`jsCall`,
-  `jsTypeOf`). Each an incremental, testable slice.
-- **Heavy items (own focused efforts):** page-driven history.back/forward
-  (LocalFrameHost shim); Web Workers; WebGL (GPU pipeline); a Cocoa windowed port
-  app under `port/mac`.
+- **wke layer: DONE.** The async callback model (wkeOnLoadingFinish/OnTitleChanged/
+  OnConsole/OnDocumentReady + wkeString), accessors (wkeGetCookie/wkeGetSource), and
+  the full V8-backed jsValue object model (jsTypeOf, jsIs* predicates, jsGet*/jsSet*,
+  jsEmptyObject/jsEmptyArray builders, jsCall/jsCallGlobal) all shipped; all 127 wke*
+  functions are tested by wke_smoke (100/100).
+- **IN PROGRESS — page-driven history.back/forward.** Scoped: page-initiated session
+  history routes through `LocalFrameHost.GoToEntryAtOffset(int32 offset, ...)` (one of
+  76 methods on the `blink::mojom::LocalFrameHost` interface in frame.mojom), which the
+  host doesn't bind -> the call is dropped (a graceful no-op; host-driven mbGoBack/
+  mbGoForward already work, case 86). Plan: (1) [DONE] anchor the safety invariant —
+  history.back/forward/go from JS is crash-safe (case 86b); (2) scaffold an
+  MbLocalFrameHost stub (76 no-op methods) and bind it via the existing
+  MbNavAssociatedInterfaceProvider (the BlobURLStore pattern), compile-verify; (3) wire
+  GoToEntryAtOffset to the WebView's navigation controller (the mbGoBack path) + a test
+  that a page's history.back() actually navigates. Risk: mojo binding can CHECK-fail
+  on a null remote (cf. the reverted policy-container fix) — hence the incremental,
+  revert-safe steps.
+- **Heavy items (own focused efforts):** Web Workers (worker thread + isolate); WebGL
+  (GPU pipeline); a Cocoa windowed port app under `port/mac` (note: the window itself
+  can't be empirically verified headlessly here).
 - **Mode:** each tick = one bounded, empirically-verified improvement; build green,
   smoke green, no survivors; commit per-milestone with the author/no-trailer convention.

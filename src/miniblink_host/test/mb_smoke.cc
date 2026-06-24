@@ -2579,6 +2579,26 @@ int main() {
                " fwd_b=" + (fwd_b ? "1" : "0"));
   }
 
+  // 86b. Page-driven history (history.back/forward/go from JS) is crash-safe. The
+  // host routes page-initiated session-history nav through LocalFrameHost
+  // (GoToEntryAtOffset); wiring that to actually navigate is an in-progress effort
+  // (host-driven mbGoBack/mbGoForward already work, case 86). Until then it's a
+  // graceful no-op — but an untrusted page calling history.back() must never crash
+  // the single-process host. (pushState/replaceState DO work, case 39b.) This
+  // safety invariant holds before AND after that wiring lands.
+  {
+    mbLoadHTML(v,
+        "<body><p id='m'>alive</p><script>window.__hr='pre';"
+        "try{history.back();history.forward();history.go(-1);window.__hr='ok';}"
+        "catch(e){window.__hr='THREW:'+e.name;}</script></body>",
+        "https://hist.test/");
+    Expect(Eval(v, "window.__hr") == "ok" &&
+               Eval(v, "document.getElementById('m').textContent") == "alive" &&
+               Eval(v, "1+1") == "2",
+           "page-driven history.back/forward/go is crash-safe",
+           Eval(v, "window.__hr"));
+  }
+
   // 87. Cookie session round-trip: mbSetCookie injects into the HTTP jar and
   // mbGetCookies reads it back; mbClearCookies empties it. (In-memory jar, so no
   // network — exercises MbAddCookieToJar + MbGetCookiesForUrl + MbClearCookieJar.)
