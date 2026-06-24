@@ -195,6 +195,25 @@ int main() {
           "native bindings are per-view (no cross-view leak)");
   }
 
+  // The cookie jar is process-wide (shared across views) — the complement to the
+  // per-view JS/binding isolation above: a login in one view is seen by another.
+  {
+    wkeWebView va = wkeCreateWebView();
+    wkeWebView vb = wkeCreateWebView();
+    wkePerformCookieCommand(wkeCookieCommandClearAllCookies);  // clean slate
+    wkeSetCookie(va, "http://shared.test/",
+                 "sk=shared1; expires=Fri, 31 Dec 2027 23:59:59 GMT");
+    const char* jar = wkeGetAllCookie(vb);  // vb reads the same process jar
+    const bool shared = std::strstr(jar, "shared.test") != nullptr &&
+                        std::strstr(jar, "sk") != nullptr &&
+                        std::strstr(jar, "shared1") != nullptr;
+    wkePerformCookieCommand(wkeCookieCommandClearAllCookies);  // restore
+    wkeDestroyWebView(va);
+    wkeDestroyWebView(vb);
+    check(shared,
+          "cookie jar is shared process-wide across views (session sharing)");
+  }
+
   // Modern web-platform JS works headlessly: structuredClone deep-clones nested
   // structures. (Web Crypto SubtleCrypto also works but is secure-context-gated —
   // present on https/file://, absent on this about:blank page — verified via

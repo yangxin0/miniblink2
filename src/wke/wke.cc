@@ -61,10 +61,18 @@ struct _tagWkeWebView {
   std::string response_headers_cache;  // backs wkeGetResponseHeaders's return
 };
 
-// The last live webView, so the view-less wkePerformCookieCommand has a handle
-// to drive the (process-wide) cookie jar. Set on create, cleared on destroy.
+// Live webViews (newest last), so the view-less wkePerformCookieCommand always
+// has a handle to drive the (process-wide) cookie jar even after some views are
+// destroyed. Push on create, erase on destroy.
 namespace {
-wkeWebView g_last_webview = nullptr;
+std::vector<wkeWebView>& LiveViews() {
+  static auto* v = new std::vector<wkeWebView>();  // leaked: no exit-time dtor
+  return *v;
+}
+// Any live view (the most recent), or null if none remain.
+wkeWebView AnyLiveView() {
+  return LiveViews().empty() ? nullptr : LiveViews().back();
+}
 // The cookie jar file path (process-wide, matching mbSave/LoadCookies). Set via
 // wkeSetCookieJarPath; the Flush/Reload cookie commands persist to/from it.
 // Leaked (never destroyed) to avoid an exit-time destructor.
@@ -242,15 +250,15 @@ wkeWebView wkeCreateWebView(void) {
     delete wv;
     return nullptr;
   }
-  g_last_webview = wv;
+  LiveViews().push_back(wv);
   return wv;
 }
 
 void wkeDestroyWebView(wkeWebView webView) {
   if (!webView)
     return;
-  if (g_last_webview == webView)
-    g_last_webview = nullptr;
+  auto& live = LiveViews();
+  live.erase(std::remove(live.begin(), live.end(), webView), live.end());
   if (webView->view)
     mbDestroyView(webView->view);
   delete webView;
@@ -884,10 +892,12 @@ void wkePerformCookieCommand(wkeCookieCommand command) {
   // wkeSetCookieJarPath (no-op until one is configured).
   switch (command) {
     case wkeCookieCommandClearAllCookies:
-    case wkeCookieCommandClearSessionCookies:
-      if (g_last_webview && g_last_webview->view)
-        mbClearCookies(g_last_webview->view);
+    case wkeCookieCommandClearSessionCookies: {
+      wkeWebView v = AnyLiveView();  // any live view drives the shared jar
+      if (v && v->view)
+        mbClearCookies(v->view);
       return;
+    }
     case wkeCookieCommandFlushCookiesToFile:
       if (!CookieJarPath().empty())
         mbSaveCookies(CookieJarPath().c_str());
