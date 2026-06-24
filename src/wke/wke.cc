@@ -470,6 +470,30 @@ const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,
   return webView->selector_attr_cache.c_str();
 }
 
+// --- DOM actions (drive the page without writing JS) ---------------------------
+bool wkeClickSelector(wkeWebView webView, const char* selector) {
+  // Click the first element matching `selector` (resolves its box and dispatches
+  // a real click). False if nothing matches or it has no box. (Port extension.)
+  return webView && webView->view && selector &&
+         mbClickSelector(webView->view, selector) != 0;
+}
+
+bool wkeFillSelector(wkeWebView webView, const char* selector,
+                     const utf8* text) {
+  // Set the value of the first matching input/textarea and fire input+change
+  // (so frameworks like React observe it). False if nothing matches. (Port ext.)
+  return webView && webView->view && selector && text &&
+         mbFillSelector(webView->view, selector, text) != 0;
+}
+
+bool wkeSelectOption(wkeWebView webView, const char* selector,
+                     const utf8* value) {
+  // Choose a <select> option whose value (or visible text) equals `value`,
+  // firing input+change. False if no <select> or no matching option. (Port ext.)
+  return webView && webView->view && selector && value &&
+         mbSelectOption(webView->view, selector, value) != 0;
+}
+
 void wkeSetTransparent(wkeWebView webView, bool transparent) {
   if (!webView || !webView->view)
     return;

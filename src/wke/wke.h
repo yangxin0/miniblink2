@@ -176,6 +176,17 @@ WKE_API const utf8* wkeGetTextForSelector(wkeWebView webView,
                                           const char* selector);
 WKE_API const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,
                                     const char* attr);
+
+// DOM action helpers — drive the page without writing JS (port extensions), each
+// returning whether it acted. wkeClickSelector clicks the first match (false if
+// no match or no box); wkeFillSelector sets an input/textarea value and fires
+// input+change (React-friendly); wkeSelectOption picks a <select> option by
+// value or visible text, firing input+change.
+WKE_API bool wkeClickSelector(wkeWebView webView, const char* selector);
+WKE_API bool wkeFillSelector(wkeWebView webView, const char* selector,
+                             const utf8* text);
+WKE_API bool wkeSelectOption(wkeWebView webView, const char* selector,
+                             const utf8* value);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);

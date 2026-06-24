@@ -82,7 +82,8 @@ the deliverable surface (C API, CLI, wke layer).
   `jsGetGlobal` + `jsGetKeys`, constructors `jsInt`/`jsString`/…, builders
   `jsEmptyObject`/`jsEmptyArray` + setters `jsSet`/`jsSetAt`/`jsSetGlobal`, and
   `jsCall`/`jsCallGlobal`, plus `wkeSetInitScript` evaluateOnNewDocument),
-  DOM query (`wkeCountSelector`/`wkeGetTextForSelector`/`wkeGetAttribute`),
+  DOM query (`wkeCountSelector`/`wkeGetTextForSelector`/`wkeGetAttribute`)
+  + actions (`wkeClickSelector`/`wkeFillSelector`/`wkeSelectOption`),
   POST (`wkePostURL`), cookies (`wkeGetCookie`/`wkeSetCookie`/
   `wkePerformCookieCommand` + jar persistence via `wkeSetCookieJarPath`),
   proxy (`wkeSetProxy`, HTTP/SOCKS + auth), request headers
@@ -95,9 +96,9 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **43/43**,
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **44/44**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com cases
-  (wke_smoke 47; mb_smoke ~145).
+  (wke_smoke 48; mb_smoke ~145).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
 
@@ -112,6 +113,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke DOM ACTIONS: wkeClickSelector + wkeFillSelector + wkeSelectOption (2026-06-24). Drive the page without writing JS (wrap mbClickSelector/mbFillSelector/mbSelectOption); each returns whether it acted. Click resolves the element box + dispatches a real click; fill sets an input value and fires input+change (React-friendly); select picks a <select> option by value/visible text. Documented PORT EXTENSIONS. VERIFIED offline: #go click bumps window.__c to 1, #name fill sets .value=="Ada Lovelace" + fires oninput, #sel select sets .value=="y"; every miss returns false. wke_smoke 44/44, mb_smoke 132/132, no survivors.
 - wke DOM QUERY: wkeCountSelector + wkeGetTextForSelector + wkeGetAttribute (2026-06-24). Read-only DOM scraping without writing JS (wrap mbCountSelector/mbGetTextForSelector/mbGetAttribute). Count = querySelectorAll length (0 valid, -1 bad selector); text/attribute return the first match's innerText/attr value as a view-owned temp string ("" on miss/absent). Two new struct caches back the temp returns. Documented PORT EXTENSIONS. VERIFIED offline: .it count==3, .none==0, null==-1; h1.t text=="Hi"; .it:nth-of-type(2)=="b"; #lnk[href]=="https://ex.com/p"; misses (.none / absent attr) yield "". wke_smoke 43/43, mb_smoke 132/132, no survivors.
 - wke OUTPUT: wkeEncodePng (2026-06-24). Render the current frame to in-memory PNG bytes (no temp file) for embedders that serve the bytes — wraps mbEncodePng, preserving the view-owned/valid-until-next-call contract. Documented PORT EXTENSION. VERIFIED offline: full 8-byte PNG signature + IHDR width/height match the requested 160×90; null view/out are safe (return 0). wke_smoke 42/42, mb_smoke 132/132, no survivors.
 - wke VIEWPORT: wkeScrollTo (2026-06-24). Absolute scroll of the layout viewport to (x,y) in CSS px (wraps mbScrollTo → window.scrollTo); the real viewport moves so fixed/sticky elements render right — pair with wkeSavePng/wkePaint for long-page viewport shots. Documented PORT EXTENSION. VERIFIED offline: a 3000px-tall page scrolls to window.scrollY==250 then back to 0. wke_smoke 41/41, mb_smoke 132/132, no survivors.

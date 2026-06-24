@@ -718,6 +718,38 @@ int main() {
           "wkeCountSelector/wkeGetTextForSelector/wkeGetAttribute scrape the DOM");
   }
 
+  // DOM actions (offline): click fires a handler, fill sets value + fires input,
+  // select changes the <select> value; misses return false.
+  {
+    wkeLoadHTML(
+        wv,
+        "<body><button id='go' onclick='window.__c=(window.__c||0)+1'>go</button>"
+        "<input id='name' oninput='window.__io=(window.__io||0)+1'>"
+        "<select id='sel'><option value='x'>X</option>"
+        "<option value='y'>Y</option></select></body>");
+
+    const bool click_ok =
+        wkeClickSelector(wv, "#go") && !wkeClickSelector(wv, "#none");
+    const bool clicked = jsToInt(es, wkeRunJS(wv, "window.__c||0")) == 1;
+
+    const bool fill_ok = wkeFillSelector(wv, "#name", "Ada Lovelace") &&
+                         !wkeFillSelector(wv, "#none", "x");
+    const bool filled =
+        std::strcmp(jsToTempString(
+                        es, wkeRunJS(wv, "document.getElementById('name').value")),
+                    "Ada Lovelace") == 0 &&
+        jsToInt(es, wkeRunJS(wv, "window.__io||0")) >= 1;
+
+    const bool sel_ok =
+        wkeSelectOption(wv, "#sel", "y") && !wkeSelectOption(wv, "#sel", "zzz");
+    const bool selected = std::strcmp(
+        jsToTempString(es, wkeRunJS(wv, "document.getElementById('sel').value")),
+        "y") == 0;
+
+    check(click_ok && clicked && fill_ok && filled && sel_ok && selected,
+          "wkeClickSelector/wkeFillSelector/wkeSelectOption drive the page");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {
