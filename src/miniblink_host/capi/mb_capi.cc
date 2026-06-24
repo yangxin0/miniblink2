@@ -173,6 +173,11 @@ void mbSetProxy(const char* proxy) {
   mb::MbSetProxy(proxy ? proxy : "");
 }
 
+void mbSetIgnoreCertErrors(int ignore) {
+  // Process-wide: skip TLS cert verification (like curl -k) when ignore != 0.
+  mb::MbSetIgnoreCertErrors(ignore != 0);
+}
+
 void mbSetTransparentBackground(mbView* v, int transparent) {
   if (v && v->impl)
     v->impl->SetTransparentBackground(transparent != 0);

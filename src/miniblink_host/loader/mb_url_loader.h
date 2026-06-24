@@ -64,6 +64,13 @@ void MbSetProxy(const std::string& proxy);
 // returns false (honor libcurl defaults). Used by the fetch path.
 bool MbProxyConfigured(std::string* out);
 
+// Disable (true) or enable (false, the default) TLS peer/host certificate
+// verification for all network fetches — the equivalent of curl -k. Process-wide.
+// For scraping/testing sites with self-signed, expired, or otherwise invalid
+// certs. MbIgnoreCertErrors() is read on the fetch path.
+void MbSetIgnoreCertErrors(bool ignore);
+bool MbIgnoreCertErrors();
+
 // Fetch a file:// or http(s):// URL into `body` (+ server Content-Type if any).
 // Shared by the subresource loader and the top-level navigation in MbWebView::LoadURL.
 // `user_agent` sets the HTTP User-Agent (empty -> MbDefaultUserAgent()).

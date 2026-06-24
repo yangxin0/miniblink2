@@ -142,6 +142,12 @@ MB_EXPORT void mbSetUserAgent(mbView*, const char* utf8_ua);
 // http(s) only — file:// and data: are served directly. Set before navigating.
 MB_EXPORT void mbSetProxy(const char* proxy);
 
+// Skip TLS certificate verification for all network fetches when `ignore` != 0
+// (the equivalent of curl -k / Puppeteer ignoreHTTPSErrors); 0 restores the
+// secure default. Process-wide (no view param). For scraping/testing sites with
+// self-signed, expired, or otherwise invalid certificates.
+MB_EXPORT void mbSetIgnoreCertErrors(int ignore);
+
 // Capture with a transparent background (1) or opaque white (0, default). With
 // transparency on, areas the page does not paint keep alpha 0 in the output.
 MB_EXPORT void mbSetTransparentBackground(mbView*, int transparent);

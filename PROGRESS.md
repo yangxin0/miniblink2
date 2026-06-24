@@ -2055,6 +2055,20 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   sent. (file:// document.cookie does NOT reach the curl jar — http(s) only by design — so the CLI
   demo uses a real http origin.) 129/129, no survivors. README + usage updated. C API now 64 fns.
 
+- ✅ DONE: TLS cert-verification toggle — mbSetIgnoreCertErrors + mb_shot --insecure (2026-06-24).
+  Completes the scraper network trifecta (proxy + cookies + cert handling). Standard tool feature
+  (curl -k / Puppeteer ignoreHTTPSErrors) for scraping/testing internal/dev sites with self-signed,
+  expired, or invalid certs — confirmed genuinely missing (the loader set no SSL opts; expired.badssl
+  failed by default). Same process-wide flag pattern as the proxy: mb::MbSetIgnoreCertErrors/
+  MbIgnoreCertErrors (default false = verify, the secure default), applied in FetchHttp as CURLOPT_SSL_
+  VERIFYPEER/VERIFYHOST 0 only when enabled (so the default path is unchanged). C API
+  mbSetIgnoreCertErrors(int) + mb_shot --insecure. VERIFIED via A/B against expired.badssl.com:
+  default -> fails (empty title, 39B); --insecure -> loads (title "expired.badssl.com", 475B real
+  HTML). Full smoke still 129/129 (verify never disabled by default), no survivors. README + usage
+  updated. C API now 65 fns. (Note: mb_shot's "<512B = likely failed" warning false-positives on
+  badssl's tiny pages; the page genuinely loads — the title is the proof. Pre-existing heuristic,
+  unrelated.)
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

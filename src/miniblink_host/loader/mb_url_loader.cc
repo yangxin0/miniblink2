@@ -174,6 +174,13 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   std::string proxy;
   if (mb::MbProxyConfigured(&proxy))
     curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str());
+  // Host-configured TLS verification bypass (mbSetIgnoreCertErrors) — like
+  // curl -k. Off by default (verify); only disabled when explicitly requested,
+  // for scraping/testing internal or dev sites with self-signed/expired certs.
+  if (mb::MbIgnoreCertErrors()) {
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+  }
   std::string header_block;  // final response's raw header lines (for the caller)
   curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, CurlHeaderWrite);
   curl_easy_setopt(curl, CURLOPT_HEADERDATA, &header_block);
@@ -348,6 +355,22 @@ bool MbProxyConfigured(std::string* out) {
   if (g_proxy_set && out)
     *out = ProxyStorage();
   return g_proxy_set;
+}
+
+namespace {
+// When true, TLS peer/host verification is disabled for network fetches (the
+// equivalent of curl -k / --no-check-certificate). Default false — verify, the
+// secure default. Set on the main thread before navigating; read on the fetch
+// path (same single-thread model as the proxy flag).
+bool g_ignore_cert_errors = false;
+}  // namespace
+
+void MbSetIgnoreCertErrors(bool ignore) {
+  g_ignore_cert_errors = ignore;
+}
+
+bool MbIgnoreCertErrors() {
+  return g_ignore_cert_errors;
 }
 
 namespace {

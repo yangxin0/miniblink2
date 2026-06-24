@@ -51,6 +51,7 @@ int main(int argc, char** argv) {
   bool print_html = false;
   bool no_images = false;
   bool dark_mode = false;
+  bool insecure = false;  // skip TLS cert verification
   std::string lang;  // navigator.language(s)
   std::string tz;    // IANA timezone for Date/Intl
   float scale = 1.0f;
@@ -108,6 +109,8 @@ int main(int argc, char** argv) {
       no_images = true;
     } else if (a == "--dark") {
       dark_mode = true;
+    } else if (a == "--insecure") {
+      insecure = true;
     } else if (a == "--lang" && i + 1 < argc) {
       lang = argv[++i];
     } else if (a == "--tz" && i + 1 < argc) {
@@ -126,7 +129,7 @@ int main(int argc, char** argv) {
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
         "[--transparent] [--text] [--html] [--eval JS] [--fill CSS TEXT] "
         "[--click CSS] [--wait-selector CSS] [--wait-ms N] [--proxy URL] "
-        "[--load-cookies FILE] [--save-cookies FILE] "
+        "[--load-cookies FILE] [--save-cookies FILE] [--insecure] "
         "<input.html|file://URL|http(s)://URL> <out.png> [width height]\n",
         argv[0]);
     return 2;
@@ -161,6 +164,8 @@ int main(int argc, char** argv) {
     mbSetExtraHeaders(view, headers.c_str());  // before load so the navigation uses them
   if (!proxy.empty())
     mbSetProxy(proxy.c_str());  // route fetches through the proxy (process-wide)
+  if (insecure)
+    mbSetIgnoreCertErrors(1);  // skip TLS cert verification (self-signed/expired)
   if (!load_cookies.empty()) {
     if (!mbLoadCookies(load_cookies.c_str()))  // restore a saved session
       std::fprintf(stderr, "mb_shot: WARNING — --load-cookies '%s' unreadable\n",
