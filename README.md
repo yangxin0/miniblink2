@@ -149,9 +149,9 @@ JavaScript mutating the DOM (bg→blue, text→"JS WORKS"):
 ## Architecture
 
 ```
-┌─ outer shell (CMake, this project) ─────────────────────┐
-│  wke/mb public C API  +  port/<platform> host window    │  ← future
-└──────────────────── links the C ABI ▼ ─────────────────┘
+┌─ wke compatibility layer (src/wke) ─────────────────────┐
+│  the classic miniblink `wke` C API on modern Blink      │
+└──────────── wraps the mb_capi ABI ▼ ────────────────────┘
 ┌─ miniblink_host (GN target, src/miniblink_host) ────────┐
 │  mb_capi      extern "C" ABI (the seam)                 │
 │  mb_runtime   engine bring-up (V8 snapshot, ThreadPool, │
@@ -210,6 +210,59 @@ void  mbResize(mbView*, int w, int h);
 void  mbDestroyView(mbView*);
 void  mbShutdown(void);
 ```
+
+(The ABI has grown well beyond this core — scraping by selector, the network knobs
+`mbSetProxy`/`mbSetIgnoreCertErrors`/`mbSetFollowRedirects`, `mbGetHttpStatus`/
+`mbGetResponseHeaders`, cookie-jar `mbSaveCookies`/`mbLoadCookies`, in-memory
+`mbEncodePng`, and more; see `mb_capi.h` for the full, commented list.)
+
+## wke compatibility layer (`src/wke/wke.h`)
+
+A drop-in subset of [miniblink](https://github.com/weolar/miniblink49)'s classic
+`wke` C API, implemented on top of `mb_capi`, so an existing headless `wke` app
+runs on modern Blink with the original signatures (`utf8`, `wkeWebView`, `jsValue`,
+…). It is built into `libminiblink_host`; an embedder includes just `wke/wke.h`.
+
+Supported today (verified by `wke_smoke`):
+
+- **Lifecycle / load:** `wkeInitialize`/`wkeFinalize`, `wkeCreateWebView`/
+  `wkeDestroyWebView`, `wkeLoadURL`/`wkeLoadHTML`, `wkeReload`, the loading-state
+  pollers (`wkeIsLoadingCompleted`/`Succeeded`/`Failed`, `wkeIsDocumentReady`).
+- **Geometry / paint:** `wkeResize`, `wkeGetWidth`/`Height`, `wkeGetContentWidth`/
+  `Height`, `wkeSetTransparent`, `wkePaint` (into a caller BGRA buffer).
+- **Accessors:** `wkeGetURL`/`wkeGetTitle`/`wkeGetSource`, `wkeSetUserAgent`.
+- **Navigation:** `wkeCanGoBack`/`wkeGoBack`/`wkeCanGoForward`/`wkeGoForward`.
+- **Input:** `wkeFireMouseEvent`, `wkeFireMouseWheelEvent`, `wkeFireKeyDown`/`Up`/
+  `PressEvent`.
+- **Scripting:** `wkeRunJS` + `wkeGlobalExec` + `jsToInt`/`jsToDouble`/
+  `jsToBoolean`/`jsToTempString`/`jsTypeOf` (a string-backed `jsValue`).
+- **Callbacks:** `wkeOnLoadingFinish`, `wkeOnTitleChanged`, `wkeOnConsole`,
+  `wkeOnDocumentReady` (+ `wkeString`/`wkeGetString`).
+
+```c
+#include "wke/wke.h"
+
+wkeInitialize();
+wkeWebView wv = wkeCreateWebView();
+wkeResize(wv, 1200, 800);
+wkeLoadURL(wv, "https://example.com");        // synchronous in this build
+if (wkeIsLoadingSucceeded(wv)) {
+    printf("title: %s\n", wkeGetTitle(wv));
+    jsValue n = wkeRunJS(wv, "document.querySelectorAll('a').length");
+    printf("links: %d\n", jsToInt(wkeGlobalExec(wv), n));
+    int w = wkeGetWidth(wv), h = wkeGetHeight(wv);
+    void* bits = malloc((size_t)w * h * 4);   // BGRA
+    wkePaint(wv, bits, w * 4);                 // … then encode/save bits …
+    free(bits);
+}
+wkeDestroyWebView(wv);
+wkeFinalize();
+```
+
+Loading is synchronous here, so a `wke` app can poll `wkeIsLoadingCompleted`
+(always true after `wkeLoadURL` returns) instead of waiting on a message loop.
+Deferred: the full V8-backed `jsValue` object model (`jsGet`/`jsGetAt`/`jsCall`,
+native function binding) — read structured data via `wkeRunJS` for now.
 
 ## Build
 

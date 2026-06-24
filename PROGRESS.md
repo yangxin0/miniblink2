@@ -96,6 +96,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- docs: README — added a "wke compatibility layer" section (supported surface, grouped, + a canonical headless usage example) and fixed the architecture diagram (wke is real now, not "future"); noted the ABI has outgrown the listed core. Verified all 44 documented wke symbols exist in wke.h. README-only (no code; tests unchanged).
 - wke+capi: jsTypeOf — host EvalWithType captures the result's JS type from the SAME single eval (no re-run/side-effects), exposed as mbEvalJSEx(value+type); wke's jsValue registry now stores {value,type} and jsTypeOf maps it. wke_smoke 21/21 (number/string/boolean/array/object/null/undefined/function). mbEvalJS unchanged (mb_smoke 131/131).
 - wke: mouse-wheel input — wkeFireMouseWheelEvent (→mbSendScroll, dy=-delta; Win32 positive=up). Completes mouse+keyboard+wheel. wke_smoke 20/20 (tall page scrolls down, scrollY>0).
 - wke: document-ready callback + page source — wkeOnDocumentReady (fires in FireLoadCallbacks) + wkeGetSource (→mbGetHTML, cached). wke_smoke 19/19 (callback fires; source contains the post-JS markup).
