@@ -83,6 +83,7 @@
 #include "v8/include/v8-function.h"
 #include "v8/include/v8-function-callback.h"
 #include "v8/include/v8-isolate.h"
+#include "v8/include/v8-json.h"
 #include "v8/include/v8-local-handle.h"
 #include "v8/include/v8-primitive.h"
 #include "v8/include/v8-value.h"
@@ -914,6 +915,16 @@ void MbNativeTrampoline(const v8::FunctionCallbackInfo<v8::Value>& info) {
       return;
     case 4:  // undefined
       return;
+    case 5: {  // JSON -> a parsed object/array/value (structured-data return)
+      v8::Local<v8::String> js;
+      if (result &&
+          v8::String::NewFromUtf8(isolate, result).ToLocal(&js)) {
+        v8::Local<v8::Value> parsed;
+        if (v8::JSON::Parse(isolate->GetCurrentContext(), js).ToLocal(&parsed))
+          info.GetReturnValue().Set(parsed);
+      }
+      return;
+    }
     default:  // string
       if (result) {
         v8::Local<v8::String> rs;

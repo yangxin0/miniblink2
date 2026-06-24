@@ -57,7 +57,8 @@ class MbWebView {
   // coerced to UTF-8 strings (argv[i]); argtypes[i] reports each arg's JS type
   // (0=string,1=number,2=boolean,3=null,4=undefined,5=object,6=array,7=function).
   // The function returns a UTF-8 string and may set *out_type to choose the JS
-  // type of the return value (same codes 0..4; 0=string is the default).
+  // type of the return value (0=string default, 1=number, 2=boolean, 3=null,
+  // 4=undefined, 5=json — the string is JSON.parse'd into an object/array/value).
   // Synchronous (JS gets the return value inline). Installed into each new
   // document's main world. `userdata` is passed to the callback.
   using MbJsNativeFn = const char* (*)(void* userdata, int argc,

@@ -196,7 +196,7 @@ Grouped overview (see `mb_capi.h` for the exact signatures):
   `mbGetHttpStatus` `mbGetResponseHeaders`
 - **Scripting:** `mbRunJS` `mbSetInitScript` `mbEvalJS` `mbEvalJSEx` (value + JS
   type) `mbEvalJSIsolated` `mbDrainConsole` `mbJsBindFunction` (native C function
-  callable from JS)
+  callable from JS; returns string/number/boolean/null/JSON-object)
 - **Scraping:** `mbGetText` `mbGetHTML` `mbGetTextForSelector` `mbGetAttribute`
   `mbGetComputedStyle` `mbCountSelector` `mbGetElementRect` `mbGetContentSize`
 - **Input:** `mbSendMouseClick` `mbSendMouseMove` `mbSendText` `mbSendKey`

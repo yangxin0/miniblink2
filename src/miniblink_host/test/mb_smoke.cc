@@ -30,6 +30,12 @@ const char* SmokeEcho(void* userdata, int argc, const char** argv,
   return buf;
 }
 
+// Returns structured data as JSON (out_type 5) -> a real JS object in the page.
+const char* SmokeJson(void*, int, const char**, const int*, int* out_type) {
+  *out_type = 5;  // json
+  return "{\"a\":1,\"b\":[2,3]}";
+}
+
 std::string EvalIso(mbView* v, const char* js) {
   char buf[512];
   mbEvalJSIsolated(v, js, buf, sizeof(buf));
@@ -2540,14 +2546,21 @@ int main() {
   {
     int tag = 7;
     mbJsBindFunction(v, "mbEcho", SmokeEcho, &tag);
+    mbJsBindFunction(v, "mbObj", SmokeJson, nullptr);
     mbLoadHTML(v, "<body>native</body>", "about:blank");
     const std::string defined = Eval(v, "typeof window.mbEcho");
     const std::string r = Eval(v, "window.mbEcho('hi')");  // -> "hi!7"
     const std::string in_expr =
         Eval(v, "(function(){return 'got:'+window.mbEcho('x');})()");
-    Expect(defined == "function" && r == "hi!7" && in_expr == "got:x!7",
-           "mbJsBindFunction: JS calls a bound C function synchronously",
-           "typeof=" + defined + " r=" + r + " expr=" + in_expr);
+    // out_type 5 (json): the C return becomes a real JS object the page navigates.
+    const std::string obj_type = Eval(v, "typeof window.mbObj()");
+    const std::string obj_vals =
+        Eval(v, "window.mbObj().a + ',' + window.mbObj().b[1]");  // -> "1,3"
+    Expect(defined == "function" && r == "hi!7" && in_expr == "got:x!7" &&
+               obj_type == "object" && obj_vals == "1,3",
+           "mbJsBindFunction: synchronous C call; string + JSON-object returns",
+           "typeof=" + defined + " r=" + r + " expr=" + in_expr +
+               " objType=" + obj_type + " objVals=" + obj_vals);
   }
 
   mbDestroyView(v);

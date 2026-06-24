@@ -183,7 +183,8 @@ MB_EXPORT void mbSetFocus(mbView*, int focused);
 // are coerced to UTF-8 strings (argc/argv); argtypes[i] reports each arg's JS
 // type (0=string,1=number,2=boolean,3=null,4=undefined,5=object,6=array,
 // 7=function). The function returns a UTF-8 string and may set *out_type to
-// choose the JS return type (same codes 0..4; 0=string is the default).
+// choose the JS return type (0=string default, 1=number, 2=boolean, 3=null,
+// 4=undefined, 5=json — the string is JSON.parse'd into an object/array/value).
 // Synchronous — JS receives the return value inline. The binding is installed
 // into each new document's main world (call before navigating). `userdata` is
 // passed back to every invocation.
