@@ -1943,6 +1943,28 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   C API now 59 fns. (FocusSelector/BlurSelector/Fill/Select use JS .focus()/.value, not coordinates,
   so they were never affected.)
 
+- ✅ CONFIRMED (2026-06-24): UTF-8 input + charset are NOT a gap. The old "UTF-8 decode TODO" note is
+  stale — MbWidget::SendText already does UTF8ToUTF16 with surrogate-pair handling, JsEscape passes
+  UTF-8 bytes through, and mbGetText returns valid UTF-8. Already covered: case 10b types "café日本😀"
+  (incl. the emoji surrogate pair), cases 81/82 cover <meta charset>/auto-detect decoding. Verified
+  reads via mb_shot --text on "café 日本語 €100 naïve" (round-trips byte-exact).
+
+- ⚠️ ATTEMPTED + REVERTED: host-controlled JS dialog responses (2026-06-24). A real automation gap —
+  alert/confirm/prompt are hardcoded (confirm→false, prompt→null; patch 0002), so a flow gated on
+  confirm()===true is stuck and prompt() can't be answered. Built it: a CORE_EXPORT process-global
+  policy bridge in the patched chrome_client_impl.cc (set via new C API mbSetJsDialogPolicy(accept,
+  prompt_text) + mbGetLastDialogMessage), delegates return the host-chosen value. It WORKED when
+  dialogs were shown one-per-script (smoke passed 125/125: defC/defP/accC/accP/accD/msg all 1), BUT
+  showing two modal dialogs in one script execution (e.g. confirm();prompt();) under the accept path
+  intermittently FATALs with "[FATAL ...thread_collision_warner.cc] NOTREACHED hit. Thread Collision"
+  — a non-deterministic data race in Blink's modal-dialog machinery (ScopedPagePauser / nested run
+  loop) that the hardcoded-cancel baseline never exercised. ~50% crash rate over 6 runs. Reverted ALL
+  of it (donor chrome_client_impl.cc restored to patch-0002 via checkout + re-apply; capi/smoke
+  reverted); baseline re-verified stable at 124/124 across 3 runs, no survivors. The feature needs the
+  modal-dialog/page-pauser threading interaction understood first — a HEAVY item, deferred, NOT to be
+  re-attempted as a quick tick. SIDE FINDING: invoking a modal dialog through mbEvalJS (ExecuteScript-
+  AndReturnValue inside a nested v8 HandleScope) aborts; host code must trigger dialogs via mbRunJS.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.
