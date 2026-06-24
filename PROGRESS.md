@@ -79,7 +79,7 @@ the deliverable surface (C API, CLI, wke layer).
   the full jsValue object model — reads `jsGetLength`/`jsGetAt`/`jsGet`/
   `jsGetGlobal` + `jsGetKeys`, constructors `jsInt`/`jsString`/…, builders
   `jsEmptyObject`/`jsEmptyArray` + setters `jsSet`/`jsSetAt`/`jsSetGlobal`, and
-  `jsCall`/`jsCallGlobal`),
+  `jsCall`/`jsCallGlobal`, plus `wkeSetInitScript` evaluateOnNewDocument),
   POST (`wkePostURL`), cookies (`wkeGetCookie`/`wkeSetCookie`/
   `wkePerformCookieCommand` + jar persistence via `wkeSetCookieJarPath`),
   proxy (`wkeSetProxy`, HTTP/SOCKS + auth), request headers
@@ -91,9 +91,9 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **35/35**,
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **36/36**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com cases
-  (wke_smoke 39; mb_smoke ~145).
+  (wke_smoke 40; mb_smoke ~145).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
 
@@ -108,6 +108,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke SCRIPTING: wkeSetInitScript (2026-06-24). evaluateOnNewDocument-style hook — runs a script in each new document BEFORE the page's own scripts (wraps mbSetInitScript → RunDocumentStartScript at document-element-available). Lets an app set globals / stub APIs / install a harness the page then observes. NULL/"" clears. Documented PORT EXTENSION. VERIFIED offline: init sets window.__early, the page's inline <script> reads it into window.__pageSaw=="injected"; after clearing, a reload reads "no". wke_smoke 36/36, mb_smoke 132/132, no survivors.
 - wke I18N: wkeSetLocale + wkeSetTimezone (2026-06-24). Emulate the i18n environment for deterministic localized rendering (wrap mbSetLocale/mbSetTimezone). wkeSetLocale drives navigator.language(s); wkeSetTimezone overrides Date/Intl (process-global, IANA id). Documented PORT EXTENSIONS. VERIFIED offline: navigator.language=="fr-FR" + languages=="fr-FR,fr,en"; Intl resolvedOptions().timeZone=="America/New_York" + Date(1609459200000).getHours()==19 (EST). Test restores en-US/UTC after (timezone is process-global). wke_smoke 35/35, mb_smoke 132/132, no survivors.
 - wke RENDERING: wkeSetDarkMode (2026-06-24). Emulate prefers-color-scheme dark/light (wraps mbSetDarkMode → Blink SetPreferredColorScheme); persists across loads, set before navigating. Documented PORT EXTENSION (modern, not classic wke). VERIFIED offline + deterministically: a page with a @media(prefers-color-scheme:dark) rule reports matchMedia=false + color rgb(1,1,1) in light and matchMedia=true + rgb(2,2,2) in dark. wke_smoke 34/34, mb_smoke 132/132, no survivors.
 - wke NETWORK: wkeSetExtraHeaders (2026-06-24). Per-view request header injection (newline-separated "Name: Value" lines, NULL/"" clears) wrapping mbSetExtraHeaders. Documented PORT EXTENSION — classic wke injects per-request via the net hook; this is the simple global form. Verified offline (set/clear/null safe, local loads still work) and over the network (MB_NET_TESTS): set X-Wke-Test: zzz9, load httpbin.org/headers, response JSON echoes zzz9. wke_smoke 33/33 default, 37/37 net, mb_smoke 132/132, no survivors. Fixed a -Wshadow (renamed a `body` local colliding with the postURL test's).

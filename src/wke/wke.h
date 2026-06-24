@@ -132,6 +132,10 @@ WKE_API void wkeSetDarkMode(wkeWebView webView, bool dark);
 // e.g. "America/New_York" — process-global). Set before navigating.
 WKE_API void wkeSetLocale(wkeWebView webView, const utf8* languages);
 WKE_API void wkeSetTimezone(wkeWebView webView, const utf8* ianaTimezone);
+// Run a script in each new document BEFORE the page's own scripts (like
+// Puppeteer's evaluateOnNewDocument): set globals, stub/override APIs, or
+// install a harness the page observes. NULL/"" clears. Port extension.
+WKE_API void wkeSetInitScript(wkeWebView webView, const utf8* script);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);

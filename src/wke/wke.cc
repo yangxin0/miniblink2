@@ -362,6 +362,14 @@ void wkeSetTimezone(wkeWebView webView, const utf8* ianaTimezone) {
     mbSetTimezone(webView->view, ianaTimezone);
 }
 
+void wkeSetInitScript(wkeWebView webView, const utf8* script) {
+  // Run `script` in each new document BEFORE the page's own scripts (like
+  // Puppeteer's evaluateOnNewDocument) — set globals, stub/override APIs, or
+  // install a harness the page then observes. NULL/"" clears. (Port extension.)
+  if (webView && webView->view)
+    mbSetInitScript(webView->view, script ? script : "");
+}
+
 void wkeSetTransparent(wkeWebView webView, bool transparent) {
   if (!webView || !webView->view)
     return;

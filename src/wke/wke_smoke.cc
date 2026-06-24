@@ -523,6 +523,27 @@ int main() {
           "wkeSetLocale/wkeSetTimezone drive navigator.language(s) + Intl/Date");
   }
 
+  // wkeSetInitScript (offline): runs before the page's own scripts, so the
+  // page's inline script observes the injected global; clearing stops it.
+  {
+    const char* page =
+        "<body><script>window.__pageSaw=window.__early||'no';</script></body>";
+    wkeSetInitScript(wv, "window.__early='injected';");
+    wkeLoadHTML(wv, page);
+    const bool injected =
+        std::strcmp(jsToTempString(es, wkeRunJS(wv, "window.__pageSaw")),
+                    "injected") == 0;
+
+    wkeSetInitScript(wv, nullptr);  // clear
+    wkeLoadHTML(wv, page);
+    const bool cleared =
+        std::strcmp(jsToTempString(es, wkeRunJS(wv, "window.__pageSaw")),
+                    "no") == 0;
+
+    check(injected && cleared,
+          "wkeSetInitScript runs before page scripts (evaluateOnNewDocument)");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {
