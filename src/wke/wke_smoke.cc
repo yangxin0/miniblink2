@@ -1135,6 +1135,33 @@ int main() {
           "wkeInsertCSS injects a stylesheet that takes effect (#x hidden)");
   }
 
+  // wkeGetRequestLog captures subresource fetches: clear, load a page linking a
+  // file:// stylesheet, and the log holds its URL; wkeClearRequestLog empties it.
+  {
+    const char* rl_css = "/tmp/mb_wke_reqlog.css";
+    if (FILE* f = std::fopen(rl_css, "wb")) {
+      std::fputs("#q{color:rgb(9,9,9)}", f);
+      std::fclose(f);
+    }
+    wkeClearRequestLog();
+    wkeLoadHtmlWithBaseUrl(
+        wv, "<head><link rel='stylesheet' href='file:///tmp/mb_wke_reqlog.css'>"
+            "</head><body><b id='q'>x</b></body>", "file:///tmp/mb_wke_rl.html");
+    // Wait until the stylesheet actually applies — that proves its fetch went
+    // through the loader (and so into the log), with no fixed sleep.
+    wkeWaitForFunction(
+        wv, "getComputedStyle(document.getElementById('q')).color==='rgb(9, 9, 9)'",
+        2000);
+    const bool logged =
+        std::string(wkeGetRequestLog(wv)).find("mb_wke_reqlog.css") !=
+        std::string::npos;
+    wkeClearRequestLog();
+    const bool cleared = std::strcmp(wkeGetRequestLog(wv), "") == 0;
+    check(logged && cleared,
+          "wkeGetRequestLog records subresource fetches; wkeClearRequestLog empties it");
+    std::remove(rl_css);
+  }
+
   // wkeGetAllTextForSelector scrapes a whole list in one call, returning a JSON
   // array of each match's innerText; "[]" for no matches, "" for a bad selector.
   {

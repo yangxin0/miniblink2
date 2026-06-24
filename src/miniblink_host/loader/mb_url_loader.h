@@ -59,6 +59,15 @@ bool MbLoadCookies(const std::string& path);
 // file. Empty if the cookie engine is unavailable.
 std::string MbGetAllCookies();
 
+// Process-wide request log: every subresource URL the loader fetches (img, css,
+// fetch/XHR, etc.) is appended via MbRecordRequest. MbGetRequestLog returns the
+// URLs newline-separated, oldest first; MbClearRequestLog empties it. The log is
+// capped (oldest entries dropped past the cap) so a long-lived process can't grow
+// it without bound. Single-threaded (main-thread loader), so no locking.
+void MbRecordRequest(const std::string& url);
+std::string MbGetRequestLog();
+void MbClearRequestLog();
+
 // Process-wide HTTP(S) proxy for all network fetches, as a libcurl proxy string:
 // "http://host:port", "socks5://host:port", "host:port" (defaults to http), or
 // "" to force a direct connection (overriding any *_proxy env vars). Once set

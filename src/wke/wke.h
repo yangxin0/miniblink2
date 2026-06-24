@@ -338,6 +338,11 @@ WKE_API bool wkeSetLocalStorage(wkeWebView webView, const utf8* key,
 WKE_API const utf8* wkeGetSessionStorage(wkeWebView webView, const utf8* key);
 WKE_API bool wkeSetSessionStorage(wkeWebView webView, const utf8* key,
                                   const utf8* value);
+// Process-wide subresource request log: wkeGetRequestLog returns the fetched URLs
+// newline-separated (owned by the view); wkeClearRequestLog empties it (call
+// before a load to scope it to that page). Port extension.
+WKE_API const utf8* wkeGetRequestLog(wkeWebView webView);
+WKE_API void wkeClearRequestLog();
 // Set the cookie jar file path (Flush/Reload persist to/from it). This port
 // takes a utf8 path rather than the Windows wke WCHAR. The path is process-wide
 // (the jar is shared); the webView arg is accepted for signature compatibility.

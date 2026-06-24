@@ -1698,6 +1698,37 @@ int main() {
     std::remove(css_path);
   }
 
+  // 75b. Request log: the loader records every subresource it fetches. Clear it,
+  // load a page that links a file:// stylesheet, and confirm the log captured the
+  // stylesheet URL; then clear and confirm it empties. (Offline — file:// flows
+  // through the same loader chokepoint as network subresources.)
+  {
+    const char* rl_css = "/tmp/mb_reqlog.css";
+    if (FILE* f = std::fopen(rl_css, "wb")) {
+      std::fputs("#q{color:rgb(3,2,1)}", f);
+      std::fclose(f);
+    }
+    mbClearRequestLog();
+    mbLoadHTML(v,
+        "<head><link rel='stylesheet' href='file:///tmp/mb_reqlog.css'></head>"
+        "<body><b id='q'>x</b></body>", "file:///tmp/mb_rl_page.html");
+    // Wait until the stylesheet applies — proves its fetch reached the loader.
+    mbWaitForFunction(
+        v, "getComputedStyle(document.getElementById('q')).color==='rgb(3, 2, 1)'",
+        2000);
+    char rb[4096] = {0};
+    int rlen = mbGetRequestLog(rb, sizeof(rb));
+    const bool logged =
+        rlen > 0 && std::string(rb).find("mb_reqlog.css") != std::string::npos;
+    mbClearRequestLog();
+    const bool cleared = mbGetRequestLog(nullptr, 0) == 0;
+    Expect(logged && cleared,
+           "mbGetRequestLog records subresource fetches; mbClearRequestLog empties it",
+           std::string("logged=") + (logged ? "1" : "0") + " cleared=" +
+               (cleared ? "1" : "0"));
+    std::remove(rl_css);
+  }
+
   // 76. CSS background-image renders (data: SVG). Distinct from <img>: exercises
   // the CSS background paint path + a data: URL image + SVG-as-image. A 30x30 div
   // with a green-SVG background should paint green at its center.

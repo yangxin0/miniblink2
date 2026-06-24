@@ -277,6 +277,14 @@ MB_EXPORT void mbClearCookies(mbView*);
 MB_EXPORT int mbSaveCookies(const char* path);
 MB_EXPORT int mbLoadCookies(const char* path);
 
+// Network observability: the loader records every subresource URL it fetches
+// (img, css, fetch/XHR, …). mbGetRequestLog writes them newline-separated,
+// oldest first, into `out` and returns the full length (size first with
+// out=NULL/out_cap=0); mbClearRequestLog empties the log (call before a load to
+// scope it to that page). Process-wide and capped (oldest dropped past the cap).
+MB_EXPORT int mbGetRequestLog(char* out, int out_cap);
+MB_EXPORT void mbClearRequestLog(void);
+
 // localStorage access for the current document's origin — inject an auth token /
 // app state before an SPA boots (pair with mbSetInitScript), or read it back.
 // mbGetLocalStorage writes the value of `key` into `out` and returns its length

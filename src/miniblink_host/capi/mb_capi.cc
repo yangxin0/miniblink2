@@ -333,6 +333,23 @@ int mbLoadCookies(const char* path) {
   return (path && mb::MbLoadCookies(path)) ? 1 : 0;
 }
 
+int mbGetRequestLog(char* out, int out_cap) {
+  // Process-wide: newline-separated subresource URLs the loader has fetched.
+  std::string result = mb::MbGetRequestLog();
+  if (out && out_cap > 0) {
+    int n = static_cast<int>(result.size());
+    int copy = n < out_cap - 1 ? n : out_cap - 1;
+    for (int i = 0; i < copy; ++i)
+      out[i] = result[i];
+    out[copy] = '\0';
+  }
+  return static_cast<int>(result.size());
+}
+
+void mbClearRequestLog(void) {
+  mb::MbClearRequestLog();
+}
+
 int mbGetLocalStorage(mbView* v, const char* key, char* out, int out_cap) {
   if (!v || !v->impl || !key)
     return -1;

@@ -588,6 +588,39 @@ std::string MbGetCookiesForUrl(const std::string& url) {
   return out;
 }
 
+// --- Request log -------------------------------------------------------------
+namespace {
+// Leaked-new (avoids an exit-time destructor on a function-local static). Capped
+// so a long-lived process can't grow it without bound; oldest entries drop first.
+std::vector<std::string>& RequestLog() {
+  static std::vector<std::string>* log = new std::vector<std::string>();
+  return *log;
+}
+constexpr size_t kRequestLogCap = 2048;
+}  // namespace
+
+void MbRecordRequest(const std::string& url) {
+  if (url.empty())
+    return;
+  auto& log = RequestLog();
+  if (log.size() >= kRequestLogCap)
+    log.erase(log.begin(), log.begin() + (log.size() - kRequestLogCap + 1));
+  log.push_back(url);
+}
+
+std::string MbGetRequestLog() {
+  std::string out;
+  for (const std::string& u : RequestLog()) {
+    out += u;
+    out += "\n";
+  }
+  return out;
+}
+
+void MbClearRequestLog() {
+  RequestLog().clear();
+}
+
 bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* content_type, const std::string& user_agent,
                 const std::string& extra_headers, const std::string& post_body,
@@ -641,6 +674,7 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   if (!client_)
     return;
   const GURL& url = request->url;
+  MbRecordRequest(url.spec());  // network observability: every subresource fetch
 
   std::string contents;
   std::string http_content_type;  // from the server, may be "text/html; charset=..."

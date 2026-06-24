@@ -59,6 +59,7 @@ struct _tagWkeWebView {
   std::string selector_allattr_cache;  // backs wkeGetAllAttributeForSelector's return
   std::string local_storage_cache;  // backs wkeGetLocalStorage's return
   std::string session_storage_cache;  // backs wkeGetSessionStorage's return
+  std::string request_log_cache;  // backs wkeGetRequestLog's return
   std::string selector_attr_cache;  // backs wkeGetAttribute's return
   std::string selector_value_cache; // backs wkeGetValueForSelector's return
   std::string computed_style_cache;  // backs wkeGetComputedStyle's return
@@ -1042,6 +1043,26 @@ bool wkeSetSessionStorage(wkeWebView webView, const utf8* key, const utf8* value
   // sessionStorage.setItem(key, value); true on success. (Port extension.)
   return webView && webView->view && key &&
          mbSetSessionStorage(webView->view, key, value) != 0;
+}
+
+const utf8* wkeGetRequestLog(wkeWebView webView) {
+  // Process-wide subresource request log (newline-separated). Owned by the view
+  // until the next call. (Port extension; the log itself is process-wide.)
+  if (!webView)
+    return "";
+  const int len = mbGetRequestLog(nullptr, 0);  // size first
+  if (len <= 0) {
+    webView->request_log_cache.clear();
+    return webView->request_log_cache.c_str();
+  }
+  std::vector<char> buf(static_cast<size_t>(len) + 1, 0);
+  mbGetRequestLog(buf.data(), len + 1);
+  webView->request_log_cache.assign(buf.data());
+  return webView->request_log_cache.c_str();
+}
+
+void wkeClearRequestLog() {
+  mbClearRequestLog();  // process-wide
 }
 
 void wkeSetCookie(wkeWebView webView, const utf8* url, const utf8* cookie) {

@@ -63,7 +63,7 @@ the deliverable surface (C API, CLI, wke layer).
   blob: URLs (`fetch` + `<img>`), Intersection/Resize/Mutation observers, WAAPI,
   forms + submit-navigation, mouse/keyboard input, host-side history. CJK/i18n +
   system web fonts render.
-- **`mb_capi` C API — 91 functions:** lifecycle, load, JS eval, scraping
+- **`mb_capi` C API — 93 functions:** lifecycle, load, JS eval, scraping
   (text/attr/computed-style/count by selector), input (mouse/key/text/scroll +
   click/fill/select/focus/hover/scroll-into-view by selector), screenshots
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
@@ -106,7 +106,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **146/146** (default, network-free), `wke_smoke` **85/85**,
+- **Tests:** `mb_smoke` **147/147** (default, network-free), `wke_smoke` **86/86**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -124,6 +124,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- capi+wke: mbGetRequestLog / mbClearRequestLog (+ wke) — network observability (2026-06-24). A genuinely new area (not selectors/storage): the loader now records every subresource URL it fetches (img/css/fetch/XHR) at the MbURLLoader::Deliver chokepoint into a process-wide, capped (2048, oldest-dropped) log. mbGetRequestLog returns them newline-separated; mbClearRequestLog empties it (scope to a page by clearing before load). Single-threaded main-thread loader -> no locking. VERIFIED OFFLINE (file:// subresources flow through the same chokepoint as network ones): clear, load a page linking a file:// stylesheet, wait until it APPLIES (proves the fetch reached the loader), log contains the .css URL; clear -> empty. wke_smoke 86/86, mb_smoke 147/147, no survivors. ABI now 93 fns (2 new). Note: captures subresources via the URLLoader; the top-level navigation (MbFetchUrl) is not logged — known via mbGetURL.
 - capi+wke: mbGetSessionStorage / mbSetSessionStorage (+ wke) — complete Web Storage (2026-06-24). The expected peer of last tick's localStorage accessors (users who find mbGetLocalStorage look for the session variant). Same contract/origin caveats, but a per-session store. VERIFIED in both suites against an https base: set via C is observed in JS (sessionStorage.getItem), set in JS is read via C, and crucially a key in sessionStorage is ABSENT from localStorage (proving the two stores are distinct). wke_smoke 85/85, mb_smoke 146/146, no survivors. ABI now 91 fns (2 new).
 - capi+wke: mbGetLocalStorage / mbSetLocalStorage (+ wke) — C-level localStorage access (2026-06-24). A distinct capability (storage/origin, not DOM selectors): read/write the document-origin localStorage from C — inject an auth token / SPA state, or read it back. Get returns -1 (absent or storage unavailable on an opaque origin), Set returns 1/0. Needs a real origin (commit with an http(s) base, not about:blank). VERIFIED in both suites against an https base: set via C is observed in JS (localStorage.getItem), a value set in JS is read back via C, an absent key -> -1/"". wke_smoke 84/84, mb_smoke 145/145, no survivors. ABI now 89 fns (2 new).
 - mb_shot: --wait-hidden / --css — the spinner-gone + hide-noise workflow on the CLI (2026-06-24). Threads the last two ticks (mbWaitForSelectorHidden + mbInsertCSS) into the deliverable. --wait-hidden CSS blocks (interact phase, after --wait-visible) until the selector is gone/hidden; --css STYLES injects a stylesheet before capture. VERIFIED end-to-end on a local page where a 250ms timer removes #spin and reveals #content: --wait-hidden '#spin' --css '#banner{display:none}' --eval (content text) --visible '#banner' → prints "REAL CONTENT" then 0 (banner hidden by the injected CSS), no warnings; the negative --wait-hidden on a staying element warns "still visible at timeout". (Caught a test-authoring slip first — --text is a BARE flag, so a stray arg corrupted the positionals; re-ran correctly.) No survivors. mb_shot.cc + usage only; both suites unchanged (wke 83/83, mb 144/144).
