@@ -219,21 +219,51 @@ A drop-in subset of [miniblink](https://github.com/weolar/miniblink49)'s classic
 runs on modern Blink with the original signatures (`utf8`, `wkeWebView`, `jsValue`,
 …). It is built into `libminiblink_host`; an embedder includes just `wke/wke.h`.
 
-Supported today (verified by `wke_smoke`):
+Supported today (every item verified by `wke_smoke` — 56 default cases, plus
+over-the-network cases under `MB_NET_TESTS=1`). Functions marked *(ext)* are
+port extensions over `mb_capi` beyond the classic `wke` surface:
 
 - **Lifecycle / load:** `wkeInitialize`/`wkeFinalize`, `wkeCreateWebView`/
-  `wkeDestroyWebView`, `wkeLoadURL`/`wkeLoadHTML`, `wkeReload`, the loading-state
-  pollers (`wkeIsLoadingCompleted`/`Succeeded`/`Failed`, `wkeIsDocumentReady`).
-- **Geometry / paint:** `wkeResize`, `wkeGetWidth`/`Height`, `wkeGetContentWidth`/
-  `Height`, `wkeSetTransparent`, `wkePaint` (into a caller BGRA buffer).
-- **Accessors:** `wkeGetURL`/`wkeGetTitle`/`wkeGetSource`, `wkeSetUserAgent`.
+  `wkeDestroyWebView`, `wkeLoadURL`/`wkeLoadHTML`, `wkePostURL`, `wkeReload`, the
+  loading-state pollers (`wkeIsLoadingCompleted`/`Succeeded`/`Failed`,
+  `wkeIsDocumentReady`).
+- **Geometry / rendering:** `wkeResize`, `wkeGetWidth`/`Height`,
+  `wkeGetContentWidth`/`Height`, `wkeSetTransparent`/`wkeIsTransparent`,
+  `wkeSetZoomFactor`/`wkeGetZoomFactor`, `wkeSetEditable`, `wkeSetDarkMode` *(ext)*,
+  `wkeSetDeviceScaleFactor` *(ext)*, `wkeScrollTo` *(ext)*.
+- **Capture / output:** `wkePaint` (into a caller BGRA buffer), and *(ext)*
+  `wkeSavePng`/`wkeSavePngRect` (PNG/JPEG by extension), `wkeSavePdf`,
+  `wkeEncodePng` (in-memory bytes).
+- **Accessors / view-state:** `wkeGetURL`/`wkeGetTitle`/`wkeGetSource`/`wkeGetText`,
+  `wkeSetUserAgent`, `wkeSetName`/`wkeGetName`, `wkeSetUserKeyValue`/
+  `wkeGetUserKeyValue`.
 - **Navigation:** `wkeCanGoBack`/`wkeGoBack`/`wkeCanGoForward`/`wkeGoForward`.
 - **Input:** `wkeFireMouseEvent`, `wkeFireMouseWheelEvent`, `wkeFireKeyDown`/`Up`/
   `PressEvent`.
-- **Scripting:** `wkeRunJS` + `wkeGlobalExec` + `jsToInt`/`jsToDouble`/
-  `jsToBoolean`/`jsToTempString`/`jsTypeOf` (a string-backed `jsValue`).
+- **Scripting (full string-backed `jsValue` model):** `wkeRunJS` + `wkeGlobalExec`;
+  classify `jsTypeOf` + `jsIsNumber`/`String`/`Boolean`/`Object`/`Array`/`Function`/
+  `Undefined`/`Null`/`True`/`False`; coerce `jsToInt`/`jsToFloat`/`jsToDouble`/
+  `jsToBoolean`/`jsToTempString`/`jsToString` (JSON for objects); construct `jsInt`/
+  `jsDouble`/`jsBoolean`/`jsString`/`jsUndefined`/`jsNull`; read `jsGetLength`/
+  `jsGetAt`/`jsGet`/`jsGetGlobal`/`jsGetKeys`; build `jsEmptyObject`/`jsEmptyArray`
+  + `jsSet`/`jsSetAt`/`jsSetGlobal`; call `jsCall`/`jsCallGlobal`; plus
+  `wkeSetInitScript` (evaluateOnNewDocument) *(ext)*.
+- **DOM automation** *(ext, Puppeteer-style)* — query `wkeCountSelector`/
+  `wkeGetTextForSelector`/`wkeGetAttribute`/`wkeGetElementRect`/
+  `wkeGetComputedStyle`; act `wkeClickSelector`/`wkeDoubleClickSelector`/
+  `wkeRightClickSelector`/`wkeHoverSelector`/`wkeFocusSelector`/`wkeBlurSelector`/
+  `wkeFillSelector`/`wkeSelectOption`/`wkeScrollIntoView`; wait `wkeWaitForSelector`/
+  `wkeWaitForFunction`.
+- **Networking:** cookies `wkeGetCookie`/`wkeSetCookie`/`wkePerformCookieCommand`
+  + jar persistence `wkeSetCookieJarPath`; `wkeSetProxy` (HTTP/SOCKS + auth);
+  and *(ext)* `wkeSetExtraHeaders`, `wkeSetLocale`/`wkeSetTimezone`,
+  `wkeSetFollowRedirects`, `wkeSetIgnoreCertErrors`, `wkeGetHttpStatusCode`/
+  `wkeGetResponseHeaders`.
 - **Callbacks:** `wkeOnLoadingFinish`, `wkeOnTitleChanged`, `wkeOnConsole`,
   `wkeOnDocumentReady` (+ `wkeString`/`wkeGetString`).
+
+A complete, runnable example of the automation surface (fill → select → click →
+wait → scrape → screenshot) is `src/wke/wke_demo.cc` (the `wke_demo` target).
 
 ```c
 #include "wke/wke.h"
@@ -257,8 +287,9 @@ wkeFinalize();
 
 Loading is synchronous here, so a `wke` app can poll `wkeIsLoadingCompleted`
 (always true after `wkeLoadURL` returns) instead of waiting on a message loop.
-Deferred: the full V8-backed `jsValue` object model (`jsGet`/`jsGetAt`/`jsCall`,
-native function binding) — read structured data via `wkeRunJS` for now.
+The `jsValue` object model is implemented as a JS-side slot store (objects/arrays
+are parked in the page and navigated by `jsGet`/`jsGetAt`/`jsCall`), not raw V8
+handles; native function binding (`wkeJsBindFunction`) remains the main gap.
 
 ## Build
 
