@@ -65,6 +65,8 @@ int main(int argc, char** argv) {
   std::string fill_selector;   // fill this field before capture (with fill_text)
   std::string fill_text;       // value for --fill
   std::string eval_js;         // JS to run after load; result printed to stdout
+  std::string value_selector;  // print this control's live .value to stdout
+  std::string checked_selector;  // print this control's .checked (1/0) to stdout
   std::string proxy;           // libcurl proxy string for network fetches
   std::string load_cookies;    // cookie jar file to load before navigating
   std::string save_cookies;    // cookie jar file to write after the page settles
@@ -95,6 +97,10 @@ int main(int argc, char** argv) {
       fill_text = argv[++i];
     } else if (a == "--eval" && i + 1 < argc) {
       eval_js = argv[++i];
+    } else if (a == "--value" && i + 1 < argc) {
+      value_selector = argv[++i];
+    } else if (a == "--checked" && i + 1 < argc) {
+      checked_selector = argv[++i];
     } else if (a == "--proxy" && i + 1 < argc) {
       proxy = argv[++i];
     } else if (a == "--load-cookies" && i + 1 < argc) {
@@ -139,7 +145,8 @@ int main(int argc, char** argv) {
     std::fprintf(
         stderr,
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
-        "[--transparent] [--text] [--html] [--eval JS] [--fill CSS TEXT] "
+        "[--transparent] [--text] [--html] [--eval JS] [--value CSS] "
+        "[--checked CSS] [--fill CSS TEXT] "
         "[--click CSS] [--wait-selector CSS] [--wait-ms N] [--scroll-to Y] "
         "[--post BODY] [--proxy URL] "
         "[--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] "
@@ -310,6 +317,30 @@ int main(int argc, char** argv) {
     mbEvalJS(view, eval_js.c_str(), ebuf.data(), static_cast<int>(ebuf.size()));
     std::fwrite(ebuf.data(), 1, std::strlen(ebuf.data()), stdout);
     std::fputc('\n', stdout);
+  }
+
+  // --value: print a control's LIVE .value (post-typing/selection) — pairs with
+  // --fill to read back exactly what landed in the field. Empty line + warning on
+  // no match (distinct from a genuinely empty value, which prints an empty line).
+  if (!value_selector.empty()) {
+    std::vector<char> vbuf(1 << 16, 0);  // 64 KiB
+    int n = mbGetValueForSelector(view, value_selector.c_str(), vbuf.data(),
+                                  static_cast<int>(vbuf.size()));
+    if (n < 0)
+      std::fprintf(stderr, "mb_shot: --value '%s' matched no element / no value\n",
+                   value_selector.c_str());
+    std::fwrite(vbuf.data(), 1, std::strlen(vbuf.data()), stdout);
+    std::fputc('\n', stdout);
+  }
+
+  // --checked: print a checkbox/radio's .checked as 1/0 (or -1 on no match / a
+  // non-checkable element) — pairs with --click, which toggles a checkbox.
+  if (!checked_selector.empty()) {
+    int c = mbGetCheckedForSelector(view, checked_selector.c_str());
+    if (c < 0)
+      std::fprintf(stderr, "mb_shot: --checked '%s' matched no checkable element\n",
+                   checked_selector.c_str());
+    std::fprintf(stdout, "%d\n", c);
   }
 
   // Persist the cookie jar after the page has settled (so cookies set during the
