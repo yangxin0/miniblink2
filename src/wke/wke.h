@@ -362,6 +362,18 @@ typedef enum _jsType {
   JSTYPE_NULL,
 } jsType;
 WKE_API jsType jsTypeOf(jsValue v);
+// Type predicates over a jsValue. Arrays report jsIsArray (not jsIsObject) in
+// this port; jsIsTrue/jsIsFalse test a boolean value specifically.
+WKE_API bool jsIsNumber(jsValue v);
+WKE_API bool jsIsString(jsValue v);
+WKE_API bool jsIsBoolean(jsValue v);
+WKE_API bool jsIsObject(jsValue v);
+WKE_API bool jsIsFunction(jsValue v);
+WKE_API bool jsIsUndefined(jsValue v);
+WKE_API bool jsIsNull(jsValue v);
+WKE_API bool jsIsArray(jsValue v);
+WKE_API bool jsIsTrue(jsValue v);
+WKE_API bool jsIsFalse(jsValue v);
 
 // Object-model reads over a wkeRunJS result (array/object). jsGetLength returns
 // an array's .length (0 otherwise); jsGetAt returns element `index` as a new,

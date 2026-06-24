@@ -838,6 +838,29 @@ int main() {
     check(ok, "wkeGetText returns the page's visible text (no markup/scripts)");
   }
 
+  // jsIs* type predicates (offline): one value of each JS type.
+  {
+    wkeLoadHTML(wv, "<body>types</body>");
+    jsValue n = wkeRunJS(wv, "42");
+    jsValue s = wkeRunJS(wv, "'hi'");
+    jsValue bt = wkeRunJS(wv, "true");
+    jsValue bf = wkeRunJS(wv, "false");
+    jsValue o = wkeRunJS(wv, "({a:1})");
+    jsValue a = wkeRunJS(wv, "[1,2]");
+    jsValue f = wkeRunJS(wv, "(function(){})");
+    jsValue u = wkeRunJS(wv, "undefined");
+    jsValue nl = wkeRunJS(wv, "null");
+    const bool ok =
+        jsIsNumber(n) && jsIsString(s) && jsIsBoolean(bt) && jsIsObject(o) &&
+        jsIsArray(a) && jsIsFunction(f) && jsIsUndefined(u) && jsIsNull(nl) &&
+        jsIsTrue(bt) && jsIsFalse(bf) &&
+        // negatives: cross-type and array-vs-object distinction
+        !jsIsNumber(s) && !jsIsObject(a) && !jsIsArray(o) && !jsIsTrue(bf) &&
+        !jsIsFalse(bt) && !jsIsNull(u);
+    check(ok, "jsIsNumber/String/Boolean/Object/Array/Function/Undefined/Null/"
+              "True/False classify values");
+  }
+
   // HTTP introspection (offline): a non-http load reports status 0 + no headers.
   {
     wkeLoadHTML(wv, "<body>local</body>");

@@ -1042,6 +1042,23 @@ jsType jsTypeOf(jsValue v) {
   return JSTYPE_UNDEFINED;
 }
 
+// Type predicates over a jsValue (built on jsTypeOf). Arrays report jsIsArray
+// (not jsIsObject) in this port; jsIsTrue/jsIsFalse test a boolean's value.
+bool jsIsNumber(jsValue v) { return jsTypeOf(v) == JSTYPE_NUMBER; }
+bool jsIsString(jsValue v) { return jsTypeOf(v) == JSTYPE_STRING; }
+bool jsIsBoolean(jsValue v) { return jsTypeOf(v) == JSTYPE_BOOLEAN; }
+bool jsIsObject(jsValue v) { return jsTypeOf(v) == JSTYPE_OBJECT; }
+bool jsIsFunction(jsValue v) { return jsTypeOf(v) == JSTYPE_FUNCTION; }
+bool jsIsUndefined(jsValue v) { return jsTypeOf(v) == JSTYPE_UNDEFINED; }
+bool jsIsNull(jsValue v) { return jsTypeOf(v) == JSTYPE_NULL; }
+bool jsIsArray(jsValue v) { return jsTypeOf(v) == JSTYPE_ARRAY; }
+bool jsIsTrue(jsValue v) {
+  return jsTypeOf(v) == JSTYPE_BOOLEAN && jsToBoolean(nullptr, v);
+}
+bool jsIsFalse(jsValue v) {
+  return jsTypeOf(v) == JSTYPE_BOOLEAN && !jsToBoolean(nullptr, v);
+}
+
 int jsGetLength(jsExecState es, jsValue object) {
   wkeWebView wv = reinterpret_cast<wkeWebView>(es);
   if (!wv || !wv->view)

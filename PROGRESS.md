@@ -78,7 +78,8 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSavePngRect`/`wkeEncodePng` in-memory), viewport scroll (`wkeScrollTo`),
   mouse (`wkeFireMouseEvent`), keyboard (`wkeFireKey*`),
   scripting (`wkeRunJS` + `jsToInt/Double/Boolean/TempString` + `jsTypeOf` +
-  the full jsValue object model — reads `jsGetLength`/`jsGetAt`/`jsGet`/
+  the full jsValue object model — `jsIs*` type predicates, reads
+  `jsGetLength`/`jsGetAt`/`jsGet`/
   `jsGetGlobal` + `jsGetKeys`, constructors `jsInt`/`jsString`/…, builders
   `jsEmptyObject`/`jsEmptyArray` + setters `jsSet`/`jsSetAt`/`jsSetGlobal`, and
   `jsCall`/`jsCallGlobal`, plus `wkeSetInitScript` evaluateOnNewDocument),
@@ -101,9 +102,9 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **52/52**,
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **53/53**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com cases
-  (wke_smoke up to 58; use a generous watchdog ≥180s — cumulative loads + the
+  (wke_smoke up to 59; use a generous watchdog ≥180s — cumulative loads + the
   15s failing-proxy connect; cases SKIP when a host is unreachable).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
@@ -119,6 +120,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke jsValue: jsIs* type predicates (2026-06-24). FAITHFUL (not extension) — the ten classic wke predicates jsIsNumber/String/Boolean/Object/Function/Undefined/Null/Array/True/False, built on jsTypeOf (+ jsToBoolean for True/False). Arrays report jsIsArray not jsIsObject (matches this port's jsTypeOf). Deterministic + OFFLINE. VERIFIED: one value of each JS type classifies correctly, with cross-type negatives + the array-vs-object and true-vs-false distinctions. Deliberately pivoted off network-gated work after last tick. wke_smoke 53/53, mb_smoke 132/132, no survivors.
 - wke NETWORK: wkeSetFollowRedirects (2026-06-24). Process-wide toggle (wraps mbSetFollowRedirects) to follow HTTP 3xx (default) or stop at the redirect so wkeGetHttpStatusCode/wkeGetResponseHeaders expose the 30x + Location. Documented PORT EXTENSION. VERIFIED offline (toggle safe, local loads still work → wke_smoke 52/52). Network proof (MB_NET_TESTS: follow-on /redirect/1→200, follow-off→30x) is correctly gated but SKIPPED this run as httpbin was unreachable; the underlying redirect behavior is already covered by mb_smoke (case 40, 132/132). NOTE: with the larger net suite + a slow-but-reachable httpbin, the net run can exceed a 90s watchdog (cumulative loads + the 15s failing-proxy connect) — use a longer watchdog for MB_NET_TESTS; it killed cleanly with no survivors. mb_smoke 132/132.
 - wke HTTP INTROSPECTION: wkeGetHttpStatusCode + wkeGetResponseHeaders (2026-06-24). Read the main document's final HTTP status + raw response headers after a load (wrap mbGetHttpStatus/mbGetResponseHeaders; headers via a new response_headers_cache). Documented PORT EXTENSIONS (classic wke uses the net hook). VERIFIED offline (non-http load → 0 + "") and over the network (MB_NET_TESTS): httpbin.org/get → status 200 + non-empty headers. wke_smoke 51/51 default, 56/56 net, mb_smoke 132/132, no survivors.
 - wke DOM READ: wkeGetText (2026-06-24). Page visible text (document.body.innerText) — the text counterpart to wkeGetSource's HTML (wraps mbGetText, size-first into a new text_cache). VERIFIED offline: includes rendered "Title"/"Hello world", excludes <script> contents and raw markup. wke_smoke 50/50, mb_smoke 132/132, no survivors.
