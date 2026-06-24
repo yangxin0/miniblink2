@@ -35,6 +35,9 @@ struct _tagWkeWebView {
   std::string last_title;  // so a title callback only fires on a real change
   wkeConsoleCallback on_console = nullptr;
   void* console_param = nullptr;
+  wkeDocumentReadyCallback on_document_ready = nullptr;
+  void* document_ready_param = nullptr;
+  std::string source_cache;  // backs wkeGetSource's const utf8* return
 };
 
 namespace {
@@ -93,6 +96,8 @@ void FireLoadCallbacks(wkeWebView wv) {
       wv->on_title_changed(wv, wv->title_param, &title);
     }
   }
+  if (wv->on_document_ready)
+    wv->on_document_ready(wv, wv->document_ready_param);
   if (wv->on_loading_finish) {
     char ub[4096] = {0};
     mbGetURL(wv->view, ub, sizeof(ub));
@@ -271,6 +276,16 @@ void wkeSetUserAgent(wkeWebView webView, const utf8* userAgent) {
 void wkeSetTransparent(wkeWebView webView, bool transparent) {
   if (webView && webView->view)
     mbSetTransparentBackground(webView->view, transparent ? 1 : 0);
+}
+
+const utf8* wkeGetSource(wkeWebView webView) {
+  if (!webView || !webView->view)
+    return "";
+  const int len = mbGetHTML(webView->view, nullptr, 0);  // size first (pages vary)
+  std::vector<char> buf(static_cast<size_t>(len) + 1, 0);
+  mbGetHTML(webView->view, buf.data(), len + 1);
+  webView->source_cache.assign(buf.data());
+  return webView->source_cache.c_str();
 }
 
 bool wkeFireMouseEvent(wkeWebView webView, unsigned int message, int x, int y,
@@ -467,4 +482,12 @@ void wkeOnConsole(wkeWebView webView, wkeConsoleCallback callback, void* param) 
     return;
   webView->on_console = callback;
   webView->console_param = param;
+}
+
+void wkeOnDocumentReady(wkeWebView webView, wkeDocumentReadyCallback callback,
+                        void* param) {
+  if (!webView)
+    return;
+  webView->on_document_ready = callback;
+  webView->document_ready_param = param;
 }

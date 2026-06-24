@@ -192,6 +192,17 @@ int main() {
             con.all.find("boom") != std::string::npos && con.saw_error,
         "wkeOnConsole captures console.log/error with levels");
 
+  // Document-ready callback + wkeGetSource: the callback fires on load and the
+  // source contains the page's (post-JS) markup.
+  int doc_ready = 0;
+  wkeOnDocumentReady(wv, [](wkeWebView, void* p) { *static_cast<int*>(p) = 1; },
+                     &doc_ready);
+  wkeLoadHTML(wv, "<body><p id='sg'>source-here</p></body>");
+  const char* src = wkeGetSource(wv);
+  check(doc_ready == 1 && src && std::strstr(src, "source-here") != nullptr &&
+            std::strstr(src, "id=\"sg\"") != nullptr,
+        "wkeOnDocumentReady fires + wkeGetSource returns the page HTML");
+
   wkeDestroyWebView(wv);
   wkeFinalize();
 

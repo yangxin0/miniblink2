@@ -117,6 +117,9 @@ WKE_API void wkeSetUserAgent(wkeWebView webView, const utf8* userAgent);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);
+// The current document's HTML (the rendered, post-JS DOM serialized to HTML).
+// Owned by the view, valid until the next wkeGetSource on it.
+WKE_API const utf8* wkeGetSource(wkeWebView webView);
 
 // --- Input ---------------------------------------------------------------------
 // Deliver a mouse event at (x, y). `message` is one of the WKE_MSG_* codes;
@@ -210,5 +213,10 @@ typedef void (*wkeConsoleCallback)(wkeWebView webView, void* param,
                                    const wkeString stackTrace);
 WKE_API void wkeOnConsole(wkeWebView webView, wkeConsoleCallback callback,
                           void* param);
+
+// Fired when the document is ready (after a load settles, in this slice).
+typedef void (*wkeDocumentReadyCallback)(wkeWebView webView, void* param);
+WKE_API void wkeOnDocumentReady(wkeWebView webView,
+                                wkeDocumentReadyCallback callback, void* param);
 
 #endif  // MINIBLINK_WKE_WKE_H_
