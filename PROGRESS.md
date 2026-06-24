@@ -2117,7 +2117,29 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   and mb_shot (follow -> lands on /get; --no-follow --headers -> "Location: /get"). Default unchanged
   (follow stays true) so 131/131 default, no survivors. C API now 69 fns.
 
+- ✅✅ STARTED the wke compatibility layer — src/wke is no longer empty (2026-06-24). The stated goal
+  ("driven by the wke/mb C API") had its most conspicuous gap: src/wke empty, deferred ~15 ticks over
+  the jsValue worry. Examined the real miniblink49 wke.h and confirmed a FAITHFUL, USEFUL first slice
+  is bounded WITHOUT jsValue: the headless render flow. Landed src/wke/{wke.h, wke.cc, wke_smoke.cc}:
+  wke.h is a self-contained subset with the exact upstream signatures (typedef char utf8; wkeWebView
+  opaque handle; WKE_API). wke.cc wraps mb_capi — wkeInitialize/Finalize -> mbInitialize/Shutdown;
+  wkeCreateWebView (default 800x600) / wkeDestroyWebView wrap mbView*; wkeLoadURL/LoadHTML/wkeReload;
+  the loading-state pollers (wkeIsLoading=false, wkeIsLoadingCompleted/DocumentReady=true,
+  wkeIsLoadingSucceeded from mbGetHttpStatus for http else true — load is SYNCHRONOUS here, so polling
+  works without the async wkeOnLoadingFinish callback); wkeResize/GetWidth/Height/wkeWidth/Height;
+  wkeGetURL/GetTitle (const utf8* cached in the handle, the classic wke contract); wkeSetUserAgent;
+  wkePaint(bits,pitch) -> mbPaintToBitmap. BUILD: wke.cc compiled into libminiblink_host via
+  ../wke/wke.cc; new executable("wke_smoke"); build.sh now stages src/wke -> donor .../renderer/wke
+  (GN ../wke/ paths + the include-root resolve cleanly — verified). wke_smoke runs the full canonical
+  flow (init->create->resize->loadHTML->poll->getTitle->paint->destroy->finalize) and is 5/5, exit 0,
+  no survivors; the blue background pixel confirms wkePaint actually renders. mb_smoke still 131/131
+  (lib change is purely additive). DEFERRED to later slices: wkeRunJS (the jsValue binding layer),
+  the async callbacks (wkeOnLoadingFinish/PaintBitUpdated/TitleChanged), and the rest of the ~200-fn
+  surface. This proves the wke-on-modern-Blink path end to end.
+
 ### REMAINING ROADMAP
+- wke layer: grow the slice — input (wkeFireMouse/KeyEvent), more accessors, then the async callback
+  model, and eventually the jsValue scripting layer (wkeRunJS). Each is an incremental, testable slice.
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.
 - P1-polish: fonts/text (GetDataResource -> .pak + macOS system fonts).

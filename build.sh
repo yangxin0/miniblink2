@@ -12,12 +12,18 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 TREE="${1:?usage: build.sh /path/to/chromium-150.x.y.z}"
 OUT="${OUT:-out/Release}"
 DEST="$TREE/third_party/blink/renderer/miniblink_host"
+WKE_DEST="$TREE/third_party/blink/renderer/wke"
 
 [ -d "$TREE/third_party/blink/renderer" ] || { echo "not a chromium tree: $TREE" >&2; exit 1; }
 
 echo "==> staging host sources -> $DEST"
 rm -rf "$DEST"
 cp -R "$HERE/src/miniblink_host" "$DEST"
+# wke compatibility layer (built into the host lib + a wke_smoke target; its
+# BUILD.gn references live in miniblink_host/BUILD.gn via ../wke/).
+echo "==> staging wke sources -> $WKE_DEST"
+rm -rf "$WKE_DEST"
+cp -R "$HERE/src/wke" "$WKE_DEST"
 
 echo "==> applying blink compatibility patches"
 for p in "$HERE"/patches/*.patch; do
@@ -43,8 +49,8 @@ export PATH="$TREE/buildtools/mac:$PATH"
 echo "==> gn gen"
 ( cd "$TREE" && gn gen "$OUT" >/dev/null )
 
-echo "==> ninja miniblink_host mb_smoke mb_shot"
-( cd "$TREE" && ninja -C "$OUT" miniblink_host mb_smoke mb_shot )
+echo "==> ninja miniblink_host mb_smoke mb_shot wke_smoke"
+( cd "$TREE" && ninja -C "$OUT" miniblink_host mb_smoke mb_shot wke_smoke )
 
 echo "==> vendor resource paks next to the binary"
 cp "$TREE/$OUT/gen/third_party/blink/public/resources/blink_resources.pak" \

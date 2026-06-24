@@ -42,6 +42,9 @@ component("miniblink_host") {
     "widget/mb_sw_frame_sink.h",
     "widget/mb_widget.cc",
     "widget/mb_widget.h",
+    # wke compatibility layer (staged alongside at ../wke; wraps the mb_capi ABI).
+    "../wke/wke.cc",
+    "../wke/wke.h",
   ]
 
   deps = [
@@ -94,6 +97,13 @@ executable("mb_smoke") {
 # mb_shot: headless HTML -> PNG renderer CLI (the deliverable tool).
 executable("mb_shot") {
   sources = [ "tools/mb_shot.cc" ]
+  include_dirs = [ "//third_party/blink/renderer" ]
+  deps = [ ":miniblink_host" ]
+}
+
+# wke_smoke: exercises the wke compatibility slice end to end (its own process).
+executable("wke_smoke") {
+  sources = [ "../wke/wke_smoke.cc" ]
   include_dirs = [ "//third_party/blink/renderer" ]
   deps = [ ":miniblink_host" ]
 }
