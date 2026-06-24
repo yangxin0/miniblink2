@@ -2375,6 +2375,36 @@ int main() {
                (empty_ok ? "1" : "0") + " absent=" + (absent ? "1" : "0"));
   }
 
+  // 102c. mbGetValueForSelector reads the LIVE .value (post-typing/selection),
+  // distinct from mbGetAttribute's static "value" attribute, with the same
+  // -1 no-match / no-value-property sentinel.
+  {
+    mbLoadHTML(v,
+        "<body><input id='n' value='start'>"
+        "<select id='s'><option value='x'>X</option>"
+        "<option value='y' selected>Y</option></select>"
+        "<div id='d'>plain</div></body>", "about:blank");
+    mbFillSelector(v, "#n", "typed-over");
+    char vb[256] = {0};
+    int vlen = mbGetValueForSelector(v, "#n", vb, sizeof(vb));
+    const bool live_ok = vlen == 10 && std::string(vb) == "typed-over";
+    // The static attribute still reads the ORIGINAL value — the whole point.
+    char ab2[256] = {0};
+    mbGetAttribute(v, "#n", "value", ab2, sizeof(ab2));
+    const bool attr_unchanged = std::string(ab2) == "start";
+    mbGetValueForSelector(v, "#s", vb, sizeof(vb));
+    const bool select_ok = std::string(vb) == "y";
+    // No value property (<div>) and no match both -> -1.
+    const bool noval = mbGetValueForSelector(v, "#d", vb, sizeof(vb)) == -1;
+    const bool nomatch2 = mbGetValueForSelector(v, "#none", vb, sizeof(vb)) == -1;
+    Expect(live_ok && attr_unchanged && select_ok && noval && nomatch2,
+           "mbGetValueForSelector reads live .value (distinct from attribute)",
+           std::string("live=") + (live_ok ? "1" : "0") + " attr=" +
+               (attr_unchanged ? "1" : "0") + " sel=" + (select_ok ? "1" : "0") +
+               " noval=" + (noval ? "1" : "0") + " nomatch=" +
+               (nomatch2 ? "1" : "0"));
+  }
+
   // 102b. mbCountSelector + indexed list scraping. Count the matches, then read
   // each one via :nth-of-type(n) selectors on mbGetTextForSelector — the standard
   // "scrape a list" pattern. Also: 0 for no matches, -1 for an invalid selector.

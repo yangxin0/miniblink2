@@ -1054,6 +1054,30 @@ int main() {
           "wkeClickSelector/wkeFillSelector/wkeSelectOption drive the page");
   }
 
+  // wkeGetValueForSelector reads a control's LIVE .value (post-typing/selection),
+  // which differs from the static "value" attribute that wkeGetAttribute reads.
+  {
+    wkeLoadHTML(wv,
+                "<body><input id='n' value='start'>"
+                "<select id='s'><option value='x'>X</option>"
+                "<option value='y' selected>Y</option></select>"
+                "<div id='d'>plain</div></body>");
+    wkeFillSelector(wv, "#n", "typed-over");
+    const bool live_ok =
+        std::strcmp(wkeGetValueForSelector(wv, "#n"), "typed-over") == 0;
+    // The static attribute still reports the ORIGINAL value — the distinction.
+    const bool attr_unchanged =
+        std::strcmp(wkeGetAttribute(wv, "#n", "value"), "start") == 0;
+    const bool select_ok =
+        std::strcmp(wkeGetValueForSelector(wv, "#s"), "y") == 0;
+    // No value property (a <div>) and no match both yield "".
+    const bool empty_ok =
+        std::strcmp(wkeGetValueForSelector(wv, "#d"), "") == 0 &&
+        std::strcmp(wkeGetValueForSelector(wv, "#none"), "") == 0;
+    check(live_ok && attr_unchanged && select_ok && empty_ok,
+          "wkeGetValueForSelector reads live .value (distinct from the attribute)");
+  }
+
   // wkeScrollIntoView (offline): a target far below the fold scrolls into the
   // viewport (scrollY rises from 0, and the element's box lands within height).
   {

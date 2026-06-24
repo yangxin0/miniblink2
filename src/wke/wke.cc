@@ -56,6 +56,7 @@ struct _tagWkeWebView {
   bool editable = false;     // wkeSetEditable; re-applied after each load
   std::string selector_text_cache;  // backs wkeGetTextForSelector's return
   std::string selector_attr_cache;  // backs wkeGetAttribute's return
+  std::string selector_value_cache; // backs wkeGetValueForSelector's return
   std::string computed_style_cache;  // backs wkeGetComputedStyle's return
   std::string isolated_cache;  // backs wkeRunJsInIsolatedWorld's return
   std::string text_cache;            // backs wkeGetText's return
@@ -617,6 +618,26 @@ const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,
   mbGetAttribute(webView->view, selector, attr, buf.data(), len + 1);
   webView->selector_attr_cache.assign(buf.data());
   return webView->selector_attr_cache.c_str();
+}
+
+const utf8* wkeGetValueForSelector(wkeWebView webView, const char* selector) {
+  // Live .value of the FIRST element matching `selector` ("" if no match or the
+  // element has no value property — same contract as wkeGetAttribute). Owned by
+  // the view, valid until the next wkeGetValueForSelector on it.
+  if (!webView || !webView->view || !selector) {
+    if (webView)
+      webView->selector_value_cache.clear();
+    return webView ? webView->selector_value_cache.c_str() : "";
+  }
+  const int len = mbGetValueForSelector(webView->view, selector, nullptr, 0);
+  if (len <= 0) {  // -1 no match / no value property, or 0 empty value
+    webView->selector_value_cache.clear();
+    return webView->selector_value_cache.c_str();
+  }
+  std::vector<char> buf(static_cast<size_t>(len) + 1, 0);
+  mbGetValueForSelector(webView->view, selector, buf.data(), len + 1);
+  webView->selector_value_cache.assign(buf.data());
+  return webView->selector_value_cache.c_str();
 }
 
 const utf8* wkeGetComputedStyle(wkeWebView webView, const char* selector,

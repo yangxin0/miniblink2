@@ -193,13 +193,17 @@ WKE_API int wkeEncodePng(wkeWebView webView, int width, int height,
 // selector). wkeGetTextForSelector / wkeGetAttribute return the first match's
 // innerText / attribute value ("" on no match or absent attribute); each return
 // is owned by the view and valid until the next call to the same getter on it.
-// Combine with :nth-of-type(n) selectors to walk a list. Property reads such as
-// .value/.checked come via wkeRunJS.
+// Combine with :nth-of-type(n) selectors to walk a list.
 WKE_API int wkeCountSelector(wkeWebView webView, const char* selector);
 WKE_API const utf8* wkeGetTextForSelector(wkeWebView webView,
                                           const char* selector);
 WKE_API const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,
                                     const char* attr);
+// The first match's LIVE .value (what a form control holds after typing or
+// selection) — distinct from wkeGetAttribute's static "value" attribute. Returns
+// "" on no match or no value property; owned by the view until the next call.
+WKE_API const utf8* wkeGetValueForSelector(wkeWebView webView,
+                                           const char* selector);
 // Write the first match's viewport-relative bounding box (logical px) into
 // *x/*y/*w/*h (any may be NULL); returns whether an element matched. Compose
 // with wkeSavePngRect for an element screenshot or with wkeFireMouseEvent for a

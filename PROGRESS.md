@@ -63,7 +63,7 @@ the deliverable surface (C API, CLI, wke layer).
   blob: URLs (`fetch` + `<img>`), Intersection/Resize/Mutation observers, WAAPI,
   forms + submit-navigation, mouse/keyboard input, host-side history. CJK/i18n +
   system web fonts render.
-- **`mb_capi` C API — 78 functions:** lifecycle, load, JS eval, scraping
+- **`mb_capi` C API — 79 functions:** lifecycle, load, JS eval, scraping
   (text/attr/computed-style/count by selector), input (mouse/key/text/scroll +
   click/fill/select/focus/hover/scroll-into-view by selector), screenshots
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
@@ -105,7 +105,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **133/133** (default, network-free), `wke_smoke` **73/73**,
+- **Tests:** `mb_smoke` **136/136** (default, network-free), `wke_smoke` **75/75**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -123,6 +123,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- capi+wke: mbGetValueForSelector / wkeGetValueForSelector — read a control's LIVE .value (2026-06-24). The fill/select setters (mbFillSelector/mbSelectOption) had no read-back: mbGetAttribute returns the static "value" HTML attribute (the INITIAL value), not what an <input>/<textarea>/<select> currently holds after typing or selection — so form automation couldn't verify its own input without dropping to mbEvalJS. Added MbWebView::GetValueForSelector (querySelector(...).value with the same '1'-flag empty-vs-no-match trick as GetTextForSelector/GetAttribute), surfaced as mbGetValueForSelector (out-buffer, -1 on no-match/no-value-property) and wkeGetValueForSelector (view-cached const utf8*). VERIFIED the live-vs-attribute distinction in BOTH suites: an <input value='start'> filled to "typed-over" → getValue=="typed-over" while getAttribute("value")=="start"; a <select> with a selected option → value=="y"; a <div> (no value property) and a no-match selector both → -1/"". Updated the now-obsolete header/wke notes that said ".value comes via mbEvalJS/wkeRunJS". wke_smoke 75/75, mb_smoke 136/136, no survivors. ABI now 79 fns.
 - capi+wke: mbGetUserAgent / wkeGetUserAgent — read the EFFECTIVE UA (2026-06-24). The setters existed (mbSetUserAgent/wkeSetUserAgent) but there was no getter, so an embedder couldn't read back the UA actually in force (override OR built-in default). Added MbFrameClient::EffectiveUserAgent() (the single source of truth UserAgentOverride() now also calls), MbWebView::GetUserAgent(), mbGetUserAgent (out-buffer convention like mbGetURL), and wkeGetUserAgent (view-cached const utf8*). The getter resolves the default when no override is set, so it always returns a real UA. VERIFIED end-to-end: the returned string EQUALS the page's navigator.userAgent for both the default (Chrome/150 …) and an override, in both suites. wke_smoke 74/74, mb_smoke 135/135, no survivors. ABI now 78 fns.
 - fix: prune window.__mbslots when the jsValue registry clears (2026-06-24). StoreEval parks each eval result in window.__mbslots[handle]; the C++ JsRegistry is capped at 4096 and cleared when full, but the JS-side object was never pruned in lockstep — an unbounded JS-heap leak for a long-lived page doing many evals. On clear, also reset window.__mbslots={} across all LiveViews(). (A 4100-eval runtime test was drafted but dropped: each wkeRunJS is a frame-task RunLoop, so it bloated the fast suite past the watchdog; the existing jsValue suite already covers post-clear correctness.) wke_smoke 73/73, mb_smoke 133/133, no survivors.
 - fix + test: free native bindings on view destroy (no leak under churn) (2026-06-24). wkeJsBindFunction's WkeBinding structs accumulated in a global vector and were never removed when their view was destroyed — an unbounded leak for apps that create/destroy views with bindings. Added ForgetBindingsForView (erase-by-view, forward-declared at top, defined with the binding storage), called from wkeDestroyWebView (the view's installed v8 functions die with its context, so nothing references these after). VERIFIED: a churn loop creating/binding/using/destroying 5 views leaves a separately-bound "keep" view's binding fully intact (keepFn()==111), confirming the erase targets only the destroyed view's bindings. wke_smoke 73/73, mb_smoke 133/133, no survivors.

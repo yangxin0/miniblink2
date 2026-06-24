@@ -647,6 +647,24 @@ bool MbWebView::GetAttribute(const char* css_selector, const char* attr,
   return true;
 }
 
+bool MbWebView::GetValueForSelector(const char* css_selector, std::string* out) {
+  if (!css_selector)
+    return false;
+  // The live .value property of the first match. Same '1'-flag trick; an element
+  // with no value property (e.g. a <div>) yields undefined -> "" -> false, the
+  // same "no value" path as no-match. A control whose value is genuinely "" is
+  // preserved by the flag.
+  std::string js =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+      "\");if(!e)return '';var v=e.value;if(v==null)return '';return '1'+v;})()";
+  std::string s = EvalToString(js.c_str());
+  if (s.empty())
+    return false;  // no element, or no value property
+  if (out)
+    *out = s.substr(1);
+  return true;
+}
+
 int MbWebView::CountSelector(const char* css_selector) {
   if (!css_selector)
     return -1;

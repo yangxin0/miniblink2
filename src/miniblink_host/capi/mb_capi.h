@@ -284,9 +284,17 @@ MB_EXPORT int mbGetTextForSelector(mbView*, const char* css_selector, char* out,
 // Write the value of attribute `attr` on the first element matching
 // `css_selector` into `out`. Returns the value's length in bytes (>=0), or -1 if
 // no element matches OR the attribute is absent (null). Size first with
-// out=NULL/out_cap=0. (Property reads like .value/.checked come via mbEvalJS.)
+// out=NULL/out_cap=0.
 MB_EXPORT int mbGetAttribute(mbView*, const char* css_selector, const char* attr,
                              char* out, int out_cap);
+
+// Write the LIVE .value of the first element matching `css_selector` (what an
+// <input>/<textarea>/<select> currently holds after typing or selection) into
+// `out`. Distinct from mbGetAttribute, which reads the static "value" HTML
+// attribute (the initial value). Returns the length in bytes (>=0), or -1 if no
+// element matches or it has no value property. Size first with out=NULL/out_cap=0.
+MB_EXPORT int mbGetValueForSelector(mbView*, const char* css_selector, char* out,
+                                    int out_cap);
 
 // Number of elements matching `css_selector` (querySelectorAll length). Returns
 // the count (>=0; 0 is valid) or -1 for a null/invalid selector. Use with

@@ -419,6 +419,23 @@ int mbGetAttribute(mbView* v, const char* css_selector, const char* attr,
   return static_cast<int>(result.size());
 }
 
+int mbGetValueForSelector(mbView* v, const char* css_selector, char* out,
+                          int out_cap) {
+  if (!v || !v->impl)
+    return -1;
+  std::string result;
+  if (!v->impl->GetValueForSelector(css_selector, &result))
+    return -1;  // no element matched, or no value property
+  if (out && out_cap > 0) {
+    int n = static_cast<int>(result.size());
+    int copy = n < out_cap - 1 ? n : out_cap - 1;
+    for (int i = 0; i < copy; ++i)
+      out[i] = result[i];
+    out[copy] = '\0';
+  }
+  return static_cast<int>(result.size());
+}
+
 int mbCountSelector(mbView* v, const char* css_selector) {
   if (!v || !v->impl || !css_selector)
     return -1;

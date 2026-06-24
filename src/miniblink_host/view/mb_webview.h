@@ -158,6 +158,11 @@ class MbWebView {
   // only written on success.
   bool GetTextForSelector(const char* css_selector, std::string* out);
   bool GetAttribute(const char* css_selector, const char* attr, std::string* out);
+  // The first match's LIVE .value property (what an <input>/<textarea>/<select>
+  // currently holds after typing or selection) — distinct from GetAttribute,
+  // which reads the static "value" HTML attribute (the initial value). Returns
+  // false if no element matches or the element has no value property.
+  bool GetValueForSelector(const char* css_selector, std::string* out);
   // Number of elements matching `css_selector` (querySelectorAll length). 0 is a
   // valid result; returns -1 on a null or syntactically invalid selector. Paired
   // with :nth-of-type(n) selectors on the per-element accessors above, this drives
