@@ -220,7 +220,7 @@ A drop-in subset of [miniblink](https://github.com/weolar/miniblink49)'s classic
 runs on modern Blink with the original signatures (`utf8`, `wkeWebView`, `jsValue`,
 …). It is built into `libminiblink_host`; an embedder includes just `wke/wke.h`.
 
-Supported today (every item verified by `wke_smoke` — 56 default cases, plus
+Supported today (every item verified by `wke_smoke` — 63 default cases, plus
 over-the-network cases under `MB_NET_TESTS=1`). Functions marked *(ext)* are
 port extensions over `mb_capi` beyond the classic `wke` surface:
 
@@ -312,15 +312,21 @@ Requirements: a Chromium M150 source tree with a component `out/Release`
 ./build.sh /path/to/chromium-150.x.y.z   # stages host into the tree, gn gen, ninja, runs the suite
 ```
 
-`mb_smoke` is a 36-case capability test suite (HTML/DOM, JS, CSS computed style, UA
-stylesheet, the `mbRunJS`+`mbEvalJS` bridge, `<canvas>` getImageData, external `<link>`
-CSS via the subresource loader, paint-to-bitmap, synthesized click, typed text (ASCII +
-UTF-8 accent/CJK/emoji), programmatic scroll, mouse-move/hover, embedded-NUL document
-integrity, full-page capture (resize → reflow → render below the fold), HiDPI
-(devicePixelRatio + resolution media queries), User-Agent (default + override), clip/
-region capture, transparent background, wait-for-selector, DOM storage
-(`localStorage`/`sessionStorage`), `requestAnimationFrame`, observer delivery (Mutation & Intersection & Resize), time-based animation (WAAPI/XHR),
-console capture, and JS document.cookie) — it prints PASS/FAIL per case and exits non-zero
-on any failure, so it doubles as a regression test. Two additional over-the-network checks
-(the cookie jar and request headers) are opt-in via `MB_NET_TESTS=1`, kept out of the
-default run so an unreachable host can't make it crawl.
+`mb_smoke` is a ~107-case (133-check) capability + regression suite covering
+HTML/DOM, JS, CSS computed style, UA stylesheet, the `mbRunJS`+`mbEvalJS` bridge,
+`<canvas>` getImageData, external `<link>` CSS via the subresource loader,
+paint-to-bitmap, synthesized click, typed text (ASCII + UTF-8 accent/CJK/emoji),
+programmatic scroll, mouse-move/hover, embedded-NUL document integrity, full-page
+capture (resize → reflow → render below the fold), HiDPI (devicePixelRatio +
+resolution media queries), User-Agent, clip/region capture, transparent
+background, wait-for-selector/function, DOM storage, `requestAnimationFrame`,
+observer delivery (Mutation/Intersection/Resize), time-based animation (WAAPI/XHR),
+console capture, the selector automation set (click/dblclick/right-click/hover/
+focus/blur/fill/select/scrollIntoView), computed-style/attribute/text scraping,
+cookie jar save/load, PDF/PNG/in-memory-PNG export, and native function binding
+(`mbJsBindFunction`). It prints PASS/FAIL per case and exits non-zero on any
+failure, so it doubles as a regression test. A handful of over-the-network checks
+(POST, the cookie jar, request headers, proxy, redirect/cert toggles, image
+loading, HTTP status) are opt-in via `MB_NET_TESTS=1`, kept out of the default
+run so an unreachable host can't make it crawl. The `wke` layer has its own
+`wke_smoke` (63 default cases) and a runnable `wke_demo` example.
