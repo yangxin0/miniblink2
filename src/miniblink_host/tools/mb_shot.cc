@@ -86,6 +86,7 @@ int main(int argc, char** argv) {
   std::string fill_text;       // value for --fill
   std::string press_key;       // named key to press after interacting (--press KEY)
   std::string eval_js;         // JS to run after load; result printed to stdout
+  std::string eval_json;       // JS expression, printed JSON.stringify'd (structured)
   std::string value_selector;  // print this control's live .value to stdout
   std::string html_for_selector;  // print the first match's outerHTML to stdout
   std::string checked_selector;  // print this control's .checked (1/0) to stdout
@@ -156,6 +157,8 @@ int main(int argc, char** argv) {
       press_key = argv[++i];
     } else if (a == "--eval" && i + 1 < argc) {
       eval_js = argv[++i];
+    } else if (a == "--eval-json" && i + 1 < argc) {
+      eval_json = argv[++i];
     } else if (a == "--value" && i + 1 < argc) {
       value_selector = argv[++i];
     } else if (a == "--html-for" && i + 1 < argc) {
@@ -247,7 +250,7 @@ int main(int argc, char** argv) {
         stderr,
         "usage: %s [--full] [--scale N] [--mobile] [--clip x,y,w,h] [--selector CSS] "
         "[--transparent] [--title] [--url] [--cookies URL] "
-        "[--local-storage KEY] [--session-storage KEY] [--text] [--html] [--html-for CSS] [--requests] [--eval JS] [--value CSS] "
+        "[--local-storage KEY] [--session-storage KEY] [--text] [--html] [--html-for CSS] [--requests] [--eval JS] [--eval-json JS] [--value CSS] "
         "[--checked CSS] [--count CSS] [--visible CSS] [--rect CSS] [--style CSS PROP] "
         "[--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
@@ -660,6 +663,18 @@ int main(int argc, char** argv) {
     std::vector<char> ebuf(1 << 20, 0);  // 1 MiB
     mbEvalJS(view, eval_js.c_str(), ebuf.data(), static_cast<int>(ebuf.size()));
     std::fwrite(ebuf.data(), 1, std::strlen(ebuf.data()), stdout);
+    std::fputc('\n', stdout);
+  }
+
+  // --eval-json: like --eval but JSON.stringify's the expression, so an object or
+  // array comes out as real JSON instead of "[object Object]" / a lossy comma-join
+  // — the structured-scraping path (e.g. map result rows to {title,href}). A
+  // value that doesn't serialize (undefined / a function) prints the empty string.
+  if (!eval_json.empty()) {
+    std::vector<char> jbuf(1 << 20, 0);  // 1 MiB
+    const std::string wrapped = "JSON.stringify((" + eval_json + "))";
+    mbEvalJS(view, wrapped.c_str(), jbuf.data(), static_cast<int>(jbuf.size()));
+    std::fwrite(jbuf.data(), 1, std::strlen(jbuf.data()), stdout);
     std::fputc('\n', stdout);
   }
 

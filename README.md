@@ -64,7 +64,7 @@ mb_shot \
   [--css STYLES] [--auto-scroll] [--scroll-to Y] [--scroll-to-selector CSS] \
   # extract (to stdout)
   [--title] [--url] [--cookies URL] [--local-storage KEY] [--session-storage KEY] \
-  [--text] [--html] [--html-for CSS] [--eval JS] [--value CSS] [--checked CSS] [--count CSS] [--visible CSS] \
+  [--text] [--html] [--html-for CSS] [--eval JS] [--eval-json JS] [--value CSS] [--checked CSS] [--count CSS] [--visible CSS] \
   [--rect CSS] [--style CSS PROP] [--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] \
   [--requests] [--console] [--headers] \
   # capture
@@ -162,7 +162,11 @@ body, a table, a card) instead of the whole document.
 result to stdout — the whole scripting surface from the command line, e.g.
 `mb_shot --eval "document.querySelectorAll('.item').length" page.html out.png` for a count,
 or reading a computed style / attribute. Compose with `--fill`/`--click`/`--wait-*` to
-interact first, then extract.
+interact first, then extract. `--eval-json JS` is the structured-scraping variant — it
+`JSON.stringify`s the expression, so an object or array comes back as real JSON instead
+of `[object Object]` or a lossy comma-join; e.g.
+`mb_shot --eval-json "[...document.querySelectorAll('.item')].map(e=>({t:e.textContent,href:e.querySelector('a').href}))"`
+yields a JSON array of records ready to pipe into `jq`.
 
 `--no-images` disables network image loading (faster text/HTML scraping; inline `data:`
 images are unaffected). `--dark` emulates `prefers-color-scheme: dark` so pages render their

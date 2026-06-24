@@ -69,7 +69,7 @@ the deliverable surface (C API, CLI, wke layer).
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
   network config (proxy / cert-bypass / follow-redirects / status / response-headers),
   config (UA/headers/locale/tz/dark/DPR/transparent/images), history.
-- **`mb_shot` CLI (the deliverable tool) — 58 flags, phase-ordered:** a full
+- **`mb_shot` CLI (the deliverable tool) — 59 flags, phase-ordered:** a full
   scraper/automator. Request-config: `--user-agent`(`--ua`)/`--header`/`--proxy`/
   `--insecure`/`--no-follow`/`--no-images`/`--post`/`--block`/`--dark`/`--lang`/
   `--tz`/`--set-cookie`/`--load-cookies`/`--save-cookies`. Interact:
@@ -77,7 +77,7 @@ the deliverable surface (C API, CLI, wke layer).
   `--wait-selector`/`--wait-visible`/`--wait-hidden`/`--wait-eval`/`--wait-idle`/
   `--wait-ms`. Prepare-view: `--css`/`--auto-scroll`/`--scroll-to`/
   `--scroll-to-selector`. Extract (to stdout): `--text`/`--html`/`--html-for`/
-  `--title`/`--url`/`--eval`/`--value`/`--checked`/`--count`/`--visible`/`--rect`/
+  `--title`/`--url`/`--eval`/`--eval-json`/`--value`/`--checked`/`--count`/`--visible`/`--rect`/
   `--style`/`--attr`/`--text-all`/`--attr-all`/`--cookies`/`--local-storage`/
   `--session-storage`/`--requests`/`--console`/`--headers`. Capture:
   `--full`/`--scale`/`--mobile`/`--clip`/`--selector`/`--transparent` (PNG/JPEG/PDF
@@ -137,6 +137,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- mb_shot: --eval-json JS — structured extraction as real JSON (2026-06-25). Probed --eval's return coercion and found the footgun: an array -> lossy comma-join ("1,2,3"), an object -> "[object Object]" — useless for the dominant structured-scraping case. Added --eval-json, which wraps the expression in JSON.stringify((expr)): objects/arrays come out as real JSON. Opt-in, no breakage; a non-serializable value (undefined/function) prints empty. VERIFIED: ({a:1,b:2}) -> {"a":1,"b":2}, [1,2,3] -> [1,2,3] (vs --eval's "1,2,3"), and the killer case mapping <a> rows -> [{"text":"One","href":"/a"},{"text":"Two","href":"/b"}]. Added mb_shot_smoke cases (now 31/31). 59 flags now. mb_smoke 176/176, wke_smoke 100/100, no survivors. ABI unchanged (108).
 - docs: refresh the stale CURRENT STATE mb_shot bullet (now all 58 flags) (2026-06-25). The loop-state "read first" doc's CLI section had drifted ~15 flags behind the binary over the recent run (missing --attr/--count/--title/--url/--cookies/--html-for/--press/--wait-eval/--require/--mobile/--local+session-storage/--scroll-to*/--console/--transparent/--scale/--dark/--lang/--tz/--no-images/--post/--header). Rewrote it phase-ordered (request-config / interact / synchronize / prepare-view / extract / capture / assert) covering all 58, plus the exit-code contract (0/1/2/3). Cross-checked programmatically: 0 of 58 flags missing from the bullet. Docs-only (git: just PROGRESS.md); binaries + suites unchanged, mb_smoke 176/176, wke_smoke 100/100, no survivors. ABI unchanged (108).
 - test: lock in --mobile + --full composition (full-page mobile screenshot) (2026-06-25). The full-page mobile screenshot is a top real workflow, and --mobile (narrow view) composing with --full (resize to content height) could interact badly. Verified it doesn't: a tall responsive page under --mobile --full keeps innerWidth 390, captures the full height (PNG 1170x4620 = 390x3 wide by 1540x3 tall), and applies the mobile media-query rule (marker rgb(0,255,0)). Locked in as an mb_shot_smoke case (now 29/29) asserting innerWidth 390 + full-height available + mobile rule via --eval. Test-only (git: just the .sh); binaries + lib unchanged, mb_smoke 176/176, wke_smoke 100/100. no survivors. ABI unchanged (108).
 - mb_shot: --mobile — one-flag phone emulation preset (2026-06-25). Builds on last tick's verified recipe (mobile = narrow view + mobile UA, since width media queries track the view size). --mobile presets a 390x844 viewport + devicePixelRatio 3 + an iPhone Safari UA. Override semantics: an explicit width/height positional, --scale, or --user-agent each still wins (tracked scale_set so --scale 1 isn't mistaken for the default). No new ABI. VERIFIED: --mobile alone -> innerWidth 390, DPR 3, /iPhone/ UA true, @media(max-width:500px) mobile rule rgb(2,2,2); --mobile 700 500 --scale 1 --user-agent Custom -> 700/DPR1/CustomUA/desktop rule (all overrides win). Added mb_shot_smoke case (now 28/28). mb_smoke 176/176, wke_smoke 100/100, no survivors. ABI unchanged (108).

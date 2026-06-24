@@ -80,6 +80,11 @@ run 40 "$URL" "$PNG" --count "li.row";        check "--count" "3" "$(cat "$TMP/o
 run 40 "$URL" "$PNG" --attr "a" "href";       check "--attr href" "https://example.com/x" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --text;                  checkc "--text" "hello world" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --eval "1+2";            check "--eval" "3" "$(cat "$TMP/out")"
+# --eval-json: structured extraction — an array/object comes out as real JSON
+run 40 "$URL" "$PNG" --eval-json "[].map.call(document.querySelectorAll('li.row'),function(e){return e.textContent;})"
+check "--eval-json (li.row array)" '["a","b","c"]' "$(cat "$TMP/out")"
+run 40 "$URL" "$PNG" --eval-json "({n:document.querySelectorAll('li.row').length})"
+check "--eval-json (object)" '{"n":3}' "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --visible "#msg";        check "--visible" "1" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --local-storage "auth";  check "--local-storage" "tok-99" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --session-storage "cart"; check "--session-storage" "3 items" "$(cat "$TMP/out")"
