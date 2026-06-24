@@ -470,6 +470,15 @@ const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,
   return webView->selector_attr_cache.c_str();
 }
 
+bool wkeGetElementRect(wkeWebView webView, const char* selector, int* x, int* y,
+                       int* w, int* h) {
+  // Viewport-relative bounding box (logical px) of the first match into *x/*y/
+  // *w/*h (any may be NULL). False if nothing matches. Compose with
+  // wkeSavePngRect for an element shot or wkeFireMouseEvent for a precise click.
+  return webView && webView->view && selector &&
+         mbGetElementRect(webView->view, selector, x, y, w, h) != 0;
+}
+
 // --- DOM actions (drive the page without writing JS) ---------------------------
 bool wkeClickSelector(wkeWebView webView, const char* selector) {
   // Click the first element matching `selector` (resolves its box and dispatches

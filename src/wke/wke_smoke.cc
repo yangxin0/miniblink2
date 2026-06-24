@@ -718,6 +718,22 @@ int main() {
           "wkeCountSelector/wkeGetTextForSelector/wkeGetAttribute scrape the DOM");
   }
 
+  // wkeGetElementRect (offline): the bbox of a positioned div matches its CSS,
+  // NULL out-params are tolerated, and a non-match returns false.
+  {
+    wkeLoadHTML(wv, "<body style='margin:0'><div id='box' style='position:"
+                    "absolute;left:30px;top:40px;width:120px;height:60px'>"
+                    "</div></body>");
+    int x = 0, y = 0, w = 0, h = 0;
+    const bool rect_ok = wkeGetElementRect(wv, "#box", &x, &y, &w, &h) &&
+                         x == 30 && y == 40 && w == 120 && h == 60;
+    const bool partial = wkeGetElementRect(wv, "#box", nullptr, nullptr, &w,
+                                           nullptr);  // NULLs tolerated
+    const bool miss = !wkeGetElementRect(wv, "#none", &x, &y, &w, &h);
+    check(rect_ok && partial && miss,
+          "wkeGetElementRect returns the element's bounding box");
+  }
+
   // DOM actions (offline): click fires a handler, fill sets value + fires input,
   // select changes the <select> value; misses return false.
   {

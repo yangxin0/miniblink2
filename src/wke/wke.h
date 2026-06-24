@@ -176,6 +176,12 @@ WKE_API const utf8* wkeGetTextForSelector(wkeWebView webView,
                                           const char* selector);
 WKE_API const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,
                                     const char* attr);
+// Write the first match's viewport-relative bounding box (logical px) into
+// *x/*y/*w/*h (any may be NULL); returns whether an element matched. Compose
+// with wkeSavePngRect for an element screenshot or with wkeFireMouseEvent for a
+// precise click. Port extension.
+WKE_API bool wkeGetElementRect(wkeWebView webView, const char* selector, int* x,
+                               int* y, int* w, int* h);
 
 // DOM action helpers — drive the page without writing JS (port extensions), each
 // returning whether it acted. wkeClickSelector clicks the first match (false if
