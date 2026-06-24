@@ -126,6 +126,12 @@ WKE_API void wkeSetExtraHeaders(wkeWebView webView, const utf8* headers);
 // Emulate prefers-color-scheme: dark (true) or light (false) so a page renders
 // its dark theme. Persists across loads; set before navigating. Port extension.
 WKE_API void wkeSetDarkMode(wkeWebView webView, bool dark);
+// Emulate i18n environment for deterministic localized rendering (port
+// extensions). wkeSetLocale drives navigator.language(s) (comma-separated, e.g.
+// "fr-FR,fr,en"); wkeSetTimezone overrides the Date/Intl timezone (an IANA id,
+// e.g. "America/New_York" — process-global). Set before navigating.
+WKE_API void wkeSetLocale(wkeWebView webView, const utf8* languages);
+WKE_API void wkeSetTimezone(wkeWebView webView, const utf8* ianaTimezone);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);

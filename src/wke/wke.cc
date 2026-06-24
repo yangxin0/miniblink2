@@ -348,6 +348,20 @@ void wkeSetDarkMode(wkeWebView webView, bool dark) {
     mbSetDarkMode(webView->view, dark ? 1 : 0);
 }
 
+void wkeSetLocale(wkeWebView webView, const utf8* languages) {
+  // navigator.language / navigator.languages (comma-separated, e.g. "fr-FR,fr").
+  // Set before navigating. (Port extension.)
+  if (webView && webView->view && languages)
+    mbSetLocale(webView->view, languages);
+}
+
+void wkeSetTimezone(wkeWebView webView, const utf8* ianaTimezone) {
+  // Override the Date/Intl timezone (an IANA id, e.g. "America/New_York"), so
+  // time-dependent UIs render deterministically. Process-global. (Port extension.)
+  if (webView && webView->view && ianaTimezone)
+    mbSetTimezone(webView->view, ianaTimezone);
+}
+
 void wkeSetTransparent(wkeWebView webView, bool transparent) {
   if (!webView || !webView->view)
     return;

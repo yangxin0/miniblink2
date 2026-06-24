@@ -494,6 +494,35 @@ int main() {
           "wkeSetDarkMode drives prefers-color-scheme (CSS flips dark/light)");
   }
 
+  // wkeSetLocale + wkeSetTimezone (offline): navigator.language(s) and the
+  // Date/Intl timezone reflect the emulated i18n environment.
+  {
+    wkeSetLocale(wv, "fr-FR,fr,en");
+    wkeLoadHTML(wv, "<body>x</body>");
+    const bool loc_ok =
+        std::strcmp(jsToTempString(es, wkeRunJS(wv, "navigator.language")),
+                    "fr-FR") == 0 &&
+        std::strcmp(
+            jsToTempString(es, wkeRunJS(wv, "navigator.languages.join(',')")),
+            "fr-FR,fr,en") == 0;
+    wkeSetLocale(wv, "en-US");  // restore
+
+    wkeSetTimezone(wv, "America/New_York");
+    wkeLoadHTML(wv, "<body>x</body>");
+    const bool tz_ok =
+        std::strcmp(
+            jsToTempString(
+                es, wkeRunJS(wv, "Intl.DateTimeFormat().resolvedOptions()"
+                                 ".timeZone")),
+            "America/New_York") == 0 &&
+        // 2021-01-01T00:00:00Z -> 2020-12-31 19:00 EST proves Date uses the zone.
+        jsToInt(es, wkeRunJS(wv, "new Date(1609459200000).getHours()")) == 19;
+    wkeSetTimezone(wv, "UTC");  // restore process-global determinism
+
+    check(loc_ok && tz_ok,
+          "wkeSetLocale/wkeSetTimezone drive navigator.language(s) + Intl/Date");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {
