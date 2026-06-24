@@ -1965,6 +1965,17 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   re-attempted as a quick tick. SIDE FINDING: invoking a modal dialog through mbEvalJS (ExecuteScript-
   AndReturnValue inside a nested v8 HandleScope) aborts; host code must trigger dialogs via mbRunJS.
 
+- ✅ DONE: C API list scraping — mbCountSelector (2026-06-24). The per-element accessors
+  (mbGetTextForSelector/mbGetAttribute) only ever returned the FIRST match, so scraping a list
+  (search results, table rows, links) was impossible from C without writing JS. Added mbCountSelector
+  -> MbWebView::CountSelector (querySelectorAll(sel).length via EvalToString; try/catch maps an invalid
+  selector to -1, distinct from a valid 0). It's the one missing primitive: count + the already-working
+  :nth-of-type(n)/:nth-child(n) selectors on the existing accessors = full indexed enumeration (no new
+  per-element index variants needed). Smoke case 102b walks a 3-item <ul>: count=3, .nope=0, invalid
+  selector=-1, and the :nth-of-type index walk collects [Alpha,Beta,Gamma]. Pure EvalToString (same
+  path as all scraping — no threading novelty); 125/125 deterministic across 2 runs, no survivors. C
+  API now 60 fns. (Verified the querySelectorAll length + :nth-of-type indexing first via mb_shot.)
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

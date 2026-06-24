@@ -2230,6 +2230,33 @@ int main() {
                (empty_ok ? "1" : "0") + " absent=" + (absent ? "1" : "0"));
   }
 
+  // 102b. mbCountSelector + indexed list scraping. Count the matches, then read
+  // each one via :nth-of-type(n) selectors on mbGetTextForSelector — the standard
+  // "scrape a list" pattern. Also: 0 for no matches, -1 for an invalid selector.
+  {
+    mbLoadHTML(v,
+        "<body><ul><li class='row'>Alpha</li><li class='row'>Beta</li>"
+        "<li class='row'>Gamma</li></ul></body>", "about:blank");
+    const int n = mbCountSelector(v, ".row");
+    const bool count_ok = n == 3;
+    const bool none_ok = mbCountSelector(v, ".nope") == 0;
+    const bool bad_ok = mbCountSelector(v, "li::::") == -1;  // invalid syntax
+    // Walk the list by index and collect the text.
+    std::string joined;
+    for (int i = 1; i <= n; ++i) {
+      char tb[64] = {0};
+      std::string sel = "li.row:nth-of-type(" + std::to_string(i) + ")";
+      if (mbGetTextForSelector(v, sel.c_str(), tb, sizeof(tb)) >= 0)
+        joined += std::string(tb) + (i < n ? "," : "");
+    }
+    const bool walk_ok = joined == "Alpha,Beta,Gamma";
+    Expect(count_ok && none_ok && bad_ok && walk_ok,
+           "mbCountSelector + :nth-of-type index walk scrapes a list",
+           std::string("count=") + std::to_string(n) + " none=" +
+               (none_ok ? "1" : "0") + " bad=" + (bad_ok ? "1" : "0") +
+               " walk=[" + joined + "]");
+  }
+
   // 103. Below-the-fold interaction auto-scrolls. A button ~2000px down is
   // outside a 400px viewport, so a coordinate-based click would miss; the click
   // path now calls scrollIntoView first. Also exercise mbScrollIntoView directly.

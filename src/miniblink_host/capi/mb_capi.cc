@@ -338,6 +338,12 @@ int mbGetAttribute(mbView* v, const char* css_selector, const char* attr,
   return static_cast<int>(result.size());
 }
 
+int mbCountSelector(mbView* v, const char* css_selector) {
+  if (!v || !v->impl || !css_selector)
+    return -1;
+  return v->impl->CountSelector(css_selector);
+}
+
 void mbReload(mbView* v) {
   if (v && v->impl)
     v->impl->Reload();

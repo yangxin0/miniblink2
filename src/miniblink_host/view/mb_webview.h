@@ -124,6 +124,11 @@ class MbWebView {
   // only written on success.
   bool GetTextForSelector(const char* css_selector, std::string* out);
   bool GetAttribute(const char* css_selector, const char* attr, std::string* out);
+  // Number of elements matching `css_selector` (querySelectorAll length). 0 is a
+  // valid result; returns -1 on a null or syntactically invalid selector. Paired
+  // with :nth-of-type(n) selectors on the per-element accessors above, this drives
+  // list scraping (count, then read each index).
+  int CountSelector(const char* css_selector);
   // Re-navigate to the current document URL, re-fetching it (file/http only).
   void Reload();
 

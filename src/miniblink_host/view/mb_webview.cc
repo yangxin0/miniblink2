@@ -601,6 +601,20 @@ bool MbWebView::GetAttribute(const char* css_selector, const char* attr,
   return true;
 }
 
+int MbWebView::CountSelector(const char* css_selector) {
+  if (!css_selector)
+    return -1;
+  // querySelectorAll(selector).length. The try/catch maps an invalid selector
+  // (querySelectorAll throws SyntaxError) to -1, distinct from a valid 0 matches.
+  std::string js =
+      "(function(){try{return ''+document.querySelectorAll(\"" +
+      JsEscape(css_selector) + "\").length;}catch(e){return '-1';}})()";
+  std::string s = EvalToString(js.c_str());
+  if (s.empty())
+    return -1;
+  return std::atoi(s.c_str());
+}
+
 void MbWebView::Reload() {
   // Re-navigate to the committed document's URL, re-fetching it. Only meaningful
   // for real (file/http) URLs; in-memory docs (about:blank, data:) are left as-is.

@@ -218,6 +218,13 @@ MB_EXPORT int mbGetTextForSelector(mbView*, const char* css_selector, char* out,
 MB_EXPORT int mbGetAttribute(mbView*, const char* css_selector, const char* attr,
                              char* out, int out_cap);
 
+// Number of elements matching `css_selector` (querySelectorAll length). Returns
+// the count (>=0; 0 is valid) or -1 for a null/invalid selector. Use with
+// :nth-of-type(n)/:nth-child(n) selectors on mbGetTextForSelector/mbGetAttribute
+// to scrape a list: count first, then read each index. Pairs with
+// mbWaitForSelector to wait for "at least one" and mbWaitForFunction for "N".
+MB_EXPORT int mbCountSelector(mbView*, const char* css_selector);
+
 // Re-navigate to the current document's URL, re-fetching it. No-op for in-memory
 // documents (about:blank, data:, mbLoadHTML content).
 MB_EXPORT void mbReload(mbView*);
