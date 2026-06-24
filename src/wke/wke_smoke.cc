@@ -825,6 +825,19 @@ int main() {
           "wkeHover/DoubleClick/RightClick/Focus/BlurSelector dispatch events");
   }
 
+  // wkeGetText (offline): visible innerText — includes rendered text, excludes
+  // markup and <script> contents.
+  {
+    wkeLoadHTML(wv, "<body><h1>Title</h1><p>Hello world</p>"
+                    "<script>var x='SCRIPTTEXT'</script></body>");
+    const char* t = wkeGetText(wv);
+    const bool ok = std::strstr(t, "Title") != nullptr &&
+                    std::strstr(t, "Hello world") != nullptr &&
+                    std::strstr(t, "SCRIPTTEXT") == nullptr &&
+                    std::strstr(t, "<h1>") == nullptr;
+    check(ok, "wkeGetText returns the page's visible text (no markup/scripts)");
+  }
+
   // Waits (offline): a setTimeout adds a delayed element / flag; the wait pumps
   // until it appears, and times out on a condition that never holds.
   {

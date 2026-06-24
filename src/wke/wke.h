@@ -244,6 +244,9 @@ WKE_API void wkeSetEditable(wkeWebView webView, bool editable);
 // The current document's HTML (the rendered, post-JS DOM serialized to HTML).
 // Owned by the view, valid until the next wkeGetSource on it.
 WKE_API const utf8* wkeGetSource(wkeWebView webView);
+// The page's visible text (document.body.innerText) — the text counterpart to
+// wkeGetSource's HTML. Owned by the view, valid until the next wkeGetText on it.
+WKE_API const utf8* wkeGetText(wkeWebView webView);
 
 // Cookies, backed by the (process-wide) libcurl cookie jar.
 // wkeGetCookie returns the jar's cookies for the CURRENT document's URL as

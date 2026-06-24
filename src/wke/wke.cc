@@ -50,6 +50,7 @@ struct _tagWkeWebView {
   std::string selector_text_cache;  // backs wkeGetTextForSelector's return
   std::string selector_attr_cache;  // backs wkeGetAttribute's return
   std::string computed_style_cache;  // backs wkeGetComputedStyle's return
+  std::string text_cache;            // backs wkeGetText's return
 };
 
 // The last live webView, so the view-less wkePerformCookieCommand has a handle
@@ -638,6 +639,22 @@ const utf8* wkeGetSource(wkeWebView webView) {
   mbGetHTML(webView->view, buf.data(), len + 1);
   webView->source_cache.assign(buf.data());
   return webView->source_cache.c_str();
+}
+
+const utf8* wkeGetText(wkeWebView webView) {
+  // The page's visible text (document.body.innerText). Owned by the view, valid
+  // until the next wkeGetText on it. (Companion to wkeGetSource's HTML.)
+  if (!webView || !webView->view)
+    return "";
+  const int len = mbGetText(webView->view, nullptr, 0);  // size first
+  if (len <= 0) {
+    webView->text_cache.clear();
+    return webView->text_cache.c_str();
+  }
+  std::vector<char> buf(static_cast<size_t>(len) + 1, 0);
+  mbGetText(webView->view, buf.data(), len + 1);
+  webView->text_cache.assign(buf.data());
+  return webView->text_cache.c_str();
 }
 
 // --- Cookies (wrap the libcurl jar via mb_capi) --------------------------------
