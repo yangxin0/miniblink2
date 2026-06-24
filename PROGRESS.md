@@ -2106,6 +2106,17 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   mb_shot --headers prints "HTTP/1.1 200 OK / Content-Type: text/html; charset=utf-8". 131/131 default,
   no survivors. C API now 68 fns.
 
+- ✅ DONE: redirect control — mbSetFollowRedirects + mb_shot --no-follow (2026-06-24). Builds directly
+  on the last two ticks: with following OFF, a load stops AT the 3xx response so the caller reads the
+  30x status (mbGetHttpStatus) + Location (mbGetResponseHeaders) without following — resolve a URL
+  shortener / inspect a redirect chain. FetchHttp already had a follow_redirects param; MbFetchUrl was
+  using the default (true). Added a process-global (mb::MbSetFollowRedirects/MbFollowRedirects, default
+  true) that MbFetchUrl now passes to FetchHttp; the separate fetch/XHR path (which self-handles
+  redirects with follow=false) is untouched. C API mbSetFollowRedirects(int) + mb_shot --no-follow.
+  VERIFIED: net case 42 (httpbin /redirect/1 — off=302 with Location, on=200; 143/143 MB_NET_TESTS=1)
+  and mb_shot (follow -> lands on /get; --no-follow --headers -> "Location: /get"). Default unchanged
+  (follow stays true) so 131/131 default, no survivors. C API now 69 fns.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

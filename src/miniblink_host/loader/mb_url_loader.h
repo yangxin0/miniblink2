@@ -71,6 +71,13 @@ bool MbProxyConfigured(std::string* out);
 void MbSetIgnoreCertErrors(bool ignore);
 bool MbIgnoreCertErrors();
 
+// Follow HTTP 3xx redirects (true, the default) or stop at the redirect response
+// (false), so the caller can read the 30x status + Location header itself — for
+// resolving URL shorteners or inspecting a redirect without following it.
+// Process-wide. MbFollowRedirects() is read on the fetch path.
+void MbSetFollowRedirects(bool follow);
+bool MbFollowRedirects();
+
 // Fetch a file:// or http(s):// URL into `body` (+ server Content-Type if any).
 // Shared by the subresource loader and the top-level navigation in MbWebView::LoadURL.
 // `user_agent` sets the HTTP User-Agent (empty -> MbDefaultUserAgent()).

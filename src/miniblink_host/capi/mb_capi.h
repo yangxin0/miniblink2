@@ -148,6 +148,13 @@ MB_EXPORT void mbSetProxy(const char* proxy);
 // self-signed, expired, or otherwise invalid certificates.
 MB_EXPORT void mbSetIgnoreCertErrors(int ignore);
 
+// Follow HTTP 3xx redirects (the default) when `follow` != 0, or stop at the
+// redirect response when 0 — so after mbLoadURL, mbGetHttpStatus returns the 30x
+// code and mbGetResponseHeaders exposes the Location header, letting a caller
+// resolve a URL shortener or inspect a redirect chain without following it.
+// Process-wide (no view param). Set before navigating.
+MB_EXPORT void mbSetFollowRedirects(int follow);
+
 // Capture with a transparent background (1) or opaque white (0, default). With
 // transparency on, areas the page does not paint keep alpha 0 in the output.
 MB_EXPORT void mbSetTransparentBackground(mbView*, int transparent);

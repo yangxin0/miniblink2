@@ -180,6 +180,12 @@ void mbSetIgnoreCertErrors(int ignore) {
   mb::MbSetIgnoreCertErrors(ignore != 0);
 }
 
+void mbSetFollowRedirects(int follow) {
+  // Process-wide: follow 3xx redirects (default) or stop at the redirect response
+  // so mbGetHttpStatus/mbGetResponseHeaders expose the 30x + Location.
+  mb::MbSetFollowRedirects(follow != 0);
+}
+
 void mbSetTransparentBackground(mbView* v, int transparent) {
   if (v && v->impl)
     v->impl->SetTransparentBackground(transparent != 0);

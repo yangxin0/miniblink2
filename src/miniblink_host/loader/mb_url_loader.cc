@@ -363,6 +363,11 @@ namespace {
 // secure default. Set on the main thread before navigating; read on the fetch
 // path (same single-thread model as the proxy flag).
 bool g_ignore_cert_errors = false;
+
+// When false, a top-level/subresource fetch does NOT follow 3xx redirects, so the
+// caller sees the redirect response itself (status 30x + Location header) — for
+// resolving URL shorteners / inspecting redirect chains. Default true (follow).
+bool g_follow_redirects = true;
 }  // namespace
 
 void MbSetIgnoreCertErrors(bool ignore) {
@@ -371,6 +376,14 @@ void MbSetIgnoreCertErrors(bool ignore) {
 
 bool MbIgnoreCertErrors() {
   return g_ignore_cert_errors;
+}
+
+void MbSetFollowRedirects(bool follow) {
+  g_follow_redirects = follow;
+}
+
+bool MbFollowRedirects() {
+  return g_follow_redirects;
 }
 
 namespace {
@@ -585,7 +598,7 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
   if (url.SchemeIsHTTPOrHTTPS())
     return FetchHttp(url_spec, body, content_type, user_agent, extra_headers,
                      post_body, post_content_type, http_method, out_status,
-                     out_headers, out_final_url);
+                     out_headers, out_final_url, MbFollowRedirects());
   if (url.SchemeIs("data")) {
     std::string mime, charset;
     if (!net::DataURL::Parse(url, &mime, &charset, body))

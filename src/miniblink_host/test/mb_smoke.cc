@@ -657,6 +657,32 @@ int main() {
       std::fprintf(stderr, "  [SKIP] http status/headers (host unreachable)\n");
     }
   }
+
+  // 42 (net). mbSetFollowRedirects(0) stops at the redirect so the 30x status +
+  // Location header are visible; re-enabling follows through to the final 200.
+  {
+    mbSetFollowRedirects(0);
+    mbLoadURL(v, (host + "/redirect/1").c_str());  // 302 -> /get
+    mbWait(v, 700);
+    const int s_off = mbGetHttpStatus(v);
+    char hb[4096] = {0};
+    mbGetResponseHeaders(v, hb, sizeof(hb));
+    std::string h(hb);
+    for (char& c : h) c = static_cast<char>(std::tolower((unsigned char)c));
+    const bool redirect_seen =
+        s_off >= 300 && s_off < 400 && h.find("location:") != std::string::npos;
+    mbSetFollowRedirects(1);  // restore the default (process-wide) before more loads
+    mbLoadURL(v, (host + "/redirect/1").c_str());
+    mbWait(v, 900);
+    const int s_on = mbGetHttpStatus(v);
+    if (s_off != 0 || s_on != 0) {  // host reachable
+      Expect(redirect_seen && s_on == 200,
+             "mbSetFollowRedirects: off exposes 30x+Location, on follows to 200",
+             "off=" + std::to_string(s_off) + " on=" + std::to_string(s_on));
+    } else {
+      std::fprintf(stderr, "  [SKIP] follow-redirects (host unreachable)\n");
+    }
+  }
   }  // MB_NET_TESTS
 
   // 33. document.cookie (JS): write then read round-trips through the in-process
