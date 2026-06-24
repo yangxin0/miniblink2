@@ -188,6 +188,41 @@ int main() {
   mbSendMouseMove(v, 50, 40);  // over the div
   Expect(Eval(v, "String(window.__h||0)") == "1", "input: mouse move (hover)");
 
+  // mbSendMouseDown/Up enable a DRAG that mbSendMouseClick can't: press, move
+  // (carrying the held button so e.buttons==1), release. A pad tracks the drag
+  // delta and the buttons mask; a same-point down+up still fires onclick.
+  mbLoadHTML(v,
+      "<body style='margin:0'><div id='pad' style='width:300px;height:100px'>"
+      "</div><button id='b' style='position:absolute;left:0;top:120px;"
+      "width:120px;height:40px' "
+      "onclick='window.__clk=(window.__clk||0)+1'>b</button>"
+      "<script>window.__dx=0;window.__btn=-1;window.__drag=0;window.__done=0;"
+      "var p=document.getElementById('pad');"
+      "p.addEventListener('mousedown',function(e){window.__drag=1;window.__sx=e.clientX;});"
+      "document.addEventListener('mousemove',function(e){if(window.__drag){"
+      "window.__dx=e.clientX-window.__sx;window.__btn=e.buttons;}});"
+      "document.addEventListener('mouseup',function(){window.__drag=0;window.__done=1;});"
+      "</script></body>", "about:blank");
+  {
+    std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // layout for hit-testing
+  }
+  mbSendMouseDown(v, 50, 40);
+  mbSendMouseMove(v, 150, 40);   // drag right (button held)
+  mbSendMouseMove(v, 200, 40);
+  mbSendMouseUp(v, 200, 40);
+  const bool dragged = Eval(v, "String(window.__dx)") == "150" &&
+                       Eval(v, "String(window.__done)") == "1";
+  const bool held = Eval(v, "String(window.__btn)") == "1";  // moves carried the button
+  mbSendMouseDown(v, 60, 140);   // a same-point down+up is still a click (button center)
+  mbSendMouseUp(v, 60, 140);
+  const bool click_ok = Eval(v, "String(window.__clk||0)") == "1";
+  Expect(dragged && held && click_ok,
+         "mbSendMouseDown/Up drag (delta + e.buttons) and down+up clicks",
+         std::string("dx=") + Eval(v, "String(window.__dx)") + " btn=" +
+             Eval(v, "String(window.__btn)") + " click=" +
+             Eval(v, "String(window.__clk||0)"));
+
   // 13. Body with an embedded NUL byte must not truncate the document (the host
   // used to commit body.c_str(), losing everything after the first NUL). Load via
   // file:// (the length-preserving path) and verify content AFTER the NUL parsed.

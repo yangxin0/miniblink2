@@ -106,6 +106,14 @@ MB_EXPORT int mbInsertCSS(mbView*, const char* css);
 // Synthesize a left mouse click (down+up) at (x,y) in the view.
 MB_EXPORT void mbSendMouseClick(mbView*, int x, int y);
 
+// Press / release the left mouse button at (x,y) as separate events. Down ->
+// mbSendMouseMove(...) -> ... -> Up performs a DRAG (the moves in between carry
+// the held button, so e.buttons==1), which mbSendMouseClick can't express; a Down
+// and Up at the same point equals a click. Pair with mbGetElementRect to drag by
+// selector (slider thumbs, canvas drawing, drag-and-drop reordering).
+MB_EXPORT void mbSendMouseDown(mbView*, int x, int y);
+MB_EXPORT void mbSendMouseUp(mbView*, int x, int y);
+
 // Click the center of the first element matching `css_selector` (Puppeteer-style
 // page.click). Resolves the element's box in the page then clicks its center.
 // Returns 1 on success, 0 if nothing matches or the element has no box

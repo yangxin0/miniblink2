@@ -1237,12 +1237,13 @@ bool wkeFireMouseEvent(wkeWebView webView, unsigned int message, int x, int y,
       mbSendMouseMove(webView->view, x, y);
       return true;
     case WKE_MSG_LBUTTONDOWN:
-      // The click is delivered on the matching LBUTTONUP (mbSendMouseClick does
-      // its own press+release), so the press alone is a no-op.
+      // Real button press: a DOWN -> MOUSEMOVE(s) -> UP sequence performs a drag
+      // (the moves carry the held button); a DOWN+UP at one point is a click.
+      mbSendMouseDown(webView->view, x, y);
       return true;
     case WKE_MSG_LBUTTONUP:
-      mbSendMouseClick(webView->view, x, y);
-      mbWait(webView->view, 20);  // let the click's handlers/layout settle
+      mbSendMouseUp(webView->view, x, y);
+      mbWait(webView->view, 20);  // let the click/drag handlers + layout settle
       return true;
     case WKE_MSG_LBUTTONDBLCLK:
       mbSendMouseClick(webView->view, x, y);

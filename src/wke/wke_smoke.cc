@@ -1122,6 +1122,31 @@ int main() {
           "wkeDispatchEvent fires mouseover + custom events (false on no match)");
   }
 
+  // Drag via wkeFireMouseEvent: LBUTTONDOWN -> MOUSEMOVE(s) -> LBUTTONUP performs
+  // a real drag (the moves carry the held button) — not possible when DOWN was a
+  // no-op. A pad tracks the drag delta and the e.buttons mask.
+  {
+    const int sw = wkeGetWidth(wv), sh = wkeGetHeight(wv);  // save to restore
+    wkeResize(wv, 300, 150);
+    wkeLoadHTML(wv,
+        "<body style='margin:0'><div id='pad' style='width:300px;height:120px'></div>"
+        "<script>window.__dx=0;window.__btn=-1;window.__drag=0;"
+        "var p=document.getElementById('pad');"
+        "p.addEventListener('mousedown',function(e){window.__drag=1;window.__sx=e.clientX;});"
+        "document.addEventListener('mousemove',function(e){if(window.__drag){"
+        "window.__dx=e.clientX-window.__sx;window.__btn=e.buttons;}});"
+        "document.addEventListener('mouseup',function(){window.__drag=0;});"
+        "</script></body>");
+    wkeFireMouseEvent(wv, WKE_MSG_LBUTTONDOWN, 40, 40, WKE_LBUTTON);
+    wkeFireMouseEvent(wv, WKE_MSG_MOUSEMOVE, 140, 40, WKE_LBUTTON);
+    wkeFireMouseEvent(wv, WKE_MSG_MOUSEMOVE, 190, 40, WKE_LBUTTON);
+    wkeFireMouseEvent(wv, WKE_MSG_LBUTTONUP, 190, 40, 0);
+    const bool dragged = jsToInt(es, wkeRunJS(wv, "window.__dx")) == 150 &&
+                         jsToInt(es, wkeRunJS(wv, "window.__btn")) == 1;
+    check(dragged, "wkeFireMouseEvent down->move->up performs a drag (delta + buttons)");
+    wkeResize(wv, sw > 0 ? sw : 800, sh > 0 ? sh : 600);  // restore
+  }
+
   // wkeGetValueForSelector reads a control's LIVE .value (post-typing/selection),
   // which differs from the static "value" attribute that wkeGetAttribute reads.
   {

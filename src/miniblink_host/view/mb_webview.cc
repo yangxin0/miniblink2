@@ -322,6 +322,16 @@ void MbWebView::SendMouseClick(int x, int y) {
     widget_->SendMouseClick(x, y);
 }
 
+void MbWebView::SendMouseDown(int x, int y) {
+  if (widget_)
+    widget_->SendMouseDown(x, y);
+}
+
+void MbWebView::SendMouseUp(int x, int y) {
+  if (widget_)
+    widget_->SendMouseUp(x, y);
+}
+
 bool MbWebView::ScrollIntoView(const char* css_selector) {
   // Scroll the first match to the viewport center. scrollIntoView forces layout
   // and updates the scroll offset synchronously, so a getBoundingClientRect that

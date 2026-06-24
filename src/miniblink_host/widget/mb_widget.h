@@ -32,6 +32,8 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   void Attach(blink::WebLocalFrame* main_frame, int width, int height);
   void Resize(int width, int height);
   void SendMouseClick(int x, int y);  // synthesize mousedown+mouseup at (x,y)
+  void SendMouseDown(int x, int y);   // press the left button at (x,y) (drag start)
+  void SendMouseUp(int x, int y);     // release the left button at (x,y) (drag end)
   void SendDoubleClick(int x, int y); // two clicks (count 1 then 2) -> dblclick
   void SendRightClick(int x, int y);  // right mousedown+up -> contextmenu
   void SendMouseMove(int x, int y);   // move pointer to (x,y): hover + mousemove
@@ -46,6 +48,7 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
 
  private:
   blink::WebFrameWidget* widget_ = nullptr;  // owned by Blink (the frame)
+  bool mouse_pressed_ = false;  // left button held (drag): moves carry the mask
 };
 
 }  // namespace mb

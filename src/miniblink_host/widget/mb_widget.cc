@@ -128,12 +128,47 @@ void MbWidget::SendRightClick(int x, int y) {
       make(blink::WebInputEvent::Type::kMouseUp), ui::LatencyInfo()));
 }
 
+void MbWidget::SendMouseDown(int x, int y) {
+  if (!widget_)
+    return;
+  mouse_pressed_ = true;  // so a subsequent SendMouseMove carries the held button
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  blink::WebMouseEvent e(blink::WebInputEvent::Type::kMouseDown,
+                         blink::WebInputEvent::kLeftButtonDown,
+                         base::TimeTicks::Now());
+  e.pointer_type = blink::WebPointerProperties::PointerType::kMouse;
+  e.SetPositionInWidget(x, y);
+  e.SetPositionInScreen(x, y);
+  e.button = blink::WebMouseEvent::Button::kLeft;
+  e.click_count = 1;
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(e, ui::LatencyInfo()));
+}
+
+void MbWidget::SendMouseUp(int x, int y) {
+  if (!widget_)
+    return;
+  mouse_pressed_ = false;
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  blink::WebMouseEvent e(blink::WebInputEvent::Type::kMouseUp,
+                         blink::WebInputEvent::kNoModifiers,  // button released
+                         base::TimeTicks::Now());
+  e.pointer_type = blink::WebPointerProperties::PointerType::kMouse;
+  e.SetPositionInWidget(x, y);
+  e.SetPositionInScreen(x, y);
+  e.button = blink::WebMouseEvent::Button::kLeft;
+  e.click_count = 1;
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(e, ui::LatencyInfo()));
+}
+
 void MbWidget::SendMouseMove(int x, int y) {
   if (!widget_)
     return;
   auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  // While a button is held (between SendMouseDown and SendMouseUp), carry the
+  // left-button mask so drag handlers see e.buttons == 1; otherwise a plain hover.
   blink::WebMouseEvent e(blink::WebInputEvent::Type::kMouseMove,
-                         blink::WebInputEvent::kNoModifiers,
+                         mouse_pressed_ ? blink::WebInputEvent::kLeftButtonDown
+                                        : blink::WebInputEvent::kNoModifiers,
                          base::TimeTicks::Now());
   e.pointer_type = blink::WebPointerProperties::PointerType::kMouse;
   e.SetPositionInWidget(x, y);

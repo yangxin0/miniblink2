@@ -75,6 +75,11 @@ class MbWebView {
   // script and installs bound native functions.
   void RunDocumentStartScript();
   void SendMouseClick(int x, int y);
+  // Press / release the left button at (x,y). Down then move(s) then up performs a
+  // drag (intermediate SendMouseMove calls carry the held button). Down+Up at one
+  // point equals a click.
+  void SendMouseDown(int x, int y);
+  void SendMouseUp(int x, int y);
   // Click the center of the first element matching `css_selector`. Resolves the
   // element's bounding box in the page, then synthesizes a click there. Returns
   // false if the selector matches nothing or the element has no box (display:none
