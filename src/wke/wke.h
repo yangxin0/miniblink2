@@ -149,6 +149,10 @@ WKE_API bool wkeSavePng(wkeWebView webView, const utf8* path, int width,
 // whether the file was written. Port extension.
 WKE_API bool wkeSavePngRect(wkeWebView webView, const utf8* path, int x, int y,
                             int w, int h);
+// Set the device pixel ratio (HiDPI/retina): window.devicePixelRatio reports
+// `scale` and paint/PNG output rasterizes at `scale`x (layout stays in CSS px).
+// Size capture buffers at logical_size*scale. Port extension.
+WKE_API void wkeSetDeviceScaleFactor(wkeWebView webView, float scale);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);

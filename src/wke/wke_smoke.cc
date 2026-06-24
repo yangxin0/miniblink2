@@ -628,6 +628,35 @@ int main() {
           "wkeSavePngRect captures a logical rect at the requested size");
   }
 
+  // wkeSetDeviceScaleFactor (offline): devicePixelRatio reports the scale and a
+  // rect capture rasterizes at scale x (a 100x60 logical rect -> 200x120 px).
+  {
+    const char* png = "/private/tmp/claude-501/wke_hidpi.png";
+    std::remove(png);
+    wkeLoadHTML(wv, "<body style='margin:0;background:#204080'>hidpi</body>");
+    wkeSetDeviceScaleFactor(wv, 2.0f);
+    const bool dpr_ok =
+        jsToInt(es, wkeRunJS(wv, "window.devicePixelRatio")) == 2;
+
+    const bool wrote = wkeSavePngRect(wv, png, 0, 0, 100, 60);
+    unsigned char d[24] = {0};
+    size_t n = 0;
+    if (FILE* f = std::fopen(png, "rb")) {
+      n = std::fread(d, 1, 24, f);
+      std::fclose(f);
+    }
+    const bool magic = n >= 24 && d[0] == 0x89 && d[1] == 'P';
+    int iw = 0, ih = 0;
+    if (magic) {
+      iw = (d[16] << 24) | (d[17] << 16) | (d[18] << 8) | d[19];
+      ih = (d[20] << 24) | (d[21] << 16) | (d[22] << 8) | d[23];
+    }
+    wkeSetDeviceScaleFactor(wv, 1.0f);  // restore 1:1 for any later capture
+    std::remove(png);
+    check(dpr_ok && wrote && iw == 200 && ih == 120,
+          "wkeSetDeviceScaleFactor scales devicePixelRatio + raster output (2x)");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {

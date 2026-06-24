@@ -393,6 +393,14 @@ bool wkeSavePngRect(wkeWebView webView, const utf8* path, int x, int y, int w,
          mbSavePngRect(webView->view, path, x, y, w, h) != 0;
 }
 
+void wkeSetDeviceScaleFactor(wkeWebView webView, float scale) {
+  // HiDPI/retina: window.devicePixelRatio reports `scale` and paint/PNG output
+  // is rasterized at `scale`x (layout stays in CSS px). Size capture buffers at
+  // logical_width*scale x logical_height*scale. (Port extension — modern.)
+  if (webView && webView->view && scale > 0.0f)
+    mbSetDeviceScaleFactor(webView->view, scale);
+}
+
 void wkeSetTransparent(wkeWebView webView, bool transparent) {
   if (!webView || !webView->view)
     return;

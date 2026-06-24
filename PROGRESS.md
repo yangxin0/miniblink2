@@ -89,13 +89,14 @@ the deliverable surface (C API, CLI, wke layer).
   navigation history,
   rendering accessors (`wkeSetTransparent`/`wkeIsTransparent`,
   `wkeSetZoomFactor`/`wkeGetZoomFactor`, `wkeSetEditable`, `wkeSetDarkMode`,
-  `wkeGetContentWidth/Height`), view-state (`wkeSetName`/`wkeGetName`,
+  `wkeSetDeviceScaleFactor`, `wkeGetContentWidth/Height`),
+  view-state (`wkeSetName`/`wkeGetName`,
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **39/39**,
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **40/40**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com cases
-  (wke_smoke 43; mb_smoke ~145).
+  (wke_smoke 44; mb_smoke ~145).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
 
@@ -110,6 +111,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke RENDERING: wkeSetDeviceScaleFactor (2026-06-24). HiDPI/retina (wraps mbSetDeviceScaleFactor → Blink InspectorDeviceScaleFactorOverride): window.devicePixelRatio reports the scale and paint/PNG rasterizes at scale×, layout stays in CSS px. Documented PORT EXTENSION (modern). VERIFIED offline + doubly: at dsf=2, devicePixelRatio==2 AND a 100×60 logical-rect capture decodes to 200×120 IHDR. Builds on last tick's wkeSavePngRect. wke_smoke 40/40, mb_smoke 132/132, no survivors.
 - wke OUTPUT: wkeSavePngRect (2026-06-24). Render just a logical rect (x,y,w,h) to a PNG — element/region screenshot (wraps mbSavePngRect; output w*dsf x h*dsf). Documented PORT EXTENSION. VERIFIED offline + strongly: the saved PNG's IHDR width/height (big-endian at byte offsets 16/20) equal the requested 120x80 (dsf=1), not just the magic; null view/path safe. wke_smoke 39/39, mb_smoke 132/132, no survivors.
 - wke OUTPUT: wkeSavePng (2026-06-24). Render the current frame at WxH and save it; format follows the extension (.jpg/.jpeg→JPEG q90, else PNG) — wraps mbSavePng. Documented PORT EXTENSION (classic wke captures via wkePaint then app-encodes). VERIFIED offline: a .png starts with the \x89PNG signature (size>100) and a .jpg starts with the JPEG SOI FF D8; null view/path safe. wke_smoke 38/38, mb_smoke 132/132, no survivors.
 - wke OUTPUT: wkeSavePdf (2026-06-24). Print the current document to a multi-page US-Letter PDF (wraps mbSavePdf). Documented PORT EXTENSION (no classic wke print API). VERIFIED offline: prints a real file whose first 5 bytes are "%PDF-" and size > 500, and null view/path are safe. wke_smoke 37/37, mb_smoke 132/132, no survivors.
