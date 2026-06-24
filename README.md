@@ -49,7 +49,7 @@ The deliverable example app — a standalone headless screenshot renderer:
 
 ```sh
 mb_shot [--full] [--scale N] [--clip x,y,w,h | --selector CSS] [--transparent] \
-        [--wait-selector CSS] [--fill CSS TEXT] [--click CSS] [--wait-ms N] [--eval JS] [--console] [--header "N: V"] [--proxy URL] [--load-cookies FILE] [--save-cookies FILE] [--insecure] [--text] [--html] [--no-images] [--dark] [--lang L,L2] [--tz Area/City] \
+        [--wait-selector CSS] [--fill CSS TEXT] [--click CSS] [--wait-ms N] [--eval JS] [--console] [--header "N: V"] [--proxy URL] [--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] [--text] [--html] [--no-images] [--dark] [--lang L,L2] [--tz Area/City] \
         <input.html | file://URL | http(s)://URL> <out.png> [width height]
 ```
 
@@ -79,7 +79,8 @@ react), and `--click CSS` clicks the matching element before capturing (e.g. fil
 box then click submit, expand a menu, dismiss a banner). `--fill` runs before `--click`.
 
 `--console` prints the page's captured console output (`console.log`/`warn`/`error`) to
-stderr — useful for debugging a page or scripting against its logs.
+stderr — useful for debugging a page or scripting against its logs. `--headers` prints the
+server's HTTP response headers (Content-Type, caching, custom/API headers) to stderr.
 
 `--text` prints the page's visible text (post-JS `document.body.innerText`) to stdout, so
 `mb_shot` doubles as a simple scraper/text extractor. `--html` prints the rendered

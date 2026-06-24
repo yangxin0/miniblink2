@@ -2094,6 +2094,18 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   MB_NET_TESTS=1), and mb_shot empirically (200 no-warn, 404 "returned HTTP 404", badssl --insecure no
   warn). 131/131 default, no survivors. C API now 67 fns.
 
+- ✅ DONE: response headers — mbGetResponseHeaders + mb_shot --headers (2026-06-24). The natural pairing
+  with last tick's mbGetHttpStatus: read the SERVER's response headers (Content-Type, Content-Length,
+  caching, custom/API headers) after a load — a routine scraper need. FetchHttp already captured the
+  raw header block but MbFetchUrl discarded it (passed nullptr); threaded out_headers through into
+  MbWebView (response_headers_, reset alongside http_status_ on every load) — same one-line pattern as
+  the status work. C API mbGetResponseHeaders(v, out, cap) (buffer-copy/size-first; CRLF "Name: Value"
+  lines incl. the status line; empty for non-http/failed) + mb_shot --headers (dumps them to stderr,
+  like --console). VERIFIED 3 ways: local smoke 105b extended (headers empty for non-http -> hdr=1),
+  net case 41 extended (httpbin /html headers contain Content-Type -> ct=1; 142/142 MB_NET_TESTS=1),
+  mb_shot --headers prints "HTTP/1.1 200 OK / Content-Type: text/html; charset=utf-8". 131/131 default,
+  no survivors. C API now 68 fns.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

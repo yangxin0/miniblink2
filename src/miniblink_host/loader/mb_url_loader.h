@@ -90,7 +90,8 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 const std::string& post_content_type = "",
                 const std::string& http_method = "",
                 std::string* out_final_url = nullptr,
-                int* out_status = nullptr);
+                int* out_status = nullptr,
+                std::string* out_headers = nullptr);
 
 class MbURLLoader : public blink::URLLoader {
  public:

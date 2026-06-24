@@ -634,22 +634,27 @@ int main() {
     }
   }
 
-  // 41 (net). mbGetHttpStatus reflects the last navigation's real HTTP status:
-  // a normal page is 200, an error endpoint is its code (404).
+  // 41 (net). mbGetHttpStatus reflects the last navigation's real HTTP status
+  // (200 vs 404), and mbGetResponseHeaders exposes the server's response headers.
   {
     mbLoadURL(v, (host + "/html").c_str());
     mbWait(v, 600);
     const int ok_status = mbGetHttpStatus(v);
     if (ok_status != 0) {  // host reachable
+      char hb[4096] = {0};
+      mbGetResponseHeaders(v, hb, sizeof(hb));
+      std::string headers(hb);
+      for (char& c : headers) c = static_cast<char>(std::tolower((unsigned char)c));
+      const bool has_ct = headers.find("content-type") != std::string::npos;
       mbLoadURL(v, (host + "/status/404").c_str());
       mbWait(v, 600);
       const int err_status = mbGetHttpStatus(v);
-      Expect(ok_status == 200 && err_status == 404,
-             "mbGetHttpStatus returns the navigation's HTTP status (200 vs 404)",
+      Expect(ok_status == 200 && err_status == 404 && has_ct,
+             "mbGetHttpStatus (200/404) + mbGetResponseHeaders exposes headers",
              "ok=" + std::to_string(ok_status) + " err=" +
-                 std::to_string(err_status));
+                 std::to_string(err_status) + " ct=" + (has_ct ? "1" : "0"));
     } else {
-      std::fprintf(stderr, "  [SKIP] http status (host unreachable)\n");
+      std::fprintf(stderr, "  [SKIP] http status/headers (host unreachable)\n");
     }
   }
   }  // MB_NET_TESTS
@@ -2435,10 +2440,13 @@ int main() {
     }
     mbLoadURL(v, "file:///tmp/mb_status.html");
     const bool file_zero = mbGetHttpStatus(v) == 0;
-    Expect(inmem_zero && file_zero,
-           "mbGetHttpStatus is 0 for non-http (in-memory + file) loads",
+    // Response headers are likewise empty for a non-http load.
+    char hb[256] = {0};
+    const bool hdr_empty = mbGetResponseHeaders(v, hb, sizeof(hb)) == 0;
+    Expect(inmem_zero && file_zero && hdr_empty,
+           "mbGetHttpStatus/mbGetResponseHeaders empty for non-http loads",
            std::string("inmem=") + (inmem_zero ? "1" : "0") + " file=" +
-               (file_zero ? "1" : "0"));
+               (file_zero ? "1" : "0") + " hdr=" + (hdr_empty ? "1" : "0"));
   }
 
   // 106. mbEncodePng: render to an in-memory PNG (no temp file) for embedders.

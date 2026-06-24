@@ -47,6 +47,7 @@ int main(int argc, char** argv) {
   bool full_page = false;
   bool transparent = false;
   bool print_console = false;
+  bool print_headers = false;  // dump the response headers to stderr
   bool print_text = false;
   bool print_html = false;
   bool no_images = false;
@@ -101,6 +102,8 @@ int main(int argc, char** argv) {
       wait_ms = std::atoi(argv[++i]);
     } else if (a == "--console") {
       print_console = true;
+    } else if (a == "--headers") {
+      print_headers = true;
     } else if (a == "--text") {
       print_text = true;
     } else if (a == "--html") {
@@ -129,7 +132,7 @@ int main(int argc, char** argv) {
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
         "[--transparent] [--text] [--html] [--eval JS] [--fill CSS TEXT] "
         "[--click CSS] [--wait-selector CSS] [--wait-ms N] [--proxy URL] "
-        "[--load-cookies FILE] [--save-cookies FILE] [--insecure] "
+        "[--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] "
         "<input.html|file://URL|http(s)://URL> <out.png> [width height]\n",
         argv[0]);
     return 2;
@@ -205,6 +208,16 @@ int main(int argc, char** argv) {
                    input.c_str(), status);
       load_ok = false;
     }
+  }
+
+  // --headers: dump the server's response headers (the last http(s) navigation)
+  // to stderr — for inspecting Content-Type, caching, or custom/API headers.
+  if (print_headers && is_http) {
+    std::vector<char> hbuf(1 << 16, 0);  // 64 KiB
+    if (mbGetResponseHeaders(view, hbuf.data(),
+                             static_cast<int>(hbuf.size())) > 0)
+      std::fprintf(stderr, "---- response headers ----\n%s--------------------------\n",
+                   hbuf.data());
   }
 
   // Wait for dynamic content before capturing: a selector to appear and/or a fixed

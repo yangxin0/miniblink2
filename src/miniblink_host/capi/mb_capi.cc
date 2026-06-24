@@ -395,6 +395,20 @@ int mbGetHttpStatus(mbView* v) {
   return (v && v->impl) ? v->impl->GetHttpStatus() : 0;
 }
 
+int mbGetResponseHeaders(mbView* v, char* out, int out_cap) {
+  if (!v || !v->impl)
+    return 0;
+  const std::string& result = v->impl->GetResponseHeaders();
+  if (out && out_cap > 0) {
+    int n = static_cast<int>(result.size());
+    int copy = n < out_cap - 1 ? n : out_cap - 1;
+    for (int i = 0; i < copy; ++i)
+      out[i] = result[i];
+    out[copy] = '\0';
+  }
+  return static_cast<int>(result.size());
+}
+
 int mbCanGoBack(mbView* v) {
   return (v && v->impl && v->impl->CanGoBack()) ? 1 : 0;
 }

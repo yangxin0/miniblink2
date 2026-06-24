@@ -266,6 +266,13 @@ MB_EXPORT void mbReload(mbView*);
 // body length.
 MB_EXPORT int mbGetHttpStatus(mbView*);
 
+// Write the raw response headers of the last top-level http(s) navigation into
+// `out` (CRLF-separated "Name: Value" lines as the server sent them, including
+// the status line). Returns the full length in bytes (size first with
+// out=NULL/out_cap=0); 0 for a non-http load or a failed fetch. Lets a caller
+// read Content-Type, Content-Length, caching, or custom/API headers.
+MB_EXPORT int mbGetResponseHeaders(mbView*, char* out, int out_cap);
+
 // Host-driven back/forward over the main frame's navigation history (captures
 // both host-initiated loads and page-initiated link/location/form navigations).
 // mbGoBack/mbGoForward return 1 if they navigated, 0 if there was no entry.
