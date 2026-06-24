@@ -60,6 +60,13 @@ MB_EXPORT void    mbResize(mbView*, int width, int height);
 MB_EXPORT void mbLoadHTML(mbView*, const char* utf8_html, const char* base_url);
 MB_EXPORT void mbLoadURL(mbView*, const char* utf8_url);
 
+// Host-driven POST navigation: POST `body` to an http(s) `url` with `content_type`
+// (NULL/empty -> application/x-www-form-urlencoded) and commit the response as the
+// document. `body` is NUL-terminated (text bodies — form-encoded or JSON). After
+// it returns, mbGetHttpStatus / mbGetResponseHeaders / mbGetURL reflect the POST.
+MB_EXPORT void mbPostURL(mbView*, const char* url, const char* body,
+                         const char* content_type);
+
 // Execute JavaScript in the page's main frame (host-driven scripting).
 MB_EXPORT void mbRunJS(mbView*, const char* utf8_script);
 

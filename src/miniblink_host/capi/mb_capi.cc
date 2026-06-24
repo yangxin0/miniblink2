@@ -78,6 +78,12 @@ void mbLoadURL(mbView* v, const char* utf8_url) {
     v->impl->LoadURL(utf8_url);
 }
 
+void mbPostURL(mbView* v, const char* utf8_url, const char* utf8_body,
+               const char* content_type) {
+  if (v && v->impl)
+    v->impl->PostURL(utf8_url, utf8_body, content_type);
+}
+
 void mbRunJS(mbView* v, const char* utf8_script) {
   if (v && v->impl)
     v->impl->RunJS(utf8_script);

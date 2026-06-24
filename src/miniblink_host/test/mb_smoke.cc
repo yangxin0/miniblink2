@@ -690,6 +690,23 @@ int main() {
       std::fprintf(stderr, "  [SKIP] follow-redirects (host unreachable)\n");
     }
   }
+
+  // 43 (net). mbPostURL: host-driven POST navigation. httpbin/post echoes the
+  // received form data into the response JSON, which becomes the document.
+  {
+    mbPostURL(v, (host + "/post").c_str(), "mbk=postval", nullptr);
+    mbWait(v, 700);
+    const int status = mbGetHttpStatus(v);
+    if (status != 0) {  // host reachable
+      std::string doc = Eval(v, "document.body?document.body.innerText:''");
+      Expect(status == 200 && doc.find("mbk") != std::string::npos &&
+                 doc.find("postval") != std::string::npos,
+             "mbPostURL posts a body and commits the response",
+             "status=" + std::to_string(status));
+    } else {
+      std::fprintf(stderr, "  [SKIP] mbPostURL (host unreachable)\n");
+    }
+  }
   }  // MB_NET_TESTS
 
   // 33. document.cookie (JS): write then read round-trips through the in-process
