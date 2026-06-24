@@ -459,6 +459,29 @@ int mbEvalJS(mbView* v, const char* utf8_script, char* out, int out_cap) {
   return static_cast<int>(result.size());
 }
 
+int mbEvalJSEx(mbView* v, const char* utf8_script, char* out_value,
+               int value_cap, char* out_type, int type_cap) {
+  if (!v || !v->impl)
+    return 0;
+  std::string type;
+  std::string value = v->impl->EvalWithType(utf8_script, &type);
+  if (out_value && value_cap > 0) {
+    int n = static_cast<int>(value.size());
+    int copy = n < value_cap - 1 ? n : value_cap - 1;
+    for (int i = 0; i < copy; ++i)
+      out_value[i] = value[i];
+    out_value[copy] = '\0';
+  }
+  if (out_type && type_cap > 0) {
+    int n = static_cast<int>(type.size());
+    int copy = n < type_cap - 1 ? n : type_cap - 1;
+    for (int i = 0; i < copy; ++i)
+      out_type[i] = type[i];
+    out_type[copy] = '\0';
+  }
+  return static_cast<int>(value.size());
+}
+
 int mbPaintToBitmap(mbView* v, void* out_bgra, int width, int height, int stride) {
   if (!v || !v->impl)
     return 0;

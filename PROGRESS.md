@@ -75,11 +75,12 @@ the deliverable surface (C API, CLI, wke layer).
 - **wke compatibility layer (`src/wke/`):** a faithful subset over `mb_capi` covering
   the full headless-automation surface — lifecycle, load, loading-state polling,
   paint (`wkePaint`), mouse (`wkeFireMouseEvent`), keyboard (`wkeFireKey*`),
-  scripting (`wkeRunJS` + `jsToInt/Double/Boolean/TempString`), navigation history,
+  scripting (`wkeRunJS` + `jsToInt/Double/Boolean/TempString` + `jsTypeOf`),
+  navigation history,
   rendering accessors (`wkeSetTransparent`, `wkeGetContentWidth/Height`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **131/131** (default, network-free), `wke_smoke` **20/20**,
+- **Tests:** `mb_smoke` **131/131** (default, network-free), `wke_smoke` **21/21**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin cases (143 total).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
@@ -95,6 +96,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke+capi: jsTypeOf — host EvalWithType captures the result's JS type from the SAME single eval (no re-run/side-effects), exposed as mbEvalJSEx(value+type); wke's jsValue registry now stores {value,type} and jsTypeOf maps it. wke_smoke 21/21 (number/string/boolean/array/object/null/undefined/function). mbEvalJS unchanged (mb_smoke 131/131).
 - wke: mouse-wheel input — wkeFireMouseWheelEvent (→mbSendScroll, dy=-delta; Win32 positive=up). Completes mouse+keyboard+wheel. wke_smoke 20/20 (tall page scrolls down, scrollY>0).
 - wke: document-ready callback + page source — wkeOnDocumentReady (fires in FireLoadCallbacks) + wkeGetSource (→mbGetHTML, cached). wke_smoke 19/19 (callback fires; source contains the post-JS markup).
 - wke: console callback — wkeOnConsole + wkeConsoleLevel; drains mbDrainConsole after load + after wkeRunJS, one msg per "level: text" line, mapping mb levels (log/warn/error/verbose) to the wke enum. wke_smoke 18/18 (console.log/error captured with levels).

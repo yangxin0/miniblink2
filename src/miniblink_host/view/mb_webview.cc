@@ -844,6 +844,65 @@ std::string MbWebView::EvalToString(const char* utf8_script) {
   return result;
 }
 
+std::string MbWebView::EvalWithType(const char* utf8_script,
+                                    std::string* out_type) {
+  if (out_type)
+    out_type->clear();
+  if (!main_frame_ || !utf8_script)
+    return {};
+  std::string result;
+  std::string type;
+  blink::WebLocalFrame* frame = main_frame_;
+  RunInFrameTask(
+      base::BindOnce(
+          [](blink::WebLocalFrame* f, std::string s, std::string* out,
+             std::string* out_t) {
+            v8::Isolate* isolate = v8::Isolate::GetCurrent();
+            if (!isolate)
+              return;
+            v8::HandleScope handle_scope(isolate);
+            v8::Local<v8::Context> context = f->MainWorldScriptContext();
+            if (context.IsEmpty())
+              return;
+            v8::Context::Scope context_scope(context);
+            v8::Local<v8::Value> value = f->ExecuteScriptAndReturnValue(
+                blink::WebScriptSource(blink::WebString::FromUtf8(s)));
+            if (value.IsEmpty())
+              return;
+            // Type: check the specific kinds before the generic object (an array
+            // and a function are also objects).
+            if (value->IsNull())
+              *out_t = "null";
+            else if (value->IsUndefined())
+              *out_t = "undefined";
+            else if (value->IsArray())
+              *out_t = "array";
+            else if (value->IsFunction())
+              *out_t = "function";
+            else if (value->IsBoolean())
+              *out_t = "boolean";
+            else if (value->IsNumber())
+              *out_t = "number";
+            else if (value->IsString())
+              *out_t = "string";
+            else if (value->IsObject())
+              *out_t = "object";
+            else
+              *out_t = "undefined";
+            v8::Local<v8::String> str;
+            if (!value->ToString(context).ToLocal(&str))
+              return;
+            v8::String::Utf8Value utf8(isolate, str);
+            if (*utf8)
+              out->assign(*utf8, utf8.length());
+          },
+          frame, std::string(utf8_script), &result, &type),
+      /*settle=*/false);
+  if (out_type)
+    *out_type = type;
+  return result;
+}
+
 std::string MbWebView::EvalIsolated(const char* utf8_script) {
   if (!main_frame_ || !utf8_script)
     return {};

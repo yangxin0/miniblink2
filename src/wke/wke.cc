@@ -401,10 +401,14 @@ void wkePaint(wkeWebView webView, void* bits, int pitch) {
 
 // --- Scripting (string-backed jsValue) -----------------------------------------
 namespace {
-// jsValue handle -> the string result of the wkeRunJS that produced it. Heap-
-// owned with no destructor (Blink builds with -Wexit-time-destructors).
-std::map<jsValue, std::string>& JsRegistry() {
-  static auto* r = new std::map<jsValue, std::string>();
+// jsValue handle -> the coerced-to-string result + its JS type. Heap-owned with
+// no destructor (Blink builds with -Wexit-time-destructors).
+struct JsRecord {
+  std::string value;
+  std::string type;  // "number"/"string"/.../"array"/"null" from mbEvalJSEx
+};
+std::map<jsValue, JsRecord>& JsRegistry() {
+  static auto* r = new std::map<jsValue, JsRecord>();
   return *r;
 }
 std::string& JsTempBuf() {
@@ -414,7 +418,7 @@ std::string& JsTempBuf() {
 // Start above wke's small reserved constants (jsUndefined/jsNull/jsTrue/jsFalse).
 jsValue g_next_js_value = 0x10000;
 
-const std::string* JsLookup(jsValue v) {
+const JsRecord* JsLookup(jsValue v) {
   auto& reg = JsRegistry();
   auto it = reg.find(v);
   return it == reg.end() ? nullptr : &it->second;
@@ -424,13 +428,15 @@ const std::string* JsLookup(jsValue v) {
 jsValue wkeRunJS(wkeWebView webView, const utf8* script) {
   if (!webView || !webView->view || !script)
     return 0;
-  std::vector<char> buf(1 << 16, 0);  // 64 KiB result cap
-  mbEvalJS(webView->view, script, buf.data(), static_cast<int>(buf.size()));
+  std::vector<char> value(1 << 16, 0);  // 64 KiB result cap
+  char type[16] = {0};
+  mbEvalJSEx(webView->view, script, value.data(),
+             static_cast<int>(value.size()), type, sizeof(type));
   auto& reg = JsRegistry();
   if (reg.size() >= 4096)
     reg.clear();  // bound the (non-GC'd) registry; very old handles expire to ""
   const jsValue handle = g_next_js_value++;
-  reg[handle] = buf.data();  // up to the first NUL
+  reg[handle] = JsRecord{std::string(value.data()), std::string(type)};
   DrainConsoleToCallback(webView);  // deliver any console output the script logged
   return handle;
 }
@@ -442,28 +448,51 @@ jsExecState wkeGlobalExec(wkeWebView webView) {
 }
 
 int jsToInt(jsExecState /*es*/, jsValue v) {
-  const std::string* s = JsLookup(v);
-  return s ? std::atoi(s->c_str()) : 0;
+  const JsRecord* r = JsLookup(v);
+  return r ? std::atoi(r->value.c_str()) : 0;
 }
 
 double jsToDouble(jsExecState /*es*/, jsValue v) {
-  const std::string* s = JsLookup(v);
-  return s ? std::atof(s->c_str()) : 0.0;
+  const JsRecord* r = JsLookup(v);
+  return r ? std::atof(r->value.c_str()) : 0.0;
 }
 
 bool jsToBoolean(jsExecState /*es*/, jsValue v) {
-  const std::string* s = JsLookup(v);
-  if (!s)
+  const JsRecord* r = JsLookup(v);
+  if (!r)
     return false;
+  const std::string& s = r->value;
   // JS truthiness over the coerced string: "true" / any non-empty value that
   // isn't "false" or "0".
-  return *s == "true" || (!s->empty() && *s != "false" && *s != "0");
+  return s == "true" || (!s.empty() && s != "false" && s != "0");
 }
 
 const utf8* jsToTempString(jsExecState /*es*/, jsValue v) {
-  const std::string* s = JsLookup(v);
-  JsTempBuf() = s ? *s : std::string();
+  const JsRecord* r = JsLookup(v);
+  JsTempBuf() = r ? r->value : std::string();
   return JsTempBuf().c_str();
+}
+
+jsType jsTypeOf(jsValue v) {
+  const JsRecord* r = JsLookup(v);
+  if (!r)
+    return JSTYPE_UNDEFINED;
+  const std::string& t = r->type;
+  if (t == "number")
+    return JSTYPE_NUMBER;
+  if (t == "string")
+    return JSTYPE_STRING;
+  if (t == "boolean")
+    return JSTYPE_BOOLEAN;
+  if (t == "array")
+    return JSTYPE_ARRAY;
+  if (t == "function")
+    return JSTYPE_FUNCTION;
+  if (t == "null")
+    return JSTYPE_NULL;
+  if (t == "object")
+    return JSTYPE_OBJECT;
+  return JSTYPE_UNDEFINED;
 }
 
 // --- Callbacks -----------------------------------------------------------------

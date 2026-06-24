@@ -166,6 +166,21 @@ WKE_API double jsToDouble(jsExecState es, jsValue v);
 WKE_API bool jsToBoolean(jsExecState es, jsValue v);
 WKE_API const utf8* jsToTempString(jsExecState es, jsValue v);
 
+// The JS type of a wkeRunJS result (captured during the eval). The object kinds
+// (object/array/function) are reported, but reading into them (jsGet/jsGetAt/
+// jsCall) is not yet implemented — read structured data via wkeRunJS for now.
+typedef enum _jsType {
+  JSTYPE_NUMBER,
+  JSTYPE_STRING,
+  JSTYPE_BOOLEAN,
+  JSTYPE_OBJECT,
+  JSTYPE_FUNCTION,
+  JSTYPE_UNDEFINED,
+  JSTYPE_ARRAY,
+  JSTYPE_NULL,
+} jsType;
+WKE_API jsType jsTypeOf(jsValue v);
+
 // --- Paint (pull model): render the view into a caller BGRA buffer -------------
 // `bits` must hold width*height*4 bytes; `pitch` is the row stride in bytes
 // (pass width*4 for a tightly-packed buffer).

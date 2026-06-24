@@ -170,6 +170,10 @@ class MbWebView {
   void SetTransparentBackground(bool transparent);
   void SendScroll(int x, int y, int dx, int dy);
   std::string EvalToString(const char* utf8_script);  // eval JS -> string result
+  // Like EvalToString, but also reports the JS typeof the result (one of
+  // "number"/"string"/"boolean"/"object"/"function"/"undefined"/"array"/"null")
+  // via *out_type — captured from the SAME single eval (no re-run / side effects).
+  std::string EvalWithType(const char* utf8_script, std::string* out_type);
   // Eval JS in a dedicated isolated world: separate globals from the page, shared DOM.
   std::string EvalIsolated(const char* utf8_script);
   // Drive the engine for ~ms of real time (lets setTimeout / async work run).

@@ -298,6 +298,13 @@ MB_EXPORT int mbDrainConsole(mbView*, char* out, int out_cap);
 // indicating truncation). Lets the host read data back from the page (e.g. document.title).
 MB_EXPORT int mbEvalJS(mbView*, const char* utf8_script, char* out, int out_cap);
 
+// Like mbEvalJS, but ALSO reports the JS typeof the result via `out_type` (one of
+// "number"/"string"/"boolean"/"object"/"function"/"undefined"/"array"/"null"),
+// captured from the SAME single evaluation (no re-run, so side effects fire once).
+// Returns the value length in bytes. Used to back wke's jsTypeOf.
+MB_EXPORT int mbEvalJSEx(mbView*, const char* utf8_script, char* out_value,
+                         int value_cap, char* out_type, int type_cap);
+
 // Like mbEvalJS, but runs in a dedicated ISOLATED world: the script has its own
 // JS globals (separate from the page and from mbRunJS/mbEvalJS's main world) yet
 // shares the same DOM — the content-script model, for automation that must not

@@ -211,6 +211,17 @@ int main() {
   check(jsToInt(es, wkeRunJS(wv, "Math.round(window.scrollY)")) > 0,
         "wkeFireMouseWheelEvent scrolls the page (scrollY > 0)");
 
+  // jsTypeOf: the result type is captured during the single eval.
+  check(jsTypeOf(wkeRunJS(wv, "1+2")) == JSTYPE_NUMBER &&
+            jsTypeOf(wkeRunJS(wv, "'x'")) == JSTYPE_STRING &&
+            jsTypeOf(wkeRunJS(wv, "1<2")) == JSTYPE_BOOLEAN &&
+            jsTypeOf(wkeRunJS(wv, "[1,2,3]")) == JSTYPE_ARRAY &&
+            jsTypeOf(wkeRunJS(wv, "({a:1})")) == JSTYPE_OBJECT &&
+            jsTypeOf(wkeRunJS(wv, "null")) == JSTYPE_NULL &&
+            jsTypeOf(wkeRunJS(wv, "undefined")) == JSTYPE_UNDEFINED &&
+            jsTypeOf(wkeRunJS(wv, "(function(){})")) == JSTYPE_FUNCTION,
+        "jsTypeOf reports number/string/boolean/array/object/null/undefined/function");
+
   wkeDestroyWebView(wv);
   wkeFinalize();
 
