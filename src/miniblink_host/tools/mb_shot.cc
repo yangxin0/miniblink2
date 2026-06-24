@@ -68,6 +68,8 @@ int main(int argc, char** argv) {
   std::string wait_hidden;    // wait for this selector to be GONE/HIDDEN before capture
   std::string inject_css;      // inject this CSS (hide noise) before capture
   std::string click_selector;  // click this selector before capture
+  std::string dispatch_sel;    // dispatch a DOM event on this selector...
+  std::string dispatch_evt;    // ...of this type before capture (--dispatch CSS EVT)
   std::string drag_from;       // drag this selector...
   std::string drag_to;         // ...onto this one before capture (--drag FROM TO)
   std::string fill_selector;   // fill this field before capture (with fill_text)
@@ -120,6 +122,9 @@ int main(int argc, char** argv) {
     } else if (a == "--drag" && i + 2 < argc) {
       drag_from = argv[++i];
       drag_to = argv[++i];
+    } else if (a == "--dispatch" && i + 2 < argc) {
+      dispatch_sel = argv[++i];
+      dispatch_evt = argv[++i];
     } else if (a == "--fill" && i + 2 < argc) {
       fill_selector = argv[++i];
       fill_text = argv[++i];
@@ -197,7 +202,8 @@ int main(int argc, char** argv) {
         "[--checked CSS] [--visible CSS] [--rect CSS] [--style CSS PROP] "
         "[--text-all CSS] [--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
-        "[--click CSS] [--drag FROM TO] [--wait-selector CSS] [--wait-visible CSS] "
+        "[--click CSS] [--drag FROM TO] [--dispatch CSS EVT] "
+        "[--wait-selector CSS] [--wait-visible CSS] "
         "[--wait-hidden CSS] [--wait-idle] [--css STYLES] [--auto-scroll] "
         "[--wait-ms N] "
         "[--scroll-to Y] "
@@ -375,6 +381,18 @@ int main(int argc, char** argv) {
       std::fprintf(stderr,
                    "mb_shot: WARNING — --drag '%s' -> '%s' matched no element\n",
                    drag_from.c_str(), drag_to.c_str());
+    } else {
+      mbWait(view, wait_ms > 0 ? wait_ms : 100);
+    }
+  }
+
+  // --dispatch CSS EVT: fire a synthetic DOM event (mouseover hover menu, custom
+  // framework event, …) that click/fill don't, before capturing, then settle.
+  if (!dispatch_sel.empty()) {
+    if (!mbDispatchEvent(view, dispatch_sel.c_str(), dispatch_evt.c_str())) {
+      std::fprintf(stderr,
+                   "mb_shot: WARNING — --dispatch '%s' matched no element\n",
+                   dispatch_sel.c_str());
     } else {
       mbWait(view, wait_ms > 0 ? wait_ms : 100);
     }

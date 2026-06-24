@@ -70,8 +70,8 @@ the deliverable surface (C API, CLI, wke layer).
   network config (proxy / cert-bypass / follow-redirects / status / response-headers),
   config (UA/headers/locale/tz/dark/DPR/transparent/images), history.
 - **`mb_shot` CLI (the deliverable tool):** a full scraper/automator — interact
-  (`--fill`/`--click`/`--drag`/`--wait-selector`/`--wait-visible`/`--wait-hidden`/
-  `--wait-idle`/`--css`/`--auto-scroll`/`--wait-ms`) → extract (`--text`/`--html`/`--eval`/`--value`/`--checked`/
+  (`--fill`/`--click`/`--drag`/`--dispatch`/`--wait-selector`/`--wait-visible`/
+  `--wait-hidden`/`--wait-idle`/`--css`/`--auto-scroll`/`--wait-ms`) → extract (`--text`/`--html`/`--eval`/`--value`/`--checked`/
   `--visible`/`--rect`/`--style`/`--text-all`/`--attr-all`/`--requests`) → capture (`--full`/`--clip`/
   `--selector`); plus `--proxy`/`--insecure`/`--no-follow`/`--headers`/
   `--block`/`--user-agent`/`--load-cookies`/`--save-cookies`.
@@ -125,6 +125,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- mb_shot: --dispatch CSS EVT — synthetic DOM event on the CLI (2026-06-25). Exposes mbDispatchEvent in the interact phase (after --drag), completing CLI interaction parity (--fill/--click/--drag/--dispatch): fire a hover/custom/framework event that click/fill don't, before capture. VERIFIED end-to-end offline with a clean A/B: a #m whose 'reveal' listener rewrites its text reads "hidden" WITHOUT the flag and "REVEALED" WITH --dispatch '#m' reveal; no survivors. mb_shot.cc + usage only; both suites unchanged (wke 96/96, mb 157/157).
 - docs: re-sync the README wke section + correct stale test counts (2026-06-25). The wke list had drifted again — 7 of 123 wke exports undocumented (wkeGetHtmlForSelector/Set, GetAllValueForSelector, DispatchEvent, DragSelector, SaveElementPng, WaitForNetworkIdle). Added them under the right groups (DOM-automation query/act/wait, Capture) and cross-checked all 123 now appear (0 missing). Also fixed three stale suite-count claims: wke_smoke "88"/"63" -> 96, and mb_smoke "~107-case (133-check)" -> "157-check". Docs-only — no code, suites unchanged (wke 96/96, mb 157/157).
 - mb_shot: --drag FROM TO — drag-by-selector on the CLI (2026-06-25). Exposes mbDragSelector in the interact phase (after --click): mouse-drag one element's center onto another's before extract/capture (slider thumb, sortable item, map pan). VERIFIED end-to-end offline: --drag '#h' '#t' on a page whose mouseup records clientX -> --eval window.__dropx prints 220 (the target center), no warning, no survivors. mb_shot.cc + usage only; both suites unchanged (wke 96/96, mb 157/157).
 - capi+wke: mbDragSelector / wkeDragSelector — drag one element onto another (2026-06-25). The high-level convenience over last tick's drag primitives (Puppeteer dragAndDrop): resolve both selectors' centers, then press on `from`, glide through 6 interpolated moves (carrying the held button), release on `to` — removes the rect-math + interpolation boilerplate. Mouse-based (sliders/sortables/map-pan), not HTML5 native DnD; both elements must be in view. VERIFIED in both suites: a #handle that follows the cursor dropped exactly at #target's center x (dropx==220), moves observed, no-match -> 0/false. Caught a -Wshadow build error (a top-of-main `nomatch` collided with later block-scoped ones) -> wrapped the test in its own block. wke_smoke 96/96, mb_smoke 157/157, no survivors. ABI now 105 fns.
