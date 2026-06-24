@@ -302,6 +302,10 @@ class MbWebView {
   bool SavePdf(const char* path);
   // Render just the logical rect (x,y,w,h) to a PNG (output is w*dsf x h*dsf px).
   bool SavePngRect(const char* path, int x, int y, int w, int h);
+  // Screenshot just the first element matching `css_selector` (scroll into view +
+  // clip its viewport box) — Puppeteer's elementHandle.screenshot. False on no
+  // match / no box. Captures the visible extent for an oversized element.
+  bool SaveElementPng(const char* css_selector, const char* path);
   // Same clip, but into a caller-provided BGRA buffer (w x h px; dsf not applied).
   bool PaintRectToBitmap(void* out_bgra, int x, int y, int w, int h, int stride);
 

@@ -777,6 +777,12 @@ int mbSavePngRect(mbView* v, const char* path, int x, int y, int w, int h) {
   return v->impl->SavePngRect(path, x, y, w, h) ? 1 : 0;
 }
 
+int mbSaveElementPng(mbView* v, const char* css_selector, const char* path) {
+  if (!v || !v->impl || !css_selector || !path)
+    return 0;
+  return v->impl->SaveElementPng(css_selector, path) ? 1 : 0;
+}
+
 int mbGetElementRect(mbView* v, const char* css_selector, int* x, int* y, int* w,
                      int* h) {
   if (!v || !v->impl)

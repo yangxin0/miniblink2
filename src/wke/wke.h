@@ -168,6 +168,10 @@ WKE_API bool wkeSavePng(wkeWebView webView, const utf8* path, int width,
 // whether the file was written. Port extension.
 WKE_API bool wkeSavePngRect(wkeWebView webView, const utf8* path, int x, int y,
                             int w, int h);
+// Screenshot just the first element matching `selector` to `path` (scroll into
+// view + clip its box) — Puppeteer elementHandle.screenshot. True on success.
+WKE_API bool wkeSaveElementPng(wkeWebView webView, const char* selector,
+                               const utf8* path);
 // Set the device pixel ratio (HiDPI/retina): window.devicePixelRatio reports
 // `scale` and paint/PNG output rasterizes at `scale`x (layout stays in CSS px).
 // Size capture buffers at logical_size*scale. Port extension.

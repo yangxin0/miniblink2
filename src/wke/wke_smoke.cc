@@ -928,6 +928,31 @@ int main() {
           "wkeSavePngRect captures a logical rect at the requested size");
   }
 
+  // wkeSaveElementPng (offline): one call scrolls a below-the-fold element into
+  // view and clips its box — the saved PNG's IHDR dims equal the element size.
+  {
+    const char* png = "/private/tmp/claude-501/wke_elem.png";
+    std::remove(png);
+    wkeSetDeviceScaleFactor(wv, 1.0f);
+    wkeLoadHTML(wv, "<body style='margin:0'><div style='height:1200px'></div>"
+                    "<div id='box' style='width:90px;height:35px;background:#08c'></div>"
+                    "</body>");
+    const bool wrote = wkeSaveElementPng(wv, "#box", png);
+    unsigned char d[24] = {0};
+    size_t n = 0;
+    if (FILE* f = std::fopen(png, "rb")) {
+      n = std::fread(d, 1, 24, f);
+      std::fclose(f);
+    }
+    const bool magic = n >= 24 && d[0] == 0x89 && d[1] == 'P';
+    int iw = magic ? ((d[16] << 24) | (d[17] << 16) | (d[18] << 8) | d[19]) : 0;
+    int ih = magic ? ((d[20] << 24) | (d[21] << 16) | (d[22] << 8) | d[23]) : 0;
+    const bool none_ok = !wkeSaveElementPng(wv, "#none", png);
+    std::remove(png);
+    check(wrote && iw == 90 && ih == 35 && none_ok,
+          "wkeSaveElementPng captures one element at its box size");
+  }
+
   // wkeSetDeviceScaleFactor (offline): devicePixelRatio reports the scale and a
   // rect capture rasterizes at scale x (a 100x60 logical rect -> 200x120 px).
   {

@@ -1686,6 +1686,29 @@ bool MbWebView::SavePdf(const char* path) {
   return base::WriteFile(base::FilePath(path), buf);
 }
 
+bool MbWebView::SaveElementPng(const char* css_selector, const char* path) {
+  if (!css_selector || !path)
+    return false;
+  // Screenshot just the first match (Puppeteer's elementHandle.screenshot). Scroll
+  // it into view, read its viewport-relative box, and clip that region — no
+  // destructive resize, so the view is left as-is (bar the scroll). An element
+  // taller/wider than the viewport is captured to the visible extent. Returns
+  // false on no match or no box (display:none / zero-size).
+  ScrollIntoView(css_selector);
+  std::string js =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+      "\");if(!e)return '';var r=e.getBoundingClientRect();"
+      "if(r.width<=0||r.height<=0)return '';"
+      "return Math.round(Math.max(0,r.left))+','+Math.round(Math.max(0,r.top))+"
+      "','+Math.round(r.width)+','+Math.round(r.height);})()";
+  std::string box = EvalToString(js.c_str());
+  int x = 0, y = 0, w = 0, h = 0;
+  if (std::sscanf(box.c_str(), "%d,%d,%d,%d", &x, &y, &w, &h) != 4 || w <= 0 ||
+      h <= 0)
+    return false;
+  return SavePngRect(path, x, y, w, h);
+}
+
 bool MbWebView::SavePng(const char* path, int w, int h) {
   SkBitmap bitmap;
   if (!bitmap.tryAllocPixels(

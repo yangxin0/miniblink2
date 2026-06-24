@@ -544,6 +544,14 @@ bool wkeSavePngRect(wkeWebView webView, const utf8* path, int x, int y, int w,
          mbSavePngRect(webView->view, path, x, y, w, h) != 0;
 }
 
+bool wkeSaveElementPng(wkeWebView webView, const char* selector,
+                       const utf8* path) {
+  // Screenshot just the first match (scroll into view + clip its box) to `path`.
+  // True on success. (Port extension — Puppeteer elementHandle.screenshot.)
+  return webView && webView->view && selector && path &&
+         mbSaveElementPng(webView->view, selector, path) != 0;
+}
+
 void wkeSetDeviceScaleFactor(wkeWebView webView, float scale) {
   // HiDPI/retina: window.devicePixelRatio reports `scale` and paint/PNG output
   // is rasterized at `scale`x (layout stays in CSS px). Size capture buffers at

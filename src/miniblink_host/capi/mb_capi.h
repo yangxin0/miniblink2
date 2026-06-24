@@ -509,6 +509,13 @@ MB_EXPORT int mbSavePdf(mbView*, const char* path);
 // screenshot). The output image is (w*dsf x h*dsf) px. Returns 1 on success.
 MB_EXPORT int mbSavePngRect(mbView*, const char* path, int x, int y, int w, int h);
 
+// Screenshot just the first element matching `css_selector` to `path` (PNG/JPEG
+// by extension) — Puppeteer's elementHandle.screenshot. Scrolls the element into
+// view and clips its bounding box (no view resize). Returns 1 on success, 0 if no
+// element matches or it has no box (display:none/zero-size). An element larger
+// than the viewport is captured to its visible extent.
+MB_EXPORT int mbSaveElementPng(mbView*, const char* css_selector, const char* path);
+
 // Composite the logical rect (x,y,w,h) into a caller-provided BGRA8888 buffer
 // (w x h px, `stride` bytes/row; the device scale factor is not applied here).
 // Write the first element matching `css_selector`'s viewport-relative bounding

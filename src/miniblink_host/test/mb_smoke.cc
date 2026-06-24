@@ -2161,6 +2161,39 @@ int main() {
                " red=" + (red ? "1" : "0"));
   }
 
+  // 90a2. mbSaveElementPng does that whole dance in one call: scroll the element
+  // into view + clip its box to a PNG. A below-the-fold 120x40 div -> the saved
+  // PNG's IHDR dimensions equal the element size (dsf 1). No-match -> 0.
+  {
+    mbSetDeviceScaleFactor(v, 1.0f);
+    mbResize(v, W, H);
+    mbLoadHTML(v,
+        "<body style='margin:0'><div style='height:1200px'></div>"
+        "<div id='box' style='width:120px;height:40px;background:#0000ff'></div>"
+        "</body>", "about:blank");
+    const char* p = "/tmp/mb_elem_shot.png";
+    const bool ok = mbSaveElementPng(v, "#box", p) == 1;
+    unsigned pw = 0, ph = 0;
+    bool png = false;
+    if (FILE* f = std::fopen(p, "rb")) {
+      unsigned char hd[24] = {0};
+      const size_t n = std::fread(hd, 1, 24, f);
+      std::fclose(f);
+      if (n == 24 && hd[0] == 0x89 && hd[1] == 'P') {  // PNG sig + IHDR dims (BE)
+        pw = (hd[16] << 24) | (hd[17] << 16) | (hd[18] << 8) | hd[19];
+        ph = (hd[20] << 24) | (hd[21] << 16) | (hd[22] << 8) | hd[23];
+        png = true;
+      }
+    }
+    const bool dims_ok = png && pw == 120 && ph == 40;
+    const bool none_ok = mbSaveElementPng(v, "#none", p) == 0;
+    Expect(ok && dims_ok && none_ok,
+           "mbSaveElementPng captures one element (PNG dims == element box)",
+           std::string("ok=") + (ok ? "1" : "0") + " dims=" + std::to_string(pw) +
+               "x" + std::to_string(ph) + " none=" + (none_ok ? "1" : "0"));
+    std::remove(p);
+  }
+
   // 90b. Text actually rasterizes to glyph pixels. Every other screenshot test
   // checks solid color fills, so a font/Skia regression that blanks text would
   // pass silently while screenshots became useless. Black text on white: the
