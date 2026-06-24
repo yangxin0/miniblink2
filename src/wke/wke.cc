@@ -47,6 +47,8 @@ struct _tagWkeWebView {
   std::map<std::string, void*> user_kv;
   double zoom_factor = 1.0;  // wkeSetZoomFactor; re-applied after each load
   bool editable = false;     // wkeSetEditable; re-applied after each load
+  std::string selector_text_cache;  // backs wkeGetTextForSelector's return
+  std::string selector_attr_cache;  // backs wkeGetAttribute's return
 };
 
 // The last live webView, so the view-less wkePerformCookieCommand has a handle
@@ -418,6 +420,54 @@ int wkeEncodePng(wkeWebView webView, int width, int height,
   if (!webView || !webView->view || width <= 0 || height <= 0 || !outData)
     return 0;
   return mbEncodePng(webView->view, width, height, outData);
+}
+
+// --- DOM query helpers (scrape without writing JS) -----------------------------
+int wkeCountSelector(wkeWebView webView, const char* selector) {
+  // querySelectorAll length (>=0; 0 is valid), or -1 for a null/invalid selector.
+  if (!webView || !webView->view || !selector)
+    return -1;
+  return mbCountSelector(webView->view, selector);
+}
+
+const utf8* wkeGetTextForSelector(wkeWebView webView, const char* selector) {
+  // innerText of the FIRST element matching `selector` ("" if none). Owned by
+  // the view, valid until the next wkeGetTextForSelector on it. (Port extension.)
+  if (!webView || !webView->view || !selector) {
+    if (webView)
+      webView->selector_text_cache.clear();
+    return webView ? webView->selector_text_cache.c_str() : "";
+  }
+  const int len = mbGetTextForSelector(webView->view, selector, nullptr, 0);
+  if (len <= 0) {
+    webView->selector_text_cache.clear();
+    return webView->selector_text_cache.c_str();
+  }
+  std::vector<char> buf(static_cast<size_t>(len) + 1, 0);
+  mbGetTextForSelector(webView->view, selector, buf.data(), len + 1);
+  webView->selector_text_cache.assign(buf.data());
+  return webView->selector_text_cache.c_str();
+}
+
+const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,
+                            const char* attr) {
+  // Value of `attr` on the FIRST element matching `selector` ("" if no match or
+  // the attribute is absent). Owned by the view, valid until the next
+  // wkeGetAttribute on it. Property reads (.value/.checked) come via wkeRunJS.
+  if (!webView || !webView->view || !selector || !attr) {
+    if (webView)
+      webView->selector_attr_cache.clear();
+    return webView ? webView->selector_attr_cache.c_str() : "";
+  }
+  const int len = mbGetAttribute(webView->view, selector, attr, nullptr, 0);
+  if (len <= 0) {  // -1 absent / no match, or 0 empty value
+    webView->selector_attr_cache.clear();
+    return webView->selector_attr_cache.c_str();
+  }
+  std::vector<char> buf(static_cast<size_t>(len) + 1, 0);
+  mbGetAttribute(webView->view, selector, attr, buf.data(), len + 1);
+  webView->selector_attr_cache.assign(buf.data());
+  return webView->selector_attr_cache.c_str();
 }
 
 void wkeSetTransparent(wkeWebView webView, bool transparent) {

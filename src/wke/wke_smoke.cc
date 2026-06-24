@@ -693,6 +693,31 @@ int main() {
           "wkeEncodePng returns an in-memory PNG of the requested size");
   }
 
+  // DOM query helpers (offline): count, per-element text (incl. :nth-of-type),
+  // and attribute reads, plus "" on a miss.
+  {
+    wkeLoadHTML(
+        wv,
+        "<body><h1 class='t'>Hi</h1>"
+        "<a id='lnk' href='https://ex.com/p'>L</a>"
+        "<ul><li class='it'>a</li><li class='it'>b</li><li class='it'>c</li>"
+        "</ul></body>");
+    const bool count_ok =
+        wkeCountSelector(wv, ".it") == 3 && wkeCountSelector(wv, ".none") == 0 &&
+        wkeCountSelector(wv, nullptr) == -1;
+    const bool text_ok =
+        std::strcmp(wkeGetTextForSelector(wv, "h1.t"), "Hi") == 0;
+    const bool nth_ok =
+        std::strcmp(wkeGetTextForSelector(wv, ".it:nth-of-type(2)"), "b") == 0;
+    const bool attr_ok = std::strcmp(wkeGetAttribute(wv, "#lnk", "href"),
+                                     "https://ex.com/p") == 0;
+    const bool miss_ok =
+        std::strcmp(wkeGetTextForSelector(wv, ".none"), "") == 0 &&
+        std::strcmp(wkeGetAttribute(wv, "#lnk", "nope"), "") == 0;
+    check(count_ok && text_ok && nth_ok && attr_ok && miss_ok,
+          "wkeCountSelector/wkeGetTextForSelector/wkeGetAttribute scrape the DOM");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {

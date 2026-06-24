@@ -163,6 +163,19 @@ WKE_API void wkeScrollTo(wkeWebView webView, int x, int y);
 // wkeDestroyWebView — copy them out before either. Port extension.
 WKE_API int wkeEncodePng(wkeWebView webView, int width, int height,
                          const unsigned char** outData);
+
+// DOM query helpers — scrape the page without writing JS (port extensions).
+// wkeCountSelector returns the querySelectorAll length (0 valid, -1 for a bad
+// selector). wkeGetTextForSelector / wkeGetAttribute return the first match's
+// innerText / attribute value ("" on no match or absent attribute); each return
+// is owned by the view and valid until the next call to the same getter on it.
+// Combine with :nth-of-type(n) selectors to walk a list. Property reads such as
+// .value/.checked come via wkeRunJS.
+WKE_API int wkeCountSelector(wkeWebView webView, const char* selector);
+WKE_API const utf8* wkeGetTextForSelector(wkeWebView webView,
+                                          const char* selector);
+WKE_API const utf8* wkeGetAttribute(wkeWebView webView, const char* selector,
+                                    const char* attr);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);
