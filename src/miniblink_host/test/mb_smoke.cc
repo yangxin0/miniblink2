@@ -2351,6 +2351,32 @@ int main() {
     mbResize(v, W, H);  // restore the shared viewport for later cases
   }
 
+  // 104. Form submission NAVIGATES (not just the onsubmit handler). A GET form,
+  // filled then submitted by clicking its submit button, must navigate to the
+  // action URL with the query string and commit the new document — exercising
+  // BeginNavigation + the loader + script re-run on the committed page. A file://
+  // doc makes the target fetchable without network (GET appends ?q=hello; the
+  // file read ignores the query). Distinct from case 88 (onsubmit handler) and
+  // case 36 (POST over network): this is local GET navigation.
+  {
+    if (FILE* f = std::fopen("/tmp/mb_formnav.html", "wb")) {
+      static const char kHtml[] =
+          "<body><form method='GET'><input name='q'>"
+          "<button type='submit' id='go'>go</button></form></body>";
+      std::fwrite(kHtml, 1, sizeof(kHtml) - 1, f);
+      std::fclose(f);
+    }
+    mbLoadURL(v, "file:///tmp/mb_formnav.html");
+    mbWaitForSelector(v, "#go", 2000);
+    mbFillSelector(v, "input[name=q]", "hello");
+    mbClickSelector(v, "#go");  // submit -> navigate to ...?q=hello
+    const bool navigated =
+        mbWaitForFunction(v, "location.search==='?q=hello'", 2000) == 1;
+    Expect(navigated,
+           "form GET submission navigates to the action URL with the query",
+           Eval(v, "String(location.search)"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

@@ -2013,6 +2013,19 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   unchanged, smoke still 127/127, no survivors. mb_shot now a full CLI scraper/automator: interact
   (--fill/--click/--wait-*) then extract (--text/--html/--eval) or capture (--full/--clip/--selector).
 
+- ✅ DONE: form-submit NAVIGATION verified + guarded — smoke case 104 (2026-06-24). Probed real-web
+  behaviors and reconfirmed the engine is very complete (<details>, <dialog>.showModal() — notably no
+  crash, since it's pure DOM not the JS-dialog/ScopedPagePauser path that thread-collides — position:
+  sticky, FontFace, loading=lazy, :has(), closest() all work). The notable UNCOVERED core behavior:
+  actual form submission NAVIGATING (vs case 88's onsubmit handler, vs case 36's POST-over-network).
+  Verified via mb_shot first: --fill the field, --click submit on a GET form -> navigates to
+  ...?q=hello, the new document commits and its script re-runs (location.search=='?q=hello'). Added
+  case 104: write a file:// GET-form doc (target fetchable w/o network — GET appends the query, the
+  file read ignores it), fill + click submit, mbWaitForFunction(location.search==='?q=hello'). This
+  exercises BeginNavigation + the loader re-fetch + new-document commit + script re-run. Robust via
+  mbWaitForFunction (waits out the async nav); 128/128 deterministic across 2 runs, no survivors.
+  Test-only, lib unchanged.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.
