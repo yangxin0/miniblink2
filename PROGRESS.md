@@ -74,7 +74,7 @@ the deliverable surface (C API, CLI, wke layer).
   `--wait-hidden`/`--wait-idle`/`--css`/`--auto-scroll`/`--wait-ms`) → extract (`--text`/`--html`/`--eval`/`--value`/`--checked`/
   `--visible`/`--rect`/`--style`/`--text-all`/`--attr-all`/`--requests`) → capture (`--full`/`--clip`/
   `--selector`); plus `--proxy`/`--insecure`/`--no-follow`/`--headers`/
-  `--block`/`--user-agent`/`--load-cookies`/`--save-cookies`.
+  `--block`/`--user-agent`/`--set-cookie`/`--load-cookies`/`--save-cookies`.
 - **wke compatibility layer (`src/wke/`):** a faithful subset over `mb_capi` covering
   the full headless-automation surface — lifecycle, load, loading-state polling,
   paint (`wkePaint`), PDF/PNG export (`wkeSavePdf`/`wkeSavePng`/
@@ -125,6 +125,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- mb_shot: --set-cookie URL COOKIE — inline session injection on the CLI (2026-06-25). The real workflow gap: "scrape as a logged-in user" previously needed a hand-crafted Netscape file for --load-cookies; now a repeatable --set-cookie injects a cookie into the jar before navigation (sent on the navigation + subresources), applied after --load-cookies so it can override. VERIFIED end-to-end offline: --set-cookie 'http://auth.test/' 'session=tok42' --save-cookies dumps a jar containing "auth.test ... session tok42". No survivors. mb_shot.cc + usage only; both suites unchanged (wke 100/100, mb 162/162).
 - maint: full health-check — all 6 targets build + both demos run (2026-06-25). After ~15 functions landed across the widget/host/loader since the last all-targets build, re-verified the whole set: miniblink_host + mb_smoke + mb_shot + mb_demo + wke_smoke + wke_demo all link clean (no bit-rot). Ran both reference demos end-to-end: mb_demo all 9 steps OK, wke_demo all 11 steps OK, exit 0 each. Suites green (wke_smoke 100/100, mb_smoke 162/162), no survivors. Verification-only; no code change.
 - capi+wke: mbGetCookie / wkeGetCookieValue — read one cookie by name (2026-06-25). Convenience over mbGetCookies' whole-jar string for the common "read the session/auth cookie to check login" check — host-side parse of the "n=v; n2=v2" jar; -1 (capi) / "" (wke) when the name is absent. wke variant uses the current document URL (like wkeGetCookie). VERIFIED offline (in-memory jar): set sid/theme -> mbGetCookie("sid")=="abc123", missing->-1; wke set+navigate to the origin -> wkeGetCookieValue("auth")=="tok9". wke_smoke 100/100 (milestone), mb_smoke 162/162, no survivors. ABI now 110 fns.
 - capi: mbGetViewSize — viewport size read-back (2026-06-25). The C ABI could SET the view size (mbCreateView/mbResize) but not read it (wke already had wkeGetWidth/Height; mb_capi had no peer — a gap I hit building SaveElementPng). Reads window.innerWidth/Height (logical px, DPR-independent), the read-back peer of mbResize, distinct from mbGetContentSize (full scrollable doc). VERIFIED: mbResize(640,480) -> mbGetViewSize reads 640x480. No wke change (it has the getters). wke_smoke 99/99, mb_smoke 161/161, no survivors. ABI now 109 fns.

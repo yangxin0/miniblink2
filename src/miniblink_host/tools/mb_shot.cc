@@ -33,6 +33,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "miniblink_host/capi/mb_capi.h"
@@ -93,6 +94,7 @@ int main(int argc, char** argv) {
   std::string post_body;       // when set, POST this body to the URL (vs GET)
   std::string user_agent;      // override the User-Agent for the navigation
   std::vector<const char*> blocks;  // URL substrings to block (repeatable)
+  std::vector<std::pair<const char*, const char*>> set_cookies;  // (url, cookie)
   std::vector<const char*> pos;  // positional args, flags filtered out
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
@@ -149,6 +151,9 @@ int main(int argc, char** argv) {
       attr_all_name = argv[++i];
     } else if (a == "--proxy" && i + 1 < argc) {
       proxy = argv[++i];
+    } else if (a == "--set-cookie" && i + 2 < argc) {
+      const char* u = argv[++i];
+      set_cookies.emplace_back(u, argv[++i]);
     } else if (a == "--load-cookies" && i + 1 < argc) {
       load_cookies = argv[++i];
     } else if (a == "--save-cookies" && i + 1 < argc) {
@@ -212,7 +217,7 @@ int main(int argc, char** argv) {
         "[--scroll-to Y] [--scroll-to-selector CSS] "
         "[--post BODY] [--proxy URL] "
         "[--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] "
-        "[--no-follow] [--block SUBSTR] [--user-agent UA] "
+        "[--no-follow] [--block SUBSTR] [--set-cookie URL COOKIE] [--user-agent UA] "
         "<input.html|file://URL|http(s)://URL> <out.png> [width height]\n",
         argv[0]);
     return 2;
@@ -260,6 +265,11 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "mb_shot: WARNING — --load-cookies '%s' unreadable\n",
                    load_cookies.c_str());
   }
+  // --set-cookie URL COOKIE: inject a cookie into the jar before navigating (sent
+  // on the navigation + subresource requests) — inline session injection without
+  // crafting a cookie file. Applied after --load-cookies so it can override.
+  for (const auto& sc : set_cookies)
+    mbSetCookie(view, sc.first, sc.second);
 
   if (print_requests || wait_idle)
     mbClearRequestLog();  // scope the log to this navigation's subresources
