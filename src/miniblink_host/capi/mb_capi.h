@@ -197,6 +197,20 @@ MB_EXPORT int mbGetText(mbView*, char* out, int out_cap);
 // bytes (size first with out=NULL/out_cap=0 — pages can be large).
 MB_EXPORT int mbGetHTML(mbView*, char* out, int out_cap);
 
+// Write the visible text (innerText) of the first element matching `css_selector`
+// into `out`. Returns the value's length in bytes (>=0), or -1 if no element
+// matches. Size first with out=NULL/out_cap=0. Companion to mbGetElementRect:
+// scrape one element's text without writing JS.
+MB_EXPORT int mbGetTextForSelector(mbView*, const char* css_selector, char* out,
+                                   int out_cap);
+
+// Write the value of attribute `attr` on the first element matching
+// `css_selector` into `out`. Returns the value's length in bytes (>=0), or -1 if
+// no element matches OR the attribute is absent (null). Size first with
+// out=NULL/out_cap=0. (Property reads like .value/.checked come via mbEvalJS.)
+MB_EXPORT int mbGetAttribute(mbView*, const char* css_selector, const char* attr,
+                             char* out, int out_cap);
+
 // Re-navigate to the current document's URL, re-fetching it. No-op for in-memory
 // documents (about:blank, data:, mbLoadHTML content).
 MB_EXPORT void mbReload(mbView*);

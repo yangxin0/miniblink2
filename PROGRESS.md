@@ -1915,6 +1915,20 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   So the whole blob: consumer surface (fetch text/arrayBuffer/blob + <img>) is complete; no engine
   change was needed — just correct blob construction.
 
+- ✅ DONE: C API per-element scraping — mbGetTextForSelector + mbGetAttribute (2026-06-24). A wide
+  capability sweep this tick reconfirmed the engine is feature-complete for common web (WAAPI
+  element.animate+onfinish, ReadableStream from fetch body, IntersectionObserver/ResizeObserver/
+  MutationObserver callbacks, transitionend, SVG getBBox, Intl, crypto.randomUUID, structuredClone,
+  matchMedia, history.pushState/state — all verified; remaining true gaps are only the heavy
+  Workers/WebGL). So the bounded win was on the DELIVERABLE surface: the C API could scrape whole-body
+  text/html (mbGetText/mbGetHTML) and element geometry (mbGetElementRect) but not a single element's
+  text or any attribute by selector — a staple scrape that a C/C++ embedder otherwise has to do via
+  mbEvalJS + string parsing. Added both, matching the selector-API family + buffer-copy/size-first
+  convention. Impl detail: the JS prefixes a '1' flag on success so a matched-but-empty element ("")
+  is distinguishable from no-match; the C API returns the value length (>=0) or -1 for no-match
+  (mbGetAttribute also -1 when the attribute is absent/null). Smoke case 102 verifies all six paths
+  (text, attr, href, no-match -1, empty==0, absent -1). 123/123, no survivors. C API now 58 fns.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

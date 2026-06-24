@@ -545,6 +545,42 @@ std::string MbWebView::GetHTML() {
       "document.documentElement ? document.documentElement.outerHTML : ''");
 }
 
+bool MbWebView::GetTextForSelector(const char* css_selector, std::string* out) {
+  if (!css_selector)
+    return false;
+  // innerText of the first match. We prefix a '1' flag on success so an element
+  // whose text is genuinely "" is distinguishable from "no element matched" (JS
+  // returns "" only in the no-match case). Strip the flag before returning.
+  std::string js =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+      "\");if(!e)return '';return '1'+(e.innerText||'');})()";
+  std::string s = EvalToString(js.c_str());
+  if (s.empty())
+    return false;  // no element matched
+  if (out)
+    *out = s.substr(1);
+  return true;
+}
+
+bool MbWebView::GetAttribute(const char* css_selector, const char* attr,
+                             std::string* out) {
+  if (!css_selector || !attr)
+    return false;
+  // getAttribute on the first match. Same '1'-flag trick; "" (→ false) covers
+  // both "no element" and "attribute absent" (getAttribute returned null), which
+  // is the natural "no value" semantics for the caller.
+  std::string js =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+      "\");if(!e)return '';var a=e.getAttribute(\"" + JsEscape(attr) +
+      "\");if(a==null)return '';return '1'+a;})()";
+  std::string s = EvalToString(js.c_str());
+  if (s.empty())
+    return false;  // no element, or attribute absent
+  if (out)
+    *out = s.substr(1);
+  return true;
+}
+
 void MbWebView::Reload() {
   // Re-navigate to the committed document's URL, re-fetching it. Only meaningful
   // for real (file/http) URLs; in-memory docs (about:blank, data:) are left as-is.

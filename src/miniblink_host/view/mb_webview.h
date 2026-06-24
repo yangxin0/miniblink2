@@ -113,6 +113,12 @@ class MbWebView {
   // Scraping reads: visible text (body.innerText) and the post-JS serialized DOM.
   std::string GetText();
   std::string GetHTML();
+  // Per-element scraping by selector. Fill *out with the first match's innerText
+  // / the named attribute's value and return true; return false if no element
+  // matches (GetAttribute also returns false if the attribute is absent). *out is
+  // only written on success.
+  bool GetTextForSelector(const char* css_selector, std::string* out);
+  bool GetAttribute(const char* css_selector, const char* attr, std::string* out);
   // Re-navigate to the current document URL, re-fetching it (file/http only).
   void Reload();
 

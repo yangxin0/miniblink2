@@ -2194,6 +2194,42 @@ int main() {
            Eval(v, "String(window.__bi)"));
   }
 
+  // 102. mbGetTextForSelector + mbGetAttribute: per-element scraping by selector.
+  // Text of a specific element, an attribute's value, the no-match sentinel (-1),
+  // and the empty-text vs no-match distinction.
+  {
+    mbLoadHTML(v,
+        "<body><p id='t' data-k='v9'>Hello</p><span id='e'></span>"
+        "<a id='lnk' href='https://x.test/p'>go</a></body>", "about:blank");
+    char tb[256] = {0};
+    int tlen = mbGetTextForSelector(v, "#t", tb, sizeof(tb));
+    const bool text_ok = tlen == 5 && std::string(tb) == "Hello";
+
+    char ab[256] = {0};
+    int alen = mbGetAttribute(v, "#t", "data-k", ab, sizeof(ab));
+    const bool attr_ok = alen == 2 && std::string(ab) == "v9";
+
+    char hb[256] = {0};
+    mbGetAttribute(v, "#lnk", "href", hb, sizeof(hb));
+    const bool href_ok = std::string(hb) == "https://x.test/p";
+
+    // No element matches -> -1 (distinct from a matched-but-empty element).
+    const bool nomatch = mbGetTextForSelector(v, "#nope", tb, sizeof(tb)) == -1;
+    char eb[8] = {0};
+    const int empty_len = mbGetTextForSelector(v, "#e", eb, sizeof(eb));
+    const bool empty_ok = empty_len == 0 && eb[0] == '\0';
+
+    // Absent attribute -> -1.
+    const bool absent = mbGetAttribute(v, "#t", "data-missing", ab, sizeof(ab)) == -1;
+
+    Expect(text_ok && attr_ok && href_ok && nomatch && empty_ok && absent,
+           "mbGetTextForSelector + mbGetAttribute scrape by selector",
+           std::string("text=") + (text_ok ? "1" : "0") + " attr=" +
+               (attr_ok ? "1" : "0") + " href=" + (href_ok ? "1" : "0") +
+               " nomatch=" + (nomatch ? "1" : "0") + " empty=" +
+               (empty_ok ? "1" : "0") + " absent=" + (absent ? "1" : "0"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

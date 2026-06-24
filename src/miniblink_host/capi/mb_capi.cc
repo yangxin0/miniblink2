@@ -298,6 +298,40 @@ int mbGetHTML(mbView* v, char* out, int out_cap) {
   return static_cast<int>(result.size());
 }
 
+int mbGetTextForSelector(mbView* v, const char* css_selector, char* out,
+                         int out_cap) {
+  if (!v || !v->impl)
+    return -1;
+  std::string result;
+  if (!v->impl->GetTextForSelector(css_selector, &result))
+    return -1;  // no element matched
+  if (out && out_cap > 0) {
+    int n = static_cast<int>(result.size());
+    int copy = n < out_cap - 1 ? n : out_cap - 1;
+    for (int i = 0; i < copy; ++i)
+      out[i] = result[i];
+    out[copy] = '\0';
+  }
+  return static_cast<int>(result.size());
+}
+
+int mbGetAttribute(mbView* v, const char* css_selector, const char* attr,
+                   char* out, int out_cap) {
+  if (!v || !v->impl)
+    return -1;
+  std::string result;
+  if (!v->impl->GetAttribute(css_selector, attr, &result))
+    return -1;  // no element matched, or attribute absent
+  if (out && out_cap > 0) {
+    int n = static_cast<int>(result.size());
+    int copy = n < out_cap - 1 ? n : out_cap - 1;
+    for (int i = 0; i < copy; ++i)
+      out[i] = result[i];
+    out[copy] = '\0';
+  }
+  return static_cast<int>(result.size());
+}
+
 void mbReload(mbView* v) {
   if (v && v->impl)
     v->impl->Reload();
