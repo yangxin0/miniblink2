@@ -121,6 +121,26 @@ int main() {
   mbPaintToBitmap(v, px.data(), W, H, W * 4);
   Expect(px[2] == 255 && px[1] == 0 && px[0] == 0, "paint to bitmap (red bg)");
 
+  // 8b. SVG renders to pixels — a distinct paint path from CSS boxes that
+  // icon/chart-heavy pages rely on. An inline 100x100 SVG with a solid-green
+  // <rect> must paint green well inside the rect (pixel (20,20)). Tolerances
+  // absorb any AA/color-management drift on the interior.
+  {
+    mbLoadHTML(v,
+        "<body style='margin:0'>"
+        "<svg width='100' height='100' xmlns='http://www.w3.org/2000/svg'>"
+        "<rect x='0' y='0' width='100' height='100' fill='rgb(0,128,0)'/></svg>"
+        "</body>", "about:blank");
+    std::vector<uint8_t> sp(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, sp.data(), W, H, W * 4);
+    const size_t o = (static_cast<size_t>(20) * W + 20) * 4;  // inside the rect
+    const int b = sp[o], g = sp[o + 1], r = sp[o + 2];
+    Expect(r < 16 && g > 110 && g < 145 && b < 16,
+           "SVG renders to pixels (inline <rect> paints green)",
+           std::string("rgb(") + std::to_string(r) + "," + std::to_string(g) +
+               "," + std::to_string(b) + ")");
+  }
+
   // 9. Input: synthesize a click on a button and verify its handler ran.
   mbLoadHTML(v,
              "<body style='margin:0'><button id='b' onclick='window.__c=1' "
