@@ -1597,6 +1597,36 @@ int main() {
            "text: glyphs rasterize (dark strokes + white gaps present)");
   }
 
+  // 56b. Emoji rasterize to glyph pixels — but MONOCHROME in this build. A color-
+  // emoji font is not bundled, so U+1F600 😀 paints as a grayscale/black glyph
+  // (saturated color pixels = 0), not Apple-Color-Emoji yellow. This is a known,
+  // documented limitation (emoji in screenshots won't be colorful); the guard is
+  // that it still rasterizes a real glyph (dark strokes + light gaps, like text)
+  // and degrades gracefully rather than crashing or rendering tofu boxes. If a
+  // color-emoji font is ever bundled, `colorful` jumps and this comment is stale.
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0;background:#fff'>"
+      "<span style='font-size:72px;line-height:1'>\xf0\x9f\x98\x80</span>"
+      "</body>", "about:blank");
+    std::vector<uint8_t> ep(static_cast<size_t>(W) * H * 4, 255);
+    mbPaintToBitmap(v, ep.data(), W, H, W * 4);
+    int dark = 0, light = 0, colorful = 0;
+    for (int y = 4; y < 84; ++y)
+      for (int x = 2; x < 82; ++x) {
+        const size_t o = (static_cast<size_t>(y) * W + x) * 4;
+        int b = ep[o], g = ep[o + 1], r = ep[o + 2];
+        int mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+        int mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+        if (mx - mn > 60 && mx > 80) ++colorful;  // a vivid, non-gray pixel
+        if (r < 60) ++dark; else if (r > 200) ++light;
+      }
+    Expect(dark > 20 && light > 20 && colorful == 0,
+           "emoji rasterizes (monochrome glyph; no color-emoji font bundled)",
+           std::string("dark=") + std::to_string(dark) + " light=" +
+               std::to_string(light) + " colorful=" + std::to_string(colorful));
+  }
+
   // 57. Font metrics scale: canvas measureText must report a real, font-size-
   // proportional advance width (text shaping with metrics, not a stub). 40px
   // text is ~2x the width of the same string at 20px.
