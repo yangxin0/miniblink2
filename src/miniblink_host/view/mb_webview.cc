@@ -615,6 +615,25 @@ int MbWebView::CountSelector(const char* css_selector) {
   return std::atoi(s.c_str());
 }
 
+bool MbWebView::GetComputedStyle(const char* css_selector, const char* property,
+                                 std::string* out) {
+  if (!css_selector || !property)
+    return false;
+  // getComputedStyle(el).getPropertyValue(prop) for the first match. The '1'
+  // flag (as in GetAttribute) distinguishes an empty computed value from
+  // no-match (JS returns "" only when nothing matches).
+  std::string js =
+      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+      "\");if(!e)return '';var v=getComputedStyle(e).getPropertyValue(\"" +
+      JsEscape(property) + "\");return '1'+(v==null?'':v);})()";
+  std::string s = EvalToString(js.c_str());
+  if (s.empty())
+    return false;  // no element matched
+  if (out)
+    *out = s.substr(1);
+  return true;
+}
+
 void MbWebView::Reload() {
   // Re-navigate to the committed document's URL, re-fetching it. Only meaningful
   // for real (file/http) URLs; in-memory docs (about:blank, data:) are left as-is.

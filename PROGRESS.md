@@ -1989,6 +1989,16 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   counts across 2 runs), no survivors. 126/126. Pure paint+pixel-read, no engine change, no threading.
   (Pixel histograms decoded from the PNG via a stdlib zlib unfilter, since PIL isn't installed.)
 
+- ✅ DONE: C API computed-style reads — mbGetComputedStyle (2026-06-24). The most-used automation
+  primitive still missing: read a resolved CSS property by selector (getComputedStyle ->
+  getPropertyValue). Distinct from mbGetAttribute (computed/normalized, not source) and high-value —
+  it's how automation checks visibility (display/visibility/opacity) and asserts on color/layout/
+  weight without writing JS. MbWebView::GetComputedStyle uses the same EvalToString + '1'-flag pattern
+  as GetAttribute (empty computed value vs no-match), C API returns length>=0 or -1 for no-match.
+  Verified normalization first via mb_shot: color:red->"rgb(255, 0, 0)", bold->"700", display:none->
+  "none". Smoke case 102c covers a visibility check (display=none), color + font-weight, and no-match
+  -1. 127/127, no survivors, pure scraping path (no threading). C API now 61 fns.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

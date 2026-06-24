@@ -2293,6 +2293,30 @@ int main() {
                " walk=[" + joined + "]");
   }
 
+  // 102c. mbGetComputedStyle: resolved CSS property values by selector. Covers
+  // a visibility check (display:none), color/weight normalization, and the
+  // no-match sentinel (-1). Distinct from mbGetAttribute (computed, not source).
+  {
+    mbLoadHTML(v,
+        "<body><div id='h' style='display:none'>x</div>"
+        "<div id='s' style='color:red;font-weight:bold'>y</div></body>",
+        "about:blank");
+    char cb[128] = {0};
+    mbGetComputedStyle(v, "#h", "display", cb, sizeof(cb));
+    const bool display_ok = std::string(cb) == "none";
+    mbGetComputedStyle(v, "#s", "color", cb, sizeof(cb));
+    const bool color_ok = std::string(cb) == "rgb(255, 0, 0)";
+    mbGetComputedStyle(v, "#s", "font-weight", cb, sizeof(cb));
+    const bool weight_ok = std::string(cb) == "700";
+    const bool nomatch_ok =
+        mbGetComputedStyle(v, "#none", "display", cb, sizeof(cb)) == -1;
+    Expect(display_ok && color_ok && weight_ok && nomatch_ok,
+           "mbGetComputedStyle returns resolved CSS values by selector",
+           std::string("display=") + (display_ok ? "1" : "0") + " color=" +
+               (color_ok ? "1" : "0") + " weight=" + (weight_ok ? "1" : "0") +
+               " nomatch=" + (nomatch_ok ? "1" : "0"));
+  }
+
   // 103. Below-the-fold interaction auto-scrolls. A button ~2000px down is
   // outside a 400px viewport, so a coordinate-based click would miss; the click
   // path now calls scrollIntoView first. Also exercise mbScrollIntoView directly.

@@ -129,6 +129,13 @@ class MbWebView {
   // with :nth-of-type(n) selectors on the per-element accessors above, this drives
   // list scraping (count, then read each index).
   int CountSelector(const char* css_selector);
+  // Computed value of CSS `property` for the first match (getComputedStyle ->
+  // getPropertyValue, so values are resolved/normalized: color -> "rgb(r, g, b)",
+  // bold -> "700", display:none -> "none"). Fill *out + return true; false if no
+  // element matches. Drives visibility checks (display/visibility/opacity) and
+  // style assertions without writing JS. *out only written on success.
+  bool GetComputedStyle(const char* css_selector, const char* property,
+                        std::string* out);
   // Re-navigate to the current document URL, re-fetching it (file/http only).
   void Reload();
 

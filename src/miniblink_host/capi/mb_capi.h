@@ -225,6 +225,15 @@ MB_EXPORT int mbGetAttribute(mbView*, const char* css_selector, const char* attr
 // mbWaitForSelector to wait for "at least one" and mbWaitForFunction for "N".
 MB_EXPORT int mbCountSelector(mbView*, const char* css_selector);
 
+// Write the computed value of CSS `property` for the first element matching
+// `css_selector` into `out` (getComputedStyle -> getPropertyValue, so values are
+// resolved: color -> "rgb(r, g, b)", bold -> "700", display:none -> "none").
+// Returns the value's length in bytes (>=0), or -1 if no element matches. Size
+// first with out=NULL/out_cap=0. Use for visibility checks (display/visibility/
+// opacity) and style assertions without writing JS.
+MB_EXPORT int mbGetComputedStyle(mbView*, const char* css_selector,
+                                 const char* property, char* out, int out_cap);
+
 // Re-navigate to the current document's URL, re-fetching it. No-op for in-memory
 // documents (about:blank, data:, mbLoadHTML content).
 MB_EXPORT void mbReload(mbView*);
