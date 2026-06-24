@@ -657,6 +657,21 @@ int main() {
           "wkeSetDeviceScaleFactor scales devicePixelRatio + raster output (2x)");
   }
 
+  // wkeScrollTo (offline): an absolute scroll moves window.scrollY to the offset.
+  {
+    wkeLoadHTML(wv,
+                "<body style='margin:0'><div style='height:3000px'></div></body>");
+    auto scrollY = [&]() {
+      return jsToInt(es, wkeRunJS(wv, "Math.round(window.scrollY)"));
+    };
+    wkeScrollTo(wv, 0, 250);
+    const bool at_250 = scrollY() == 250;
+    wkeScrollTo(wv, 0, 0);
+    const bool at_0 = scrollY() == 0;
+    check(at_250 && at_0,
+          "wkeScrollTo moves the viewport to an absolute offset");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {

@@ -153,6 +153,10 @@ WKE_API bool wkeSavePngRect(wkeWebView webView, const utf8* path, int x, int y,
 // `scale` and paint/PNG output rasterizes at `scale`x (layout stays in CSS px).
 // Size capture buffers at logical_size*scale. Port extension.
 WKE_API void wkeSetDeviceScaleFactor(wkeWebView webView, float scale);
+// Scroll the layout viewport to an ABSOLUTE offset (x,y) in CSS px
+// (window.scrollTo). Moves the real viewport (fixed/sticky elements render
+// correctly) — pair with wkeSavePng/wkePaint for a long-page shot. Port extension.
+WKE_API void wkeScrollTo(wkeWebView webView, int x, int y);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);

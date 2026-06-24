@@ -401,6 +401,14 @@ void wkeSetDeviceScaleFactor(wkeWebView webView, float scale) {
     mbSetDeviceScaleFactor(webView->view, scale);
 }
 
+void wkeScrollTo(wkeWebView webView, int x, int y) {
+  // Absolute scroll of the layout viewport to (x,y) in CSS px (window.scrollTo).
+  // The real viewport moves, so fixed/sticky elements render correctly — pair
+  // with wkeSavePng/wkePaint for a viewport shot of a long page. (Port extension.)
+  if (webView && webView->view)
+    mbScrollTo(webView->view, x, y);
+}
+
 void wkeSetTransparent(wkeWebView webView, bool transparent) {
   if (!webView || !webView->view)
     return;
