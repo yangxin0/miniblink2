@@ -1627,6 +1627,24 @@ int main() {
                std::to_string(light) + " colorful=" + std::to_string(colorful));
   }
 
+  // 56c. Multiple distinct fonts are available — not a single fallback. The three
+  // generic families must render the same text at DIFFERENT advance widths,
+  // proving the build ships a real serif + sans-serif + monospace, so screenshots
+  // of sites that specify font families keep the right look. A font-config
+  // regression that collapsed everything to one fallback would make these equal.
+  {
+    mbLoadHTML(v, "<body>fonts</body>", "about:blank");
+    const std::string r = Eval(v,
+        "(function(){var c=document.createElement('canvas').getContext('2d');"
+        "function w(f){c.font='40px '+f;"
+        "return Math.round(c.measureText('Wikipedia mix& Quilt').width);}"
+        "var s=w('serif'),n=w('sans-serif'),m=w('monospace');"
+        "return (s>0&&n>0&&m>0&&s!==m&&n!==m&&s!==n)+':'+s+','+n+','+m;})()");
+    Expect(r.substr(0, 5) == "true:",
+           "fonts: serif/sans/monospace render at distinct widths (real font set)",
+           r);
+  }
+
   // 57. Font metrics scale: canvas measureText must report a real, font-size-
   // proportional advance width (text shaping with metrics, not a stub). 40px
   // text is ~2x the width of the same string at 20px.
