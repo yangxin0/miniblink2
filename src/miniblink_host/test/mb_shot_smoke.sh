@@ -77,6 +77,12 @@ URL="file://$FIX"
 
 run 40 "$URL" "$PNG" --title;                 check "--title" "Shot Smoke" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --count "li.row";        check "--count" "3" "$(cat "$TMP/out")"
+# list-scraping JSON arrays across all matches
+run 40 "$URL" "$PNG" --text-all "li.row";     check "--text-all (JSON array)" '["a","b","c"]' "$(cat "$TMP/out")"
+run 40 "$URL" "$PNG" --attr-all "a" "href";   check "--attr-all (JSON array)" '["https://example.com/x"]' "$(cat "$TMP/out")"
+# --css injects a stylesheet before extract/capture: hiding #msg flips --visible 1 -> 0
+run 40 "$URL" "$PNG" --css "#msg{display:none}" --visible "#msg"
+check "--css injects style (hides #msg)" "0" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --attr "a" "href";       check "--attr href" "https://example.com/x" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --text;                  checkc "--text" "hello world" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --eval "1+2";            check "--eval" "3" "$(cat "$TMP/out")"
