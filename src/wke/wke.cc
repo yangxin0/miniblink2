@@ -161,6 +161,16 @@ void wkeReload(wkeWebView webView) {
     mbReload(webView->view);
 }
 
+void wkePostURL(wkeWebView webView, const utf8* url, const char* postData,
+                int /*postLen*/) {
+  if (!webView || !webView->view)
+    return;
+  webView->last_was_http = true;
+  mbPostURL(webView->view, url, postData, /*content_type=*/nullptr);
+  mbWait(webView->view, 60);  // settle the synchronous load (as wkeLoadURL does)
+  FireLoadCallbacks(webView);
+}
+
 bool wkeCanGoBack(wkeWebView webView) {
   return webView && webView->view && mbCanGoBack(webView->view);
 }

@@ -76,7 +76,7 @@ the deliverable surface (C API, CLI, wke layer).
   the full headless-automation surface — lifecycle, load, loading-state polling,
   paint (`wkePaint`), mouse (`wkeFireMouseEvent`), keyboard (`wkeFireKey*`),
   scripting (`wkeRunJS` + `jsToInt/Double/Boolean/TempString` + `jsTypeOf`),
-  navigation history,
+  POST (`wkePostURL`), navigation history,
   rendering accessors (`wkeSetTransparent`, `wkeGetContentWidth/Height`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
@@ -96,6 +96,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke: wkePostURL — POST navigation wrapping mbPostURL (wke parity, no v8 risk). Default wke_smoke stays 21/21 (network-free); MB_NET_TESTS=1 -> 22/22 with the POST case (httpbin echoes the body). Added MB_NET_TESTS gating to wke_smoke.
 - ⚠️ ATTEMPTED + REVERTED: jsValue object model (jsGetLength/jsGetAt) (2026-06-24). Approach: a JS-side "slot store" — extend the host EvalWithType(slot) to ALSO write the live v8 result into window.__mbslots[slot] (so jsGetAt just evals "__mbslots[h][i]" into a new slot; no host-side v8::Global lifetime to manage). It CRASHED (exit 133 / SIGTRAP in wkeRunJS -> the v8 store) on the first wkeRunJS — the host manipulating the global object (Global()->Get/Set, Object::New) from inside the ExecuteScriptAndReturnValue task traps. Reverted all 7 files; baseline restored (wke_smoke 21/21, mb_smoke 132/132, no survivors). LESSON for the future effort: don't write window.__mbslots from C++ inside the eval task; safer to (a) wrap the v8 writes in a v8::TryCatch and check Maybe results, or (b) do the slot store via a separate ExecuteScript("window.__mbslots[H]=...") — but that needs the value in JS scope. The jsValue object model remains a dedicated, careful-v8 effort, NOT a bounded tick.
 - docs: README — replaced the stale flat C-ABI list (showed ~40 of 72 fns) with an accurate grouped overview of all 72 mb_capi functions + a canonical flow snippet; verified every documented name exists in mb_capi.h (0 drift). README-only.
 - capi: mbPostURL — host-driven POST navigation (MbWebView::PostURL → MbFetchUrl with POST; the loader already supported it, defaults Content-Type to form-urlencoded). Completes GET-only mbLoadURL. Net-gated case 43 (httpbin/post echoes mbk=postval -> status 200; net suite 145/145). Default mb_smoke 132/132.

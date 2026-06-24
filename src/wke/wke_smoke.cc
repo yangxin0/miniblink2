@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -221,6 +222,21 @@ int main() {
             jsTypeOf(wkeRunJS(wv, "undefined")) == JSTYPE_UNDEFINED &&
             jsTypeOf(wkeRunJS(wv, "(function(){})")) == JSTYPE_FUNCTION,
         "jsTypeOf reports number/string/boolean/array/object/null/undefined/function");
+
+  // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
+  // form into the response document.
+  if (std::getenv("MB_NET_TESTS")) {
+    wkePostURL(wv, "http://httpbin.org/post", "wkk=wval", 8);
+    const char* body =
+        jsToTempString(es, wkeRunJS(wv, "document.body?document.body.innerText:''"));
+    if (wkeIsLoadingSucceeded(wv)) {
+      check(std::strstr(body, "wkk") != nullptr &&
+                std::strstr(body, "wval") != nullptr,
+            "wkePostURL posts a body (httpbin echoes it)");
+    } else {
+      std::printf("  [SKIP] wkePostURL (host unreachable)\n");
+    }
+  }
 
   wkeDestroyWebView(wv);
   wkeFinalize();

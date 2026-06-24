@@ -80,6 +80,11 @@ WKE_API void wkeDestroyWebView(wkeWebView webView);
 WKE_API void wkeLoadURL(wkeWebView webView, const utf8* url);
 WKE_API void wkeLoadHTML(wkeWebView webView, const utf8* html);
 WKE_API void wkeReload(wkeWebView webView);
+// POST `postData` (Content-Type defaults to form-urlencoded) to an http(s) URL and
+// commit the response. `postLen` is the body length; the body is treated as text
+// (a trailing NUL is assumed, as for form/JSON data).
+WKE_API void wkePostURL(wkeWebView webView, const utf8* url, const char* postData,
+                        int postLen);
 
 // --- Navigation history --------------------------------------------------------
 // Back/forward over the view's navigation history. The Can* queries report
