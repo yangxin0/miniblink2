@@ -143,6 +143,21 @@ int main() {
         "") == 0;
     check(persisted && isolated,
           "localStorage persists across same-origin nav, isolated by origin");
+
+    // The C-level accessors set/read the same store the page sees: set via C,
+    // observe in JS; set in JS, read via C; an absent key reads "".
+    wkeLoadHtmlWithBaseUrl(wv, "<body>ls</body>", "https://lsapi.test/");
+    const bool set_seen_by_js =
+        wkeSetLocalStorage(wv, "auth", "tok-42") &&
+        std::strcmp(jsToTempString(es, wkeRunJS(wv, "localStorage.getItem('auth')")),
+                    "tok-42") == 0;
+    wkeRunJS(wv, "localStorage.setItem('pref','dark')");
+    const bool js_read_by_c =
+        std::strcmp(wkeGetLocalStorage(wv, "pref"), "dark") == 0;
+    const bool absent = std::strcmp(wkeGetLocalStorage(wv, "missing"), "") == 0;
+    check(set_seen_by_js && js_read_by_c && absent,
+          "wkeGetLocalStorage/wkeSetLocalStorage share the page's localStorage");
+
     wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore for later cases
   }
 

@@ -2438,6 +2438,25 @@ int main() {
                (none_ok ? "1" : "0") + " bad=" + (bad_ok ? "1" : "0"));
   }
 
+  // 102b6. mbGetLocalStorage/mbSetLocalStorage share the page's localStorage for
+  // the document's origin (needs a real http(s) base, not about:blank): set via
+  // C and observe in JS, set in JS and read via C, an absent key -> -1.
+  {
+    mbLoadHTML(v, "<body>ls</body>", "https://lsapi.test/");
+    const bool set_seen_by_js =
+        mbSetLocalStorage(v, "auth", "tok-42") == 1 &&
+        Eval(v, "localStorage.getItem('auth')") == "tok-42";
+    mbRunJS(v, "localStorage.setItem('pref','dark')");
+    char sb[64] = {0};
+    int slen = mbGetLocalStorage(v, "pref", sb, sizeof(sb));
+    const bool c_read = slen == 4 && std::string(sb) == "dark";
+    const bool absent = mbGetLocalStorage(v, "missing", sb, sizeof(sb)) == -1;
+    Expect(set_seen_by_js && c_read && absent,
+           "mbGetLocalStorage/mbSetLocalStorage share the page's localStorage",
+           std::string("set=") + (set_seen_by_js ? "1" : "0") + " read=" +
+               (c_read ? "1" : "0") + " absent=" + (absent ? "1" : "0"));
+  }
+
   // 102b5. mbInsertCSS appends a <style> that actually applies: a rule hiding #x
   // flips it from visible to hidden (verified via mbIsVisibleForSelector).
   {

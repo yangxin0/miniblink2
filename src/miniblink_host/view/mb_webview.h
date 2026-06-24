@@ -177,6 +177,12 @@ class MbWebView {
   // restyle or hide elements (cookie banners, ads) before a capture. Returns
   // true on success.
   bool InsertCSS(const char* css);
+  // localStorage access for the document's origin (inject an auth token, read
+  // SPA state). Get returns false if the key is absent or storage is unavailable
+  // (opaque origin); Set returns false on a SecurityError/quota failure. Needs a
+  // real origin — commit with an http(s) base URL, not about:blank.
+  bool GetLocalStorage(const char* key, std::string* out);
+  bool SetLocalStorage(const char* key, const char* value);
   // The first match's LIVE .value property (what an <input>/<textarea>/<select>
   // currently holds after typing or selection) — distinct from GetAttribute,
   // which reads the static "value" HTML attribute (the initial value). Returns

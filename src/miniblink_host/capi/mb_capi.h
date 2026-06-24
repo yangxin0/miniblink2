@@ -277,6 +277,15 @@ MB_EXPORT void mbClearCookies(mbView*);
 MB_EXPORT int mbSaveCookies(const char* path);
 MB_EXPORT int mbLoadCookies(const char* path);
 
+// localStorage access for the current document's origin — inject an auth token /
+// app state before an SPA boots (pair with mbSetInitScript), or read it back.
+// mbGetLocalStorage writes the value of `key` into `out` and returns its length
+// (>=0), or -1 if the key is absent OR storage is unavailable (opaque origin like
+// about:blank — commit with an http(s) base URL). mbSetLocalStorage stores
+// key=value and returns 1 on success, 0 on failure. Origin-scoped, like cookies.
+MB_EXPORT int mbGetLocalStorage(mbView*, const char* key, char* out, int out_cap);
+MB_EXPORT int mbSetLocalStorage(mbView*, const char* key, const char* value);
+
 // Write the committed main document's URL (the final URL after any redirects)
 // into `out` (NUL-terminated, up to out_cap). Returns the full length in bytes.
 MB_EXPORT int mbGetURL(mbView*, char* out, int out_cap);

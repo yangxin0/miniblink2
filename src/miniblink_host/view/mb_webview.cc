@@ -704,6 +704,35 @@ bool MbWebView::InsertCSS(const char* css) {
   return EvalToString(js.c_str()) == "1";
 }
 
+bool MbWebView::GetLocalStorage(const char* key, std::string* out) {
+  if (!key)
+    return false;
+  // localStorage.getItem(key) for the document's origin. The '1' flag separates a
+  // genuinely empty stored value from absent/no-storage (getItem -> null, or a
+  // SecurityError on an opaque origin like about:blank -> caught). Storage needs
+  // a real origin: commit with an http(s) base URL.
+  std::string js = "(function(){try{var x=localStorage.getItem(\"" +
+                   JsEscape(key) + "\");if(x==null)return '';return '1'+x;}"
+                   "catch(e){return '';}})()";
+  std::string s = EvalToString(js.c_str());
+  if (s.empty())
+    return false;  // absent, or storage unavailable on this origin
+  if (out)
+    *out = s.substr(1);
+  return true;
+}
+
+bool MbWebView::SetLocalStorage(const char* key, const char* value) {
+  if (!key)
+    return false;
+  // localStorage.setItem(key, value) for the document's origin; false on a
+  // SecurityError (opaque origin) or quota failure. Needs a real origin.
+  std::string js = "(function(){try{localStorage.setItem(\"" + JsEscape(key) +
+                   "\",\"" + JsEscape(value ? value : "") +
+                   "\");return '1';}catch(e){return '0';}})()";
+  return EvalToString(js.c_str()) == "1";
+}
+
 bool MbWebView::SetAttribute(const char* css_selector, const char* attr,
                              const char* value) {
   if (!css_selector || !attr)

@@ -57,6 +57,7 @@ struct _tagWkeWebView {
   std::string selector_text_cache;  // backs wkeGetTextForSelector's return
   std::string selector_alltext_cache;  // backs wkeGetAllTextForSelector's return
   std::string selector_allattr_cache;  // backs wkeGetAllAttributeForSelector's return
+  std::string local_storage_cache;  // backs wkeGetLocalStorage's return
   std::string selector_attr_cache;  // backs wkeGetAttribute's return
   std::string selector_value_cache; // backs wkeGetValueForSelector's return
   std::string computed_style_cache;  // backs wkeGetComputedStyle's return
@@ -990,6 +991,31 @@ const utf8* wkeGetAllCookie(wkeWebView webView) {
   mbGetAllCookies(webView->view, buf.data(), len + 1);
   webView->all_cookie_cache.assign(buf.data());
   return webView->all_cookie_cache.c_str();
+}
+
+const utf8* wkeGetLocalStorage(wkeWebView webView, const utf8* key) {
+  // localStorage.getItem(key) for the document's origin ("" if absent or storage
+  // is unavailable). Owned by the view until the next call. (Port extension.)
+  if (!webView || !webView->view || !key) {
+    if (webView)
+      webView->local_storage_cache.clear();
+    return webView ? webView->local_storage_cache.c_str() : "";
+  }
+  const int len = mbGetLocalStorage(webView->view, key, nullptr, 0);
+  if (len < 0) {  // -1 absent / unavailable
+    webView->local_storage_cache.clear();
+    return webView->local_storage_cache.c_str();
+  }
+  std::vector<char> buf(static_cast<size_t>(len) + 1, 0);
+  mbGetLocalStorage(webView->view, key, buf.data(), len + 1);
+  webView->local_storage_cache.assign(buf.data(), len);
+  return webView->local_storage_cache.c_str();
+}
+
+bool wkeSetLocalStorage(wkeWebView webView, const utf8* key, const utf8* value) {
+  // localStorage.setItem(key, value) for the document's origin; true on success.
+  return webView && webView->view && key &&
+         mbSetLocalStorage(webView->view, key, value) != 0;
 }
 
 void wkeSetCookie(wkeWebView webView, const utf8* url, const utf8* cookie) {
