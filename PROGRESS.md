@@ -82,16 +82,17 @@ the deliverable surface (C API, CLI, wke layer).
   `jsCall`/`jsCallGlobal`),
   POST (`wkePostURL`), cookies (`wkeGetCookie`/`wkeSetCookie`/
   `wkePerformCookieCommand` + jar persistence via `wkeSetCookieJarPath`),
-  proxy (`wkeSetProxy`, HTTP/SOCKS + auth), navigation history,
+  proxy (`wkeSetProxy`, HTTP/SOCKS + auth), request headers
+  (`wkeSetExtraHeaders`), navigation history,
   rendering accessors (`wkeSetTransparent`/`wkeIsTransparent`,
   `wkeSetZoomFactor`/`wkeGetZoomFactor`, `wkeSetEditable`,
   `wkeGetContentWidth/Height`), view-state (`wkeSetName`/`wkeGetName`,
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **32/32**,
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **33/33**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com cases
-  (wke_smoke 35; mb_smoke ~145).
+  (wke_smoke 37; mb_smoke ~145).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
 
@@ -106,6 +107,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke NETWORK: wkeSetExtraHeaders (2026-06-24). Per-view request header injection (newline-separated "Name: Value" lines, NULL/"" clears) wrapping mbSetExtraHeaders. Documented PORT EXTENSION — classic wke injects per-request via the net hook; this is the simple global form. Verified offline (set/clear/null safe, local loads still work) and over the network (MB_NET_TESTS): set X-Wke-Test: zzz9, load httpbin.org/headers, response JSON echoes zzz9. wke_smoke 33/33 default, 37/37 net, mb_smoke 132/132, no survivors. Fixed a -Wshadow (renamed a `body` local colliding with the postURL test's).
 - wke EDITING: wkeSetEditable (2026-06-24). Whole-document editability modeled as document.designMode, stored per-view and re-applied after each navigation via a new ApplyEditable() in FireLoadCallbacks (same pattern as zoom). VERIFIED offline: designMode "off"→"on"→(persists across a fresh load)→"off", and document.body.isContentEditable reads true while on. wke_smoke 32/32, mb_smoke 132/132, no survivors.
 - wke RENDERING: wkeSetZoomFactor/wkeGetZoomFactor (2026-06-24). Page zoom modeled as CSS `zoom` on the document element (scales layout + the rects getBoundingClientRect reports), stored per-view and re-applied after every navigation via a new ApplyZoom() in FireLoadCallbacks. Non-positive factors ignored. VERIFIED observably + offline: a 100px div reports width 100 at 1.0, 200 at 2.0, and stays 200 after loading a fresh document (proves persistence). wke_smoke 31/31, mb_smoke 132/132, no survivors. (Honest deviation documented: real wke uses Blink page zoom; this port approximates via CSS zoom on the current document.)
 - wke VIEW-STATE: wkeIsTransparent + wkeSetName/wkeGetName + wkeSetUserKeyValue/wkeGetUserKeyValue (2026-06-24). Pure wke view-state accessors (no engine backing, 100% faithful semantics): wkeSetTransparent now mirrors its flag for wkeIsTransparent; name labels the view (default ""); the per-view std::map<string,void*> user store lets an app thread its own context through wke callbacks (app-owned, unset→NULL). Caught a real test bug — an earlier test left the view transparent, so the new test now asserts both transition directions rather than the initial state. wke_smoke 30/30, mb_smoke 132/132, no survivors.

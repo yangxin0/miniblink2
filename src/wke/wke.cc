@@ -332,6 +332,14 @@ void wkeSetUserAgent(wkeWebView webView, const utf8* userAgent) {
     mbSetUserAgent(webView->view, userAgent);
 }
 
+void wkeSetExtraHeaders(wkeWebView webView, const utf8* headers) {
+  // Newline-separated "Name: Value" lines applied to the navigation and its
+  // subresources. NULL/"" clears them. (Port extension — classic wke does
+  // per-request headers via the net hook.)
+  if (webView && webView->view)
+    mbSetExtraHeaders(webView->view, headers ? headers : "");
+}
+
 void wkeSetTransparent(wkeWebView webView, bool transparent) {
   if (!webView || !webView->view)
     return;

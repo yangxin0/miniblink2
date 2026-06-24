@@ -455,6 +455,17 @@ int main() {
           "wkeSetEditable toggles document editability + persists across loads");
   }
 
+  // wkeSetExtraHeaders (offline): set/clear/null are safe and leave local loads
+  // working (the request-echo proof is network-gated below).
+  {
+    wkeSetExtraHeaders(wv, "X-Wke-A: 1\nX-Wke-B: 2");
+    wkeSetExtraHeaders(wv, nullptr);  // clear
+    wkeLoadHTML(wv, "<title>HdrOK</title><body>h</body>");
+    check(wkeIsLoadingSucceeded(wv) &&
+              std::strcmp(wkeGetTitle(wv), "HdrOK") == 0,
+          "wkeSetExtraHeaders(set/clear/null) is safe; local loads still work");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {
@@ -501,6 +512,19 @@ int main() {
     } else {
       std::printf("  [SKIP] wkeSetProxy routing (direct host unreachable)\n");
     }
+
+    // Extra headers: httpbin echoes the request headers in its JSON body.
+    wkeSetExtraHeaders(wv, "X-Wke-Test: zzz9");
+    wkeLoadURL(wv, "http://httpbin.org/headers");
+    if (wkeIsLoadingSucceeded(wv)) {
+      const char* hbody = jsToTempString(
+          es, wkeRunJS(wv, "document.body?document.body.innerText:''"));
+      check(std::strstr(hbody, "zzz9") != nullptr,
+            "wkeSetExtraHeaders injects a request header (httpbin echoes it)");
+    } else {
+      std::printf("  [SKIP] wkeSetExtraHeaders echo (host unreachable)\n");
+    }
+    wkeSetExtraHeaders(wv, nullptr);  // clear for any later requests
   }
 
   wkeDestroyWebView(wv);

@@ -119,6 +119,10 @@ WKE_API int wkeGetContentHeight(wkeWebView webView);
 WKE_API const utf8* wkeGetURL(wkeWebView webView);
 WKE_API const utf8* wkeGetTitle(wkeWebView webView);
 WKE_API void wkeSetUserAgent(wkeWebView webView, const utf8* userAgent);
+// Extra HTTP request headers added to the navigation and its subresources:
+// newline-separated "Name: Value" lines (NULL/"" clears them). Set before
+// loading. Port extension — classic wke injects per-request via the net hook.
+WKE_API void wkeSetExtraHeaders(wkeWebView webView, const utf8* headers);
 // Capture with a transparent background (areas the page does not paint keep
 // alpha 0) instead of opaque white. Call before loading the page.
 WKE_API void wkeSetTransparent(wkeWebView webView, bool transparent);
