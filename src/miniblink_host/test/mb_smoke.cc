@@ -2249,6 +2249,38 @@ int main() {
            "non-UTF-8 page decodes via <meta charset> (ISO-8859-1)");
   }
 
+  // 81b. Legacy CJK charsets decode too — not just latin-1. Confirms the bundled
+  // ICU/codec data covers the common Asian-site encodings (a real international-
+  // scraping need). Checked via code points (charCodeAt) to avoid UTF-8
+  // byte-compare noise.
+  {
+    // Shift_JIS bytes 0x93FA 0x967B = 日(U+65E5=26085) 本(U+672C=26412).
+    const char* sjis =
+        "<meta charset=\"Shift_JIS\"><body><span id=o>\x93\xfa\x96\x7b</span></body>";
+    if (FILE* f = std::fopen("/tmp/mb_sjis.html", "wb")) {
+      std::fwrite(sjis, 1, std::strlen(sjis), f); std::fclose(f);
+    }
+    mbLoadURL(v, "file:///tmp/mb_sjis.html");
+    mbWait(v, 50);
+    const std::string sj = Eval(v,
+        "var t=document.getElementById('o').textContent;"
+        "t.length+':'+t.charCodeAt(0)+','+t.charCodeAt(1)");
+    // GBK bytes 0xD6D0 0xCEC4 = 中(U+4E2D=20013) 文(U+6587=25991).
+    const char* gbk =
+        "<meta charset=\"GBK\"><body><span id=o>\xd6\xd0\xce\xc4</span></body>";
+    if (FILE* f = std::fopen("/tmp/mb_gbk.html", "wb")) {
+      std::fwrite(gbk, 1, std::strlen(gbk), f); std::fclose(f);
+    }
+    mbLoadURL(v, "file:///tmp/mb_gbk.html");
+    mbWait(v, 50);
+    const std::string gb = Eval(v,
+        "var t=document.getElementById('o').textContent;"
+        "t.length+':'+t.charCodeAt(0)+','+t.charCodeAt(1)");
+    Expect(sj == "2:26085,26412" && gb == "2:20013,25991",
+           "legacy CJK charsets decode via <meta charset> (Shift_JIS + GBK)",
+           std::string("sjis=") + sj + " gbk=" + gb);
+  }
+
   // 82. UTF-8 without a <meta charset> still decodes (auto-detection) — guards
   // that the tentative-encoding change didn't regress the common UTF-8 default.
   {
