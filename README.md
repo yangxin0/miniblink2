@@ -36,6 +36,7 @@ that satisfies modern Blink so it runs without the full browser.
 | `requestAnimationFrame` (serviced without a compositor) | ✅ |
 | Observers: Mutation, **Intersection** (forced past offscreen throttling), Resize | ✅ |
 | Web/CSS Animations advance (clock serviced); `XMLHttpRequest` + `fetch` | ✅ |
+| `structuredClone`; Web Crypto (`SubtleCrypto.digest`, in a secure-context page) | ✅ |
 | Console capture (`console.log`/`warn`/`error` → host) | ✅ |
 | Init scripts (`evaluateOnNewDocument`: run JS before page scripts) | ✅ |
 | Isolated-world eval (content-script model: separate globals, shared DOM) | ✅ |

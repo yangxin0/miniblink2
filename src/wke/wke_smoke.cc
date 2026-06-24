@@ -154,6 +154,22 @@ int main() {
           "wkeLoadHtmlWithBaseUrl: base origin (relative URLs + secure context)");
   }
 
+  // Web Crypto end to end: in a secure-context page, SubtleCrypto.digest computes
+  // a real SHA-256 (async). SHA-256('abc') = ba7816bf... -> first byte 0xba.
+  {
+    wkeLoadHtmlWithBaseUrl(
+        wv,
+        "<body><script>window.__h='p';"
+        "crypto.subtle.digest('SHA-256',new TextEncoder().encode('abc'))"
+        ".then(function(h){window.__h=new Uint8Array(h)[0].toString(16);})"
+        ".catch(function(e){window.__h='ERR:'+e.name;});</script></body>",
+        "https://crypto.test/");
+    const bool ok =
+        wkeWaitForFunction(wv, "window.__h!=='p'", 3000) &&
+        std::strcmp(jsToTempString(es, wkeRunJS(wv, "window.__h")), "ba") == 0;
+    check(ok, "Web Crypto: SubtleCrypto.digest computes SHA-256 (secure context)");
+  }
+
   // Keyboard: type into a focused field, then submit with Enter — verified by
   // reading the field value and the form's submit flag through wkeRunJS.
   wkeLoadHTML(wv,
