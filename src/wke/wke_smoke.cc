@@ -846,6 +846,17 @@ int main() {
           "wkeGetHttpStatusCode/wkeGetResponseHeaders are 0/empty for non-http");
   }
 
+  // wkeSetFollowRedirects (offline): toggling it is safe and leaves local loads
+  // working (the redirect-stops-at-30x proof is network-gated below).
+  {
+    wkeSetFollowRedirects(false);
+    wkeSetFollowRedirects(true);  // restore default
+    wkeLoadHTML(wv, "<title>RedirOK</title><body>r</body>");
+    check(wkeIsLoadingSucceeded(wv) &&
+              std::strcmp(wkeGetTitle(wv), "RedirOK") == 0,
+          "wkeSetFollowRedirects toggle is safe; local loads still work");
+  }
+
   // Waits (offline): a setTimeout adds a delayed element / flag; the wait pumps
   // until it appears, and times out on a condition that never holds.
   {
@@ -934,6 +945,21 @@ int main() {
             "wkeGetHttpStatusCode==200 + wkeGetResponseHeaders non-empty (httpbin)");
     } else {
       std::printf("  [SKIP] wkeGetHttpStatusCode/Headers (host unreachable)\n");
+    }
+
+    // Follow-redirects toggle: with following on, /redirect/1 lands on /get
+    // (200); with it off, the load stops at the 30x response.
+    wkeSetFollowRedirects(true);
+    wkeLoadURL(wv, "http://httpbin.org/redirect/1");
+    if (wkeIsLoadingSucceeded(wv) && wkeGetHttpStatusCode(wv) == 200) {
+      wkeSetFollowRedirects(false);
+      wkeLoadURL(wv, "http://httpbin.org/redirect/1");
+      const int code = wkeGetHttpStatusCode(wv);
+      check(code >= 300 && code < 400,
+            "wkeSetFollowRedirects(false) stops at the 30x response");
+      wkeSetFollowRedirects(true);  // restore default for any later request
+    } else {
+      std::printf("  [SKIP] wkeSetFollowRedirects (redirect host unreachable)\n");
     }
   }
 

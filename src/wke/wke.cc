@@ -406,6 +406,13 @@ void wkeSetDeviceScaleFactor(wkeWebView webView, float scale) {
     mbSetDeviceScaleFactor(webView->view, scale);
 }
 
+void wkeSetFollowRedirects(bool follow) {
+  // Follow HTTP 3xx redirects (default) or stop at the redirect response, so a
+  // caller can inspect a 30x's status/Location (e.g. resolve a URL shortener)
+  // without following it. Process-wide; set before navigating. (Port extension.)
+  mbSetFollowRedirects(follow ? 1 : 0);
+}
+
 void wkeScrollTo(wkeWebView webView, int x, int y) {
   // Absolute scroll of the layout viewport to (x,y) in CSS px (window.scrollTo).
   // The real viewport moves, so fixed/sticky elements render correctly — pair

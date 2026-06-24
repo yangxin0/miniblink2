@@ -92,7 +92,7 @@ the deliverable surface (C API, CLI, wke layer).
   proxy (`wkeSetProxy`, HTTP/SOCKS + auth), request headers
   (`wkeSetExtraHeaders`), i18n emulation (`wkeSetLocale`/`wkeSetTimezone`),
   HTTP introspection (`wkeGetHttpStatusCode`/`wkeGetResponseHeaders`),
-  navigation history,
+  redirect control (`wkeSetFollowRedirects`), navigation history,
   page text (`wkeGetText`), rendering accessors
   (`wkeSetTransparent`/`wkeIsTransparent`,
   `wkeSetZoomFactor`/`wkeGetZoomFactor`, `wkeSetEditable`, `wkeSetDarkMode`,
@@ -101,9 +101,10 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **51/51**,
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **52/52**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com cases
-  (wke_smoke 56; mb_smoke ~145).
+  (wke_smoke up to 58; use a generous watchdog ≥180s — cumulative loads + the
+  15s failing-proxy connect; cases SKIP when a host is unreachable).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
 
@@ -118,6 +119,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke NETWORK: wkeSetFollowRedirects (2026-06-24). Process-wide toggle (wraps mbSetFollowRedirects) to follow HTTP 3xx (default) or stop at the redirect so wkeGetHttpStatusCode/wkeGetResponseHeaders expose the 30x + Location. Documented PORT EXTENSION. VERIFIED offline (toggle safe, local loads still work → wke_smoke 52/52). Network proof (MB_NET_TESTS: follow-on /redirect/1→200, follow-off→30x) is correctly gated but SKIPPED this run as httpbin was unreachable; the underlying redirect behavior is already covered by mb_smoke (case 40, 132/132). NOTE: with the larger net suite + a slow-but-reachable httpbin, the net run can exceed a 90s watchdog (cumulative loads + the 15s failing-proxy connect) — use a longer watchdog for MB_NET_TESTS; it killed cleanly with no survivors. mb_smoke 132/132.
 - wke HTTP INTROSPECTION: wkeGetHttpStatusCode + wkeGetResponseHeaders (2026-06-24). Read the main document's final HTTP status + raw response headers after a load (wrap mbGetHttpStatus/mbGetResponseHeaders; headers via a new response_headers_cache). Documented PORT EXTENSIONS (classic wke uses the net hook). VERIFIED offline (non-http load → 0 + "") and over the network (MB_NET_TESTS): httpbin.org/get → status 200 + non-empty headers. wke_smoke 51/51 default, 56/56 net, mb_smoke 132/132, no survivors.
 - wke DOM READ: wkeGetText (2026-06-24). Page visible text (document.body.innerText) — the text counterpart to wkeGetSource's HTML (wraps mbGetText, size-first into a new text_cache). VERIFIED offline: includes rendered "Title"/"Hello world", excludes <script> contents and raw markup. wke_smoke 50/50, mb_smoke 132/132, no survivors.
 - wke DOM ACTIONS: hover/double-click/right-click/focus/blur by selector (2026-06-24). Five more pointer/focus selector actions (wrap mbHover/DoubleClick/RightClick/Focus/BlurSelector); each returns whether it matched. Documented PORT EXTENSIONS — completes the selector-action set. VERIFIED offline: #h onmouseover, #d ondblclick, #r oncontextmenu each fire; focus sets document.activeElement.id=="f", blur clears it; misses return false. wke_smoke 49/49, mb_smoke 132/132, no survivors.

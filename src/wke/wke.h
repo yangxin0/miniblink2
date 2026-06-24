@@ -157,6 +157,10 @@ WKE_API void wkeSetDeviceScaleFactor(wkeWebView webView, float scale);
 // (window.scrollTo). Moves the real viewport (fixed/sticky elements render
 // correctly) — pair with wkeSavePng/wkePaint for a long-page shot. Port extension.
 WKE_API void wkeScrollTo(wkeWebView webView, int x, int y);
+// Follow HTTP 3xx redirects (default, follow=true) or stop at the redirect
+// response (follow=false) so wkeGetHttpStatusCode/wkeGetResponseHeaders expose
+// the 30x + Location. Process-wide; set before navigating. Port extension.
+WKE_API void wkeSetFollowRedirects(bool follow);
 // Render the current frame to a width x height PNG held IN MEMORY (no temp
 // file); returns the byte length and sets *outData (0 on failure). The bytes are
 // owned by the view and valid only until the next wkeEncodePng on it or
