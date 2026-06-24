@@ -19,6 +19,16 @@ void step(bool cond, const char* what) {
   if (!cond)
     g_ok = false;
 }
+
+// The page signals the host via window.mbBridge(channel, message); this callback
+// receives it. (A C callback can't capture locals, so the result lands here.)
+char g_bridge_channel[128], g_bridge_message[256];
+void OnBridge(wkeWebView, void*, const utf8* channel, const utf8* message) {
+  std::snprintf(g_bridge_channel, sizeof(g_bridge_channel), "%s",
+                channel ? channel : "");
+  std::snprintf(g_bridge_message, sizeof(g_bridge_message), "%s",
+                message ? message : "");
+}
 }  // namespace
 
 int main() {
@@ -26,8 +36,13 @@ int main() {
   wkeWebView wv = wkeCreateWebView();
   jsExecState es = wkeGlobalExec(wv);
 
-  // A tiny form: clicking #go appends a styled #out result after a 30ms timer,
-  // mimicking an async (SPA-like) response the automation must wait for.
+  // Let the page signal us: window.mbBridge calls reach OnBridge. Register before
+  // loading so the bridge is installed in the document.
+  wkeOnJsBridge(wv, OnBridge, nullptr);
+
+  // A tiny form: clicking #go signals the host via window.mbBridge, then appends
+  // a styled #out result after a 30ms timer — mimicking an async (SPA-like)
+  // response the automation must wait for.
   wkeLoadHTML(
       wv,
       "<body style='font:16px sans-serif'>"
@@ -36,7 +51,9 @@ int main() {
       "<select id='role'>"
       "<option value='user'>User</option>"
       "<option value='admin'>Admin</option></select>"
-      "<button id='go' onclick=\"setTimeout(function(){"
+      "<button id='go' onclick=\""
+      "window.mbBridge('submit', document.getElementById('name').value);"
+      "setTimeout(function(){"
       "var d=document.createElement('div');d.id='out';"
       "d.style.color='rgb(0,128,0)';"
       "d.textContent='Hello '+document.getElementById('name').value+"
@@ -53,6 +70,12 @@ int main() {
   // 2. Submit, then wait for the asynchronously-rendered result element.
   step(wkeClickSelector(wv, "#go"), "click #go (submit)");
   step(wkeWaitForSelector(wv, "#out", 4000), "wait for #out to appear");
+
+  // 2b. The click handler signaled the host via window.mbBridge; the click's
+  //     drain delivered it to OnBridge (page -> host messaging).
+  step(std::strcmp(g_bridge_channel, "submit") == 0 &&
+           std::strcmp(g_bridge_message, "Ada") == 0,
+       "page -> host bridge: window.mbBridge('submit','Ada') received");
 
   // 3. Scrape the result: its text and a computed style property.
   const char* text = wkeGetTextForSelector(wv, "#out");
