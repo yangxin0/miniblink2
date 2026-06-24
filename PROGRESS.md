@@ -36,7 +36,8 @@
    handshake, an in-process mojo service host (cookies, blobs, BlobURLStore bound
    on a service thread so `[Sync]` calls don't deadlock), a libcurl loader, and
    viz→SkBitmap paint; exposes `extern "C"` `mb_capi`.
-3. `wke`/`mb` C API consumers: `mb_shot` (CLI), `mb_smoke`, `wke_smoke`.
+3. `wke`/`mb` C API consumers: `mb_shot` (CLI), `mb_smoke`, `wke_smoke`,
+   `wke_demo` (runnable automation example).
 
 ## Build & test (sources are STAGED into the donor tree, then ninja)
 ```
@@ -120,6 +121,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke EXAMPLE: wke_demo end-to-end automation sample (2026-06-24). New runnable example + build target (src/wke/wke_demo.cc; executable("wke_demo") in miniblink_host/BUILD.gn; staged with src/wke; added to build.sh ninja line). Drives an offline form the way a real app would — fill #name, select #role, click #go, waitForSelector #out (async/SPA-like via setTimeout), scrape text ("Hello Ada (admin)") + computed color (rgb(0, 128, 0)), count options, screenshot — asserting each step (returns 0/1) so it doubles as an integration check + usage doc. VERIFIED: all 10 steps OK, no survivors. wke_smoke 55/55 + mb_smoke 132/132 unregressed. NOTE: adding a GN target requires staging miniblink_host/BUILD.gn into the tree + gn gen (build.sh does both; an in-place ninja needs the BUILD.gn re-copied first).
 - wke jsValue: jsToFloat (2026-06-24). Completes the numeric coercion set (jsToInt/jsToDouble/jsToFloat/jsToBoolean) — float cast of the stored value. Faithful wke API, offline. VERIFIED: 7/2 → jsToFloat 3.5f vs jsToInt 3. wke_smoke 55/55, mb_smoke 132/132, no survivors.
 - wke jsValue: jsToString (JSON view) (2026-06-24). Like jsToTempString but object/array values are JSON-serialized via their slot (JSON.stringify(literal)) instead of coercing to "[object Object]"; primitives return the coerced value. Separate JsStringBuf() temp. Offline + deterministic. VERIFIED: ({a:1,b:'x'})→{"a":1,"b":"x"}, [1,2,3]→[1,2,3], 42→"42", 'hi'→"hi". wke_smoke 54/54, mb_smoke 132/132, no survivors.
 - wke jsValue: jsIs* type predicates (2026-06-24). FAITHFUL (not extension) — the ten classic wke predicates jsIsNumber/String/Boolean/Object/Function/Undefined/Null/Array/True/False, built on jsTypeOf (+ jsToBoolean for True/False). Arrays report jsIsArray not jsIsObject (matches this port's jsTypeOf). Deterministic + OFFLINE. VERIFIED: one value of each JS type classifies correctly, with cross-type negatives + the array-vs-object and true-vs-false distinctions. Deliberately pivoted off network-gated work after last tick. wke_smoke 53/53, mb_smoke 132/132, no survivors.

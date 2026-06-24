@@ -107,3 +107,11 @@ executable("wke_smoke") {
   include_dirs = [ "//third_party/blink/renderer" ]
   deps = [ ":miniblink_host" ]
 }
+
+# wke_demo: a runnable example of the automation API (fill/select/click/wait/
+# scrape/screenshot) that doubles as documentation.
+executable("wke_demo") {
+  sources = [ "../wke/wke_demo.cc" ]
+  include_dirs = [ "//third_party/blink/renderer" ]
+  deps = [ ":miniblink_host" ]
+}
