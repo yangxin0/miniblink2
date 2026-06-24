@@ -925,12 +925,14 @@ int main() {
     const bool defined =
         std::strcmp(jsToTempString(es, wkeRunJS(wv, "typeof window.wkeAdd")),
                     "function") == 0;
-    // 2 + 3 + base(100) = 105, returned inline within a JS expression.
-    const bool called =
-        std::strcmp(jsToTempString(es, wkeRunJS(wv, "'r='+window.wkeAdd(2,3)")),
-                    "r=105") == 0;
-    check(defined && called,
-          "wkeJsBindFunction: JS synchronously calls a bound C function");
+    // 2 + 3 + base(100) = 105, returned inline as a real NUMBER (===, not "105").
+    const bool typed = jsToBoolean(
+        es, wkeRunJS(wv, "window.wkeAdd(2,3)===105 && "
+                         "typeof window.wkeAdd(2,3)==='number'"));
+    const bool arith =
+        jsToInt(es, wkeRunJS(wv, "window.wkeAdd(2,3)+1")) == 106;
+    check(defined && typed && arith,
+          "wkeJsBindFunction: JS calls a bound C fn; returns a typed number");
   }
 
   // wkeOnJsBridge (offline): window.mbBridge(channel,message) is installed before

@@ -21,7 +21,8 @@ std::string Eval(mbView* v, const char* js) {
 
 // Native function bound into JS for the mbJsBindFunction test: echoes its first
 // argument with a "!" suffix and the userdata it was given.
-const char* SmokeEcho(void* userdata, int argc, const char** argv) {
+const char* SmokeEcho(void* userdata, int argc, const char** argv,
+                      int* /*out_type*/) {  // default string return
   static char buf[256];
   std::snprintf(buf, sizeof(buf), "%s!%d", (argc > 0 && argv[0]) ? argv[0] : "",
                 userdata ? *static_cast<int*>(userdata) : -1);

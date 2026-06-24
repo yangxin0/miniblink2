@@ -292,8 +292,9 @@ are parked in the page and navigated by `jsGet`/`jsGetAt`/`jsCall`), not raw V8
 handles. Native function binding (`wkeJsBindFunction`) is supported: a C function
 is installed on `window` (via v8 `CreateDataProperty` at document-element-available
 — the public `Object::Set` API traps in this sandboxed build) and called
-synchronously from JS, reading args with `jsArg`/`jsArgCount`. In this port the
-args arrive as strings and the returned `jsValue` is delivered to JS as a string.
+synchronously from JS, reading args with `jsArg`/`jsArgCount`. The returned
+`jsValue`'s type is preserved (number/boolean/null/string), so JS gets a real
+value (e.g. `window.fn(2,3) + 1`); arguments arrive as strings.
 
 ## Build
 

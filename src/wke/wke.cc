@@ -1178,7 +1178,8 @@ std::vector<jsValue>& CurrentArgs() {  // args of the in-flight bound call
   return *v;
 }
 
-const char* WkeNativeShim(void* userdata, int argc, const char** argv) {
+const char* WkeNativeShim(void* userdata, int argc, const char** argv,
+                          int* out_type) {
   auto* b = static_cast<WkeBinding*>(userdata);
   if (!b || !b->fn)
     return nullptr;
@@ -1192,6 +1193,18 @@ const char* WkeNativeShim(void* userdata, int argc, const char** argv) {
   CurrentArgs() = saved;
   const JsRecord* rec = JsLookup(r);
   b->ret = rec ? rec->value : std::string();
+  // Preserve the returned jsValue's JS type (number/boolean/null/undefined) so
+  // JS receives a real value, not always a string.
+  if (out_type && rec) {
+    if (rec->type == "number")
+      *out_type = 1;
+    else if (rec->type == "boolean")
+      *out_type = 2;
+    else if (rec->type == "null")
+      *out_type = 3;
+    else if (rec->type == "undefined")
+      *out_type = 4;
+  }
   return b->ret.c_str();
 }
 }  // namespace

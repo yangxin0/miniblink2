@@ -875,12 +875,30 @@ void MbNativeTrampoline(const v8::FunctionCallbackInfo<v8::Value>& info) {
   argv.reserve(args.size());
   for (const std::string& a : args)
     argv.push_back(a.c_str());
+  int out_type = 0;  // 0 string, 1 number, 2 boolean, 3 null, 4 undefined
   const char* result = b->fn(b->userdata, static_cast<int>(args.size()),
-                             argv.empty() ? nullptr : argv.data());
-  if (result) {
-    v8::Local<v8::String> rs;
-    if (v8::String::NewFromUtf8(isolate, result).ToLocal(&rs))
-      info.GetReturnValue().Set(rs);
+                             argv.empty() ? nullptr : argv.data(), &out_type);
+  switch (out_type) {
+    case 1:  // number
+      info.GetReturnValue().Set(
+          v8::Number::New(isolate, result ? std::atof(result) : 0.0));
+      return;
+    case 2:  // boolean
+      info.GetReturnValue().Set(
+          v8::Boolean::New(isolate, result && std::strcmp(result, "true") == 0));
+      return;
+    case 3:  // null
+      info.GetReturnValue().SetNull();
+      return;
+    case 4:  // undefined
+      return;
+    default:  // string
+      if (result) {
+        v8::Local<v8::String> rs;
+        if (v8::String::NewFromUtf8(isolate, result).ToLocal(&rs))
+          info.GetReturnValue().Set(rs);
+      }
+      return;
   }
 }
 }  // namespace
