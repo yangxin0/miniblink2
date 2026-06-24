@@ -633,6 +633,25 @@ int main() {
                    rr.c_str());
     }
   }
+
+  // 41 (net). mbGetHttpStatus reflects the last navigation's real HTTP status:
+  // a normal page is 200, an error endpoint is its code (404).
+  {
+    mbLoadURL(v, (host + "/html").c_str());
+    mbWait(v, 600);
+    const int ok_status = mbGetHttpStatus(v);
+    if (ok_status != 0) {  // host reachable
+      mbLoadURL(v, (host + "/status/404").c_str());
+      mbWait(v, 600);
+      const int err_status = mbGetHttpStatus(v);
+      Expect(ok_status == 200 && err_status == 404,
+             "mbGetHttpStatus returns the navigation's HTTP status (200 vs 404)",
+             "ok=" + std::to_string(ok_status) + " err=" +
+                 std::to_string(err_status));
+    } else {
+      std::fprintf(stderr, "  [SKIP] http status (host unreachable)\n");
+    }
+  }
   }  // MB_NET_TESTS
 
   // 33. document.cookie (JS): write then read round-trips through the in-process
@@ -2402,6 +2421,24 @@ int main() {
                (cleared ? "1" : "0") + " loaded=" + (loaded ? "1" : "0") +
                " got=[" + got + "]");
     mbClearCookies(v);  // don't leak into later cases
+  }
+
+  // 105b. mbGetHttpStatus is 0 for non-http loads (in-memory and file://), since
+  // there's no HTTP response. (The 200-vs-404 http path is the net-gated case 41
+  // and is verified end-to-end by mb_shot.) Guards the reset + the non-http path.
+  {
+    mbLoadHTML(v, "<body>x</body>", "about:blank");
+    const bool inmem_zero = mbGetHttpStatus(v) == 0;
+    if (FILE* f = std::fopen("/tmp/mb_status.html", "wb")) {
+      std::fputs("<body>file</body>", f);
+      std::fclose(f);
+    }
+    mbLoadURL(v, "file:///tmp/mb_status.html");
+    const bool file_zero = mbGetHttpStatus(v) == 0;
+    Expect(inmem_zero && file_zero,
+           "mbGetHttpStatus is 0 for non-http (in-memory + file) loads",
+           std::string("inmem=") + (inmem_zero ? "1" : "0") + " file=" +
+               (file_zero ? "1" : "0"));
   }
 
   // 106. mbEncodePng: render to an in-memory PNG (no temp file) for embedders.

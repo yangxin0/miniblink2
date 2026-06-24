@@ -572,7 +572,8 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* content_type, const std::string& user_agent,
                 const std::string& extra_headers, const std::string& post_body,
                 const std::string& post_content_type,
-                const std::string& http_method, std::string* out_final_url) {
+                const std::string& http_method, std::string* out_final_url,
+                int* out_status) {
   GURL url(url_spec);
   if (url.SchemeIsFile()) {
     // Convert via net (percent-decodes the path; "Andale%20Mono.ttf" -> a space)
@@ -583,9 +584,8 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
   }
   if (url.SchemeIsHTTPOrHTTPS())
     return FetchHttp(url_spec, body, content_type, user_agent, extra_headers,
-                     post_body, post_content_type, http_method,
-                     /*out_status=*/nullptr, /*out_headers=*/nullptr,
-                     out_final_url);
+                     post_body, post_content_type, http_method, out_status,
+                     /*out_headers=*/nullptr, out_final_url);
   if (url.SchemeIs("data")) {
     std::string mime, charset;
     if (!net::DataURL::Parse(url, &mime, &charset, body))

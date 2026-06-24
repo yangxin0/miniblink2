@@ -2080,6 +2080,20 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   signature) whose IHDR width/height (BE @ offsets 16/20) match the request -> len=2539 dim=400x300.
   130/130, no survivors. C API now 66 fns. (Embedder-only, so no mb_shot flag — the CLI writes files.)
 
+- ✅ DONE: load status — mbGetHttpStatus + mb_shot status-based failure detection (2026-06-24). After
+  mbLoadURL there was no way to know if the page succeeded or what HTTP code it returned (did it 404?)
+  — a real scraper/embedder need, and it FIXES the fragile "<512 bytes = failed" heuristic that false-
+  flagged tiny-but-valid pages last tick (badssl). The load is synchronous (MbFetchUrl blocks then
+  commits), so a plain accessor works — no callbacks. Threaded FetchHttp's existing out_status through
+  MbFetchUrl into MbWebView (http_status_, reset to 0 on every LoadURL/LoadHTML so it reflects the LAST
+  load; set only on a real http(s) fetch). C API mbGetHttpStatus(v) -> 200/404/500…, or 0 for non-http
+  (file/data/in-memory) or a network failure (no response). mb_shot now warns from the real status:
+  status 0 -> "no response", >=400 -> "returned HTTP N", and a 2xx/3xx (even tiny) is success — so the
+  badssl false-positive is gone. VERIFIED 3 ways: local smoke 105b (status==0 for in-memory + file ->
+  inmem=1 file=1), net-gated case 41 (httpbin /html -> 200, /status/404 -> 404; 142/142 with
+  MB_NET_TESTS=1), and mb_shot empirically (200 no-warn, 404 "returned HTTP 404", badssl --insecure no
+  warn). 131/131 default, no survivors. C API now 67 fns.
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

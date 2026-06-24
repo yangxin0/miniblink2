@@ -185,23 +185,24 @@ int main(int argc, char** argv) {
     mbLoadHTML(view, ss.str().c_str(), base.c_str());
   }
 
-  // For network loads, detect a failed/empty navigation so we don't silently
-  // emit a blank PNG and report success. A failed fetch (DNS/TLS/HTTP error,
-  // or throttling) makes the loader call DidFail, and Blink commits a near-empty
-  // document (~tens of chars of "<html><head></head><body></body></html>"); a
-  // real page is thousands. Below the threshold we treat the load as failed.
+  // For network loads, detect a failed navigation from the real HTTP status so we
+  // don't silently emit a blank PNG and report success. Status 0 means no response
+  // (DNS/TLS/connection error); >= 400 is an HTTP error page. A 2xx/3xx is treated
+  // as success even when the body is small (this replaces an old body-length
+  // heuristic that false-flagged tiny-but-valid pages).
   bool load_ok = true;
   if (is_http) {
-    char buf[64] = {0};
-    mbEvalJS(view, "String(document.documentElement.outerHTML.length)", buf,
-             sizeof(buf));
-    const long html_len = std::atol(buf);
-    if (html_len < 512) {
+    const int status = mbGetHttpStatus(view);
+    if (status == 0) {
       std::fprintf(stderr,
-                   "mb_shot: WARNING — %s loaded an empty document (HTML %ld "
-                   "bytes); the fetch likely failed (network error/throttling). "
-                   "The PNG will be blank.\n",
-                   input.c_str(), html_len);
+                   "mb_shot: WARNING — %s got no response (network/DNS/TLS "
+                   "error); the PNG will be blank.\n",
+                   input.c_str());
+      load_ok = false;
+    } else if (status >= 400) {
+      std::fprintf(stderr,
+                   "mb_shot: WARNING — %s returned HTTP %d (error page).\n",
+                   input.c_str(), status);
       load_ok = false;
     }
   }

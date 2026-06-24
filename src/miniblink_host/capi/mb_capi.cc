@@ -391,6 +391,10 @@ void mbReload(mbView* v) {
     v->impl->Reload();
 }
 
+int mbGetHttpStatus(mbView* v) {
+  return (v && v->impl) ? v->impl->GetHttpStatus() : 0;
+}
+
 int mbCanGoBack(mbView* v) {
   return (v && v->impl && v->impl->CanGoBack()) ? 1 : 0;
 }

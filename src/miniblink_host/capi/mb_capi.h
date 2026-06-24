@@ -259,6 +259,13 @@ MB_EXPORT int mbGetComputedStyle(mbView*, const char* css_selector,
 // documents (about:blank, data:, mbLoadHTML content).
 MB_EXPORT void mbReload(mbView*);
 
+// HTTP status code of the last top-level http(s) navigation (e.g. 200, 404, 500),
+// or 0 if the last load was non-http (file://, data:, mbLoadHTML) or the network
+// request failed before a response. Lets a caller distinguish a successful page
+// from a 404/error page after mbLoadURL — more reliable than guessing from the
+// body length.
+MB_EXPORT int mbGetHttpStatus(mbView*);
+
 // Host-driven back/forward over the main frame's navigation history (captures
 // both host-initiated loads and page-initiated link/location/form navigations).
 // mbGoBack/mbGoForward return 1 if they navigated, 0 if there was no entry.

@@ -137,6 +137,10 @@ class MbWebView {
   // style assertions without writing JS. *out only written on success.
   bool GetComputedStyle(const char* css_selector, const char* property,
                         std::string* out);
+  // HTTP status of the last top-level http(s) navigation (200, 404, 500…), or 0
+  // when the last load was non-http (file/data/in-memory) or the network request
+  // failed before a response. Lets a caller tell success from a 404/error page.
+  int GetHttpStatus() const { return http_status_; }
   // Re-navigate to the current document URL, re-fetching it (file/http only).
   void Reload();
 
@@ -228,6 +232,7 @@ class MbWebView {
   bool in_history_nav_ = false;       // a Go{Back,Forward} is in flight
 
   std::vector<uint8_t> encoded_png_;  // retained bytes from the last EncodePng
+  int http_status_ = 0;  // HTTP status of the last http(s) load; 0 if none/failed
 };
 
 }  // namespace mb
