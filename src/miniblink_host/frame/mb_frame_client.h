@@ -58,6 +58,12 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // document is still committed directly by MbWebView, not here.
   void BeginNavigation(std::unique_ptr<blink::WebNavigationInfo>) override;
 
+  // The frame's navigation-associated-interface provider. We return one that
+  // binds BlobURLStore to our in-process store (so URL.createObjectURL +
+  // blob: fetch work); without this, Blink would talk to the absent browser.
+  blink::AssociatedInterfaceProvider* GetRemoteNavigationAssociatedInterfaces()
+      override;
+
   // Fires when this frame commits a document. For the main frame we record the
   // navigation in MbWebView's history stack (captures host- and page-initiated
   // navigations uniformly). Child-frame commits are ignored here.
@@ -126,6 +132,10 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   std::unique_ptr<MbFrameClient> self_owned_;        // set for child frames only
   network::mojom::WebSandboxFlags sandbox_flags_ =
       network::mojom::WebSandboxFlags::kNone;        // child <iframe sandbox>
+
+  // Lazily-created navigation-associated-interface provider (owns the BlobURLStore
+  // binding). Owned here; freed in the destructor.
+  blink::AssociatedInterfaceProvider* nav_assoc_interfaces_ = nullptr;
 
   // Guards posted main-frame commits: if the client is torn down before the
   // task runs, it no-ops. Must be the last member.

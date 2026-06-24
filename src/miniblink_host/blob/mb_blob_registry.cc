@@ -7,21 +7,41 @@
 #include <utility>
 #include <vector>
 
+#include <map>
+#include <string>
+
 #include "base/containers/span.h"
 #include "base/functional/bind.h"
+#include "base/location.h"
 #include "base/memory/weak_ptr.h"
+#include "base/no_destructor.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
 #include "miniblink_host/runtime/mb_runtime.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "mojo/public/cpp/bindings/self_owned_associated_receiver.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/data_pipe_drainer.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
+#include "net/base/net_errors.h"
+#include "net/http/http_request_headers.h"
+#include "net/http/http_response_headers.h"
+#include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/cpp/url_loader_completion_status.h"
+#include "services/network/public/mojom/url_loader.mojom-blink.h"
+#include "services/network/public/mojom/url_loader_factory.mojom-blink.h"
+#include "services/network/public/mojom/url_response_head.mojom-blink.h"
+#include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
+#include "third_party/blink/public/mojom/associated_interfaces/associated_interfaces.mojom.h"
 #include "third_party/blink/public/mojom/blob/blob.mojom-blink.h"
+#include "third_party/blink/public/mojom/blob/blob_url_store.mojom-blink.h"
 #include "third_party/blink/public/mojom/blob/data_element.mojom-blink.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
+#include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace mb {
@@ -111,6 +131,48 @@ class BlobReadSession {
   mojo::ScopedDataPipeProducerHandle pipe_;
   mojo::Remote<blink::mojom::blink::BlobReaderClient> remote_;
   mojo::SimpleWatcher watcher_;
+};
+
+// A network URLLoader that serves a blob's bytes for a blob: URL fetch. Owns the
+// URLLoaderClient remote and, on construction, delivers a 200 response whose body
+// pipe is fed by a BlobReadSession. Self-owned: lives until the loader endpoint
+// (held by the fetch) is dropped. URLLoader control methods are no-ops.
+class MbBlobURLLoader : public network::mojom::blink::URLLoader {
+ public:
+  MbBlobURLLoader(
+      const std::vector<uint8_t>& data,
+      mojo::PendingRemote<network::mojom::blink::URLLoaderClient> client)
+      : client_(std::move(client)) {
+    auto head = network::mojom::blink::URLResponseHead::New();
+    head->mime_type = blink::String("application/octet-stream");
+    // Several URLResponseHead fields are non-nullable (mojo validation aborts on
+    // a null), so give them valid empty/default values.
+    head->charset = blink::String("utf-8");
+    auto lt = network::mojom::blink::LoadTimingInfo::New();
+    lt->connect_timing =
+        network::mojom::blink::LoadTimingInfoConnectTiming::New();
+    head->load_timing = std::move(lt);
+    head->alpn_negotiated_protocol = blink::String("");
+    head->cache_storage_cache_name = blink::String("");
+    head->headers = base::MakeRefCounted<net::HttpResponseHeaders>(
+        std::string("HTTP/1.1 200 OK\0", 16));
+    head->headers->SetHeader("Content-Type", "application/octet-stream");
+    head->headers->SetHeader("Content-Length", std::to_string(data.size()));
+    mojo::ScopedDataPipeProducerHandle producer;
+    mojo::ScopedDataPipeConsumerHandle consumer;
+    if (mojo::CreateDataPipe(nullptr, producer, consumer) != MOJO_RESULT_OK)
+      return;
+    client_->OnReceiveResponse(std::move(head), std::move(consumer),
+                               std::nullopt);
+    BlobReadSession::Start(data, std::move(producer), mojo::NullRemote());
+    client_->OnComplete(network::URLLoaderCompletionStatus(net::OK));
+  }
+  void FollowRedirect(network::HttpRequestHeadersUpdateParams,
+                      const std::optional<blink::KURL>&) override {}
+  void SetPriority(net::RequestPriority, int32_t) override {}
+
+ private:
+  mojo::Remote<network::mojom::blink::URLLoaderClient> client_;
 };
 
 // Reads another Blob fully (ReadAll into a pipe, drained), then hands back the
@@ -222,11 +284,21 @@ class MbBlob : public blink::mojom::blink::Blob {
       uint64_t /*length*/,
       mojo::ScopedDataPipeProducerHandle,
       mojo::PendingRemote<blink::mojom::blink::BlobReaderClient>) override {}
-  void Load(mojo::PendingReceiver<network::mojom::blink::URLLoader>,
-            const blink::String&,
-            const net::HttpRequestHeaders&,
-            mojo::PendingRemote<network::mojom::blink::URLLoaderClient>)
-      override {}
+  void Load(mojo::PendingReceiver<network::mojom::blink::URLLoader> loader,
+            const blink::String& /*method*/,
+            const net::HttpRequestHeaders& /*headers*/,
+            mojo::PendingRemote<network::mojom::blink::URLLoaderClient> client)
+      override {
+    // Serves this blob for a blob: URL fetch. Defer until the bytes are
+    // materialized, then hand a URLLoader that streams data_ to the client.
+    if (!ready_) {
+      pending_loads_.push_back({std::move(loader), std::move(client)});
+      return;
+    }
+    mojo::MakeSelfOwnedReceiver(
+        std::make_unique<MbBlobURLLoader>(data_, std::move(client)),
+        std::move(loader));
+  }
   void ReadSideData(ReadSideDataCallback callback) override {
     std::move(callback).Run(std::nullopt);
   }
@@ -241,6 +313,10 @@ class MbBlob : public blink::mojom::blink::Blob {
   struct PendingRead {
     mojo::ScopedDataPipeProducerHandle pipe;
     mojo::PendingRemote<blink::mojom::blink::BlobReaderClient> client;
+  };
+  struct PendingLoad {
+    mojo::PendingReceiver<network::mojom::blink::URLLoader> loader;
+    mojo::PendingRemote<network::mojom::blink::URLLoaderClient> client;
   };
 
   // Walk parts in order, appending bytes to data_. Inline parts append
@@ -283,6 +359,12 @@ class MbBlob : public blink::mojom::blink::Blob {
     for (auto& pr : pending_reads_)
       BlobReadSession::Start(data_, std::move(pr.pipe), std::move(pr.client));
     pending_reads_.clear();
+    for (auto& pl : pending_loads_) {
+      mojo::MakeSelfOwnedReceiver(
+          std::make_unique<MbBlobURLLoader>(data_, std::move(pl.client)),
+          std::move(pl.loader));
+    }
+    pending_loads_.clear();
   }
 
   blink::String uuid_;
@@ -290,6 +372,7 @@ class MbBlob : public blink::mojom::blink::Blob {
   std::vector<uint8_t> data_;
   bool ready_ = false;
   std::vector<PendingRead> pending_reads_;
+  std::vector<PendingLoad> pending_loads_;
   base::WeakPtrFactory<MbBlob> weak_factory_{this};
 };
 
@@ -394,6 +477,101 @@ class MbBlobRegistry : public blink::mojom::blink::BlobRegistry {
   }
 };
 
+// Process-global blob: URL -> Blob remote map. Touched only on the service
+// thread (MbBlobURLStore is bound there), so no lock.
+std::map<std::string, mojo::Remote<blink::mojom::blink::Blob>>& BlobUrlMap() {
+  static base::NoDestructor<
+      std::map<std::string, mojo::Remote<blink::mojom::blink::Blob>>>
+      m;
+  return *m;
+}
+
+// A URLLoaderFactory bound to one blob: forwards every CreateLoaderAndStart to
+// the Blob's own Load() (which streams the bytes). Self-owned per resolve.
+class MbBlobURLLoaderFactory : public network::mojom::blink::URLLoaderFactory {
+ public:
+  explicit MbBlobURLLoaderFactory(
+      mojo::PendingRemote<blink::mojom::blink::Blob> blob)
+      : blob_(std::move(blob)) {}
+  void CreateLoaderAndStart(
+      mojo::PendingReceiver<network::mojom::blink::URLLoader> loader,
+      int32_t /*request_id*/,
+      uint32_t /*options*/,
+      const network::ResourceRequest& request,
+      mojo::PendingRemote<network::mojom::blink::URLLoaderClient> client,
+      const net::MutableNetworkTrafficAnnotationTag& /*ta*/) override {
+    blob_->Load(std::move(loader),
+                blink::String::FromUtf8(request.method.c_str()),
+                net::HttpRequestHeaders(), std::move(client));
+  }
+  void Clone(mojo::PendingReceiver<network::mojom::blink::URLLoaderFactory>
+                 factory) override {
+    mojo::PendingRemote<blink::mojom::blink::Blob> cloned;
+    blob_->Clone(cloned.InitWithNewPipeAndPassReceiver());
+    mojo::MakeSelfOwnedReceiver(
+        std::make_unique<MbBlobURLLoaderFactory>(std::move(cloned)),
+        std::move(factory));
+  }
+
+ private:
+  mojo::Remote<blink::mojom::blink::Blob> blob_;
+};
+
+// In-process BlobURLStore: maps blob: URLs (URL.createObjectURL) to their Blob
+// and resolves them for fetch via a URLLoaderFactory. Bound on the service
+// thread, so the [Sync] Register from the main thread is serviced off-thread.
+class MbBlobURLStore : public blink::mojom::blink::BlobURLStore {
+ public:
+  void Register(mojo::PendingRemote<blink::mojom::blink::Blob> blob,
+                const blink::KURL& url,
+                RegisterCallback callback) override {
+    BlobUrlMap()[url.GetString().Utf8()] =
+        mojo::Remote<blink::mojom::blink::Blob>(std::move(blob));
+    std::move(callback).Run();
+  }
+  void Revoke(const blink::KURL& url) override {
+    BlobUrlMap().erase(url.GetString().Utf8());
+  }
+  void ResolveAsURLLoaderFactory(
+      const blink::KURL& url,
+      mojo::PendingReceiver<network::mojom::blink::URLLoaderFactory> factory)
+      override {
+    auto it = BlobUrlMap().find(url.GetString().Utf8());
+    if (it == BlobUrlMap().end())
+      return;  // unknown blob: URL -> drop (the fetch fails, as it should)
+    mojo::PendingRemote<blink::mojom::blink::Blob> cloned;
+    it->second->Clone(cloned.InitWithNewPipeAndPassReceiver());
+    mojo::MakeSelfOwnedReceiver(
+        std::make_unique<MbBlobURLLoaderFactory>(std::move(cloned)),
+        std::move(factory));
+  }
+  void ResolveAsBlobURLToken(
+      const blink::KURL& /*url*/,
+      mojo::PendingReceiver<blink::mojom::blink::BlobURLToken> /*token*/,
+      bool /*is_top_level_navigation*/) override {}
+};
+
+// The frame's navigation-associated-interface provider, bound on the SERVICE
+// thread. Routing GetAssociatedInterface here (off the main thread) lets us bind
+// BlobURLStore on the service thread, so createObjectURL's [Sync] Register — made
+// from the blocked main thread — is serviced instead of deadlocking.
+class MbNavAssociatedInterfaceProvider
+    : public blink::mojom::AssociatedInterfaceProvider {
+ public:
+  void GetAssociatedInterface(
+      const std::string& name,
+      mojo::PendingAssociatedReceiver<blink::mojom::AssociatedInterface>
+          receiver) override {
+    if (name == blink::mojom::blink::BlobURLStore::Name_) {
+      mojo::MakeSelfOwnedAssociatedReceiver(
+          std::make_unique<MbBlobURLStore>(),
+          mojo::PendingAssociatedReceiver<blink::mojom::blink::BlobURLStore>(
+              receiver.PassHandle()));
+    }
+    // Other associated interfaces are not provided here (dropped).
+  }
+};
+
 }  // namespace
 
 void BindBlobRegistryOnServiceThread(
@@ -410,6 +588,32 @@ void BindBlobRegistryOnServiceThread(
                                         std::move(r));
           },
           std::move(receiver)));
+}
+
+blink::AssociatedInterfaceProvider* MakeBlobUrlNavAssociatedInterfaces() {
+  // Build a dedicated associated pipe and bind the provider impl on the SERVICE
+  // thread. The provider's master endpoint then lives off the main thread, so
+  // when the main thread blocks in createObjectURL's [Sync] BlobURLStore.Register,
+  // the service thread independently dispatches GetAssociatedInterface (binding
+  // BlobURLStore) and services Register -> no deadlock. (A local provider binds
+  // via a main-thread task that can't run during the sync wait -> deadlock.)
+  mojo::AssociatedRemote<blink::mojom::AssociatedInterfaceProvider> remote;
+  auto receiver = remote.BindNewEndpointAndPassDedicatedReceiver();
+  if (scoped_refptr<base::SingleThreadTaskRunner> runner =
+          MbRuntime::ServiceTaskRunner()) {
+    runner->PostTask(
+        FROM_HERE,
+        base::BindOnce(
+            [](mojo::PendingAssociatedReceiver<
+                blink::mojom::AssociatedInterfaceProvider> r) {
+              mojo::MakeSelfOwnedAssociatedReceiver(
+                  std::make_unique<MbNavAssociatedInterfaceProvider>(),
+                  std::move(r));
+            },
+            std::move(receiver)));
+  }
+  return new blink::AssociatedInterfaceProvider(
+      remote.Unbind(), base::SingleThreadTaskRunner::GetCurrentDefault());
 }
 
 }  // namespace mb

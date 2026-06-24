@@ -2152,6 +2152,24 @@ int main() {
                " custom=" + (custom ? "1" : "0"));
   }
 
+  // 100. fetch(blob:) end to end: URL.createObjectURL + fetch reads the blob's
+  // bytes. Landed via the in-process BlobURLStore (bound on the service thread
+  // through a navigation-associated-interface proxy, so the [Sync] Register
+  // doesn't deadlock) + a URLLoaderFactory that delegates to Blob::Load, plus the
+  // donor patch that skips the host loader for blob: URLs.
+  {
+    mbLoadHTML(v, "<body>x</body>", "about:blank");
+    mbRunJS(v,
+        "window.__bf='';var b=new Blob(['BLOBFETCH-OK'],{type:'text/plain'});"
+        "var u=URL.createObjectURL(b);"
+        "fetch(u).then(function(r){return r.text();}).then(function(t){"
+        "window.__bf=t;}).catch(function(e){window.__bf='ERR:'+e.name;});");
+    mbWait(v, 400);  // async fetch of the blob
+    Expect(Eval(v, "String(window.__bf)") == "BLOBFETCH-OK",
+           "fetch(blob:) reads the blob's bytes (createObjectURL + fetch)",
+           Eval(v, "String(window.__bf)"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

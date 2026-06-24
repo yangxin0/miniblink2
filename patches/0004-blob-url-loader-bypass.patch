@@ -1,0 +1,20 @@
+diff --git a/third_party/blink/renderer/core/loader/loader_factory_for_frame.cc b/third_party/blink/renderer/core/loader/loader_factory_for_frame.cc
+index 1ff4a0c..ab70ebf 100644
+--- a/third_party/blink/renderer/core/loader/loader_factory_for_frame.cc
++++ b/third_party/blink/renderer/core/loader/loader_factory_for_frame.cc
+@@ -148,8 +148,13 @@ std::unique_ptr<URLLoader> LoaderFactoryForFrame::CreateURLLoader(
+     bool is_from_origin_dirty_style_sheet) {
+   LocalFrame* frame = window_->GetFrame();
+   CHECK(frame);
+-  if (std::unique_ptr<URLLoader> loader = frame->CreateURLLoaderForTesting()) {
+-    return loader;
++  // miniblink-modern: skip the host's URLLoader for blob: URLs so Blink's native
++  // blob path (PublicURLManager.Resolve -> BlobURLStore.ResolveAsURLLoaderFactory)
++  // serves them; the host loader (MbURLLoader) can't read a blob: URL.
++  if (!network_request.url.SchemeIsBlob()) {
++    if (std::unique_ptr<URLLoader> loader = frame->CreateURLLoaderForTesting()) {
++      return loader;
++    }
+   }
+ 
+   if (prefetched_signed_exchange_manager_) {

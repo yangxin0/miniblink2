@@ -12,8 +12,10 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/unguessable_token.h"
 #include "third_party/blink/public/platform/task_type.h"
+#include "miniblink_host/blob/mb_blob_registry.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/view/mb_webview.h"
+#include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "services/network/public/cpp/web_sandbox_flags.h"
@@ -58,7 +60,16 @@ class MbPolicyContainerHost : public blink::mojom::blink::PolicyContainerHost {
 }  // namespace
 
 MbFrameClient::MbFrameClient(MbWebView* owner) : owner_(owner) {}
-MbFrameClient::~MbFrameClient() = default;
+MbFrameClient::~MbFrameClient() {
+  delete nav_assoc_interfaces_;
+}
+
+blink::AssociatedInterfaceProvider*
+MbFrameClient::GetRemoteNavigationAssociatedInterfaces() {
+  if (!nav_assoc_interfaces_)
+    nav_assoc_interfaces_ = MakeBlobUrlNavAssociatedInterfaces();
+  return nav_assoc_interfaces_;
+}
 
 blink::WebLocalFrame* MbFrameClient::CreateChildFrame(
     blink::mojom::TreeScopeType scope,

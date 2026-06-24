@@ -1678,8 +1678,8 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   at 20 hops. VERIFIED (mb_shot + gated smoke case 41): fetch /redirect-to?url=/get -> url=/get,
   redirected=true. The cookie-across-redirect case (31) STILL passes — each manual hop shares the
   curl cookie jar, so Set-Cookie on a 302 is sent on the next hop. Net 110/110, default 100/100.
-- ⚠️ KNOWN GAPS (all the documented heavy items; everything else works): fetch(blob:) fails
-  (TypeError) — blob: URL resolution is the reverted BlobURLStore work; Web Workers are inert
+- ⚠️ KNOWN GAPS (all the documented heavy items; everything else works): [fetch(blob:) NOW WORKS
+  — landed 2026-06-24, see the LANDED entry below]; Web Workers are inert
   (new Worker never fires onmessage/onerror) — "real worker execution"; WebGL getContext returns
   null — needs the GPU/command-buffer pipeline (P4). NOT gaps (verified working): CSS
   calc/vw/@supports/:has(), TextDecoder, AbortController fetch-abort, pseudo-elements, tables, media
@@ -1890,6 +1890,22 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
     "Failed to fetch". NEXT: instrument CorsURLLoader / the request-mode + blob-URL partition/origin
     checks to find which one rejects before CreateLoaderAndStart. This is a focused-session task
     (needs iterative core-Blink debugging); the subsystem code is written + working up to this point.
+
+- ✅✅ fetch(blob:) — **LANDED end to end (2026-06-24)**. "THE WALL" above was NOT a CORS check:
+  it was MbFrameClient::CreateURLLoaderForTesting() intercepting the blob: request. The frame loader
+  (loader_factory_for_frame.cc) tries the host's testing loader FIRST; our MbURLLoader (libcurl)
+  claimed the blob: URL, returned nothing useful, and the native blob path was never reached — so
+  CreateLoaderAndStart on MbBlobURLStore's factory never fired. **Fix = patch 0004**: skip the host
+  loader when `network_request.url.SchemeIsBlob()`, letting Blink's native PublicURLManager.Resolve ->
+  BlobURLStore.ResolveAsURLLoaderFactory -> our MbBlobURLLoaderFactory.CreateLoaderAndStart -> Blob::
+  Load serve the bytes. With that one bypass + the (already-working) service-thread-proxy Register and
+  the MbBlobURLLoader delivery, the load completes. Also had to fully populate URLResponseHead's
+  non-nullable mojo fields (charset, load_timing->connect_timing, alpn/cache-name, HttpResponseHeaders)
+  or serialization aborts VALIDATION_ERROR_UNEXPECTED_NULL_POINTER. VERIFIED: fetch(blob:).text() ==
+  the blob content, and .arrayBuffer()/.blob() both deliver the bytes. Smoke case 100 locks it in.
+  **121/121, no survivors.** Patches re-captured from the live donor: 0003 now ENABLES Register (with
+  a corrected comment), new 0004 = the blob: loader bypass. (Open: <img src=blob:> for a tiny GIF
+  still errored — a separate image-decode/path item, not fetch; fetch(blob:) itself is complete.)
 
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a

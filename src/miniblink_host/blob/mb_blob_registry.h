@@ -15,12 +15,23 @@
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "third_party/blink/public/mojom/blob/blob_registry.mojom-blink.h"
 
+namespace blink {
+class AssociatedInterfaceProvider;
+}
+
 namespace mb {
 
 // Bind a BlobRegistry receiver on the service thread. Safe to call from the main
 // thread (the broker does); posts the bind to MbRuntime::ServiceTaskRunner().
 void BindBlobRegistryOnServiceThread(
     mojo::PendingReceiver<blink::mojom::blink::BlobRegistry> receiver);
+
+// A navigation-associated-interface provider (owned by the caller) that binds
+// blink.mojom.BlobURLStore to our in-process store on the service thread, so
+// URL.createObjectURL registration and blob: URL fetch resolution work. Returned
+// from MbFrameClient::GetRemoteNavigationAssociatedInterfaces(). Created + used
+// on the main thread.
+blink::AssociatedInterfaceProvider* MakeBlobUrlNavAssociatedInterfaces();
 
 }  // namespace mb
 
