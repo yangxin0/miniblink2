@@ -5,8 +5,10 @@
 // TaskRunner), so Blink's [Sync] BlobRegistry.Register is serviced off-thread
 // (no main-thread deadlock) and Blob.ReadAll serves the stored bytes.
 //
-// Small blobs only for now: DataElementBytes carries embedded_data inline for
-// <=256 KB; larger blobs (BytesProvider) and blob: URL resolution are TODO (see
+// Both blob sizes and blob: URL resolution are supported: a DataElement arrives
+// inline (embedded_data, <=256 KB) or via a BytesProvider (>256 KB), and the
+// in-process MbBlobURLStore (below) resolves blob: URLs so createObjectURL + a
+// blob: fetch round-trips. Verified by mb_smoke cases 46/46b (see also
 // docs/design-blob-service-host.md).
 
 #ifndef MINIBLINK_HOST_BLOB_MB_BLOB_REGISTRY_H_

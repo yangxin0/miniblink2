@@ -1294,12 +1294,12 @@ int main() {
   // PublicURLManager::RegisterURL makes the [Sync] BlobURLStore.Register call on
   // a store bound through the frame's navigation-associated channel, which no
   // browser process services — so any page calling createObjectURL() used to
-  // deadlock the host forever (confirmed: mb_shot exit 137). The
-  // 0003-skip-blob-url-register patch skips that registration: createObjectURL
-  // returns a blob: URL without blocking (the URL won't resolve to data, but the
-  // host survives). Blob data ops (size/text/arrayBuffer/FileReader) were always
-  // fine. This calls createObjectURL DURING LOAD (the realistic hang path) and
-  // also revokes; a regression would hang the whole suite (watchdog catches it).
+  // deadlock the host forever (confirmed: mb_shot exit 137). Our in-process
+  // MbBlobURLStore now services that [Sync] Register off-thread, so
+  // createObjectURL returns a blob: URL without blocking AND the URL resolves to
+  // data (see case 46b). Blob data ops (size/text/arrayBuffer/FileReader) were
+  // always fine. This calls createObjectURL DURING LOAD (the realistic hang path)
+  // and also revokes; a regression would hang the whole suite (watchdog catches it).
   mbLoadHTML(v,
     "<body>blob<script>"
     "var b=new Blob(['hello'],{type:'text/plain'});"
@@ -1314,6 +1314,28 @@ int main() {
              Eval(v, "String(window.__isblob)") == "true" &&
              Eval(v, "String(window.__rev)") == "true",
          "URL.createObjectURL/revokeObjectURL no longer hang (blob: URL returned)");
+
+  // 46b. Blob: URL resolution actually SERVES the bytes — not merely "returns a
+  // blob: URL without hanging" (case 46). The in-process MbBlobURLStore
+  // (ResolveAsURLLoaderFactory) resolves blob: URLs, so createObjectURL + fetch
+  // round-trips the content for BOTH inline (<=256 KB) and BytesProvider (>256 KB)
+  // blobs. (This supersedes the old 0003-skip-blob-url-register behavior, where
+  // the URL did not resolve.) Async — the script signals window.__bd when done.
+  {
+    mbLoadHTML(v,
+      "<body><div id='r'>p</div><script>(async function(){try{"
+      "var s=await (await fetch(URL.createObjectURL(new Blob(['hi blob'])))).text();"
+      "var big='z'.repeat(300*1024);"   // > 256 KB inline cap -> BytesProvider path
+      "var t=await (await fetch(URL.createObjectURL(new Blob([big])))).text();"
+      "document.getElementById('r').textContent=(s==='hi blob'&&t===big)?'OK':'BAD';"
+      "}catch(e){document.getElementById('r').textContent='THREW:'+e.name;}"
+      "window.__bd=true;})();</script></body>", "about:blank");
+    const int ready = mbWaitForFunction(v, "window.__bd===true", 8000);
+    const std::string r = Eval(v, "document.getElementById('r').textContent");
+    Expect(ready == 1 && r == "OK",
+           "blob: URL fetch resolves bytes (inline + BytesProvider >256 KB)",
+           std::string("ready=") + std::to_string(ready) + " r=" + r);
+  }
 
   // 47. Web Crypto works. crypto.subtle.* used to SIGSEGV: SubtleCrypto derefs
   // Platform::Current()->Crypto() unconditionally, and base Platform returns
