@@ -301,5 +301,23 @@ fi
 run 40 "$URL" --out "$PNG"; check "bad-size guard exit code" "2" "$RC"
 checkc "bad-size guard message" "must be positive" "$(cat "$TMP/err")"
 
+# Opt-in network cases (MB_NET_TESTS=1): exercise the real-network request path
+# against public echo hosts. Skipped by default so the suite stays deterministic
+# and offline (build.sh runs it network-free). Each host is reachability-gated, so
+# a down host SKIPs (not fails). curl gates the reachability probe.
+if [ -n "${MB_NET_TESTS:-}" ] && command -v curl >/dev/null 2>&1; then
+  netok() { curl -s -o /dev/null --max-time 8 "$1" 2>/dev/null; }
+  if netok "https://example.com/"; then
+    run 60 "https://example.com/" "$PNG" --title
+    check "net: example.com loads (--title)" "Example Domain" "$(cat "$TMP/out")"
+  else echo "  [SKIP] net: example.com unreachable"; fi
+  if netok "https://httpbin.org/get"; then
+    run 60 "https://httpbin.org/headers" "$PNG" --header "X-Mb-Test: hello42" --text
+    checkc "net: --header reaches the server (httpbin echo)" "hello42" "$(cat "$TMP/out")"
+    run 60 "https://httpbin.org/post" "$PNG" --post "field=val99" --text
+    checkc "net: --post body reaches the server (httpbin echo)" "val99" "$(cat "$TMP/out")"
+  else echo "  [SKIP] net: httpbin unreachable"; fi
+fi
+
 echo "mb_shot_smoke: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

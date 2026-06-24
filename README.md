@@ -456,4 +456,6 @@ bad-size guard, the capture modes (PNG dimensions for default/`--scale`/`--clip`
 `--selector`, and `.jpg`/`.pdf` output formats read from the file header), and an
 end-to-end `fill`→`click`→`wait-selector`→`eval` integration flow (the canonical
 scrape, extracting result rows as JSON) — coverage the C++ suites can't give the
-command-line tool itself.
+command-line tool itself. It runs 62 deterministic offline cases by default;
+`MB_NET_TESTS=1` adds reachability-gated live-network cases (loading `example.com`,
+and `--header`/`--post` echoed by httpbin).
