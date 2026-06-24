@@ -1817,7 +1817,10 @@ bool MbWebView::SavePngRect(const char* path, int x, int y, int w, int h) {
 }
 
 bool MbWebView::SavePdf(const char* path) {
-  if (!main_frame_ || !widget_ || !widget_->widget())
+  // !path: defense-in-depth — base::FilePath(nullptr) would be UB. The C-ABI
+  // mbSavePdf already rejects null, so this guards direct host-side callers too,
+  // matching EncodeBitmapToPath / SaveElementPng.
+  if (!path || !main_frame_ || !widget_ || !widget_->widget())
     return false;
   // Settle the document, then drive Blink's print path into a Skia PDF document.
   for (int round = 0; round < 5; ++round) {

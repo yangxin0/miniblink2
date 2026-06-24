@@ -3237,6 +3237,40 @@ int main() {
                " objType=" + obj_type + " objVals=" + obj_vals);
   }
 
+  {
+    // case 51: null-argument robustness. A C ABI must not crash when a caller
+    // passes a null string pointer — it should return the documented failure
+    // value. Reaching the Expect at all proves no function crashed (a null
+    // deref would abort the process before we get there). Probes a spread
+    // across categories: selector getters (-1), action setters (0), eval (0),
+    // file save (0), and void sinks (no return, just must not crash).
+    char nb[16] = {0};
+    int rect_x = 0, rect_y = 0, rect_w = 0, rect_h = 0;
+    const bool getters_safe =
+        mbGetTextForSelector(v, nullptr, nb, sizeof(nb)) == -1 &&
+        mbGetValueForSelector(v, nullptr, nb, sizeof(nb)) == -1 &&
+        mbGetAttribute(v, nullptr, nullptr, nb, sizeof(nb)) == -1 &&
+        mbGetCheckedForSelector(v, nullptr) == -1 &&
+        mbIsVisibleForSelector(v, nullptr) == -1 &&
+        mbGetElementRect(v, nullptr, &rect_x, &rect_y, &rect_w, &rect_h) == 0;
+    const bool actions_safe =
+        mbClickSelector(v, nullptr) == 0 &&
+        mbFillSelector(v, nullptr, "x") == 0 &&
+        mbSelectOption(v, nullptr, nullptr) == 0 &&
+        mbSetAttribute(v, nullptr, nullptr, nullptr) == 0 &&
+        mbEvalJS(v, nullptr, nb, sizeof(nb)) == 0 &&
+        mbSavePdf(v, nullptr) == 0;
+    // void sinks: no return value — the test is simply that these don't crash.
+    mbLoadURL(v, nullptr);
+    mbSetCookie(v, nullptr, nullptr);
+    mbSendKey(v, nullptr);
+    mbSendText(v, nullptr);
+    Expect(getters_safe && actions_safe,
+           "C ABI is null-arg safe (no crash; documented failure returns)",
+           std::string("getters=") + (getters_safe ? "ok" : "BAD") +
+               " actions=" + (actions_safe ? "ok" : "BAD"));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
