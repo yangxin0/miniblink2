@@ -1176,6 +1176,20 @@ int main() {
     check(ok, "wkeFireTouchTap fires touchstart+touchend (touches[0].clientX==60)");
   }
 
+  // wkeFireTouchSwipe drives touchmove ending at the swipe end x.
+  {
+    wkeLoadHTML(wv,
+        "<body style='margin:0'><div id='s' style='width:300px;height:100px'></div>"
+        "<script>window.__mx=-1;window.__se=0;var s=document.getElementById('s');"
+        "s.addEventListener('touchmove',function(e){if(e.touches[0])"
+        "window.__mx=Math.round(e.touches[0].clientX);});"
+        "s.addEventListener('touchend',function(){window.__se=1;});</script></body>");
+    wkeFireTouchSwipe(wv, 40, 50, 220, 50);
+    const bool ok = jsToInt(es, wkeRunJS(wv, "window.__mx")) == 220 &&
+                    jsToInt(es, wkeRunJS(wv, "window.__se")) == 1;
+    check(ok, "wkeFireTouchSwipe drives touchmove to the end x (220)");
+  }
+
   // wkeGetValueForSelector reads a control's LIVE .value (post-typing/selection),
   // which differs from the static "value" attribute that wkeGetAttribute reads.
   {

@@ -276,6 +276,31 @@ int main() {
                Eval(v, "String(window.__tx)") + " end=" + (end ? "1" : "0"));
   }
 
+  // 12d. mbSendTouchSwipe drives touchmove: a handler sees the moves and the final
+  // touches[0].clientX equals the swipe end x.
+  {
+    mbLoadHTML(v,
+        "<body style='margin:0'><div id='s' style='width:300px;height:100px'></div>"
+        "<script>window.__mv=0;window.__mx=-1;window.__se=0;"
+        "var s=document.getElementById('s');"
+        "s.addEventListener('touchmove',function(e){window.__mv++;"
+        "if(e.touches[0])window.__mx=Math.round(e.touches[0].clientX);});"
+        "s.addEventListener('touchend',function(){window.__se=1;});"
+        "</script></body>", "about:blank");
+    {
+      std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+      mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // layout for hit-testing
+    }
+    mbSendTouchSwipe(v, 50, 50, 200, 50);
+    const bool moved = Eval(v, "String(window.__mv>0)") == "true";
+    const bool endx = Eval(v, "String(window.__mx)") == "200";
+    const bool ended = Eval(v, "String(window.__se)") == "1";
+    Expect(moved && endx && ended,
+           "mbSendTouchSwipe fires touchmoves ending at the swipe end x",
+           std::string("moved=") + (moved ? "1" : "0") + " endx=" +
+               Eval(v, "String(window.__mx)") + " end=" + (ended ? "1" : "0"));
+  }
+
   // 13. Body with an embedded NUL byte must not truncate the document (the host
   // used to commit body.c_str(), losing everything after the first NUL). Load via
   // file:// (the length-preserving path) and verify content AFTER the NUL parsed.

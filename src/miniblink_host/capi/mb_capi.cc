@@ -138,6 +138,11 @@ void mbSendTouchTap(mbView* v, int x, int y) {
     v->impl->SendTouchTap(x, y);
 }
 
+void mbSendTouchSwipe(mbView* v, int x1, int y1, int x2, int y2) {
+  if (v && v->impl)
+    v->impl->SendTouchSwipe(x1, y1, x2, y2);
+}
+
 int mbClickSelector(mbView* v, const char* css_selector) {
   if (!v || !v->impl || !css_selector)
     return 0;

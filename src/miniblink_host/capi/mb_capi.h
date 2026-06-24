@@ -119,6 +119,11 @@ MB_EXPORT void mbSendMouseUp(mbView*, int x, int y);
 // populated touches[0].clientX/Y. Touch events are enabled in the engine.
 MB_EXPORT void mbSendTouchTap(mbView*, int x, int y);
 
+// One-finger touch swipe from (x1,y1) to (x2,y2): touchstart + interpolated
+// touchmoves + touchend — touch scroll / swipe gestures (carousels, pull-to-
+// refresh, mobile drawers). Like a mouse drag but for touch handlers.
+MB_EXPORT void mbSendTouchSwipe(mbView*, int x1, int y1, int x2, int y2);
+
 // Click the center of the first element matching `css_selector` (Puppeteer-style
 // page.click). Resolves the element's box in the page then clicks its center.
 // Returns 1 on success, 0 if nothing matches or the element has no box

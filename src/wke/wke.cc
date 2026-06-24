@@ -1328,6 +1328,15 @@ bool wkeFireTouchTap(wkeWebView webView, int x, int y) {
   return true;
 }
 
+bool wkeFireTouchSwipe(wkeWebView webView, int x1, int y1, int x2, int y2) {
+  // One-finger swipe (x1,y1)->(x2,y2) — touch scroll/swipe gestures. (Port ext.)
+  if (!webView || !webView->view)
+    return false;
+  mbSendTouchSwipe(webView->view, x1, y1, x2, y2);
+  mbWait(webView->view, 20);
+  return true;
+}
+
 bool wkeFireKeyDownEvent(wkeWebView webView, unsigned int virtualKeyCode,
                          unsigned int /*flags*/, bool /*systemKey*/) {
   if (!webView || !webView->view)

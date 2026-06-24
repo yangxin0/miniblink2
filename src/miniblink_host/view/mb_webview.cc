@@ -347,6 +347,29 @@ void MbWebView::SendTouchTap(int x, int y) {
   EvalToString(js.c_str());
 }
 
+void MbWebView::SendTouchSwipe(int x1, int y1, int x2, int y2) {
+  // A one-finger swipe: touchstart at (x1,y1), interpolated touchmoves, touchend
+  // at (x2,y2) — drives touch scroll / swipe gestures (carousels, pull-to-refresh).
+  // Synthetic, like SendTouchTap; the moves stay on the start element (touch
+  // capture). No-op if no element is under the start point.
+  const std::string sx1 = std::to_string(x1), sy1 = std::to_string(y1);
+  const std::string sx2 = std::to_string(x2), sy2 = std::to_string(y2);
+  std::string js =
+      "(function(){try{var e=document.elementFromPoint(" + sx1 + "," + sy1 +
+      ");if(!e)return;"
+      "function T(cx,cy){return new Touch({identifier:0,target:e,clientX:cx,"
+      "clientY:cy,pageX:cx,pageY:cy,screenX:cx,screenY:cy});}"
+      "function D(type,cx,cy,active){var t=T(cx,cy);e.dispatchEvent(new TouchEvent("
+      "type,{bubbles:true,cancelable:true,touches:active?[t]:[],"
+      "targetTouches:active?[t]:[],changedTouches:[t]}));}"
+      "var x1=" + sx1 + ",y1=" + sy1 + ",x2=" + sx2 + ",y2=" + sy2 + ";"
+      "D('touchstart',x1,y1,true);"
+      "for(var i=1;i<=6;i++)D('touchmove',Math.round(x1+(x2-x1)*i/6),"
+      "Math.round(y1+(y2-y1)*i/6),true);"
+      "D('touchend',x2,y2,false);}catch(err){}})()";
+  EvalToString(js.c_str());
+}
+
 void MbWebView::SendMouseUp(int x, int y) {
   if (widget_)
     widget_->SendMouseUp(x, y);

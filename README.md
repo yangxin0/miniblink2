@@ -213,7 +213,7 @@ See `docs/interface-surface.md` for the exact minimal Blink embedding surface, a
 
 ## Public C ABI (`src/miniblink_host/capi/mb_capi.h`)
 
-106 functions; the header has the full, commented signatures. The canonical flow —
+107 functions; the header has the full, commented signatures. The canonical flow —
 boot, render, read back, screenshot, shut down:
 
 ```c
@@ -256,7 +256,7 @@ Grouped overview (see `mb_capi.h` for the exact signatures):
   (`.checked`) `mbIsVisibleForSelector` `mbGetComputedStyle` `mbCountSelector`
   `mbGetElementRect` `mbGetContentSize`
 - **Input:** `mbSendMouseClick` `mbSendMouseDown`/`mbSendMouseUp` (drag)
-  `mbSendMouseMove` `mbSendTouchTap` (touch) `mbSendText` `mbSendKey`
+  `mbSendMouseMove` `mbSendTouchTap`/`mbSendTouchSwipe` (touch) `mbSendText` `mbSendKey`
   `mbSendScroll` `mbScrollTo` `mbScrollToBottom` (auto-scroll to load lazy content);
   by selector `mbClickSelector`
   `mbDoubleClickSelector` `mbRightClickSelector` `mbHoverSelector`
