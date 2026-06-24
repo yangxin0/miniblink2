@@ -157,6 +157,12 @@ check "--wait-eval blocks until truthy" "true" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --wait-selector "#never-appears" --wait-ms 300
 check "--wait-selector timeout exit 0" "0" "$RC"
 checkc "--wait-selector timeout warns" "never appeared" "$(cat "$TMP/err")"
+# --wait-visible / --wait-hidden timeout paths (warn-only): a never-visible element,
+# and an always-visible element that never hides.
+run 40 "$URL" "$PNG" --wait-visible "#never-vis" --wait-ms 300
+checkc "--wait-visible timeout warns" "never became visible" "$(cat "$TMP/err")"
+run 40 "$URL" "$PNG" --wait-hidden "#msg" --wait-ms 300
+checkc "--wait-hidden timeout warns" "still visible at timeout" "$(cat "$TMP/err")"
 
 # --scroll-to-selector: bring a below-fold element into view before extract (scrollY>0)
 TALL2="$TMP/tall2.html"
@@ -249,6 +255,10 @@ open(sys.argv[1],"wb").write(png)' "$TMP/pic.png"
   check "--no-images skips file:// image fetch" "0" "$(cat "$TMP/out")"
   run 40 "file://$TMP/fimg.html" "$TMP/o.png" --eval "String(document.getElementById('im').naturalWidth)"
   check "(control) image loads without --no-images" "2" "$(cat "$TMP/out")"
+  # --block: a URL substring match drops the matching subresource (vs --no-images,
+  # which drops all). Blocking "pic.png" leaves the <img> unloaded (naturalWidth 0).
+  run 40 "file://$TMP/fimg.html" "$TMP/o.png" --block "pic.png" --eval "String(document.getElementById('im').naturalWidth)"
+  check "--block drops the matching subresource" "0" "$(cat "$TMP/out")"
 else
   echo "  [SKIP] capture-mode dimension/format checks (no python3)"
 fi
