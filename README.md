@@ -63,7 +63,7 @@ mb_shot \
   # prepare the view
   [--css STYLES] [--auto-scroll] [--scroll-to Y] [--scroll-to-selector CSS] \
   # extract (to stdout)
-  [--title] [--url] [--text] [--html] [--eval JS] [--value CSS] [--checked CSS] [--count CSS] [--visible CSS] \
+  [--title] [--url] [--cookies URL] [--text] [--html] [--eval JS] [--value CSS] [--checked CSS] [--count CSS] [--visible CSS] \
   [--rect CSS] [--style CSS PROP] [--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] \
   [--requests] [--console] [--headers] \
   # capture
@@ -125,7 +125,10 @@ stderr — useful for debugging a page or scripting against its logs. `--headers
 server's HTTP response headers (Content-Type, caching, custom/API headers) to stderr.
 
 `--title` prints `document.title` and `--url` prints the current document URL (the
-landing URL after any redirects) to stdout — the basic page-metadata fields. `--text`
+landing URL after any redirects) to stdout — the basic page-metadata fields. `--cookies
+URL` prints the jar's cookies for that origin (`name=value; name2=value2`) — the
+inspection peer of `--set-cookie`/`--save-cookies`, e.g. read a session token after a
+login flow. `--text`
 prints the page's visible text (post-JS `document.body.innerText`) to stdout, so
 `mb_shot` doubles as a simple scraper/text extractor. `--html` prints the rendered
 (post-JS) DOM as serialized HTML — useful for SPAs whose fetched source is near-empty.

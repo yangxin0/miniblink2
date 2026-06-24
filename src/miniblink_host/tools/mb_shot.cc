@@ -53,6 +53,7 @@ int main(int argc, char** argv) {
   bool print_html = false;
   bool print_title = false;     // print document.title to stdout
   bool print_url = false;       // print the current document URL (post-redirect)
+  std::string cookies_url;      // print the jar's cookies for this origin to stdout
   bool print_requests = false;  // dump the subresource request log to stdout
   bool wait_idle = false;       // wait for network idle before capture (networkidle)
   bool auto_scroll = false;     // scroll through the page to load lazy content
@@ -190,6 +191,8 @@ int main(int argc, char** argv) {
       print_title = true;
     } else if (a == "--url") {
       print_url = true;
+    } else if (a == "--cookies" && i + 1 < argc) {
+      cookies_url = argv[++i];
     } else if (a == "--requests") {
       print_requests = true;
     } else if (a == "--auto-scroll") {
@@ -220,7 +223,7 @@ int main(int argc, char** argv) {
     std::fprintf(
         stderr,
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
-        "[--transparent] [--title] [--url] [--text] [--html] [--requests] [--eval JS] [--value CSS] "
+        "[--transparent] [--title] [--url] [--cookies URL] [--text] [--html] [--requests] [--eval JS] [--value CSS] "
         "[--checked CSS] [--count CSS] [--visible CSS] [--rect CSS] [--style CSS PROP] "
         "[--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
@@ -481,6 +484,19 @@ int main(int argc, char** argv) {
     char ubuf[4096] = {0};
     mbGetURL(view, ubuf, sizeof(ubuf));
     std::fwrite(ubuf, 1, std::strlen(ubuf), stdout);
+    std::fputc('\n', stdout);
+  }
+
+  // --cookies URL: print the jar's cookies for URL's origin ("name=value;
+  // name2=value2", request-header form) to stdout — the inspection peer of
+  // --set-cookie/--save-cookies, e.g. read a session token after a login flow.
+  // An explicit origin (vs the current page) so it works regardless of how the
+  // page loaded; empty for a non-http(s) URL or an origin with no cookies.
+  if (!cookies_url.empty()) {
+    std::vector<char> cbuf(1 << 16, 0);  // 64 KiB
+    mbGetCookies(view, cookies_url.c_str(), cbuf.data(),
+                 static_cast<int>(cbuf.size()));
+    std::fwrite(cbuf.data(), 1, std::strlen(cbuf.data()), stdout);
     std::fputc('\n', stdout);
   }
 
