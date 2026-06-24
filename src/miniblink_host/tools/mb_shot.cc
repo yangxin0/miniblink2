@@ -333,6 +333,15 @@ int main(int argc, char** argv) {
     // A local HTML file path: read it and commit (base URL = its file:// dir so that
     // relative subresources resolve through the loader).
     std::ifstream f(input, std::ios::binary);
+    if (!f.is_open()) {
+      // A missing/unreadable input file must fail, not silently commit empty HTML
+      // and "succeed" with a blank PNG (a typo'd path is the common case). An
+      // empty-but-existing file still opens, so it stays valid (renders blank).
+      std::fprintf(stderr, "mb_shot: cannot open input file '%s'\n", input.c_str());
+      mbDestroyView(view);
+      mbShutdown();
+      return 1;
+    }
     std::stringstream ss;
     ss << f.rdbuf();
     const std::string base = "file://" + input;

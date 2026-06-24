@@ -122,6 +122,10 @@ check "integration: fill->click->wait->extract JSON" '["apple-1","apple-2","appl
 run 40 "$URL" "$PNG" --require "#msg";          check "--require present -> exit 0" "0" "$RC"
 run 40 "$URL" "$PNG" --require ".nonexistent";  check "--require absent -> exit 3" "3" "$RC"
 
+# a missing local input file must fail (exit 1), not silently emit a blank PNG
+run 40 "$TMP/does-not-exist.html" "$PNG"; check "missing input file -> exit 1" "1" "$RC"
+checkc "missing input file message" "cannot open input file" "$(cat "$TMP/err")"
+
 # bad-size guard: a non-numeric width positional must fail fast (exit 2), not crash
 run 40 "$URL" --out "$PNG"; check "bad-size guard exit code" "2" "$RC"
 checkc "bad-size guard message" "must be positive" "$(cat "$TMP/err")"
