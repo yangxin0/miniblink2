@@ -29,6 +29,12 @@ void OnBridge(wkeWebView, void*, const utf8* channel, const utf8* message) {
   std::snprintf(g_bridge_message, sizeof(g_bridge_message), "%s",
                 message ? message : "");
 }
+
+// A native C function the page can call synchronously as window.hostDouble(n):
+// doubles its (numeric) argument and returns a real JS number.
+jsValue HostDouble(jsExecState es, void* /*param*/) {
+  return jsInt(2 * jsToInt(es, jsArg(es, 0)));
+}
 }  // namespace
 
 int main() {
@@ -39,6 +45,8 @@ int main() {
   // Let the page signal us: window.mbBridge calls reach OnBridge. Register before
   // loading so the bridge is installed in the document.
   wkeOnJsBridge(wv, OnBridge, nullptr);
+  // Expose a native C function to the page as window.hostDouble(n).
+  wkeJsBindFunction(wv, "hostDouble", HostDouble, nullptr);
 
   // A tiny form: clicking #go signals the host via window.mbBridge, then appends
   // a styled #out result after a 30ms timer — mimicking an async (SPA-like)
@@ -85,6 +93,12 @@ int main() {
   const char* color = wkeGetComputedStyle(wv, "#out", "color");
   step(std::strcmp(color, "rgb(0, 128, 0)") == 0, "read #out computed color");
   std::printf("       #out color = %s\n", color);
+
+  // 3b. The page can call our native C function synchronously and get a real
+  //     number back (window.hostDouble(21) -> 42, usable in arithmetic).
+  step(jsToInt(es, wkeRunJS(wv, "window.hostDouble(21)")) == 42 &&
+           jsToInt(es, wkeRunJS(wv, "window.hostDouble(21) + 1")) == 43,
+       "native binding: window.hostDouble(21) returns 42 (typed)");
 
   // 4. A couple of read-side helpers an app commonly uses.
   step(wkeCountSelector(wv, "option") == 2, "count <option> elements (2)");
