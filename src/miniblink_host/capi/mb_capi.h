@@ -353,6 +353,12 @@ MB_EXPORT int mbSetLocalStorage(mbView*, const char* key, const char* value);
 MB_EXPORT int mbGetSessionStorage(mbView*, const char* key, char* out, int out_cap);
 MB_EXPORT int mbSetSessionStorage(mbView*, const char* key, const char* value);
 
+// Empty both Web Storage areas (localStorage + sessionStorage) for the current
+// document's origin — reset app state between scrapes, or simulate a logout.
+// Best-effort. The cookie-jar peer is mbClearCookies; together they reset a
+// login session.
+MB_EXPORT void mbClearStorage(mbView*);
+
 // Write the committed main document's URL (the final URL after any redirects)
 // into `out` (NUL-terminated, up to out_cap). Returns the full length in bytes.
 MB_EXPORT int mbGetURL(mbView*, char* out, int out_cap);

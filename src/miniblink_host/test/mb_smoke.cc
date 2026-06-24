@@ -2806,6 +2806,14 @@ int main() {
            "mbGet/SetSessionStorage share sessionStorage, separate from localStorage",
            std::string("set=") + (ss_set ? "1" : "0") + " read=" +
                (ss_read ? "1" : "0") + " distinct=" + (distinct ? "1" : "0"));
+
+    // mbClearStorage empties BOTH stores (local has 'auth'/'pref', session 'sk').
+    mbClearStorage(v);
+    const bool cleared = Eval(v, "String(localStorage.length)") == "0" &&
+                         Eval(v, "String(sessionStorage.length)") == "0";
+    Expect(cleared, "mbClearStorage empties localStorage + sessionStorage",
+           std::string("local=") + Eval(v, "String(localStorage.length)") +
+               " session=" + Eval(v, "String(sessionStorage.length)"));
   }
 
   // 102b5. mbInsertCSS appends a <style> that actually applies: a rule hiding #x

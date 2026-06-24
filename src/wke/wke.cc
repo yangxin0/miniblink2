@@ -1137,6 +1137,12 @@ bool wkeSetSessionStorage(wkeWebView webView, const utf8* key, const utf8* value
          mbSetSessionStorage(webView->view, key, value) != 0;
 }
 
+void wkeClearStorage(wkeWebView webView) {
+  // Empty localStorage + sessionStorage for the origin (reset/logout). (Port ext.)
+  if (webView && webView->view)
+    mbClearStorage(webView->view);
+}
+
 const utf8* wkeGetRequestLog(wkeWebView webView) {
   // Process-wide subresource request log (newline-separated). Owned by the view
   // until the next call. (Port extension; the log itself is process-wide.)

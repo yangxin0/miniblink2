@@ -169,6 +169,14 @@ int main() {
     check(ss_set && ss_read && distinct,
           "wkeGet/SetSessionStorage share sessionStorage, separate from localStorage");
 
+    // wkeClearStorage empties BOTH stores for the origin (we just set 'auth'/'pref'
+    // in local and 'sk' in session above).
+    wkeClearStorage(wv);
+    const bool cleared =
+        jsToInt(es, wkeRunJS(wv, "localStorage.length")) == 0 &&
+        jsToInt(es, wkeRunJS(wv, "sessionStorage.length")) == 0;
+    check(cleared, "wkeClearStorage empties localStorage + sessionStorage");
+
     wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore for later cases
   }
 

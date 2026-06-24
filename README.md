@@ -213,7 +213,7 @@ See `docs/interface-surface.md` for the exact minimal Blink embedding surface, a
 
 ## Public C ABI (`src/miniblink_host/capi/mb_capi.h`)
 
-107 functions; the header has the full, commented signatures. The canonical flow —
+108 functions; the header has the full, commented signatures. The canonical flow —
 boot, render, read back, screenshot, shut down:
 
 ```c
@@ -269,7 +269,7 @@ Grouped overview (see `mb_capi.h` for the exact signatures):
 - **Cookies / session:** `mbGetCookies` `mbGetAllCookies` (whole jar)
   `mbSetCookie` `mbClearCookies` `mbSaveCookies`/`mbLoadCookies` (file jar)
   `mbGetLocalStorage`/`mbSetLocalStorage` `mbGetSessionStorage`/`mbSetSessionStorage`
-  (origin-scoped Web Storage, for auth/state injection)
+  `mbClearStorage` (origin-scoped Web Storage — auth/state injection + reset)
 - **Network config:** `mbSetProxy` `mbSetIgnoreCertErrors` `mbSetFollowRedirects`
   `mbSetExtraHeaders` `mbSetUserAgent` `mbGetUserAgent` `mbSetLoadImages`
   `mbGetRequestLog`/`mbClearRequestLog` (subresource fetch log)

@@ -218,6 +218,9 @@ class MbWebView {
   // persisted). Get false if absent/unavailable; Set false on error.
   bool GetSessionStorage(const char* key, std::string* out);
   bool SetSessionStorage(const char* key, const char* value);
+  // Empty both Web Storage areas (localStorage + sessionStorage) for the
+  // document's origin — reset state between scrapes / a logout. Best-effort.
+  void ClearStorage();
   // The first match's LIVE .value property (what an <input>/<textarea>/<select>
   // currently holds after typing or selection) — distinct from GetAttribute,
   // which reads the static "value" HTML attribute (the initial value). Returns

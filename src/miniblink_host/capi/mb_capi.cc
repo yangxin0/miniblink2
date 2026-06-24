@@ -448,6 +448,11 @@ int mbSetSessionStorage(mbView* v, const char* key, const char* value) {
   return v->impl->SetSessionStorage(key, value) ? 1 : 0;
 }
 
+void mbClearStorage(mbView* v) {
+  if (v && v->impl)
+    v->impl->ClearStorage();
+}
+
 int mbDrainConsole(mbView* v, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;

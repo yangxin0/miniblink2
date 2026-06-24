@@ -63,7 +63,7 @@ the deliverable surface (C API, CLI, wke layer).
   blob: URLs (`fetch` + `<img>`), Intersection/Resize/Mutation observers, WAAPI,
   forms + submit-navigation, mouse/keyboard input, host-side history. CJK/i18n +
   system web fonts render.
-- **`mb_capi` C API — 107 functions:** lifecycle, load, JS eval, scraping
+- **`mb_capi` C API — 108 functions:** lifecycle, load, JS eval, scraping
   (text/attr/computed-style/count by selector), input (mouse/key/text/scroll +
   click/fill/select/focus/hover/scroll-into-view by selector), screenshots
   (PNG/JPEG/PDF, file + in-memory `mbEncodePng`), cookies (+ jar save/load),
@@ -107,7 +107,7 @@ the deliverable surface (C API, CLI, wke layer).
   `wkeSetUserKeyValue`/`wkeGetUserKeyValue`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **159/159** (default, network-free), `wke_smoke` **98/98**,
+- **Tests:** `mb_smoke` **160/160** (default, network-free), `wke_smoke` **99/99**,
   deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com/badssl
   cases (wke_smoke up to 65; use a generous watchdog ≥180s — cumulative loads +
   the 15s failing-proxy connect; cases SKIP when a host is unreachable).
@@ -125,6 +125,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- capi+wke: mbClearStorage / wkeClearStorage — reset Web Storage (2026-06-25). Completes the storage surface (get/set local+session, now clear): empties BOTH localStorage and sessionStorage for the document origin — test isolation between scrapes, or a logout. Best-effort per store (opaque-origin throw ignored); the cookie-jar peer mbClearCookies + this = a full session reset. Safe eval-based (no native-API risk). VERIFIED in both suites: after setting local 'auth'/'pref' + session 'sk', mbClearStorage -> localStorage.length==0 && sessionStorage.length==0. wke_smoke 99/99, mb_smoke 160/160, no survivors. ABI now 108 fns.
 - maint: trim the Recent log into the archive (2026-06-25). PROGRESS.md had grown to 93KB / 164 log entries — loaded into context every iteration. Moved the 122 oldest recent-log entries (the bulk of the 2026-06-24 per-tick log) into docs/progress-archive-2026-06.md under a dated "archived 2026-06-25" header, keeping the ~20 newest + the "earlier:" rollup here. Conservation checked (21 kept + 122 moved = 143; spot-checked a moved entry is in the archive and gone from here). PROGRESS.md now 24KB. Docs-only — no code, suites unchanged (mb_smoke 159/159, wke_smoke 98/98).
 - capi+wke: mbSendTouchSwipe / wkeFireTouchSwipe — touch swipe gesture (2026-06-25). Completes touch input (tap + swipe): touchstart + 6 interpolated touchmoves + touchend, same synthetic-TouchEvent approach as the tap (the moves stay on the start element via touch capture). Drives touch scroll / swipe (carousels, pull-to-refresh, mobile drawers) — distinct from mouse drag (touch handlers != mouse handlers). VERIFIED in both suites: a touchmove handler sees the moves and the final touches[0].clientX == the swipe end x (mb 200 / wke 220), touchend fires. wke_smoke 98/98, mb_smoke 159/159, no survivors. ABI now 107 fns.
 - capi+wke: mbSendTouchTap / wkeFireTouchTap — touch input (2026-06-25). A distinct capability (mobile/touch-only handlers, which mouse events don't reach; mbDispatchEvent can't shape a TouchEvent with touch-point coords). First probed that the engine supports touch (TouchEvent type, ontouchstart in window, JS-dispatched touch fires). Tried a native WebTouchEvent via the widget's HandleInputEvent -> SIGABRT: WebFrameWidgetImpl DCHECKs !IsTouchEventType (Blink routes real touch through an async touch queue the offscreen widget doesn't wire). Reverted that and reimplemented in MbWebView via a correctly-shaped synthetic TouchEvent (elementFromPoint -> new Touch -> dispatch touchstart[touches:[t]]+touchend[changedTouches:[t]]). VERIFIED in both suites: a touch-only handler fires and reads touches[0].clientX == the tap x (mb 50, wke 60), touchend fires. wke_smoke 97/97, mb_smoke 158/158, no survivors. ABI now 106 fns. (Synthetic, not native input — documented; native touch needs the full touch-event pipeline.)

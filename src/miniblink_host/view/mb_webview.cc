@@ -915,6 +915,16 @@ bool MbWebView::SetSessionStorage(const char* key, const char* value) {
   return EvalToString(js.c_str()) == "1";
 }
 
+void MbWebView::ClearStorage() {
+  // Empty both Web Storage areas for the document's origin (localStorage +
+  // sessionStorage) — reset state between scrapes, or a logout. Best-effort per
+  // store (an opaque origin throws and is ignored). The cookie-jar peer is
+  // mbClearCookies; together they reset a login session.
+  EvalToString(
+      "(function(){try{localStorage.clear();}catch(e){}"
+      "try{sessionStorage.clear();}catch(e){}})()");
+}
+
 bool MbWebView::SetAttribute(const char* css_selector, const char* attr,
                              const char* value) {
   if (!css_selector || !attr)
