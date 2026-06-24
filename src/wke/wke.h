@@ -334,6 +334,10 @@ WKE_API void wkeSetCookie(wkeWebView webView, const utf8* url,
 WKE_API const utf8* wkeGetLocalStorage(wkeWebView webView, const utf8* key);
 WKE_API bool wkeSetLocalStorage(wkeWebView webView, const utf8* key,
                                 const utf8* value);
+// sessionStorage peer (per-session, not persisted). Same contract.
+WKE_API const utf8* wkeGetSessionStorage(wkeWebView webView, const utf8* key);
+WKE_API bool wkeSetSessionStorage(wkeWebView webView, const utf8* key,
+                                  const utf8* value);
 // Set the cookie jar file path (Flush/Reload persist to/from it). This port
 // takes a utf8 path rather than the Windows wke WCHAR. The path is process-wide
 // (the jar is shared); the webView arg is accepted for signature compatibility.

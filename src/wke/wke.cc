@@ -58,6 +58,7 @@ struct _tagWkeWebView {
   std::string selector_alltext_cache;  // backs wkeGetAllTextForSelector's return
   std::string selector_allattr_cache;  // backs wkeGetAllAttributeForSelector's return
   std::string local_storage_cache;  // backs wkeGetLocalStorage's return
+  std::string session_storage_cache;  // backs wkeGetSessionStorage's return
   std::string selector_attr_cache;  // backs wkeGetAttribute's return
   std::string selector_value_cache; // backs wkeGetValueForSelector's return
   std::string computed_style_cache;  // backs wkeGetComputedStyle's return
@@ -1016,6 +1017,31 @@ bool wkeSetLocalStorage(wkeWebView webView, const utf8* key, const utf8* value) 
   // localStorage.setItem(key, value) for the document's origin; true on success.
   return webView && webView->view && key &&
          mbSetLocalStorage(webView->view, key, value) != 0;
+}
+
+const utf8* wkeGetSessionStorage(wkeWebView webView, const utf8* key) {
+  // sessionStorage.getItem(key) ("" if absent / unavailable). Owned by the view
+  // until the next call. (Port extension.)
+  if (!webView || !webView->view || !key) {
+    if (webView)
+      webView->session_storage_cache.clear();
+    return webView ? webView->session_storage_cache.c_str() : "";
+  }
+  const int len = mbGetSessionStorage(webView->view, key, nullptr, 0);
+  if (len < 0) {
+    webView->session_storage_cache.clear();
+    return webView->session_storage_cache.c_str();
+  }
+  std::vector<char> buf(static_cast<size_t>(len) + 1, 0);
+  mbGetSessionStorage(webView->view, key, buf.data(), len + 1);
+  webView->session_storage_cache.assign(buf.data(), len);
+  return webView->session_storage_cache.c_str();
+}
+
+bool wkeSetSessionStorage(wkeWebView webView, const utf8* key, const utf8* value) {
+  // sessionStorage.setItem(key, value); true on success. (Port extension.)
+  return webView && webView->view && key &&
+         mbSetSessionStorage(webView->view, key, value) != 0;
 }
 
 void wkeSetCookie(wkeWebView webView, const utf8* url, const utf8* cookie) {

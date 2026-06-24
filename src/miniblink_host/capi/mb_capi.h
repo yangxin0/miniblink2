@@ -286,6 +286,11 @@ MB_EXPORT int mbLoadCookies(const char* path);
 MB_EXPORT int mbGetLocalStorage(mbView*, const char* key, char* out, int out_cap);
 MB_EXPORT int mbSetLocalStorage(mbView*, const char* key, const char* value);
 
+// sessionStorage peer of the above — identical contract, but the store is
+// per-session (not persisted across runs). Same origin requirement.
+MB_EXPORT int mbGetSessionStorage(mbView*, const char* key, char* out, int out_cap);
+MB_EXPORT int mbSetSessionStorage(mbView*, const char* key, const char* value);
+
 // Write the committed main document's URL (the final URL after any redirects)
 // into `out` (NUL-terminated, up to out_cap). Returns the full length in bytes.
 MB_EXPORT int mbGetURL(mbView*, char* out, int out_cap);

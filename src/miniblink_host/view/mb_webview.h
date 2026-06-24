@@ -183,6 +183,10 @@ class MbWebView {
   // real origin — commit with an http(s) base URL, not about:blank.
   bool GetLocalStorage(const char* key, std::string* out);
   bool SetLocalStorage(const char* key, const char* value);
+  // sessionStorage peer of the above — same semantics, but per-session (not
+  // persisted). Get false if absent/unavailable; Set false on error.
+  bool GetSessionStorage(const char* key, std::string* out);
+  bool SetSessionStorage(const char* key, const char* value);
   // The first match's LIVE .value property (what an <input>/<textarea>/<select>
   // currently holds after typing or selection) — distinct from GetAttribute,
   // which reads the static "value" HTML attribute (the initial value). Returns

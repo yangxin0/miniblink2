@@ -158,6 +158,17 @@ int main() {
     check(set_seen_by_js && js_read_by_c && absent,
           "wkeGetLocalStorage/wkeSetLocalStorage share the page's localStorage");
 
+    // sessionStorage works the same way and is a SEPARATE store from localStorage
+    // (a key set in session must not appear in local).
+    const bool ss_set =
+        wkeSetSessionStorage(wv, "sk", "sv") &&
+        std::strcmp(jsToTempString(es, wkeRunJS(wv, "sessionStorage.getItem('sk')")),
+                    "sv") == 0;
+    const bool ss_read = std::strcmp(wkeGetSessionStorage(wv, "sk"), "sv") == 0;
+    const bool distinct = std::strcmp(wkeGetLocalStorage(wv, "sk"), "") == 0;
+    check(ss_set && ss_read && distinct,
+          "wkeGet/SetSessionStorage share sessionStorage, separate from localStorage");
+
     wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore for later cases
   }
 

@@ -2455,6 +2455,19 @@ int main() {
            "mbGetLocalStorage/mbSetLocalStorage share the page's localStorage",
            std::string("set=") + (set_seen_by_js ? "1" : "0") + " read=" +
                (c_read ? "1" : "0") + " absent=" + (absent ? "1" : "0"));
+
+    // sessionStorage: same C<->JS sharing, and a SEPARATE store from localStorage.
+    const bool ss_set = mbSetSessionStorage(v, "sk", "sv") == 1 &&
+                        Eval(v, "sessionStorage.getItem('sk')") == "sv";
+    char ssb[32] = {0};
+    mbGetSessionStorage(v, "sk", ssb, sizeof(ssb));
+    const bool ss_read = std::string(ssb) == "sv";
+    // 'sk' lives in sessionStorage only -> absent from localStorage.
+    const bool distinct = mbGetLocalStorage(v, "sk", ssb, sizeof(ssb)) == -1;
+    Expect(ss_set && ss_read && distinct,
+           "mbGet/SetSessionStorage share sessionStorage, separate from localStorage",
+           std::string("set=") + (ss_set ? "1" : "0") + " read=" +
+               (ss_read ? "1" : "0") + " distinct=" + (distinct ? "1" : "0"));
   }
 
   // 102b5. mbInsertCSS appends a <style> that actually applies: a rule hiding #x

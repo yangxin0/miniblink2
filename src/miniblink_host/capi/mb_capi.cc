@@ -355,6 +355,28 @@ int mbSetLocalStorage(mbView* v, const char* key, const char* value) {
   return v->impl->SetLocalStorage(key, value) ? 1 : 0;
 }
 
+int mbGetSessionStorage(mbView* v, const char* key, char* out, int out_cap) {
+  if (!v || !v->impl || !key)
+    return -1;
+  std::string result;
+  if (!v->impl->GetSessionStorage(key, &result))
+    return -1;
+  if (out && out_cap > 0) {
+    int n = static_cast<int>(result.size());
+    int copy = n < out_cap - 1 ? n : out_cap - 1;
+    for (int i = 0; i < copy; ++i)
+      out[i] = result[i];
+    out[copy] = '\0';
+  }
+  return static_cast<int>(result.size());
+}
+
+int mbSetSessionStorage(mbView* v, const char* key, const char* value) {
+  if (!v || !v->impl || !key)
+    return 0;
+  return v->impl->SetSessionStorage(key, value) ? 1 : 0;
+}
+
 int mbDrainConsole(mbView* v, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;

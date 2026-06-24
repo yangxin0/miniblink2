@@ -733,6 +733,31 @@ bool MbWebView::SetLocalStorage(const char* key, const char* value) {
   return EvalToString(js.c_str()) == "1";
 }
 
+bool MbWebView::GetSessionStorage(const char* key, std::string* out) {
+  if (!key)
+    return false;
+  // sessionStorage.getItem(key) — same '1'-flag and origin caveats as
+  // GetLocalStorage, but the store is per-session (not persisted to disk).
+  std::string js = "(function(){try{var x=sessionStorage.getItem(\"" +
+                   JsEscape(key) + "\");if(x==null)return '';return '1'+x;}"
+                   "catch(e){return '';}})()";
+  std::string s = EvalToString(js.c_str());
+  if (s.empty())
+    return false;
+  if (out)
+    *out = s.substr(1);
+  return true;
+}
+
+bool MbWebView::SetSessionStorage(const char* key, const char* value) {
+  if (!key)
+    return false;
+  std::string js = "(function(){try{sessionStorage.setItem(\"" + JsEscape(key) +
+                   "\",\"" + JsEscape(value ? value : "") +
+                   "\");return '1';}catch(e){return '0';}})()";
+  return EvalToString(js.c_str()) == "1";
+}
+
 bool MbWebView::SetAttribute(const char* css_selector, const char* attr,
                              const char* value) {
   if (!css_selector || !attr)
