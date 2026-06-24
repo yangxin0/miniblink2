@@ -59,7 +59,7 @@ mb_shot \
   # interact
   [--fill CSS TEXT] [--click CSS] [--drag FROM TO] [--dispatch CSS EVT] [--press KEY] \
   # synchronize
-  [--wait-selector CSS] [--wait-visible CSS] [--wait-hidden CSS] [--wait-idle] [--wait-ms N] \
+  [--wait-selector CSS] [--wait-visible CSS] [--wait-hidden CSS] [--wait-eval JS] [--wait-idle] [--wait-ms N] \
   # prepare the view
   [--css STYLES] [--auto-scroll] [--scroll-to Y] [--scroll-to-selector CSS] \
   # extract (to stdout)
@@ -106,8 +106,11 @@ the interact phase, after `--fill`/`--click`.
 Beyond `--wait-selector`, the synchronization set covers the appear/disappear/quiet
 lifecycle: `--wait-visible CSS` waits until the element is actually shown (not just
 present — `display:none`/`opacity:0` don't count), `--wait-hidden CSS` waits until it
-goes away (the "spinner disappeared" signal), and `--wait-idle` waits until the page
-stops making network requests (Puppeteer's `networkidle`, for SPAs that lazy-fetch).
+goes away (the "spinner disappeared" signal), `--wait-eval JS` waits until an arbitrary
+JS expression is truthy (Puppeteer's `waitForFunction`, e.g. `window.appReady` or
+`items.length>10` — any condition a selector can't express), and `--wait-idle` waits
+until the page stops making network requests (Puppeteer's `networkidle`, for SPAs that
+lazy-fetch).
 `--css STYLES` injects a stylesheet (hide cookie banners / ads / sticky headers before
 a shot), `--auto-scroll` scrolls the page to trigger lazy-loaded / infinite-scroll
 content, and `--scroll-to-selector CSS` brings a specific element into the viewport

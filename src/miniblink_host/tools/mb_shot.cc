@@ -72,6 +72,7 @@ int main(int argc, char** argv) {
   std::string wait_selector;  // wait for this selector before capture
   std::string wait_visible;   // wait for this selector to be VISIBLE before capture
   std::string wait_hidden;    // wait for this selector to be GONE/HIDDEN before capture
+  std::string wait_eval;      // wait until this JS expression is truthy before capture
   std::string inject_css;      // inject this CSS (hide noise) before capture
   std::string click_selector;  // click this selector before capture
   std::string dispatch_sel;    // dispatch a DOM event on this selector...
@@ -125,6 +126,8 @@ int main(int argc, char** argv) {
       wait_visible = argv[++i];
     } else if (a == "--wait-hidden" && i + 1 < argc) {
       wait_hidden = argv[++i];
+    } else if (a == "--wait-eval" && i + 1 < argc) {
+      wait_eval = argv[++i];
     } else if (a == "--wait-idle") {
       wait_idle = true;
     } else if (a == "--css" && i + 1 < argc) {
@@ -239,7 +242,7 @@ int main(int argc, char** argv) {
         "[--fill CSS TEXT] "
         "[--click CSS] [--drag FROM TO] [--dispatch CSS EVT] [--press KEY] "
         "[--wait-selector CSS] [--wait-visible CSS] "
-        "[--wait-hidden CSS] [--wait-idle] [--css STYLES] [--auto-scroll] "
+        "[--wait-hidden CSS] [--wait-eval JS] [--wait-idle] [--css STYLES] [--auto-scroll] "
         "[--wait-ms N] "
         "[--scroll-to Y] [--scroll-to-selector CSS] "
         "[--post BODY] [--proxy URL] "
@@ -391,6 +394,17 @@ int main(int argc, char** argv) {
       std::fprintf(stderr,
                    "mb_shot: WARNING — --wait-hidden '%s' still visible at timeout\n",
                    wait_hidden.c_str());
+    }
+  }
+  // --wait-eval JS: block until an arbitrary JS expression is truthy (Puppeteer's
+  // waitForFunction) — the general condition wait, e.g. "window.appReady" or
+  // "document.querySelectorAll('.row').length > 10", for state a selector can't
+  // express.
+  if (!wait_eval.empty()) {
+    if (!mbWaitForFunction(view, wait_eval.c_str(), wait_ms > 0 ? wait_ms : 5000)) {
+      std::fprintf(stderr,
+                   "mb_shot: WARNING — --wait-eval '%s' never became truthy\n",
+                   wait_eval.c_str());
     }
   }
   // --wait-idle: let the page's deferred fetches / lazy images settle (Puppeteer

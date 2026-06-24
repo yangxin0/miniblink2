@@ -31,6 +31,7 @@ localStorage.setItem('auth','tok-99');
 sessionStorage.setItem('cart','3 items');
 document.getElementById('kq').addEventListener('keydown',function(e){
   document.getElementById('krec').textContent=e.key;});
+setTimeout(function(){window.delayedReady=true;},150);  // for --wait-eval
 </script></body></html>
 HTML
 
@@ -77,6 +78,12 @@ check "--cookies round-trip" "s=1" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --fill "#kq" "x" --press "ArrowDown" \
     --eval "document.getElementById('krec').textContent"
 check "--press delivers the key" "ArrowDown" "$(cat "$TMP/out")"
+
+# --wait-eval: block until a deferred (150ms setTimeout) flag is truthy, then read
+# it. Proves the wait actually blocked — the page settles before the timer fires.
+run 40 "$URL" "$PNG" --wait-eval "window.delayedReady===true" \
+    --eval "String(window.delayedReady===true)"
+check "--wait-eval blocks until truthy" "true" "$(cat "$TMP/out")"
 
 # bad-size guard: a non-numeric width positional must fail fast (exit 2), not crash
 run 40 "$URL" --out "$PNG"; check "bad-size guard exit code" "2" "$RC"
