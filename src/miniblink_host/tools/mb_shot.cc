@@ -78,6 +78,7 @@ int main(int argc, char** argv) {
   std::string eval_js;         // JS to run after load; result printed to stdout
   std::string value_selector;  // print this control's live .value to stdout
   std::string checked_selector;  // print this control's .checked (1/0) to stdout
+  std::string count_selector;    // print querySelectorAll length (>=0) to stdout
   std::string visible_selector;  // print this selector's visibility (1/0/-1)
   std::string rect_selector;     // print this selector's bounding box "x,y,w,h"
   std::string style_selector;    // print a computed style property of this selector
@@ -139,6 +140,8 @@ int main(int argc, char** argv) {
       value_selector = argv[++i];
     } else if (a == "--checked" && i + 1 < argc) {
       checked_selector = argv[++i];
+    } else if (a == "--count" && i + 1 < argc) {
+      count_selector = argv[++i];
     } else if (a == "--visible" && i + 1 < argc) {
       visible_selector = argv[++i];
     } else if (a == "--rect" && i + 1 < argc) {
@@ -212,7 +215,7 @@ int main(int argc, char** argv) {
         stderr,
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
         "[--transparent] [--text] [--html] [--requests] [--eval JS] [--value CSS] "
-        "[--checked CSS] [--visible CSS] [--rect CSS] [--style CSS PROP] "
+        "[--checked CSS] [--count CSS] [--visible CSS] [--rect CSS] [--style CSS PROP] "
         "[--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
         "[--click CSS] [--drag FROM TO] [--dispatch CSS EVT] "
@@ -519,6 +522,19 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "mb_shot: --checked '%s' matched no checkable element\n",
                    checked_selector.c_str());
     std::fprintf(stdout, "%d\n", c);
+  }
+
+  // --count: print the number of elements matching the selector
+  // (querySelectorAll length; 0 is valid). -1 -> a null/invalid selector;
+  // print 0 to stdout in that case but warn on stderr.
+  if (!count_selector.empty()) {
+    int n = mbCountSelector(view, count_selector.c_str());
+    if (n < 0) {
+      std::fprintf(stderr, "mb_shot: --count '%s' invalid selector\n",
+                   count_selector.c_str());
+      n = 0;
+    }
+    std::fprintf(stdout, "%d\n", n);
   }
 
   // --visible: print whether a selector is actually shown — 1 visible, 0 hidden
