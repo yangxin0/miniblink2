@@ -19,9 +19,11 @@ class MbViewClient : public blink::WebViewClient {
   MbViewClient();
   ~MbViewClient() override;
 
-  // P1: deny popups / new windows (return nullptr). Other overrides added only
-  // when Blink actually calls them.
-  // blink::WebView* CreateView(...) override;  // -> nullptr in P1
+  // No popup/new-window override needed: in M150 the CreateView factory has
+  // migrated off WebViewClient and the default denies popups (window.open() ->
+  // null), so an untrusted page can't spawn an unmanaged view. Other overrides
+  // are added only when Blink actually calls them. (See the .cc + mb_smoke's
+  // "popup safety" case.)
 };
 
 }  // namespace mb

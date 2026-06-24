@@ -1657,6 +1657,26 @@ int main() {
            std::string("probe=") + probe);
   }
 
+  // 62-popup. Popup / new-window safety: a scraped or automated page that calls
+  // window.open or activates a target=_blank link must never crash the
+  // single-process host. Modern Blink (M150) has no WebViewClient::CreateView to
+  // override — the factory methods migrated out of that interface — and the
+  // default denies the popup, so window.open returns null and the _blank
+  // activation is a safe no-op here. This locks that in: a crash would take down
+  // any embedder that runs untrusted pages.
+  {
+    mbLoadHTML(v,
+        "<body><a id='b' href='https://example.com/' target='_blank'>x</a>"
+        "<script>window.__r=String(window.open('about:blank'));</script></body>",
+        "about:blank");
+    const std::string opened = Eval(v, "window.__r");  // "null" == popup denied
+    const int clicked = mbClickSelector(v, "#b");       // must not crash the host
+    const std::string alive = Eval(v, "'alive'");       // host still responsive
+    Expect(opened == "null" && clicked == 1 && alive == "alive",
+           "popup safety: window.open -> null; _blank click doesn't crash the host",
+           std::string("open=") + opened + " click=" + std::to_string(clicked));
+  }
+
   // 62b. mbDispatchEvent fires arbitrary DOM events that click/fill don't — a
   // mouseover handler and a custom-event handler both run; no-match -> 0.
   {
