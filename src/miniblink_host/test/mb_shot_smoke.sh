@@ -105,6 +105,8 @@ run 40 "$URL" "$PNG" --lang "fr-FR" --eval "navigator.language"
 check "--lang (navigator.language)" "fr-FR" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --tz "America/New_York" --eval "Intl.DateTimeFormat().resolvedOptions().timeZone"
 check "--tz (Intl timeZone)" "America/New_York" "$(cat "$TMP/out")"
+run 40 "$URL" "$PNG" --user-agent "TestUA/9" --eval "navigator.userAgent"
+check "--user-agent override" "TestUA/9" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --attr "a" "href";       check "--attr href" "https://example.com/x" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --text;                  checkc "--text" "hello world" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --eval "1+2";            check "--eval" "3" "$(cat "$TMP/out")"
@@ -163,6 +165,9 @@ cat > "$TALL2" <<'HTML'
 HTML
 run 40 "file://$TALL2" "$PNG" --scroll-to-selector "#x" --eval "String(window.scrollY>0)" 400 300
 check "--scroll-to-selector scrolls below-fold into view" "true" "$(cat "$TMP/out")"
+# --scroll-to Y: scroll to an absolute offset before extract
+run 40 "file://$TALL2" "$PNG" --scroll-to 500 --eval "String(window.scrollY)" 400 300
+check "--scroll-to absolute offset" "500" "$(cat "$TMP/out")"
 
 # --requests: the subresource fetch log. A dedicated fixture <link>s a file:// CSS,
 # which routes through the loader and is logged (a small data: URI is inlined, not).
@@ -231,6 +236,19 @@ HTML
   # a 2500px-tall page yields a 4+-digit height (a viewport shot would be 300).
   run 40 "file://$TALL2" "$TMP/f.png" --full 400 300
   checkre "capture: --full grows to content height" '^PNG 400x[0-9]{4,}$' "$(imginfo "$TMP/f.png")"
+  # --no-images: a file:// <img> (routes through the loader) is NOT fetched, so its
+  # naturalWidth stays 0 (vs 2 without). data: images are inlined and unaffected.
+  python3 -c '
+import struct,zlib,sys
+def chunk(t,d): return struct.pack(">I",len(d))+t+d+struct.pack(">I",zlib.crc32(t+d)&0xffffffff)
+raw=b"".join(b"\x00"+b"\xff\x00\x00"*2 for _ in range(2))
+png=b"\x89PNG\r\n\x1a\n"+chunk(b"IHDR",struct.pack(">IIBBBBB",2,2,8,2,0,0,0))+chunk(b"IDAT",zlib.compress(raw))+chunk(b"IEND",b"")
+open(sys.argv[1],"wb").write(png)' "$TMP/pic.png"
+  printf '<!doctype html><body><img id=im src="pic.png"></body>' > "$TMP/fimg.html"
+  run 40 "file://$TMP/fimg.html" "$TMP/o.png" --no-images --eval "String(document.getElementById('im').naturalWidth)"
+  check "--no-images skips file:// image fetch" "0" "$(cat "$TMP/out")"
+  run 40 "file://$TMP/fimg.html" "$TMP/o.png" --eval "String(document.getElementById('im').naturalWidth)"
+  check "(control) image loads without --no-images" "2" "$(cat "$TMP/out")"
 else
   echo "  [SKIP] capture-mode dimension/format checks (no python3)"
 fi
