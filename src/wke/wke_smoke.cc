@@ -238,6 +238,20 @@ int main() {
           "jsGetLength/jsGetAt read array elements (incl. nested)");
   }
 
+  // jsGet (object property by name, incl. nested) + jsGetGlobal (window prop).
+  {
+    jsValue obj = wkeRunJS(wv, "({name:'Ada',age:36,inner:{n:7}})");
+    const bool name_ok =
+        std::strcmp(jsToTempString(es, jsGet(es, obj, "name")), "Ada") == 0;
+    const bool age_ok = jsToInt(es, jsGet(es, obj, "age")) == 36;
+    const bool nested_ok =
+        jsToInt(es, jsGet(es, jsGet(es, obj, "inner"), "n")) == 7;
+    wkeRunJS(wv, "window.__gv=99");
+    const bool global_ok = jsToInt(es, jsGetGlobal(es, "__gv")) == 99;
+    check(name_ok && age_ok && nested_ok && global_ok,
+          "jsGet reads object properties (nested) + jsGetGlobal reads a global");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {

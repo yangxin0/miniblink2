@@ -435,6 +435,22 @@ const JsRecord* JsLookup(jsValue v) {
   return it == reg.end() ? nullptr : &it->second;
 }
 
+// Quote `s` as a JS string literal (for embedding a property name safely).
+std::string JsStringLiteral(const char* s) {
+  std::string out = "\"";
+  for (const char* p = s; p && *p; ++p) {
+    switch (*p) {
+      case '\\': out += "\\\\"; break;
+      case '"': out += "\\\""; break;
+      case '\n': out += "\\n"; break;
+      case '\r': out += "\\r"; break;
+      default: out += *p;
+    }
+  }
+  out += "\"";
+  return out;
+}
+
 // Eval `script` and record its coerced value + type under a fresh handle, ALSO
 // parking the live result in window.__mbslots[handle] so a later eval can index
 // it (backs jsGetAt). The slot store is done IN JS (a wrapper assignment) — never
@@ -549,6 +565,27 @@ jsValue jsGetAt(jsExecState es, jsValue object, int index) {
   const std::string expr = "(function(){try{return window.__mbslots[" +
                            std::to_string(object) + "][" +
                            std::to_string(index) +
+                           "]}catch(e){return undefined}})()";
+  return StoreEval(wv, expr);
+}
+
+jsValue jsGet(jsExecState es, jsValue object, const char* prop) {
+  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  if (!wv || !wv->view || !prop)
+    return 0;
+  // Read window.__mbslots[object][prop] into a fresh navigable handle.
+  const std::string expr = "(function(){try{return window.__mbslots[" +
+                           std::to_string(object) + "][" + JsStringLiteral(prop) +
+                           "]}catch(e){return undefined}})()";
+  return StoreEval(wv, expr);
+}
+
+jsValue jsGetGlobal(jsExecState es, const char* prop) {
+  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  if (!wv || !wv->view || !prop)
+    return 0;
+  const std::string expr = "(function(){try{return window[" +
+                           JsStringLiteral(prop) +
                            "]}catch(e){return undefined}})()";
   return StoreEval(wv, expr);
 }

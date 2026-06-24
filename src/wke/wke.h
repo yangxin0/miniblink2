@@ -193,6 +193,10 @@ WKE_API jsType jsTypeOf(jsValue v);
 // jsCall remain future work.)
 WKE_API int jsGetLength(jsExecState es, jsValue object);
 WKE_API jsValue jsGetAt(jsExecState es, jsValue object, int index);
+// Read object property `prop` (or a window global) as a new, further-navigable
+// jsValue (undefined if absent). jsCall remains future work.
+WKE_API jsValue jsGet(jsExecState es, jsValue object, const char* prop);
+WKE_API jsValue jsGetGlobal(jsExecState es, const char* prop);
 
 // --- Paint (pull model): render the view into a caller BGRA buffer -------------
 // `bits` must hold width*height*4 bytes; `pitch` is the row stride in bytes
