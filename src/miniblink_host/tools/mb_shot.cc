@@ -50,6 +50,7 @@ int main(int argc, char** argv) {
   bool print_headers = false;  // dump the response headers to stderr
   bool print_text = false;
   bool print_html = false;
+  bool print_requests = false;  // dump the subresource request log to stdout
   bool no_images = false;
   bool dark_mode = false;
   bool insecure = false;  // skip TLS cert verification
@@ -141,6 +142,8 @@ int main(int argc, char** argv) {
       print_text = true;
     } else if (a == "--html") {
       print_html = true;
+    } else if (a == "--requests") {
+      print_requests = true;
     } else if (a == "--no-images") {
       no_images = true;
     } else if (a == "--dark") {
@@ -165,7 +168,7 @@ int main(int argc, char** argv) {
     std::fprintf(
         stderr,
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
-        "[--transparent] [--text] [--html] [--eval JS] [--value CSS] "
+        "[--transparent] [--text] [--html] [--requests] [--eval JS] [--value CSS] "
         "[--checked CSS] [--visible CSS] [--text-all CSS] [--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
         "[--click CSS] [--wait-selector CSS] [--wait-visible CSS] "
@@ -216,6 +219,9 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "mb_shot: WARNING — --load-cookies '%s' unreadable\n",
                    load_cookies.c_str());
   }
+
+  if (print_requests)
+    mbClearRequestLog();  // scope the log to this navigation's subresources
 
   const bool is_http = input.rfind("http", 0) == 0;
   if (is_http && !post_body.empty()) {
@@ -354,6 +360,14 @@ int main(int argc, char** argv) {
              hbuf.data(), static_cast<int>(hbuf.size()));
     std::fwrite(hbuf.data(), 1, std::strlen(hbuf.data()), stdout);
     std::fputc('\n', stdout);
+  }
+
+  // --requests: dump the subresource fetch log (one URL per line) — an asset/
+  // tracker inventory of what the page actually requested.
+  if (print_requests) {
+    std::vector<char> rbuf(1 << 20, 0);  // 1 MiB
+    mbGetRequestLog(rbuf.data(), static_cast<int>(rbuf.size()));
+    std::fwrite(rbuf.data(), 1, std::strlen(rbuf.data()), stdout);
   }
 
   // --eval: run arbitrary JS after the page settles and print the string result

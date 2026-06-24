@@ -72,8 +72,9 @@ the deliverable surface (C API, CLI, wke layer).
 - **`mb_shot` CLI (the deliverable tool):** a full scraper/automator — interact
   (`--fill`/`--click`/`--wait-selector`/`--wait-visible`/`--wait-hidden`/`--css`/
   `--wait-ms`) → extract (`--text`/`--html`/`--eval`/`--value`/`--checked`/
-  `--visible`/`--text-all`/`--attr-all`) → capture (`--full`/`--clip`/`--selector`);
-  plus `--proxy`/`--insecure`/`--no-follow`/`--headers`/`--load-cookies`/`--save-cookies`.
+  `--visible`/`--text-all`/`--attr-all`/`--requests`) → capture (`--full`/`--clip`/
+  `--selector`); plus `--proxy`/`--insecure`/`--no-follow`/`--headers`/
+  `--load-cookies`/`--save-cookies`.
 - **wke compatibility layer (`src/wke/`):** a faithful subset over `mb_capi` covering
   the full headless-automation surface — lifecycle, load, loading-state polling,
   paint (`wkePaint`), PDF/PNG export (`wkeSavePdf`/`wkeSavePng`/
@@ -124,6 +125,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- mb_shot: --requests — subresource fetch log on the CLI (2026-06-24). Threads last tick's request log into the deliverable: clears the log before navigation (scoping it to this page) and prints the fetched URLs (one per line) in the extract phase — a command-line asset/tracker inventory. VERIFIED end-to-end offline: a page linking a file:// stylesheet prints that .css URL under --requests, no survivors. mb_shot.cc + usage only; both suites unchanged (wke 86/86, mb 147/147).
 - capi+wke: mbGetRequestLog / mbClearRequestLog (+ wke) — network observability (2026-06-24). A genuinely new area (not selectors/storage): the loader now records every subresource URL it fetches (img/css/fetch/XHR) at the MbURLLoader::Deliver chokepoint into a process-wide, capped (2048, oldest-dropped) log. mbGetRequestLog returns them newline-separated; mbClearRequestLog empties it (scope to a page by clearing before load). Single-threaded main-thread loader -> no locking. VERIFIED OFFLINE (file:// subresources flow through the same chokepoint as network ones): clear, load a page linking a file:// stylesheet, wait until it APPLIES (proves the fetch reached the loader), log contains the .css URL; clear -> empty. wke_smoke 86/86, mb_smoke 147/147, no survivors. ABI now 93 fns (2 new). Note: captures subresources via the URLLoader; the top-level navigation (MbFetchUrl) is not logged — known via mbGetURL.
 - capi+wke: mbGetSessionStorage / mbSetSessionStorage (+ wke) — complete Web Storage (2026-06-24). The expected peer of last tick's localStorage accessors (users who find mbGetLocalStorage look for the session variant). Same contract/origin caveats, but a per-session store. VERIFIED in both suites against an https base: set via C is observed in JS (sessionStorage.getItem), set in JS is read via C, and crucially a key in sessionStorage is ABSENT from localStorage (proving the two stores are distinct). wke_smoke 85/85, mb_smoke 146/146, no survivors. ABI now 91 fns (2 new).
 - capi+wke: mbGetLocalStorage / mbSetLocalStorage (+ wke) — C-level localStorage access (2026-06-24). A distinct capability (storage/origin, not DOM selectors): read/write the document-origin localStorage from C — inject an auth token / SPA state, or read it back. Get returns -1 (absent or storage unavailable on an opaque origin), Set returns 1/0. Needs a real origin (commit with an http(s) base, not about:blank). VERIFIED in both suites against an https base: set via C is observed in JS (localStorage.getItem), a value set in JS is read back via C, an absent key -> -1/"". wke_smoke 84/84, mb_smoke 145/145, no survivors. ABI now 89 fns (2 new).
