@@ -73,6 +73,7 @@ int main(int argc, char** argv) {
   std::string value_selector;  // print this control's live .value to stdout
   std::string checked_selector;  // print this control's .checked (1/0) to stdout
   std::string visible_selector;  // print this selector's visibility (1/0/-1)
+  std::string rect_selector;     // print this selector's bounding box "x,y,w,h"
   std::string text_all_selector;  // print JSON array of all matches' innerText
   std::string attr_all_selector;  // print JSON array of all matches' attribute
   std::string attr_all_name;      // attribute name for --attr-all
@@ -120,6 +121,8 @@ int main(int argc, char** argv) {
       checked_selector = argv[++i];
     } else if (a == "--visible" && i + 1 < argc) {
       visible_selector = argv[++i];
+    } else if (a == "--rect" && i + 1 < argc) {
+      rect_selector = argv[++i];
     } else if (a == "--text-all" && i + 1 < argc) {
       text_all_selector = argv[++i];
     } else if (a == "--attr-all" && i + 2 < argc) {
@@ -178,7 +181,8 @@ int main(int argc, char** argv) {
         stderr,
         "usage: %s [--full] [--scale N] [--clip x,y,w,h] [--selector CSS] "
         "[--transparent] [--text] [--html] [--requests] [--eval JS] [--value CSS] "
-        "[--checked CSS] [--visible CSS] [--text-all CSS] [--attr-all CSS NAME] "
+        "[--checked CSS] [--visible CSS] [--rect CSS] [--text-all CSS] "
+        "[--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
         "[--click CSS] [--wait-selector CSS] [--wait-visible CSS] "
         "[--wait-hidden CSS] [--css STYLES] [--auto-scroll] [--wait-ms N] "
@@ -433,6 +437,17 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "mb_shot: --visible '%s' matched no element\n",
                    visible_selector.c_str());
     std::fprintf(stdout, "%d\n", vis);
+  }
+
+  // --rect: print the first match's viewport-relative bounding box as "x,y,w,h"
+  // (logical px) — locate an element, compute a crop, or feed coordinates onward.
+  if (!rect_selector.empty()) {
+    int x = 0, y = 0, rw = 0, rh = 0;
+    if (mbGetElementRect(view, rect_selector.c_str(), &x, &y, &rw, &rh))
+      std::fprintf(stdout, "%d,%d,%d,%d\n", x, y, rw, rh);
+    else
+      std::fprintf(stderr, "mb_shot: --rect '%s' matched no element\n",
+                   rect_selector.c_str());
   }
 
   // --text-all: print a JSON array of every match's innerText (one-shot list

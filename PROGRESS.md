@@ -72,7 +72,7 @@ the deliverable surface (C API, CLI, wke layer).
 - **`mb_shot` CLI (the deliverable tool):** a full scraper/automator — interact
   (`--fill`/`--click`/`--wait-selector`/`--wait-visible`/`--wait-hidden`/`--css`/
   `--auto-scroll`/`--wait-ms`) → extract (`--text`/`--html`/`--eval`/`--value`/`--checked`/
-  `--visible`/`--text-all`/`--attr-all`/`--requests`) → capture (`--full`/`--clip`/
+  `--visible`/`--rect`/`--text-all`/`--attr-all`/`--requests`) → capture (`--full`/`--clip`/
   `--selector`); plus `--proxy`/`--insecure`/`--no-follow`/`--headers`/
   `--block`/`--user-agent`/`--load-cookies`/`--save-cookies`.
 - **wke compatibility layer (`src/wke/`):** a faithful subset over `mb_capi` covering
@@ -125,6 +125,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- mb_shot: --rect SELECTOR — print an element's bounding box on the CLI (2026-06-24). Wraps mbGetElementRect: prints the first match's viewport-relative box as "x,y,w,h" (logical px) — locate elements, compute crops, feed coordinates to downstream tooling. VERIFIED end-to-end offline: a div at left:40 top:60 width:120 height:30 prints exactly "40,60,120,30"; a no-match selector prints nothing + a stderr warning. No survivors. mb_shot.cc + usage only; both suites unchanged (wke 89/89, mb 150/150).
 - capi+wke: mbGetHtmlForSelector / wkeGetHtmlForSelector — a fragment's outerHTML (2026-06-24). Fills the scraping gap between mbGetTextForSelector (plain text of one element) and mbGetHTML (whole document): the first match's outerHTML (element + its markup) to extract a fragment — article body, table, card — for re-parsing. -1/"" on no match. VERIFIED in both suites: <div id=card><b>Hi</b> there</div> -> outerHTML contains id="card" AND <b>Hi</b> there; no-match -> -1/"". wke_smoke 89/89, mb_smoke 150/150, no survivors. ABI now 97 fns.
 - mb_shot: --user-agent / --ua — set the User-Agent on the CLI (2026-06-24). Real scraper gap: many sites serve different markup by UA (mobile vs desktop), but the CLI couldn't override it. Wraps mbSetUserAgent, applied before navigation. VERIFIED end-to-end offline with a clean A/B: default navigator.userAgent is the Chrome/150 string; --user-agent 'MyScraper/2.0 (mobile)' makes navigator.userAgent return exactly that. No survivors. mb_shot.cc + usage only; both suites unchanged (wke 88/88, mb 149/149).
 - docs: re-sync the README wke-layer section (2026-06-24). The wke surface grew across ~15 ticks but the README's grouped wke list had drifted — 32 of the 116 wke exports were undocumented (storage, request log/block, value/checked/visible readers, all-text/attr, wait-visible/hidden, scroll-to-bottom, insert-css, UA getter, focus, full key-event names, …). Added them under the right groups (a new Storage bullet; broadened DOM-automation / Networking / Scripting / Geometry), and corrected the stale "63 default cases" -> 88. Cross-checked: all 116 unique wke functions now appear in README (0 missing), restoring the same "every export documented" invariant the mb_capi list holds. Docs-only — no code, suites unchanged (wke 88/88, mb 149/149).
