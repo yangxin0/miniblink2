@@ -1146,8 +1146,15 @@ std::string JsStringLiteral(const char* s) {
 // avoids re-running a valid expression that merely yields undefined.
 jsValue StoreEval(wkeWebView wv, const std::string& script) {
   auto& reg = JsRegistry();
-  if (reg.size() >= 4096)
+  if (reg.size() >= 4096) {
     reg.clear();  // bound the C++ registry; old handles' value/type expire to ""
+    // Also reset the JS-side slot stores: window.__mbslots would otherwise grow
+    // unbounded on a long-lived page (the cleared handles are dead in C++ now).
+    char tmp[8] = {0};
+    for (wkeWebView lv : LiveViews())
+      if (lv && lv->view)
+        mbEvalJS(lv->view, "window.__mbslots={}", tmp, sizeof(tmp));
+  }
   const jsValue handle = g_next_js_value++;  // handle id == its __mbslots slot
   const std::string wrapped =
       "window.__mbslots=window.__mbslots||{};window.__mbslots[" +
