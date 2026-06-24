@@ -1638,6 +1638,25 @@ int main() {
            "mbFillSelector: sets value + fires input event; 0 when no match");
   }
 
+  // 62-sep. JsEscape robustness: a value containing the JS line terminators
+  // U+2028 / U+2029 must round-trip intact through the eval-based fill. These are
+  // legal in ES2019+ string literals (V8's JSON-superset) but would terminate a
+  // pre-ES2019 literal and break the generated JS — JsEscape escapes \ " \n \r
+  // but NOT these, so this case is the regression guard proving the embedding
+  // stays correct if V8's parser or JsEscape ever changes (real text — some PDFs
+  // / rich-text sources — does carry these separators).
+  {
+    mbLoadHTML(v, "<body><input id='sep' value=''></body>", "about:blank");
+    const char* sep_val = "a\xe2\x80\xa8" "b\xe2\x80\xa9" "c";  // a U+2028 b U+2029 c
+    int ok = mbFillSelector(v, "#sep", sep_val);
+    const std::string probe = Eval(v,
+        "var x=document.getElementById('sep').value;"
+        "x.length + ',' + x.charCodeAt(1) + ',' + x.charCodeAt(3)");
+    Expect(ok == 1 && probe == "5,8232,8233",  // 5 code points; 0x2028, 0x2029
+           "JsEscape: U+2028/U+2029 in a filled value round-trip intact",
+           std::string("probe=") + probe);
+  }
+
   // 62b. mbDispatchEvent fires arbitrary DOM events that click/fill don't — a
   // mouseover handler and a custom-event handler both run; no-match -> 0.
   {
