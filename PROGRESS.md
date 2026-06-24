@@ -1976,6 +1976,19 @@ NEXT interactivity: scroll/wheel, mouse move/hover.
   path as all scraping — no threading novelty); 125/125 deterministic across 2 runs, no survivors. C
   API now 60 fns. (Verified the querySelectorAll length + :nth-of-type indexing first via mb_shot.)
 
+- ✅ DONE: text-render regression guard — smoke case 90b (2026-06-24). Probed font/text quality and
+  found it SOLID: a 40px sans line rasterizes to ~9.7% glyph pixels + ~5.5% antialiasing, and CJK
+  (日本語中文한국어) also renders (~6.4% glyph + ~4.2% AA) — system font fallback works, so the
+  "P1-polish: fonts" roadmap worry is overstated for basic + CJK text. BUT this exposed a real COVERAGE
+  gap: every screenshot test checks solid color fills, so a font/Skia regression that blanked text
+  would pass all 125 silently while screenshots became useless — and this project keeps touching the
+  paint path (blob images, compositor). Added case 90b: paint black-text-on-white via mbPaintToBitmap,
+  assert the bitmap has dark glyph pixels (>200) AND antialiased edges (>50, i.e. real glyphs not a
+  block), and that a blank white page has ~none (<50) — the blank baseline proves the check measures
+  text, not noise. Wide margins (blankDark=0, dark=3365, aa=1318) → robust; deterministic (identical
+  counts across 2 runs), no survivors. 126/126. Pure paint+pixel-read, no engine change, no threading.
+  (Pixel histograms decoded from the PNG via a stdlib zlib unfilter, since PIL isn't installed.)
+
 ### REMAINING ROADMAP
 - P1-history-js: route page-driven history.back()/forward() into the host stack — blocked on a
   ~171-method LocalFrameHost shim (see above). Heavy.

@@ -1911,6 +1911,42 @@ int main() {
                " red=" + (red ? "1" : "0"));
   }
 
+  // 90b. Text actually rasterizes to glyph pixels. Every other screenshot test
+  // checks solid color fills, so a font/Skia regression that blanks text would
+  // pass silently while screenshots became useless. Black text on white: the
+  // painted bitmap must have dark (glyph) pixels AND antialiased edge pixels
+  // (real glyphs, not a solid block) — and a blank page must have ~none, which
+  // proves the check measures text rather than always-present noise. (Pixels are
+  // BGRA; the dark/white tests are channel-symmetric so order doesn't matter.)
+  {
+    mbLoadHTML(v, "<body style='margin:0;background:#fff'></body>",
+               "about:blank");
+    mbWait(v, 30);
+    std::vector<uint8_t> blank(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, blank.data(), W, H, W * 4);
+    int blank_dark = 0;
+    for (size_t i = 0; i + 3 < blank.size(); i += 4)
+      if (blank[i] < 80 && blank[i + 1] < 80 && blank[i + 2] < 80) ++blank_dark;
+
+    mbLoadHTML(v,
+        "<body style='margin:0;background:#fff'><div style='font-size:40px;"
+        "color:#000;font-family:sans-serif;padding:10px'>Hello World ABC 123"
+        "</div></body>", "about:blank");
+    mbWait(v, 30);
+    std::vector<uint8_t> buf(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, buf.data(), W, H, W * 4);
+    int dark = 0, aa = 0;
+    for (size_t i = 0; i + 3 < buf.size(); i += 4) {
+      const int b = buf[i], g = buf[i + 1], r = buf[i + 2];
+      if (r < 80 && g < 80 && b < 80) ++dark;
+      else if (!(r > 240 && g > 240 && b > 240)) ++aa;  // partial -> antialiased
+    }
+    Expect(blank_dark < 50 && dark > 200 && aa > 50,
+           "text rasterizes to glyph pixels (font render path)",
+           std::string("blankDark=") + std::to_string(blank_dark) + " dark=" +
+               std::to_string(dark) + " aa=" + std::to_string(aa));
+  }
+
   // 91. mbHoverSelector fires mouseover and applies :hover. A target with a
   // mouseover handler (sets a flag) and a :hover rule (changes color); hovering
   // must trigger both.
