@@ -237,8 +237,8 @@ port extensions over `mb_capi` beyond the classic `wke` surface:
   `wkeSetZoomFactor`/`wkeGetZoomFactor`, `wkeSetEditable`, `wkeSetDarkMode` *(ext)*,
   `wkeSetDeviceScaleFactor` *(ext)*, `wkeScrollTo` *(ext)*.
 - **Capture / output:** `wkePaint` (into a caller BGRA buffer), and *(ext)*
-  `wkeSavePng`/`wkeSavePngRect` (PNG/JPEG by extension), `wkeSavePdf`,
-  `wkeEncodePng` (in-memory bytes).
+  `wkePaintRect` (a region → BGRA buffer), `wkeSavePng`/`wkeSavePngRect`
+  (PNG/JPEG by extension), `wkeSavePdf`, `wkeEncodePng` (in-memory bytes).
 - **Accessors / view-state:** `wkeGetURL`/`wkeGetTitle`/`wkeGetSource`/`wkeGetText`,
   `wkeSetUserAgent`, `wkeSetName`/`wkeGetName`, `wkeSetUserKeyValue`/
   `wkeGetUserKeyValue`.

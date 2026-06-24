@@ -187,6 +187,20 @@ int main() {
           "wkeRunJsInIsolatedWorld: own globals, shared DOM, no leak to main");
   }
 
+  // wkePaintRect: composite a logical sub-rect into a caller BGRA buffer.
+  {
+    wkeSetDeviceScaleFactor(wv, 1.0f);  // 1:1 so the rect maps to w x h px
+    wkeLoadHTML(wv, "<body style='margin:0;background:rgb(10,200,30)'>x</body>");
+    const int rw = 20, rh = 10;
+    std::vector<unsigned char> rb(static_cast<size_t>(rw) * rh * 4, 0);
+    const bool painted = wkePaintRect(wv, rb.data(), 0, 0, rw, rh, rw * 4);
+    const size_t px = (static_cast<size_t>(5) * rw + 10) * 4;  // a center pixel
+    // BGRA byte order for rgb(10,200,30): B=30, G=200, R=10.
+    const bool green = painted && rb[px] > 10 && rb[px] < 60 &&
+                       rb[px + 1] > 150 && rb[px + 2] < 60;
+    check(green, "wkePaintRect composites a logical rect into a BGRA buffer");
+  }
+
   // Keyboard: type into a focused field, then submit with Enter — verified by
   // reading the field value and the form's submit flag through wkeRunJS.
   wkeLoadHTML(wv,

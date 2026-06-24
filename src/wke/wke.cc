@@ -1047,6 +1047,17 @@ void wkePaint(wkeWebView webView, void* bits, int pitch) {
   mbPaintToBitmap(webView->view, bits, webView->width, webView->height, stride);
 }
 
+bool wkePaintRect(wkeWebView webView, void* bits, int x, int y, int w, int h,
+                  int pitch) {
+  // Composite the logical rect (x,y,w,h) into a caller BGRA8888 buffer (w x h px,
+  // `pitch` bytes/row, default w*4) — a partial/dirty-rect capture to memory
+  // without encoding. (Port extension; pairs with wkeGetElementRect.)
+  if (!webView || !webView->view || !bits || w <= 0 || h <= 0)
+    return false;
+  const int stride = pitch > 0 ? pitch : w * 4;
+  return mbPaintRectToBitmap(webView->view, bits, x, y, w, h, stride) != 0;
+}
+
 // --- Scripting (string-backed jsValue) -----------------------------------------
 namespace {
 // jsValue handle -> the coerced-to-string result + its JS type. Heap-owned with

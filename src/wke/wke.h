@@ -475,6 +475,11 @@ WKE_API jsValue jsCallGlobal(jsExecState es, jsValue func, jsValue* args,
 // `bits` must hold width*height*4 bytes; `pitch` is the row stride in bytes
 // (pass width*4 for a tightly-packed buffer).
 WKE_API void wkePaint(wkeWebView webView, void* bits, int pitch);
+// Composite just the logical rect (x,y,w,h) into a caller BGRA8888 buffer (w x h
+// px, `pitch` bytes/row, default w*4); returns whether it painted. A partial/
+// dirty-rect capture to memory without encoding. Port extension.
+WKE_API bool wkePaintRect(wkeWebView webView, void* bits, int x, int y, int w,
+                          int h, int pitch);
 
 // --- Callbacks (the async event model) -----------------------------------------
 // Read the text of a wkeString passed to a callback (owned by the library, valid
