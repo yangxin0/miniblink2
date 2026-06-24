@@ -362,6 +362,43 @@ void wkePerformCookieCommand(wkeCookieCommand command) {
   }
 }
 
+void wkeSetProxy(const wkeProxy* proxy) {
+  // Build a curl proxy URL "scheme://[user[:pass]@]host:port" from the struct;
+  // mbSetProxy hands it straight to CURLOPT_PROXY (which parses the scheme).
+  if (!proxy || proxy->type == WKE_PROXY_NONE || proxy->hostname[0] == '\0') {
+    mbSetProxy("");  // direct connection
+    return;
+  }
+  const char* scheme = "http://";
+  switch (proxy->type) {
+    case WKE_PROXY_HTTP: scheme = "http://"; break;
+    case WKE_PROXY_SOCKS4: scheme = "socks4://"; break;
+    case WKE_PROXY_SOCKS4A: scheme = "socks4a://"; break;
+    case WKE_PROXY_SOCKS5: scheme = "socks5://"; break;
+    case WKE_PROXY_SOCKS5HOSTNAME: scheme = "socks5h://"; break;
+    case WKE_PROXY_NONE: break;  // handled above
+  }
+  // The struct's char buffers may not be NUL-terminated if filled to capacity;
+  // copy into a +1 buffer and terminate before treating them as C strings.
+  char host[101], user[51], pass[51];
+  std::memcpy(host, proxy->hostname, 100); host[100] = '\0';
+  std::memcpy(user, proxy->username, 50); user[50] = '\0';
+  std::memcpy(pass, proxy->password, 50); pass[50] = '\0';
+  std::string url = scheme;
+  if (user[0]) {
+    url += user;
+    if (pass[0]) {
+      url += ":";
+      url += pass;
+    }
+    url += "@";
+  }
+  url += host;
+  url += ":";
+  url += std::to_string(proxy->port);
+  mbSetProxy(url.c_str());
+}
+
 bool wkeFireMouseEvent(wkeWebView webView, unsigned int message, int x, int y,
                        unsigned int /*flags*/) {
   if (!webView || !webView->view)

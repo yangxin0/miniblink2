@@ -370,6 +370,20 @@ int main() {
           "wkeSetCookieJarPath + Flush/Reload persist the jar to/from a file");
   }
 
+  // wkeSetProxy (offline): null / WKE_PROXY_NONE are safe and force a direct
+  // connection, leaving local (non-network) loads working.
+  {
+    wkeSetProxy(nullptr);  // null-safe -> direct
+    wkeProxy direct;
+    std::memset(&direct, 0, sizeof(direct));
+    direct.type = WKE_PROXY_NONE;
+    wkeSetProxy(&direct);
+    wkeLoadHTML(wv, "<title>ProxyOK</title><body>p</body>");
+    check(wkeIsLoadingSucceeded(wv) &&
+              std::strcmp(wkeGetTitle(wv), "ProxyOK") == 0,
+          "wkeSetProxy(null/NONE) is safe and leaves local loads working");
+  }
+
   // Network-gated (MB_NET_TESTS=1): wkePostURL posts a body; httpbin echoes the
   // form into the response document.
   if (std::getenv("MB_NET_TESTS")) {
@@ -395,6 +409,26 @@ int main() {
             "wkeGetCookie reads a server-set cookie; clear command drops it");
     } else {
       std::printf("  [SKIP] wkeGetCookie round-trip (host unreachable)\n");
+    }
+
+    // Proxy routing: a bogus (unresolvable) proxy must make an http load fail;
+    // clearing it restores direct connectivity. Proves the proxy is applied.
+    wkeProxy bad;
+    std::memset(&bad, 0, sizeof(bad));
+    bad.type = WKE_PROXY_HTTP;
+    std::strcpy(bad.hostname, "no-such-proxy.invalid");
+    bad.port = 8080;
+    wkeSetProxy(&bad);
+    wkeLoadURL(wv, "http://example.com/");
+    const bool failed_via_proxy = !wkeIsLoadingSucceeded(wv);
+    wkeSetProxy(nullptr);  // back to direct
+    wkeLoadURL(wv, "http://example.com/");
+    const bool ok_direct = wkeIsLoadingSucceeded(wv);
+    if (ok_direct) {
+      check(failed_via_proxy,
+            "wkeSetProxy routes via the proxy (bogus proxy fails the load)");
+    } else {
+      std::printf("  [SKIP] wkeSetProxy routing (direct host unreachable)\n");
     }
   }
 

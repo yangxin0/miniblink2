@@ -82,13 +82,13 @@ the deliverable surface (C API, CLI, wke layer).
   `jsCall`/`jsCallGlobal`),
   POST (`wkePostURL`), cookies (`wkeGetCookie`/`wkeSetCookie`/
   `wkePerformCookieCommand` + jar persistence via `wkeSetCookieJarPath`),
-  navigation history,
+  proxy (`wkeSetProxy`, HTTP/SOCKS + auth), navigation history,
   rendering accessors (`wkeSetTransparent`, `wkeGetContentWidth/Height`), and the
   async callback model (`wkeOnLoadingFinish`/`wkeOnTitleChanged`/`wkeOnConsole`/
   `wkeOnDocumentReady` + `wkeString`), page source (`wkeGetSource`).
-- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **28/28**,
-  deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin cases (wke_smoke
-  30; mb_smoke ~145).
+- **Tests:** `mb_smoke` **132/132** (default, network-free), `wke_smoke` **29/29**,
+  deterministic, no survivors. `MB_NET_TESTS=1` adds httpbin/example.com cases
+  (wke_smoke 32; mb_smoke ~145).
 - **Donor patches (`patches/`):** 0001 offscreen-widget-compat, 0002 suppress-js-dialogs,
   0003 enable-blob-Register, 0004 blob-url-loader-bypass.
 
@@ -103,6 +103,7 @@ the deliverable surface (C API, CLI, wke layer).
   scripts via `mbRunJS`.
 
 ## Recent log (newest first; full history in the archive)
+- wke NETWORK: wkeSetProxy (HTTP/SOCKS + auth) (2026-06-24). Faithful wke proxy API — wkeProxyType enum + wkeProxy struct {type, hostname[100], port, username[50], password[50]}. Builds a curl proxy URL "scheme://[user[:pass]@]host:port" (http/socks4/socks4a/socks5/socks5h) and hands it to mbSetProxy → CURLOPT_PROXY; NULL/WKE_PROXY_NONE forces a direct connection. Fixed-buffer fields copied into +1 NUL-terminated locals before use. Verified offline (null/NONE safe, local loads still work) and over the network (MB_NET_TESTS): a bogus unresolvable proxy makes http://example.com FAIL, clearing it makes the same load SUCCEED — proving the proxy is genuinely applied. wke_smoke 29/29 default, 32/32 net, mb_smoke 132/132, no survivors.
 - wke COOKIE PERSISTENCE: wkeSetCookieJarPath + Flush/Reload wired (2026-06-24). Closes last tick's loose end — wkePerformCookieCommand's FlushCookiesToFile/ReloadCookiesFromFile now persist the process-wide jar to/from a file via mbSaveCookies/mbLoadCookies. Path set by wkeSetCookieJarPath (utf8, not the Win wke WCHAR — documented; held in a leaked CookieJarPath() to dodge the exit-time-destructor -Werror). Tested OFFLINE deterministically by inspecting the saved curl/Netscape jar file: inject psid=jar987 → Flush to jar1 (file contains it) → ClearAll → Reload → re-Flush to jar2 (still contains it). wke_smoke 28/28, mb_smoke 132/132, no survivors.
 - wke COOKIES: wkeGetCookie + wkeSetCookie + wkePerformCookieCommand (2026-06-24). First non-scripting wke gap closed in a while — wraps the existing mb_capi cookie jar (mbGetCookies/mbSetCookie/mbClearCookies). wkeGetCookie reads the jar for the CURRENT document URL (mbGetURL→mbGetCookies, cached temp string); wkeSetCookie injects a set-cookie string for a url's origin; wkePerformCookieCommand is view-less so it drives the process-wide jar through a tracked g_last_webview (set on create / cleared on destroy) — clear commands → mbClearCookies, file flush/reload are documented no-ops (no jar-path setter yet). Offline default test (about:blank has no cookies; setter+clear null-safe) + a NETWORK round-trip (MB_NET_TESTS) PROVEN against httpbin: /cookies/set?wkeck=ok42 → wkeGetCookie contains it → clear drops it. wke_smoke 27/27 default, 29/29 net, mb_smoke 132/132, no survivors.
 - wke jsValue WRITE SIDE: jsEmptyObject/jsEmptyArray + jsSet/jsSetAt/jsSetGlobal (2026-06-24). Builders StoreEval "({})"/"([])" into fresh navigable slots; setters mutate the live slot object in place via a void IIFE eval (window.__mbslots[obj][prop|index]=(LiteralOf(value)) / window[prop]=...), so any jsValue — a constructor result or another handle — can be assigned. Closes the loop: a built object round-trips through jsCall (passed as arg, read back) and through jsGet/jsGetAt/jsGetGlobal. wke_smoke 26/26 (obj{name,n} + arr[10,20] + global + jsCallGlobal(fn,[obj])=="Ada:7"), mb_smoke 132/132, no survivors.

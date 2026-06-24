@@ -150,6 +150,27 @@ typedef enum _wkeCookieCommand {
 } wkeCookieCommand;
 WKE_API void wkePerformCookieCommand(wkeCookieCommand command);
 
+// Process-wide HTTP/SOCKS proxy for all subsequent network fetches. The struct
+// matches classic wke; the type selects the curl proxy scheme, and a non-empty
+// username enables proxy auth. A NULL proxy or WKE_PROXY_NONE forces a direct
+// connection (overriding *_proxy env vars). Affects http(s) only.
+typedef enum {
+  WKE_PROXY_NONE,
+  WKE_PROXY_HTTP,
+  WKE_PROXY_SOCKS4,
+  WKE_PROXY_SOCKS4A,
+  WKE_PROXY_SOCKS5,
+  WKE_PROXY_SOCKS5HOSTNAME,
+} wkeProxyType;
+typedef struct {
+  wkeProxyType type;
+  char hostname[100];
+  unsigned short port;
+  char username[50];
+  char password[50];
+} wkeProxy;
+WKE_API void wkeSetProxy(const wkeProxy* proxy);
+
 // --- Input ---------------------------------------------------------------------
 // Deliver a mouse event at (x, y). `message` is one of the WKE_MSG_* codes;
 // `flags` carries WKE_LBUTTON/etc. (currently advisory). Supported in this slice:
