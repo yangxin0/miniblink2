@@ -401,7 +401,7 @@ Requirements: a Chromium M150 source tree with a component `out/Release`
 ./build.sh /path/to/chromium-150.x.y.z   # stages host into the tree, gn gen, ninja, runs the suite
 ```
 
-`mb_smoke` is a 157-check capability + regression suite covering
+`mb_smoke` is a 165-check capability + regression suite covering
 HTML/DOM, JS, CSS computed style, UA stylesheet, the `mbRunJS`+`mbEvalJS` bridge,
 `<canvas>` getImageData, external `<link>` CSS via the subresource loader,
 paint-to-bitmap, synthesized click, typed text (ASCII + UTF-8 accent/CJK/emoji),
@@ -419,3 +419,9 @@ failure, so it doubles as a regression test. A handful of over-the-network check
 loading, HTTP status) are opt-in via `MB_NET_TESTS=1`, kept out of the default
 run so an unreachable host can't make it crawl. The `wke` layer has its own
 `wke_smoke` (96 default checks) and a runnable `wke_demo` example.
+
+`build.sh` also runs `src/miniblink_host/test/mb_shot_smoke.sh`, a CLI regression
+test that drives the `mb_shot` binary against a local fixture and asserts the exact
+stdout of the extraction flags (`--title`/`--count`/`--attr`/`--text`/`--eval`/
+`--visible`/`--local-storage`/`--session-storage`/`--url`/`--cookies`) plus the
+bad-size guard — coverage the C++ suites can't give the command-line tool itself.

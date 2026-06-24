@@ -58,6 +58,10 @@ cp "$TREE/$OUT/gen/third_party/blink/public/resources/blink_resources.pak" \
 cp "$TREE/$OUT/gen/third_party/blink/renderer/modules/media_controls/resources/media_controls_resources_100_percent.pak" \
    "$TREE/$OUT/media_controls_resources_100_percent.pak"
 
-echo "==> smoke test"
+echo "==> smoke test (library/ABI)"
 ( cd "$TREE/$OUT" && DYLD_LIBRARY_PATH="$PWD" ./mb_smoke )
+
+echo "==> mb_shot CLI smoke (argument parsing + stdout extraction)"
+bash "$(dirname "$0")/src/miniblink_host/test/mb_shot_smoke.sh" "$TREE/$OUT"
+
 echo "==> artifacts: $TREE/$OUT/libminiblink_host.dylib  +  blink_resources.pak"
