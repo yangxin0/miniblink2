@@ -140,6 +140,20 @@ run 40 "$URL" "$PNG" --wait-eval "window.delayedReady===true" \
     --eval "String(window.delayedReady===true)"
 check "--wait-eval blocks until truthy" "true" "$(cat "$TMP/out")"
 
+# --wait-selector for a never-appearing element warns and proceeds (warn-only, exit 0)
+run 40 "$URL" "$PNG" --wait-selector "#never-appears" --wait-ms 300
+check "--wait-selector timeout exit 0" "0" "$RC"
+checkc "--wait-selector timeout warns" "never appeared" "$(cat "$TMP/err")"
+
+# --requests: the subresource fetch log. A dedicated fixture <link>s a file:// CSS,
+# which routes through the loader and is logged (a small data: URI is inlined, not).
+REQH="$TMP/req.html"; printf '#m{color:red}' > "$TMP/style.css"
+cat > "$REQH" <<HTML
+<!doctype html><head><link rel="stylesheet" href="style.css"></head><body><p id="m">x</p></body>
+HTML
+run 40 "file://$REQH" "$PNG" --requests
+checkc "--requests logs a subresource" "style.css" "$(cat "$TMP/out")"
+
 # integration: the canonical scrape workflow — fill a search box, click submit,
 # wait for the rendered result rows, then extract them as structured JSON. This
 # exercises the phase pipeline (interact -> synchronize -> extract) end to end, so
