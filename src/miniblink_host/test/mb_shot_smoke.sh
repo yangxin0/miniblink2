@@ -83,6 +83,13 @@ run 40 "$URL" "$PNG" --attr-all "a" "href";   check "--attr-all (JSON array)" '[
 # --css injects a stylesheet before extract/capture: hiding #msg flips --visible 1 -> 0
 run 40 "$URL" "$PNG" --css "#msg{display:none}" --visible "#msg"
 check "--css injects style (hides #msg)" "0" "$(cat "$TMP/out")"
+# request-config emulation flags (self-contained reads via --eval)
+run 40 "$URL" "$PNG" --dark --eval "String(matchMedia('(prefers-color-scheme:dark)').matches)"
+check "--dark (prefers-color-scheme)" "true" "$(cat "$TMP/out")"
+run 40 "$URL" "$PNG" --lang "fr-FR" --eval "navigator.language"
+check "--lang (navigator.language)" "fr-FR" "$(cat "$TMP/out")"
+run 40 "$URL" "$PNG" --tz "America/New_York" --eval "Intl.DateTimeFormat().resolvedOptions().timeZone"
+check "--tz (Intl timeZone)" "America/New_York" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --attr "a" "href";       check "--attr href" "https://example.com/x" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --text;                  checkc "--text" "hello world" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --eval "1+2";            check "--eval" "3" "$(cat "$TMP/out")"
