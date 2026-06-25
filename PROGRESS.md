@@ -721,3 +721,17 @@ the SAME view runs its script (CSP shed). Every-load path; no crash, all suites 
   AI / Co-Authored-By trailer**:
   `git -c user.name="Xin Yang" -c user.email="yangxin0@outlook.com" commit --no-verify`
   Commit per-milestone, only at a clean, tested state.
+
+[BUG FOUND: history.back()/forward() non-functional] Page-driven session-history traversal does NOT
+work (real SPA back-button / programmatic-routing gap). Verified: after pushState to /a then /b,
+`history.back()` leaves location at /b, popstate never fires, and `history.length` stays 1. Root cause:
+`LocalFrameClientImpl::NavigateBackForward` first checks `webview->HistoryBackListCount()` — our embedder
+never sets the WebView's history index/length, so it's 0 and back() returns false immediately; and even
+past that, blink calls `LocalFrameHost.GoToEntryAtOffset` (a browser/mojo round-trip) which routes to the
+absent browser. The synchronous primitives (pushState/replaceState updating location + history.state,
+sessionStorage) DO work (mb_smoke 23ar). FIX (deep, multi-step, deferred): track session-history
+index/length in the embedder (incl. pushState/replaceState via DidUpdateHistory), push it to the WebView
+(SetHistoryIndexAndLength), and service GoToEntryAtOffset by driving the frame to commit the target entry
+(same-document -> CommitSameDocumentNavigation + popstate; cross-document -> re-load). This is the
+renderer-side navigation-controller logic the in-process host currently lacks. The existing host-driven
+GoBack/GoForward (C ABI, re-loads URLs) is separate and unaffected.
