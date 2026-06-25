@@ -387,8 +387,16 @@ are also wired: a worker's BroadcastChannel asks its broker (the frame broker, s
 where `BindBroadcastChannelProviderPipe` binds the SAME provider into the SAME registry — so
 window and worker channels of one name interoperate. Verified (mb_smoke 23i): a dedicated worker
 posts on 'xch' and the window's same-name channel receives "from-worker" (cross-thread delivery).
-[REMAINING at the broker: IndexedDB / WebSocket / notifications — genuinely heavy backends;
-same frame-broker entry point, but each needs a real store/network/connector.]
+[DONE: Notifications] `frame/mb_notification_service.{h,cc}` (`MbNotificationService`, bound from
+the frame broker). `[Sync] GetPermissionStatus` returns GRANTED (so `Notification.permission`
+== "granted" without hanging — it's a sync getter); `DisplayNonPersistentNotification` fires the
+listener's `OnShow()` so a page's `Notification.onshow` runs (headless: no OS toast, but the API
+is live + scriptable), keeping the listener alive by token for a later `OnClose`. Persistent (SW)
+notifications + GetNotifications are accepted-but-empty stubs. The permission service also grants
+NOTIFICATIONS so `Notification.requestPermission()` resolves "granted". Verified (mb_smoke 23j):
+`Notification.permission`=="granted", `new Notification('hi')` fires onshow, requestPermission()
+-> "granted". [REMAINING at the broker: IndexedDB / WebSocket — genuinely heavy backends; same
+frame-broker entry point, but each needs a real store / network connector.]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
    Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —

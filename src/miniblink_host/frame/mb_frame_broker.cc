@@ -12,6 +12,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "miniblink_host/frame/mb_broadcast_channel.h"
 #include "miniblink_host/frame/mb_lock_manager.h"
+#include "miniblink_host/frame/mb_notification_service.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/runtime/mb_runtime.h"
 #include "miniblink_host/worker/mb_shared_worker.h"
@@ -237,7 +238,8 @@ class MbPermissionService : public blink::mojom::blink::PermissionService {
       const blink::mojom::blink::PermissionDescriptorPtr& d) {
     const bool grant =
         d && (d->name == blink::mojom::blink::PermissionName::CLIPBOARD_READ ||
-              d->name == blink::mojom::blink::PermissionName::CLIPBOARD_WRITE);
+              d->name == blink::mojom::blink::PermissionName::CLIPBOARD_WRITE ||
+              d->name == blink::mojom::blink::PermissionName::NOTIFICATIONS);
     return blink::mojom::blink::PermissionStatusWithDetails::New(
         grant ? blink::mojom::blink::PermissionStatus::GRANTED
               : blink::mojom::blink::PermissionStatus::DENIED,
@@ -474,6 +476,11 @@ class MbBrowserInterfaceBroker
     // nav-associated provider instead). Same process-wide registry as windows.
     if (auto r = receiver.As<blink::mojom::blink::BroadcastChannelProvider>()) {
       BindBroadcastChannelProviderPipe(std::move(r));
+      return;
+    }
+    // Notification API — permission granted; new Notification() fires onshow.
+    if (auto r = receiver.As<blink::mojom::blink::NotificationService>()) {
+      BindNotificationService(std::move(r));
       return;
     }
     // Drop everything else (no browser process).

@@ -1101,6 +1101,27 @@ int main() {
            "xw=[" + xw + "]");
   }
 
+  // 23j. Notification API (broker #8): the in-process NotificationService grants the
+  // permission (Notification.permission == 'granted', a [Sync] call) and "shows" a
+  // non-persistent notification by firing the listener's OnShow -> the page's
+  // notification.onshow runs. (Headless: no OS toast, but the API is live + scriptable.)
+  // Also Notification.requestPermission() resolves 'granted' via the permission service.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://notify.test/");
+    const std::string perm = Eval(v, "Notification.permission");
+    Eval(v,
+         "window.__nshow='';window.__nperm='';"
+         "Notification.requestPermission().then(function(p){window.__nperm=p;});"
+         "var __n=new Notification('hi',{body:'there'});"
+         "__n.onshow=function(){window.__nshow='shown:'+__n.title;};");
+    mbWaitForFunction(v, "window.__nshow!==''&&window.__nperm!==''", 3000);
+    const std::string shown = Eval(v, "window.__nshow");
+    const std::string rp = Eval(v, "window.__nperm");
+    Expect(perm == "granted" && shown == "shown:hi" && rp == "granted",
+           "Notification: permission granted, new Notification fires onshow",
+           "perm=[" + perm + "] show=[" + shown + "] requestPerm=[" + rp + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");
