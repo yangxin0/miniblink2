@@ -456,10 +456,10 @@ All four built-in AI surfaces' availability() now resolve 'unavailable'. mb_smok
 [DONE: WebUSB] `MbWebUsbService` (blink.mojom.WebUsbService, bound from the frame broker) — getDevices
 -> [] (no permitted devices), getPermission -> null, forgetDevice acks, getDevice/setClient drop. BUG
 fixed: device dashboards call navigator.usb.getDevices() on load; the service has no disconnect handler,
-so unbound it HANGS (unsettled resolver crashes teardown). mb_smoke 23aq. FOLLOW-UP: WebHID
-(navigator.hid.getDevices), WebSerial (navigator.serial.getPorts), WebBluetooth
-(navigator.bluetooth.getAvailability/getDevices) are exposed and likewise hang — separate device
-services, bind them next.
+so unbound it HANGS (unsettled resolver crashes teardown). mb_smoke 23aq. WebHID (`MbHidService`) + WebSerial (`MbSerialService`) bound too (getDevices/getPorts ->
+[], requestDevice/requestPort -> none, connect/openPort -> null, forget acks) — same hang pattern.
+mb_smoke 23aq covers usb/hid/serial. FOLLOW-UP: WebBluetooth (navigator.bluetooth.getAvailability/
+getDevices) also hangs but WebBluetoothService is a large GATT interface (~20+ methods) — deferred.
 [BATTERY NOW DETERMINISTIC] The cache-body flake (a cached Response's body reads empty ~12%, see above)
 had been polluting tests 23v/23af/23ae intermittently. All three now verify what reliably works (entry
 found, status 200, keys/has/ignoreSearch matching) instead of body bytes. mb_smoke is 5/5 green (118).
