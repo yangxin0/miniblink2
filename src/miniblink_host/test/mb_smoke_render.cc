@@ -47,13 +47,11 @@ static void RunCases(mbView* v, int W, int H) {
              Eval(v, "String(document.querySelector('#s'))") == "null",  // encapsulated
          "Web Components: custom element upgrade + shadow DOM encapsulation");
 
-  // 37. Worker spawn must not crash the host. We have no worker-thread
-  // infrastructure, so a dedicated Worker is INERT (never runs) — but a page
-  // that does `new Worker(...)` must degrade gracefully, not SIGSEGV (it used
-  // to: factory_client_ was null and DedicatedWorker::Start derefs it). The
-  // guard: construct a Worker, pump, and confirm the host is still alive and
-  // scripting after (a crash would never reach the assert). The worker itself
-  // is expected to be inert, so we only assert survival + a live main frame.
+  // 37. Worker spawn must not crash the host. A page that does `new Worker(...)` must
+  // not SIGSEGV (it once did: factory_client_ was null and DedicatedWorker::Start
+  // derefs it). The guard: construct a Worker, pump, and confirm the host is still
+  // alive and scripting after. (37b below proves the worker actually RUNS now; this
+  // case is the narrower crash-safety invariant and also covers the throw path.)
   mbLoadHTML(v, "<body>worker-guard</body>", "about:blank");
   mbRunJS(v,
     "try{window.__w=new Worker('data:text/javascript,'+"
@@ -67,6 +65,33 @@ static void RunCases(mbView* v, int W, int H) {
              (Eval(v, "String(typeof window.__w)") == "object" ||
               Eval(v, "String(window.__wok)") == "false"),
          "Worker spawn degrades gracefully (no crash; host still scriptable)");
+
+  // 37b. A dedicated Worker actually RUNS (worker bring-up Step 2): the worker thread
+  // executes its script, receives a message, and posts a reply the page observes. This
+  // exercises the in-process worker host (worker/mb_dedicated_worker_host.cc) — the
+  // OnWorkerHostCreated + OnScriptLoadStarted handshake streams the script over a data
+  // pipe, the worker thread compiles+runs it, and postMessage round-trips both ways. A
+  // reply of 42 (= 21*2) proves the worker is LIVE, not the old inert stub.
+  mbLoadHTML(v, "<body>worker-run</body>", "about:blank");
+  mbRunJS(v,
+    "window.__reply='';"
+    "window.__w2=new Worker('data:text/javascript,'+"
+    "encodeURIComponent('onmessage=function(e){postMessage(e.data*2)}'));"
+    "window.__w2.onmessage=function(e){window.__reply=String(e.data)};"
+    "window.__w2.postMessage(21);");
+  {
+    // Poll for the async round-trip (thread start + script compile + two messages).
+    std::string reply;
+    for (int i = 0; i < 80; ++i) {
+      mbWait(v, 25);
+      reply = Eval(v, "window.__reply");
+      if (!reply.empty())
+        break;
+    }
+    Expect(reply == "42",
+           "a dedicated Worker runs its script and postMessage round-trips (Step 2)",
+           "reply=[" + reply + "]");
+  }
 
   // 38. The rest of the Worker family must also be crash-safe. SharedWorker's
   // Connect() is a fire-and-forget mojo call our empty broker drops (inert, no

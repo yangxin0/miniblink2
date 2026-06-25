@@ -272,16 +272,24 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      KNOWN follow-up: MbURLLoader's body-loader task runner is the creation-thread runner; once the
      worker actually runs, `GetURLLoaderFactory()` is consulted ON the worker thread and the loader
      must use the worker-thread runner. Harmless until Step 2 (factory created but never invoked).
-   - [NEXT] **Step 2 — drive the worker thread.** In `MbDedicatedWorkerHostFactoryClient` (mb_platform.cc):
-     store the `WebDedicatedWorker*`; on `CreateWorkerHost`, (a) call `worker_->OnWorkerHostCreated(
-     broker_remote, dedicated_worker_host_remote, origin)` — broker remote reuses the frame broker
-     impl, host remote is the empty self-owned receiver; (b) fetch the script (MbFetchUrl), synthesize
-     `WorkerMainScriptLoadParameters` (response_head + data-pipe body + inert URLLoader receiver +
-     URLLoaderClient remote), and call `worker_->OnScriptLoadStarted(params, bfcache_host_remote,
-     coep_receiver, dip_receiver)`; (c) after EOF, push `OnComplete(net::OK)`. RISK concentrated here:
-     the worker thread brings its own isolate+cppgc heap setup that may hit CHECKs in this minimal host;
-     if it crashes, REVERT step 2 and keep step 1's dormant context. First verifiable milestone:
-     a Worker runs its script and `postMessage`s back to the page.
+   - [DONE] **Step 2 — drive the worker thread.** `src/miniblink_host/worker/mb_dedicated_worker_host.{h,cc}`
+     (`MakeDedicatedWorkerHostFactoryClient`, wired from `MbPlatform::CreateDedicatedWorkerHostFactory-
+     Client`). On `CreateWorkerHost`: (a) `worker_->OnWorkerHostCreated(MakeFrameInterfaceBroker(),
+     empty-DedicatedWorkerHost self-owned receiver, WebSecurityOrigin::Create(script_url))`; (b) fetch
+     the script via `MbFetchUrl` (file/http(s)/data:), synthesize `WorkerMainScriptLoadParameters` —
+     200 `URLResponseHead`, script bytes over a data pipe, a `URLLoaderClientEndpoints` whose inert
+     `network::mojom::URLLoader` we hold and whose `URLLoaderClient` remote we drive; (c) `OnScript-
+     LoadStarted(params, bfcache-host self-owned receiver, NullReceiver, NullReceiver)`. The script
+     delivery object (`MbWorkerScript`) writes the body via `mojo::DataPipeProducer`, drops the
+     producer (EOF), pushes `OnComplete(net::OK)`, and self-deletes when blink drops the loader remote.
+     The risk (worker-thread isolate/cppgc CHECKs) did NOT materialize — the thread starts cleanly.
+     VERIFIED (mb_smoke_render 37b=82, stable across repeated runs, no leaked threads): a Worker built
+     from a `data:` script runs `onmessage=e=>postMessage(e.data*2)`, the page posts 21 and receives
+     42 — a full two-way `postMessage` round-trip. **Dedicated workers now actually RUN in-process.**
+   - [NEXT] **Step 3 — exercise/​harden.** Verify worker subresource loads (importScripts/fetch) drive
+     the Step-1 fetch context on the worker thread (fix the loader's task-runner to the worker thread,
+     per the Step-1 note); confirm multiple concurrent workers, module workers (`type:'module'`), and
+     http(s) worker scripts. Then SharedWorker (separate `WebSharedWorker` path) if wanted.
    8. Broker binds cookies
 only [+ Permissions, this tick]. [DONE: Permissions] `MbPermissionService` in the FRAME
 broker (mb_frame_broker.cc — the one navigator.* uses, not the platform thread broker)
