@@ -362,6 +362,15 @@ MB_EXPORT void mbMockResponse(const char* url_substring, const char* body,
                               const char* content_type, int status);
 MB_EXPORT void mbClearMocks(void);
 
+// Request URL rewriting — the request-side counterpart to mocking. Before any
+// fetch, the first occurrence of `from` in a request URL is replaced with `to`
+// (host swap, http->https, point a CDN/API at a local mock). The rewrite is
+// transparent: the page still sees its ORIGINAL URL as the response URL (so
+// fetch()/XHR behave correctly). Register several (applied in order);
+// mbClearUrlRewrites removes all. Process-wide, applied at the loader.
+MB_EXPORT void mbRewriteUrl(const char* from, const char* to);
+MB_EXPORT void mbClearUrlRewrites(void);
+
 // localStorage access for the current document's origin — inject an auth token /
 // app state before an SPA boots (pair with mbSetInitScript), or read it back.
 // mbGetLocalStorage writes the value of `key` into `out` and returns its length

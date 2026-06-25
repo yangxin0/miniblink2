@@ -90,6 +90,15 @@ void MbClearMocks();
 bool MbFindMock(const std::string& url, std::string* body,
                 std::string* content_type, int* status);
 
+// Request URL rewriting: before any fetch, replace the first occurrence of `from`
+// with `to` in the request URL (host swap, scheme upgrade, CDN -> local mock). The
+// rewrite is transparent — the page still sees its original URL as the response
+// URL. MbAddUrlRewrite registers one (applied in registration order);
+// MbClearUrlRewrites removes all; MbApplyUrlRewrites is the loader's transform.
+void MbAddUrlRewrite(const std::string& from, const std::string& to);
+void MbClearUrlRewrites();
+std::string MbApplyUrlRewrites(const std::string& url);
+
 // Process-wide HTTP(S) proxy for all network fetches, as a libcurl proxy string:
 // "http://host:port", "socks5://host:port", "host:port" (defaults to http), or
 // "" to force a direct connection (overriding any *_proxy env vars). Once set

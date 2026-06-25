@@ -1174,6 +1174,43 @@ static void RunCases(mbView* v, int W, int H) {
                (red ? "1" : "0"));
   }
 
+  // 75e. URL rewriting (mbRewriteUrl) — request redirected before fetch. The page
+  // links orig.test/r.css; a rewrite sends the request to mock.test/r.css, which a
+  // mock serves green. So #q turns green purely via rewrite+mock, no network. Clear
+  // the rewrite and a fresh page linking orig.test no longer styles (no mock there).
+  {
+    mbClearMocks();
+    mbClearUrlRewrites();
+    mbMockResponse("https://mock.test/r.css", "#q{color:rgb(0,150,30)}", "text/css",
+                   200);
+    mbRewriteUrl("orig.test/r.css", "mock.test/r.css");  // redirect the request
+    mbLoadHTML(v,
+        "<head><link rel='stylesheet' href='https://orig.test/r.css'></head>"
+        "<body><b id='q'>x</b></body>",
+        "https://orig.test/rw1.html");
+    const bool rewritten = mbWaitForFunction(
+        v, "getComputedStyle(document.getElementById('q')).color==='rgb(0, 150, 30)'",
+        2000) == 1;
+    // Clear the rewrite; mock the ORIGINAL url red. The page now gets red (served
+    // by orig.test's own mock), NOT the rewrite's green — proving clear worked,
+    // and staying fully offline (no fetch of an unmocked URL).
+    mbClearUrlRewrites();
+    mbMockResponse("https://orig.test/r.css", "#q{color:rgb(150,0,0)}", "text/css",
+                   200);
+    mbLoadHTML(v,
+        "<head><link rel='stylesheet' href='https://orig.test/r.css'></head>"
+        "<body><b id='q'>x</b></body>",
+        "https://orig.test/rw2.html");
+    const bool not_rewritten = mbWaitForFunction(
+        v, "getComputedStyle(document.getElementById('q')).color==='rgb(150, 0, 0)'",
+        2000) == 1;
+    mbClearMocks();
+    Expect(rewritten && not_rewritten,
+           "mbRewriteUrl redirects a request before fetch; clear restores",
+           std::string("rewritten=") + (rewritten ? "1" : "0") + " cleared=" +
+               (not_rewritten ? "1" : "0"));
+  }
+
   // 76. CSS background-image renders (data: SVG). Distinct from <img>: exercises
   // the CSS background paint path + a data: URL image + SVG-as-image. A 30x30 div
   // with a green-SVG background should paint green at its center.

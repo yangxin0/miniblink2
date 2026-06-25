@@ -431,6 +431,15 @@ void mbClearMocks(void) {
   mb::MbClearMocks();
 }
 
+void mbRewriteUrl(const char* from, const char* to) {
+  if (from)
+    mb::MbAddUrlRewrite(from, to ? to : "");
+}
+
+void mbClearUrlRewrites(void) {
+  mb::MbClearUrlRewrites();
+}
+
 int mbGetLocalStorage(mbView* v, const char* key, char* out, int out_cap) {
   if (!v || !v->impl || !key)
     return -1;

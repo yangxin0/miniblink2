@@ -68,9 +68,14 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      + `mbClearMocks()`: a matching URL serves a canned body with NO real fetch (offline
      runs / API substitution). Checked first in `Deliver`. mb_smoke case 75d (mock a
      stylesheet → element turns green; clear/re-mock → red), all offline.
-   - [NEXT] pre-request rewrite hook (URL / method / headers / body) + a dynamic callback
-     model (`wkeNetHookRequest`/`wkeNetOnResponse`/`wkeNetSetData`/`wkeNetSetURL`/
-     `wkeNetSetHTTPHeaderField`) + the `mb_shot --mock URL FILE` CLI flag + wke peers.
+   - [DONE] **URL rewriting** — `mbRewriteUrl(from, to)` + `mbClearUrlRewrites()`:
+     transparently redirect a request before fetch (host swap / scheme upgrade / CDN ->
+     local mock); the page still sees its original URL as the response URL (Deliver
+     fetches `fetch_url`, reports `url`). mb_smoke_render case 75e (rewrite orig.test ->
+     mock.test, mocked green; clear -> served by orig's own mock), offline.
+   - [NEXT] request HEADER rewrite (add/override before fetch) + a dynamic per-request
+     callback (`wkeNetHookRequest`/`wkeNetOnResponse` — inspect/modify live) + the
+     `mb_shot --mock URL FILE` / `--rewrite FROM TO` CLI flags + wke peers.
 
 2. **Quick-win correctness bugs** (real defects; fast; each independently verifiable —
    NOTE several have *existing tests that assert the stubbed/fake behavior* and must be

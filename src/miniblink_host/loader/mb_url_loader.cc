@@ -695,6 +695,40 @@ bool MbFindMock(const std::string& url, std::string* body,
   return true;
 }
 
+// --- Request URL rewriting ---------------------------------------------------
+// Redirect a request to a different URL before any fetch: replace the first
+// occurrence of `from` with `to` in the request URL (host swap, scheme upgrade,
+// CDN -> local mock, API repointing). The request-side counterpart to mocking.
+namespace {
+struct RewriteEntry {
+  std::string from;
+  std::string to;
+};
+std::vector<RewriteEntry>& RewriteList() {
+  static std::vector<RewriteEntry>* r = new std::vector<RewriteEntry>();
+  return *r;
+}
+}  // namespace
+
+void MbAddUrlRewrite(const std::string& from, const std::string& to) {
+  if (!from.empty())
+    RewriteList().push_back({from, to});
+}
+
+void MbClearUrlRewrites() {
+  RewriteList().clear();
+}
+
+std::string MbApplyUrlRewrites(const std::string& url) {
+  std::string out = url;
+  for (const RewriteEntry& e : RewriteList()) {
+    const std::string::size_type at = out.find(e.from);
+    if (at != std::string::npos)
+      out.replace(at, e.from.size(), e.to);  // first occurrence; in registration order
+  }
+  return out;
+}
+
 bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* content_type, const std::string& user_agent,
                 const std::string& extra_headers, const std::string& post_body,
@@ -747,12 +781,19 @@ void MbURLLoader::LoadAsynchronously(
 void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   if (!client_)
     return;
-  const GURL& url = request->url;
-  MbRecordRequest(url.spec());  // network observability: every subresource fetch
+  const GURL& url = request->url;     // the page's URL (response.url, log, errors)
+  MbRecordRequest(url.spec());        // log the URL the page actually requested
+
+  // URL rewriting: TRANSPARENTLY redirect the request to a different URL — the
+  // block/mock/fetch act on `fetch_url`, but the response is still reported as the
+  // page's original `url` (so fetch()'s url_list_ DCHECK holds; host swap, scheme
+  // upgrade, CDN -> local mock).
+  const std::string rewritten = MbApplyUrlRewrites(url.spec());
+  const GURL fetch_url = (rewritten == url.spec()) ? url : GURL(rewritten);
 
   // Request blocking: fail a blocked URL up front (ERR_BLOCKED_BY_CLIENT), before
   // any fetch — the resource simply never loads (ad/tracker/image suppression).
-  if (MbIsUrlBlocked(url.spec())) {
+  if (MbIsUrlBlocked(fetch_url.spec())) {
     client_->DidFail(
         blink::WebURLError(net::ERR_BLOCKED_BY_CLIENT, ToWebURL(url)),
         base::TimeTicks::Now(), blink::URLLoaderClient::kUnknownEncodedDataLength,
@@ -770,16 +811,16 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   // real fetch (offline tests, API substitution). Checked before any scheme fetch.
   std::string mock_body, mock_ct;
   int mock_status = 0;
-  if (MbFindMock(url.spec(), &mock_body, &mock_ct, &mock_status)) {
+  if (MbFindMock(fetch_url.spec(), &mock_body, &mock_ct, &mock_status)) {
     contents = std::move(mock_body);
     http_content_type = mock_ct.empty() ? std::string("text/html") : mock_ct;
     http_status = mock_status > 0 ? mock_status : 200;
     ok = true;
-  } else if (url.SchemeIsFile()) {
+  } else if (fetch_url.SchemeIsFile()) {
     base::FilePath fp;  // net path conversion percent-decodes (spaces etc.)
-    ok = net::FileURLToFilePath(url, &fp) &&
+    ok = net::FileURLToFilePath(fetch_url, &fp) &&
          base::ReadFileToString(fp, &contents);
-  } else if (url.SchemeIsHTTPOrHTTPS()) {
+  } else if (fetch_url.SchemeIsHTTPOrHTTPS()) {
     // Carry the request method + body so fetch()/XHR POST/PUT/etc. send their
     // payload (the dominant API pattern), not a bodyless GET. The body's bytes
     // live in kBytes DataElements; pull the Content-Type off the request headers.
@@ -810,7 +851,7 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
     // fetch's response.url (the final URL) and response.redirected correct. (You
     // can't just rewrite the final response URL: fetch_manager DCHECKs that it
     // equals url_list_.back(), which only the redirect reports advance.)
-    std::string cur = url.spec();
+    std::string cur = fetch_url.spec();
     std::string cur_method = request->method;
     std::string cur_body = post_body;
     for (int hop = 0; hop <= 20; ++hop) {
@@ -856,11 +897,11 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
       cur = next.spec();
       cur_method = new_method;
     }
-  } else if (url.SchemeIs("data")) {
+  } else if (fetch_url.SchemeIs("data")) {
     // Decode the data: URL in-process (libcurl doesn't serve it); the parsed
     // mime flows into the response Content-Type below via http_content_type.
     std::string charset;
-    ok = net::DataURL::Parse(url, &http_content_type, &charset, &contents);
+    ok = net::DataURL::Parse(fetch_url, &http_content_type, &charset, &contents);
   }
   if (std::getenv("MB_VERBOSE")) {
     std::fprintf(stderr, "[mb_url_loader] %s -> %s (%zu bytes)\n", url.spec().c_str(),
@@ -883,7 +924,7 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
     while (!mime_str.empty() && mime_str.back() == ' ')
       mime_str.pop_back();
   } else {
-    mime_str = MimeFromPath(std::string(url.path())).Utf8();
+    mime_str = MimeFromPath(std::string(fetch_url.path())).Utf8();
     content_type_header = mime_str;
   }
 
