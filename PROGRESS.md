@@ -441,10 +441,17 @@ snapshots the in-range encoded keys in iteration order (forward or reverse) and 
 (plain or to-a-key), `Advance`, and `Prefetch`/`PrefetchReset` walk that snapshot, looking each
 record up live by key and returning it as an `IDBCursorValue`. Verified (mb_smoke 23p): insert id
 3,1,2 -> `openCursor()` + `continue()` visits 1,2,3. The object-store read/write surface is now
-broad: open+schema, put/get, count/delete/clear, getAll/ranges, AND cursors. NOT yet: indexes
-(createIndex/index cursors), autoincrement key generation, transaction atomicity/rollback,
-prefetch position-rewind beyond the simple case — and persistence is in-memory (per-process, by
-db name).]
+broad: open+schema, put/get, count/delete/clear, getAll/ranges, AND cursors. STEP 6 (DONE): autoincrement key
+generation. An `{autoIncrement:true}` store generates keys on a keyless `put` — blink sends a
+None-typed key for those, so the backend assigns the next per-store counter value (and an explicit
+numeric key bumps the counter). `GetKeyGeneratorCurrentNumber` reports it. Two blink invariants
+handled in `BuildReturnValue`: `IDBReturnValue.primary_key` is non-nullable, and the key injector
+DCHECKs a String key path — so in-line (keyPath) stores send the real key + path while out-of-line
+stores send a None key (which blink ignores, skipping injection). Verified (mb_smoke 23q): two
+keyless puts on an `{autoIncrement:true}` store get keys 1 and 2, retrievable by those keys. NOT
+yet: indexes (createIndex/index cursors), transaction atomicity/rollback — and persistence is
+in-memory (per-process, by db name). The object-store surface (open/schema, put/get, count/delete/
+clear, getAll/ranges, cursors, autoincrement) covers what the vast majority of apps use.]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
    Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —

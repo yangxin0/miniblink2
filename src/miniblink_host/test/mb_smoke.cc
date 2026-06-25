@@ -1265,6 +1265,30 @@ int main() {
            "idb4=[" + r + "]");
   }
 
+  // 23q. IndexedDB autoincrement (step 6): an {autoIncrement:true} store generates keys
+  // when put() is called without one. Two out-of-line puts get keys 1 and 2, and the
+  // values are retrievable by those generated keys.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://idb.test/");
+    Eval(v,
+         "window.__idb5='';"
+         "var __a=indexedDB.open('mbdb6',1);"
+         "__a.onupgradeneeded=function(e){e.target.result.createObjectStore('a',{autoIncrement:true});};"
+         "__a.onsuccess=function(e){var db=e.target.result;"
+         "var t=db.transaction('a','readwrite');var s=t.objectStore('a');"
+         "var k1=0,k2=0;"
+         "var r1=s.put('alpha');r1.onsuccess=function(){k1=r1.result;};"
+         "var r2=s.put('beta');r2.onsuccess=function(){k2=r2.result;};"
+         "t.oncomplete=function(){"
+         "var g=db.transaction('a').objectStore('a').get(1);"
+         "g.onsuccess=function(){window.__idb5='k1='+k1+',k2='+k2+',get1='+g.result;};};};");
+    mbWaitForFunction(v, "window.__idb5!==''", 4000);
+    const std::string r = Eval(v, "window.__idb5");
+    Expect(r == "k1=1,k2=2,get1=alpha",
+           "IndexedDB autoIncrement store generates keys 1,2 on keyless put",
+           "idb5=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

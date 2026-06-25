@@ -46,9 +46,15 @@ struct MbRecord {
 struct MbIDBBackend {
   blink::IDBDatabaseMetadata metadata;  // name/version/object_stores
   std::map<int64_t, std::map<std::string, MbRecord>> data;  // store -> ekey -> record
+  std::map<int64_t, int64_t> key_generator;  // store -> next auto-increment value
   // The active connection's database callbacks (transaction completion is reported here).
   mojo::AssociatedRemote<IDBDatabaseCallbacks> db_callbacks;
 };
+
+bool IsAutoIncrement(MbIDBBackend* b, int64_t store_id) {
+  auto it = b->metadata.object_stores.find(store_id);
+  return it != b->metadata.object_stores.end() && it->value->auto_increment;
+}
 
 // Big-endian, order-preserving encoding of a double: flip the sign bit for positives and
 // all bits for negatives, so lexicographic byte order matches numeric order.
@@ -122,8 +128,15 @@ m::IDBReturnValuePtr BuildReturnValue(const MbRecord& rec,
   auto rv = m::IDBReturnValue::New();
   rv->value = std::make_unique<blink::IDBValue>();
   rv->value->SetData(mojo_base::BigBuffer(base::as_byte_span(rec.bytes)));
-  rv->primary_key = blink::IDBKey::Clone(rec.key);
-  rv->key_path = key_path;
+  // primary_key is non-nullable. Only in-line-key stores (a String key path) re-inject the
+  // key into the deserialized value; for out-of-line stores send a None-typed key, which
+  // blink ignores (a real key + a non-String path would DCHECK in the key injector).
+  if (key_path.GetType() == blink::mojom::IDBKeyPathType::String) {
+    rv->primary_key = blink::IDBKey::Clone(rec.key);
+    rv->key_path = key_path;
+  } else {
+    rv->primary_key = blink::IDBKey::CreateNone();
+  }
   return rv;
 }
 
@@ -401,9 +414,11 @@ class MbIDBDatabase : public m::IDBDatabase {
     std::move(callback).Run(/*success=*/true);
   }
   void GetKeyGeneratorCurrentNumber(
-      int64_t, int64_t,
+      int64_t, int64_t object_store_id,
       GetKeyGeneratorCurrentNumberCallback callback) override {
-    std::move(callback).Run(0, nullptr);
+    auto it = backend_->key_generator.find(object_store_id);
+    int64_t current = it != backend_->key_generator.end() ? it->second : 1;
+    std::move(callback).Run(current, nullptr);
   }
   void Clear(int64_t, int64_t object_store_id,
              ClearCallback callback) override {
@@ -465,7 +480,29 @@ class MbIDBTransactionImpl : public IDBTransaction {
            m::IDBPutMode,
            blink::Vector<blink::IDBIndexKeys>,
            PutCallback callback) override {
-    std::string ekey = EncodeKey(key.get());
+    // Auto-increment: blink sends a null key for a key-generator store; the backend
+    // assigns the next number. An explicit numeric key also bumps the generator.
+    std::unique_ptr<blink::IDBKey> generated;
+    const blink::IDBKey* use_key = key.get();
+    // "No key" includes a None-typed key (blink sends that for a keyless put).
+    const bool no_key = !use_key || !use_key->IsValid() ||
+                        use_key->GetType() == blink::mojom::IDBKeyType::None;
+    if (no_key && IsAutoIncrement(backend_, object_store_id)) {
+      int64_t& next = backend_->key_generator[object_store_id];
+      if (next < 1)
+        next = 1;
+      generated = blink::IDBKey::CreateNumber(static_cast<double>(next));
+      ++next;
+      use_key = generated.get();
+    } else if (use_key && use_key->GetType() == blink::mojom::IDBKeyType::Number &&
+               IsAutoIncrement(backend_, object_store_id)) {
+      int64_t k = static_cast<int64_t>(use_key->Number());
+      int64_t& next = backend_->key_generator[object_store_id];
+      if (k >= next)
+        next = k + 1;
+    }
+
+    std::string ekey = EncodeKey(use_key);
     if (ekey.empty()) {
       std::move(callback).Run(m::IDBTransactionPutResult::NewErrorResult(
           m::IDBError::New(m::IDBException::kDataError,
@@ -473,9 +510,9 @@ class MbIDBTransactionImpl : public IDBTransaction {
       return;
     }
     backend_->data[object_store_id][ekey] =
-        MbRecord{blink::IDBKey::Clone(key), ValueBytes(value.get())};
+        MbRecord{blink::IDBKey::Clone(use_key), ValueBytes(value.get())};
     std::move(callback).Run(
-        m::IDBTransactionPutResult::NewKey(blink::IDBKey::Clone(key)));
+        m::IDBTransactionPutResult::NewKey(blink::IDBKey::Clone(use_key)));
   }
   void SetIndexKeys(int64_t,
                     std::unique_ptr<blink::IDBKey>,
