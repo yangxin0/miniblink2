@@ -107,7 +107,13 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      `wkeFireKeyUpEvent` calls it. Press events untouched (no decouple → no regression
      to the Enter-submit path). Verified (wke_smoke +1): VK_RIGHT keyup → page sees
      keyCode 39. (Refactored `kKeys` to file scope; SendKey behavior unchanged, 182 green.)
-   - `mbShutdown` leaks on repeated init (`runtime/mb_runtime.cc:203`).
+   - [DONE] `mbShutdown` re-init leak/crash. It did `delete g_runtime`, leaving the
+     installed `DiscardableMemoryAllocator`/blink `Platform` pointers dangling and
+     making a 2nd `mbInitialize` re-run the one-time globals (mojo::core::Init,
+     blink::Initialize + isolate) → crash. Fixed to match Chromium's process model: the
+     engine is one-time and stays resident; `mbShutdown` is a safe no-op and
+     `mbInitialize` is idempotent (reuses it). Verified (mb_smoke 0 +1=61): shutdown ->
+     re-init succeeds AND all 60 subsequent tests run against the post-cycle engine.
    - Delete the dead commented-out `widget/mb_sw_frame_sink.{h,cc}` scaffolding.
 
 **Tier 1 — genuine high-value automation capability (after the above):**

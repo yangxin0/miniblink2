@@ -33,6 +33,15 @@ int main() {
     std::fprintf(stderr, "init failed\n");
     return 1;
   }
+
+  // 0. Lifecycle: mbShutdown is safe and the engine survives a shutdown -> re-init
+  // cycle. Blink's process-global init is one-time, so the engine stays resident and
+  // re-init reuses it (pre-fix this deleted the runtime, leaving dangling allocator
+  // pointers and crashing on the 2nd init). Running it BEFORE the main view means
+  // every test below also exercises the post-cycle engine.
+  mbShutdown();
+  Expect(mbInitialize() == 1, "engine survives mbShutdown + re-init (no crash/leak)");
+
   const int W = 400, H = 300;
   mbView* v = mbCreateView(W, H);
   if (!v)

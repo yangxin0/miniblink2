@@ -25,9 +25,13 @@ extern "C" {
 typedef struct mbView mbView;
 
 // Process-wide engine bring-up / teardown. Call mbInitialize() once on the
-// thread that will be Blink's main thread, before any other call.
+// thread that will be Blink's main thread, before any other call. It is idempotent:
+// extra calls return success and reuse the running engine.
 // Internally: builds the mb_platform, an (empty for now) mojo::BinderMap, then
-// blink::CreateMainThreadAndInitialize(...) + CreateMainThreadIsolate().
+// blink::Initialize(...) (which creates the main-thread V8 isolate).
+// mbShutdown() is a safe no-op: Blink's global init is one-time per process and
+// cannot be re-created, so the engine stays resident until the process exits (a later
+// mbInitialize reuses it). It exists for API symmetry; you may also just exit.
 MB_EXPORT int  mbInitialize(void);
 MB_EXPORT void mbShutdown(void);
 

@@ -96,8 +96,19 @@ bool MbRuntime::Initialize() {
 
 // static
 void MbRuntime::Shutdown() {
-  delete g_runtime;
-  g_runtime = nullptr;
+  // The Blink/V8/mojo global init done in the ctor (mojo::core::Init, the V8 context
+  // snapshot, blink::Platform::InitializeBlink, blink::Initialize + the main-thread
+  // V8 isolate and its cppgc heap, the thread pool) is ONE-TIME per process and has
+  // no clean teardown — a 2nd blink::Initialize builds a 2nd isolate that crashes
+  // ThreadState::AttachToIsolate, and mojo::core::Init double-inits. So the engine
+  // stays resident for the process lifetime and a later mbInitialize reuses it
+  // (Initialize() is idempotent); process-global memory is reclaimed by the OS at exit.
+  //
+  // Previously this did `delete g_runtime; g_runtime = nullptr;`, which (a) left the
+  // installed base::DiscardableMemoryAllocator / blink Platform pointers dangling at
+  // freed memory and (b) made any re-init re-run the one-time globals and crash. Both
+  // are gone now: Shutdown is a safe no-op. (Matches the single-process Chromium model,
+  // where process-global singletons are intentionally leaked rather than destroyed.)
 }
 
 MbRuntime::MbRuntime() {
