@@ -410,6 +410,10 @@ later with identical plumbing.
 [DONE: Wake Lock] `navigator.wakeLock.request('screen')` — `MbWakeLockService.GetWakeLock` binds a
 no-op `device::mojom::WakeLock` (headless: no real screen) and the permission service grants
 SCREEN_WAKE_LOCK, so request('screen') resolves with a live sentinel (mb_smoke 23u: released==false).
+[DONE: Battery] `navigator.getBattery()` — `MbBatteryMonitor` (device.mojom.BatteryMonitor, bound from
+the frame broker) reports a static plugged-in/full battery (level 1, charging true, chargingTime 0).
+QueryNextStatus long-polls for changes, so the first call answers and later calls are held open forever
+(headless value never changes). mb_smoke 23z.
 [DONE: Cache Storage] `frame/mb_cache_storage.{h,cc}` (`MbCacheStorage` + `MbCacheStorageCache`,
 bound from the frame broker). `caches.open/has/delete/keys`, `caches.match`, `cache.put`/`delete`
 (via `Batch`), and `cache.match`. Stores Request URL -> FetchAPIResponse in a process-wide
