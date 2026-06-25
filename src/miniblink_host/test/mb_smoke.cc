@@ -1457,6 +1457,30 @@ int main() {
            "idbAB=[" + r + "]");
   }
 
+  // 23y. IndexedDB compound (array) primary keys: a store with keyPath ['a','b'] keys records
+  // by the [a,b] tuple. get([1,2]) finds the exact record, and getAll() returns records in
+  // compound-key order ([1,1] < [1,2] < [2,0]) — verifying the order-preserving array encoding.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://idb.test/");
+    Eval(v,
+         "window.__idbCK='';"
+         "var __c=indexedDB.open('mdbCK',1);"
+         "__c.onupgradeneeded=function(e){e.target.result.createObjectStore('c',{keyPath:['a','b']});};"
+         "__c.onsuccess=function(e){var db=e.target.result;"
+         "var t=db.transaction('c','readwrite');var s=t.objectStore('c');"
+         "s.put({a:1,b:2,v:'x'});s.put({a:2,b:0,v:'y'});s.put({a:1,b:1,v:'z'});"
+         "t.oncomplete=function(){"
+         "var s2=db.transaction('c').objectStore('c');"
+         "var g=s2.get([1,2]);var ga=s2.getAll();"
+         "ga.onsuccess=function(){var ord=ga.result.map(function(r){return r.v;}).join('');"
+         "window.__idbCK=(g.result?g.result.v:'-')+',order:'+ord;};};};");
+    mbWaitForFunction(v, "window.__idbCK!==''", 4000);
+    const std::string r = Eval(v, "window.__idbCK");
+    Expect(r == "x,order:zxy",
+           "IndexedDB compound (array) primary keys: get + ordered getAll",
+           "idbCK=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

@@ -143,9 +143,27 @@ std::string EncodeDouble(double d) {
   return std::string(buf, 8);
 }
 
+// Make a component self-delimiting for use as an array element: escape every 0x00 byte as
+// 0x00 0x01, then append a 0x00 0x00 terminator. The terminator sorts below an escaped null
+// (0x00 0x01) and below any element's leading type byte (>= 0x10), so a shorter element/array
+// that is a prefix of another sorts first — exactly IndexedDB array order.
+std::string EscapeComponent(const std::string& s) {
+  std::string out;
+  out.reserve(s.size() + 2);
+  for (char c : s) {
+    out.push_back(c);
+    if (c == '\x00')
+      out.push_back('\x01');
+  }
+  out.push_back('\x00');
+  out.push_back('\x00');
+  return out;
+}
+
 // Encode an IDBKey to a comparable std::string. A leading type-rank byte groups types in
-// IndexedDB order (number < date < string < binary); numbers/dates are order-preserving,
-// strings/binary compare bytewise. Arrays/none/invalid yield an empty encoding (unsupported).
+// IndexedDB order (number < date < string < binary < array); numbers/dates are order-
+// preserving, strings/binary compare bytewise, arrays compare element-wise (each element
+// escaped+terminated, array ended by a 0x00 marker). None/invalid yield an empty encoding.
 std::string EncodeKey(const blink::IDBKey* k) {
   if (!k)
     return std::string();
@@ -159,6 +177,17 @@ std::string EncodeKey(const blink::IDBKey* k) {
     case blink::mojom::IDBKeyType::Binary: {
       auto b = k->Binary();
       return std::string(1, '\x40') + std::string(b->data.data(), b->data.size());
+    }
+    case blink::mojom::IDBKeyType::Array: {
+      std::string out(1, '\x50');
+      for (const std::unique_ptr<blink::IDBKey>& e : k->Array()) {
+        std::string enc = EncodeKey(e.get());  // recursive (nested arrays ok)
+        if (enc.empty())
+          return std::string();  // an unsupported element makes the whole key unsupported
+        out += EscapeComponent(enc);
+      }
+      out.push_back('\x00');  // array end (sorts before any element's type byte)
+      return out;
     }
     default:
       return std::string();
@@ -186,6 +215,29 @@ std::unique_ptr<blink::IDBKey> DecodeKey(const std::string& e) {
     case '\x30':
       return blink::IDBKey::CreateString(
           blink::String::FromUtf8(std::string_view(rest)));
+    case '\x50': {
+      // Array: walk escaped+terminated components until the 0x00 array-end marker.
+      blink::IDBKey::KeyArray arr;
+      size_t i = 1;
+      while (i < e.size() && e[i] != '\x00') {  // 0x00 here is the array end
+        std::string comp;
+        while (i + 1 < e.size()) {
+          if (e[i] == '\x00' && e[i + 1] == '\x00') {  // component terminator
+            i += 2;
+            break;
+          }
+          if (e[i] == '\x00' && e[i + 1] == '\x01') {  // escaped null
+            comp.push_back('\x00');
+            i += 2;
+            continue;
+          }
+          comp.push_back(e[i]);
+          ++i;
+        }
+        arr.push_back(DecodeKey(comp));  // recursive
+      }
+      return blink::IDBKey::CreateArray(std::move(arr));
+    }
     default:
       return blink::IDBKey::CreateNone();
   }
