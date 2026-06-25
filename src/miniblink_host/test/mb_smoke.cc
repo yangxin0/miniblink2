@@ -1,25 +1,16 @@
 // mb_smoke — capability test suite for the miniblink-modern engine. Each case loads
 // content and ASSERTS engine behavior (mostly via mbEvalJS / getComputedStyle, which is
 // robust; plus one pixel check). Prints PASS/FAIL per case and a summary; exit 0 iff all pass.
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <string>
-#include <vector>
+#include "miniblink_host/test/mb_smoke_harness.h"
 
-#include "miniblink_host/capi/mb_capi.h"
+using mbsmoke::Eval;     // shared harness helpers (see mb_smoke_harness.h)
+using mbsmoke::EvalIso;
+using mbsmoke::Expect;
+using mbsmoke::g_fail;
+using mbsmoke::g_pass;
 
 namespace {
-int g_pass = 0, g_fail = 0;
-
-std::string Eval(mbView* v, const char* js) {
-  char buf[512];
-  mbEvalJS(v, js, buf, sizeof(buf));
-  return std::string(buf);
-}
-
-// Native function bound into JS for the mbJsBindFunction test: echoes its first
+// Native functions bound into JS for the mbJsBindFunction test: echoes its first
 // argument with a "!" suffix and the userdata it was given.
 const char* SmokeEcho(void* userdata, int argc, const char** argv,
                       const int* /*argtypes*/,
@@ -34,18 +25,6 @@ const char* SmokeEcho(void* userdata, int argc, const char** argv,
 const char* SmokeJson(void*, int, const char**, const int*, int* out_type) {
   *out_type = 5;  // json
   return "{\"a\":1,\"b\":[2,3]}";
-}
-
-std::string EvalIso(mbView* v, const char* js) {
-  char buf[512];
-  mbEvalJSIsolated(v, js, buf, sizeof(buf));
-  return std::string(buf);
-}
-
-void Expect(bool ok, const char* name, const std::string& got = "") {
-  std::fprintf(stderr, "  [%s] %s%s%s\n", ok ? "PASS" : "FAIL", name,
-               got.empty() ? "" : " -> ", got.c_str());
-  ok ? ++g_pass : ++g_fail;
 }
 }  // namespace
 

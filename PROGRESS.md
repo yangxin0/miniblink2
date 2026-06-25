@@ -25,6 +25,17 @@ step is available and nothing is broken, **say so and stop** — do not invent c
 
 ---
 
+## Active refactor — split the mb_smoke monolith
+`test/mb_smoke.cc` is a 3660-line / 180-case monolith. Splitting it into small themed
+smoke programs (engine / scrape / input / net / platform), each its own executable.
+- [DONE] `test/mb_smoke_harness.h` — shared header-only helpers (`Eval`/`EvalIso`/
+  `Expect`/counters) + `MB_SMOKE_MAIN(SUITE)`. mb_smoke.cc now uses it (still 180/180).
+- [NEXT] Move contiguous case ranges into `mb_smoke_<theme>.cc` files, each `#include`s
+  the harness + defines `RunCases` + `MB_SMOKE_MAIN(...)`. Add the executables to
+  BUILD.gn; verify each builds/runs and the case total stays 180; update build.sh to run
+  them. Watch for shared main()-scope state across a cut (most cases are self-contained
+  `{}` blocks; the binding test uses file-scope `SmokeEcho`/`SmokeJson`).
+
 ## Current State (complete)
 - **Engine:** modern M150 Blink renders HTML→pixels in-process. V8/JS, modern + cutting-edge
   CSS (`:has()`, nesting, `@container`, `oklch()`), canvas 2D, SVG, Web Components/Shadow DOM,
