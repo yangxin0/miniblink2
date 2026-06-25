@@ -1739,6 +1739,24 @@ int main() {
            "ia=[" + r + "]");
   }
 
+  // 23am. WebOTP (navigator.credentials.get({otp}), broker WebOTPService): SMS one-time-code
+  // autofill on login pages. The WebOTPService remote has no disconnect handler, so unbound the
+  // OTP request hangs; bound, a headless host (no SMS backend) settles it — get() rejects.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://login.test/");
+    Eval(v,
+         "window.__otp='';"
+         "try{navigator.credentials.get({otp:{transport:['sms']}})"
+         ".then(function(){window.__otp='resolved';})"
+         ".catch(function(){window.__otp='settled';});}"
+         "catch(e){window.__otp='throw:'+e.name;}");
+    mbWaitForFunction(v, "window.__otp!==''", 3000);
+    const std::string r = Eval(v, "window.__otp");
+    Expect(r == "settled" || r == "resolved" || r.rfind("throw:", 0) == 0,
+           "WebOTP get({otp}) settles (no SMS backend) instead of hanging",
+           "otp=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

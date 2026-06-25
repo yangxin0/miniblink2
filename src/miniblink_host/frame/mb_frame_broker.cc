@@ -38,6 +38,7 @@
 #include "third_party/blink/public/mojom/clipboard/clipboard.mojom-blink.h"
 #include "third_party/blink/public/mojom/credentialmanagement/credential_manager.mojom-blink.h"
 #include "third_party/blink/public/mojom/installedapp/installed_app_provider.mojom-blink.h"
+#include "third_party/blink/public/mojom/sms/webotp_service.mojom-blink.h"
 #include "third_party/blink/public/mojom/installedapp/related_application.mojom-blink.h"
 #include "third_party/blink/public/mojom/webauthn/authenticator.mojom-blink.h"
 #include "miniblink_host/frame/mb_opfs.h"
@@ -590,6 +591,19 @@ class MbInstalledAppProvider
   }
 };
 
+// blink.mojom.WebOTPService for navigator.credentials.get({otp}) (SMS one-time-code autofill on
+// login pages). A headless host has no SMS backend, so Receive reports kBackendNotAvailable (the
+// get() promise rejects cleanly). Like the other credential services this remote has no
+// disconnect handler, so unbound the OTP request would hang during a login flow.
+class MbWebOTPService : public blink::mojom::blink::WebOTPService {
+ public:
+  void Receive(ReceiveCallback callback) override {
+    std::move(callback).Run(
+        blink::mojom::blink::SmsStatus::kBackendNotAvailable, blink::String());
+  }
+  void Abort() override {}
+};
+
 // blink.mojom.MediaDevicesDispatcherHost for navigator.mediaDevices. Headless has no cameras,
 // mics, or speakers, so every query returns an EMPTY list. This must be bound: if the pipe is
 // left unbound, blink's disconnect handler REJECTS enumerateDevices() with an AbortError
@@ -819,6 +833,12 @@ class MbBrowserInterfaceBroker
     // navigator.getInstalledRelatedApps() — headless: no installed apps ([]).
     if (auto r = receiver.As<blink::mojom::blink::InstalledAppProvider>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbInstalledAppProvider>(),
+                                  std::move(r));
+      return;
+    }
+    // navigator.credentials.get({otp}) (WebOTP/SMS) — headless: no SMS backend.
+    if (auto r = receiver.As<blink::mojom::blink::WebOTPService>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbWebOTPService>(),
                                   std::move(r));
       return;
     }
