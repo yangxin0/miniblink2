@@ -37,6 +37,7 @@
 #include "base/files/file.h"
 #include "third_party/blink/public/mojom/clipboard/clipboard.mojom-blink.h"
 #include "third_party/blink/public/mojom/credentialmanagement/credential_manager.mojom-blink.h"
+#include "third_party/blink/public/mojom/webauthn/authenticator.mojom-blink.h"
 #include "miniblink_host/frame/mb_opfs.h"
 #include "miniblink_host/frame/mb_storage_buckets.h"
 #include "third_party/blink/public/mojom/buckets/bucket_manager_host.mojom-blink.h"
@@ -529,6 +530,48 @@ class MbCredentialManager : public blink::mojom::blink::CredentialManager {
   }
 };
 
+// blink.mojom.Authenticator for WebAuthn (navigator.credentials publicKey + PublicKeyCredential
+// statics). Headless has no authenticator. Like the CredentialManager, the Authenticator remote
+// has NO disconnect handler, so the feature-detection statics commonly called at page load —
+// isUserVerifyingPlatformAuthenticatorAvailable() / isConditionalMediationAvailable() — would
+// HANG unbound. Answer those false; make/get credential reject cleanly (NOT_ALLOWED_ERROR).
+class MbAuthenticator : public blink::mojom::blink::Authenticator {
+ public:
+  void MakeCredential(
+      blink::mojom::blink::PublicKeyCredentialCreationOptionsPtr,
+      MakeCredentialCallback callback) override {
+    std::move(callback).Run(
+        blink::mojom::blink::AuthenticatorStatus::NOT_ALLOWED_ERROR, nullptr,
+        nullptr);
+  }
+  void GetCredential(blink::mojom::blink::GetCredentialOptionsPtr,
+                     GetCredentialCallback callback) override {
+    auto assertion = blink::mojom::blink::GetAssertionResponse::New(
+        blink::mojom::blink::AuthenticatorStatus::NOT_ALLOWED_ERROR, nullptr,
+        nullptr);
+    std::move(callback).Run(
+        blink::mojom::blink::GetCredentialResponse::NewGetAssertionResponse(
+            std::move(assertion)));
+  }
+  void IsUserVerifyingPlatformAuthenticatorAvailable(
+      IsUserVerifyingPlatformAuthenticatorAvailableCallback callback) override {
+    std::move(callback).Run(false);
+  }
+  void IsConditionalMediationAvailable(
+      IsConditionalMediationAvailableCallback callback) override {
+    std::move(callback).Run(false);
+  }
+  void Report(blink::mojom::blink::PublicKeyCredentialReportOptionsPtr,
+              ReportCallback callback) override {
+    std::move(callback).Run(
+        blink::mojom::blink::AuthenticatorStatus::NOT_ALLOWED_ERROR, nullptr);
+  }
+  void GetClientCapabilities(GetClientCapabilitiesCallback callback) override {
+    std::move(callback).Run({});
+  }
+  void Cancel() override {}
+};
+
 // blink.mojom.MediaDevicesDispatcherHost for navigator.mediaDevices. Headless has no cameras,
 // mics, or speakers, so every query returns an EMPTY list. This must be bound: if the pipe is
 // left unbound, blink's disconnect handler REJECTS enumerateDevices() with an AbortError
@@ -746,6 +789,12 @@ class MbBrowserInterfaceBroker
     // navigator.credentials.get/store — headless: no credential store (get() -> null).
     if (auto r = receiver.As<blink::mojom::blink::CredentialManager>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbCredentialManager>(),
+                                  std::move(r));
+      return;
+    }
+    // WebAuthn (navigator.credentials publicKey) — headless: no authenticator.
+    if (auto r = receiver.As<blink::mojom::blink::Authenticator>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbAuthenticator>(),
                                   std::move(r));
       return;
     }

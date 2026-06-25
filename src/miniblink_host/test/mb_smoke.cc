@@ -1700,6 +1700,27 @@ int main() {
            "cred=[" + r + "]");
   }
 
+  // 23aj. WebAuthn feature-detection (PublicKeyCredential statics, broker Authenticator): sites
+  // probe passkey support on load via isUserVerifyingPlatformAuthenticatorAvailable() and
+  // isConditionalMediationAvailable(). The Authenticator remote has no disconnect handler, so
+  // unbound these would hang; bound, they resolve false (no authenticator in a headless host).
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://login.test/");
+    Eval(v,
+         "window.__wa='';"
+         "if(window.PublicKeyCredential){Promise.all(["
+         "PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(),"
+         "PublicKeyCredential.isConditionalMediationAvailable()])"
+         ".then(function(r){window.__wa='uvpaa:'+r[0]+',cma:'+r[1];})"
+         ".catch(function(e){window.__wa='err:'+e.name;});}"
+         "else{window.__wa='no-api';}");
+    mbWaitForFunction(v, "window.__wa!==''", 3000);
+    const std::string r = Eval(v, "window.__wa");
+    Expect(r == "uvpaa:false,cma:false" || r == "no-api",
+           "WebAuthn isUVPAA/isConditionalMediationAvailable resolve false (no hang)",
+           "wa=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");
