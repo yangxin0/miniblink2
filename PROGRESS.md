@@ -421,6 +421,12 @@ Credential -> get() resolves to null) and Store/PreventSilentAccess ack. BUG fix
 CredentialManager remote has NO disconnect handler, so without the binding get() HANGS forever (a
 real hang on login pages that probe for stored credentials at load). NOTE: SUCCESS requires a
 non-null CredentialInfo (blink DCHECKs), hence EMPTY not null. mb_smoke 23ai.
+[DONE: WebAuthn] `MbAuthenticator` (blink.mojom.Authenticator, bound from the frame broker) — for
+PublicKeyCredential. Headless has no authenticator; the feature-detection statics sites probe at
+load — `isUserVerifyingPlatformAuthenticatorAvailable()` / `isConditionalMediationAvailable()` —
+resolve false, getClientCapabilities returns [], makeCredential/getCredential/report reject cleanly
+(NOT_ALLOWED_ERROR). BUG fixed: the Authenticator remote has NO disconnect handler, so unbound those
+statics HANG. mb_smoke 23aj.
 [DONE: Cookie Store API] `cookieStore.get/getAll/set/delete` — `MbCookieManager` (the
 RestrictedCookieManager already serving document.cookie) gained real `GetAllForUrl` (returns the
 origin's cookies as net::CanonicalCookies via CreateSanitizedCookie, honoring the options name filter:
