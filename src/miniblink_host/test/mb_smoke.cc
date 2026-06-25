@@ -1404,6 +1404,33 @@ int main() {
            "cs=[" + r + "]");
   }
 
+  // 23w. IndexedDB multiEntry index: a {multiEntry:true} index over an array-valued key
+  // path indexes EACH array element separately, so a record with tags ['red','blue'] is
+  // found by index.get('red') AND index.get('blue'). (blink expands the array renderer-side
+  // into one IDBIndexKeys list; the backend inserts each element key.)
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://idb.test/");
+    Eval(v,
+         "window.__idbME='';"
+         "var __m=indexedDB.open('mdbME',1);"
+         "__m.onupgradeneeded=function(e){var os=e.target.result.createObjectStore('p',{keyPath:'id'});"
+         "os.createIndex('tags','tags',{multiEntry:true});};"
+         "__m.onsuccess=function(e){var db=e.target.result;"
+         "var t=db.transaction('p','readwrite');var s=t.objectStore('p');"
+         "s.put({id:1,tags:['red','blue']});"
+         "s.put({id:2,tags:['blue','green']});"
+         "t.oncomplete=function(){"
+         "var idx=db.transaction('p').objectStore('p').index('tags');"
+         "var g1=idx.get('red');g1.onsuccess=function(){"
+         "var g2=idx.getAll('blue');g2.onsuccess=function(){"
+         "window.__idbME=(g1.result?g1.result.id:'-')+',blue-count:'+g2.result.length;};};};};");
+    mbWaitForFunction(v, "window.__idbME!==''", 4000);
+    const std::string r = Eval(v, "window.__idbME");
+    Expect(r == "1,blue-count:2",
+           "IndexedDB multiEntry index indexes each array element (get/getAll by element)",
+           "idbME=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

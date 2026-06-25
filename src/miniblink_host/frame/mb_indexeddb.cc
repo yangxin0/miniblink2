@@ -372,7 +372,7 @@ class MbIDBDatabase : public m::IDBDatabase {
 
   // getAll()/getAllKeys()/getAllRecords(): emit records in IDB key order (the encoded-key
   // map is sorted), honoring the key range, max_count, and direction.
-  void GetAll(int64_t, int64_t object_store_id, int64_t,
+  void GetAll(int64_t, int64_t object_store_id, int64_t index_id,
               m::IDBKeyRangePtr key_range, m::IDBGetAllResultType result_type,
               uint32_t max_count, m::IDBCursorDirection direction,
               GetAllCallback callback) override {
@@ -380,7 +380,9 @@ class MbIDBDatabase : public m::IDBDatabase {
     auto store_it = backend_->data.find(object_store_id);
     if (store_it != backend_->data.end()) {
       const auto& store = store_it->second;
-      // Encoded-key bounds for the range (order-preserving encoding makes this exact).
+      // Encoded-key bounds for the range (order-preserving encoding makes this exact). The
+      // range applies to the CURSOR key: the primary key for a store getAll, the INDEX key
+      // for an index getAll.
       std::string lo = key_range ? EncodeKey(key_range->lower.get()) : std::string();
       std::string hi = key_range ? EncodeKey(key_range->upper.get()) : std::string();
       const blink::IDBKeyPath kp = StoreKeyPath(backend_, object_store_id);
@@ -388,6 +390,7 @@ class MbIDBDatabase : public m::IDBDatabase {
       const bool reverse = direction == m::IDBCursorDirection::Prev ||
                            direction == m::IDBCursorDirection::PrevNoDuplicate;
       const uint32_t limit = max_count == 0 ? UINT32_MAX : max_count;
+      const bool is_index = index_id != blink::IDBIndexMetadata::kInvalidId;
 
       auto in_range = [&](const std::string& ek) {
         if (!lo.empty()) {
@@ -400,26 +403,37 @@ class MbIDBDatabase : public m::IDBDatabase {
         }
         return true;
       };
-      auto emit = [&](const std::string& ek, const MbRecord& rec) {
+      // Records in forward cursor-key order; reversed below for Prev directions.
+      std::vector<const MbRecord*> ordered;
+      if (is_index) {
+        auto si = backend_->index_data.find(object_store_id);
+        if (si != backend_->index_data.end() && si->second.count(index_id)) {
+          for (const auto& ik : si->second.at(index_id))  // index key -> primary keys
+            if (in_range(ik.first))
+              for (const std::string& pk : ik.second) {  // sorted primary keys
+                auto rit = store.find(pk);
+                if (rit != store.end())
+                  ordered.push_back(&rit->second);
+              }
+        }
+      } else {
+        for (const auto& entry : store)
+          if (in_range(entry.first))
+            ordered.push_back(&entry.second);
+      }
+      if (reverse)
+        std::reverse(ordered.begin(), ordered.end());
+      for (const MbRecord* rec : ordered) {
+        if (records.size() >= limit)
+          break;
         auto record = m::IDBRecord::New();
         // Values-only getAll() must NOT carry a primary key (blink CHECKs this); keys are
         // set only for getAllKeys()/getAllRecords().
         if (result_type != m::IDBGetAllResultType::Values)
-          record->primary_key = blink::IDBKey::Clone(rec.key);
+          record->primary_key = blink::IDBKey::Clone(rec->key);
         if (!keys_only)
-          record->return_value = BuildReturnValue(rec, kp);
+          record->return_value = BuildReturnValue(*rec, kp);
         records.push_back(std::move(record));
-      };
-      if (reverse) {
-        for (auto it = store.rbegin();
-             it != store.rend() && records.size() < limit; ++it)
-          if (in_range(it->first))
-            emit(it->first, it->second);
-      } else {
-        for (auto it = store.begin();
-             it != store.end() && records.size() < limit; ++it)
-          if (in_range(it->first))
-            emit(it->first, it->second);
       }
     }
     std::move(callback).Run(std::move(records), mojo::NullAssociatedReceiver());
