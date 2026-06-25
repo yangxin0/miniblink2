@@ -15,6 +15,7 @@
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_response.mojom-blink.h"
+#include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -23,9 +24,10 @@ namespace {
 
 namespace m = blink::mojom::blink;
 
-// A cache holds Request URL -> FetchAPIResponse. In the blink variant the response body is a
-// scoped_refptr<BlobDataHandle> (refcounted), so Clone() shares it — a cached response can be
-// matched any number of times.
+// A cache holds Request URL -> Response. In the blink variant a Response body is a
+// refcounted scoped_refptr<BlobDataHandle>, so Clone() shares it — an entry can be matched
+// any number of times. The *request* cannot be Clone()d (its ResourceRequestBody field has
+// no clone), so we keep only the URL and rebuild a minimal request for cache.keys().
 struct MbCacheData {
   std::map<std::string, m::FetchAPIResponsePtr> entries;  // request URL -> response
 };
@@ -43,6 +45,15 @@ std::string UrlKey(const m::FetchAPIRequestPtr& request) {
   return request ? request->url.GetString().Utf8() : std::string();
 }
 
+// A minimal GET request carrying just the URL — enough for cache.keys() to hand back
+// Request objects the page can read .url from.
+m::FetchAPIRequestPtr MakeRequest(const std::string& url) {
+  auto req = m::FetchAPIRequest::New();
+  req->url = blink::KURL(blink::String::FromUtf8(url));
+  req->method = "GET";
+  return req;
+}
+
 class MbCacheStorageCache : public m::CacheStorageCache {
  public:
   explicit MbCacheStorageCache(MbCacheData* data) : data_(data) {}
@@ -54,21 +65,43 @@ class MbCacheStorageCache : public m::CacheStorageCache {
       std::move(callback).Run(base::unexpected(m::CacheStorageError::kErrorNotFound));
       return;
     }
-    std::move(callback).Run(m::MatchResponse::NewResponse(CloneStored(it->second)));
+    std::move(callback).Run(
+        m::MatchResponse::NewResponse(CloneStored(it->second)));
   }
 
-  void MatchAll(m::FetchAPIRequestPtr, m::CacheQueryOptionsPtr, int64_t,
+  // matchAll(request?): with a request, the matching response (0/1 by URL); without one,
+  // every cached response, in URL order.
+  void MatchAll(m::FetchAPIRequestPtr request, m::CacheQueryOptionsPtr, int64_t,
                 MatchAllCallback callback) override {
-    std::move(callback).Run(blink::Vector<m::FetchAPIResponsePtr>());
+    blink::Vector<m::FetchAPIResponsePtr> out;
+    if (request) {
+      auto it = data_->entries.find(UrlKey(request));
+      if (it != data_->entries.end())
+        out.push_back(CloneStored(it->second));
+    } else {
+      for (auto& e : data_->entries)
+        out.push_back(CloneStored(e.second));
+    }
+    std::move(callback).Run(std::move(out));
   }
   void GetAllMatchedEntries(m::FetchAPIRequestPtr, m::CacheQueryOptionsPtr,
                             int64_t,
                             GetAllMatchedEntriesCallback callback) override {
     std::move(callback).Run(blink::Vector<m::CacheEntryPtr>());
   }
-  void Keys(m::FetchAPIRequestPtr, m::CacheQueryOptionsPtr, int64_t,
+  // keys(request?): the cached requests (filtered to one by URL if given).
+  void Keys(m::FetchAPIRequestPtr request, m::CacheQueryOptionsPtr, int64_t,
             KeysCallback callback) override {
-    std::move(callback).Run(blink::Vector<m::FetchAPIRequestPtr>());
+    blink::Vector<m::FetchAPIRequestPtr> out;
+    if (request) {
+      auto it = data_->entries.find(UrlKey(request));
+      if (it != data_->entries.end())
+        out.push_back(MakeRequest(it->first));
+    } else {
+      for (auto& e : data_->entries)
+        out.push_back(MakeRequest(e.first));
+    }
+    std::move(callback).Run(std::move(out));
   }
 
   void Batch(blink::Vector<m::BatchOperationPtr> batch_operations, int64_t,

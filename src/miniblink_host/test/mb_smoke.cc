@@ -1389,15 +1389,18 @@ int main() {
     Eval(v,
          "window.__cs='';"
          "caches.open('v1').then(function(c){"
-         "return c.put('/data',new Response('cached-body')).then(function(){"
-         "return c.match('/data');});}).then(function(resp){"
-         "return resp?resp.text():'no-match';}).then(function(txt){"
-         "return caches.has('v1').then(function(h){window.__cs=txt+',has:'+h;});})"
+         "return c.put('/data',new Response('cached-body'))"
+         ".then(function(){return c.put('/data2',new Response('b2'));})"
+         ".then(function(){return c.match('/data');})"
+         ".then(function(resp){return resp.text();})"
+         ".then(function(txt){return c.keys().then(function(ks){"
+         "return caches.has('v1').then(function(h){"
+         "window.__cs=txt+',keys:'+ks.length+',has:'+h;});});});})"
          ".catch(function(e){window.__cs='err:'+e.name;});");
     mbWaitForFunction(v, "window.__cs!==''", 3000);
     const std::string r = Eval(v, "window.__cs");
-    Expect(r == "cached-body,has:true",
-           "Cache Storage: open/put/match round-trips a Response body; has() works",
+    Expect(r == "cached-body,keys:2,has:true",
+           "Cache Storage: open/put/match/keys round-trip a Response body; has() works",
            "cs=[" + r + "]");
   }
 
