@@ -675,6 +675,14 @@ constraints, atomic abort, and compound keys — the whole object-store/index AP
 `<video>` render blank) — the heaviest; needs a GL/media provider. Last.
 
 **Tier 3 — input & rendering refinements:**
+[DEFERRED: device emulation] `WebView::EnableDeviceEmulation` (the DevTools device-mode path —
+mobile viewport + coarse-pointer/no-hover) was attempted and REVERTED: it builds a
+ScreenMetricsEmulator that drives widget_base_'s screen/viewport into the COMPOSITOR
+(LayerTreeHost), which is null in our non-compositing headless widget -> SIGSEGV inside
+EnableDeviceEmulation. Needs the GPU/compositor path (the heaviest deferred item). mb_shot's
+`--mobile` (resize + DPR + mobile UA) remains the practical approximation; CSS-side conditions are
+covered by mbEmulateMedia. The private EnableMobileEmulation internals (ViewportStyle kMobile +
+pointer/hover global overrides) are not reachable without going through the crashing widget path.
 [DONE: media-feature emulation] `mbEmulateMedia(view, feature, value)` -> MbWebView::EmulateMedia
 -> Page::SetMediaFeatureOverride (the DevTools Emulation.setEmulatedMedia path) — overrides ANY CSS
 media feature LIVE (re-runs the page's media queries): prefers-reduced-motion, prefers-contrast,
