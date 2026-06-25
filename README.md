@@ -54,7 +54,8 @@ The deliverable example app — a standalone headless screenshot renderer:
 mb_shot \
   # request config
   [--user-agent UA] [--header "N: V"] [--proxy URL] [--insecure] [--no-follow] \
-  [--block SUBSTR] [--load-cookies FILE] [--save-cookies FILE] [--post BODY] \
+  [--block SUBSTR] [--mock URL FILE] [--rewrite FROM TO] \
+  [--load-cookies FILE] [--save-cookies FILE] [--post BODY] \
   [--no-images] [--dark] [--lang L,L2] [--tz Area/City] \
   # interact
   [--fill CSS TEXT] [--click CSS] [--drag FROM TO] [--dispatch CSS EVT] [--press KEY] \

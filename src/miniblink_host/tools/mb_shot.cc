@@ -109,6 +109,8 @@ int main(int argc, char** argv) {
   std::string post_body;       // when set, POST this body to the URL (vs GET)
   std::string user_agent;      // override the User-Agent for the navigation
   std::vector<const char*> blocks;  // URL substrings to block (repeatable)
+  std::vector<std::pair<const char*, const char*>> mocks;     // (url_substr, file)
+  std::vector<std::pair<const char*, const char*>> rewrites;  // (from, to)
   std::vector<std::pair<const char*, const char*>> set_cookies;  // (url, cookie)
   std::vector<const char*> pos;  // positional args, flags filtered out
   for (int i = 1; i < argc; ++i) {
@@ -237,6 +239,12 @@ int main(int argc, char** argv) {
       tz = argv[++i];
     } else if (a == "--block" && i + 1 < argc) {
       blocks.push_back(argv[++i]);
+    } else if (a == "--mock" && i + 2 < argc) {
+      mocks.emplace_back(argv[i + 1], argv[i + 2]);
+      i += 2;
+    } else if (a == "--rewrite" && i + 2 < argc) {
+      rewrites.emplace_back(argv[i + 1], argv[i + 2]);
+      i += 2;
     } else if (a == "--header" && i + 1 < argc) {
       if (!headers.empty())
         headers += "\n";
@@ -261,7 +269,8 @@ int main(int argc, char** argv) {
         "[--scroll-to Y] [--scroll-to-selector CSS] "
         "[--post BODY] [--proxy URL] "
         "[--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] "
-        "[--no-follow] [--block SUBSTR] [--set-cookie URL COOKIE] [--user-agent UA] "
+        "[--no-follow] [--block SUBSTR] [--mock URL FILE] [--rewrite FROM TO] "
+        "[--set-cookie URL COOKIE] [--user-agent UA] "
         "[--require CSS] "
         "<input.html|file://URL|http(s)://URL> <out.png> [width height]\n",
         argv[0]);
@@ -330,6 +339,37 @@ int main(int argc, char** argv) {
     mbSetFollowRedirects(0);  // stop at the redirect (see status + Location)
   for (const char* b : blocks)
     mbBlockUrl(b);  // drop matching subresources (ads/trackers/images) before load
+  // --rewrite FROM TO: redirect matching requests before fetch (host swap, CDN ->
+  // local mock). Applied before --mock so a rewrite can land on a mocked URL.
+  for (const auto& rw : rewrites)
+    mbRewriteUrl(rw.first, rw.second);
+  // --mock URL FILE: serve FILE's bytes for requests whose URL contains URL, with
+  // no real fetch — substitute an API/resource response or run a page offline.
+  // Content-Type is guessed from FILE's extension (css/js/json/svg/html/xml/png/
+  // txt), defaulting to text/plain.
+  for (const auto& mk : mocks) {
+    std::ifstream mf(mk.second, std::ios::binary);
+    if (!mf.is_open()) {
+      std::fprintf(stderr, "mb_shot: WARNING — --mock body file '%s' unreadable\n",
+                   mk.second);
+      continue;
+    }
+    std::stringstream ms;
+    ms << mf.rdbuf();
+    const std::string body = ms.str();
+    const std::string f(mk.second);
+    const std::string ext =
+        f.rfind('.') != std::string::npos ? f.substr(f.rfind('.') + 1) : "";
+    const char* ct = "text/plain";
+    if (ext == "css") ct = "text/css";
+    else if (ext == "js") ct = "application/javascript";
+    else if (ext == "json") ct = "application/json";
+    else if (ext == "svg") ct = "image/svg+xml";
+    else if (ext == "html" || ext == "htm") ct = "text/html";
+    else if (ext == "xml") ct = "application/xml";
+    else if (ext == "png") ct = "image/png";
+    mbMockResponse(mk.first, body.c_str(), ct, 200);
+  }
   if (!load_cookies.empty()) {
     if (!mbLoadCookies(load_cookies.c_str()))  // restore a saved session
       std::fprintf(stderr, "mb_shot: WARNING — --load-cookies '%s' unreadable\n",

@@ -297,6 +297,30 @@ else
   echo "  [SKIP] capture-mode dimension/format checks (no python3)"
 fi
 
+# --mock / --rewrite: network interception (the signature miniblink feature). A page
+# fetch()es an API URL; --mock serves it from a local file with no network; --rewrite
+# redirects a request onto the mocked URL. Both exercise the fetch()/XHR path offline.
+printf '%s' '{"v":42}' > "$TMP/api.json"
+cat > "$TMP/fetch.html" <<'HTML'
+<!doctype html><body><div id="r">pending</div><script>
+fetch('https://api.test/data').then(r=>r.json()).then(j=>{document.getElementById('r').textContent='GOT:'+j.v;});
+</script></body>
+HTML
+run 40 "file://$TMP/fetch.html" "$PNG" --mock "https://api.test/data" "$TMP/api.json" \
+    --wait-eval "document.getElementById('r').textContent.indexOf('GOT')===0" \
+    --eval "document.getElementById('r').textContent"
+check "--mock serves a fetch() response from a file" "GOT:42" "$(cat "$TMP/out")"
+cat > "$TMP/fetch2.html" <<'HTML'
+<!doctype html><body><div id="r">pending</div><script>
+fetch('https://orig.test/data').then(r=>r.json()).then(j=>{document.getElementById('r').textContent='GOT:'+j.v;});
+</script></body>
+HTML
+run 40 "file://$TMP/fetch2.html" "$PNG" --rewrite "orig.test" "api.test" \
+    --mock "https://api.test/data" "$TMP/api.json" \
+    --wait-eval "document.getElementById('r').textContent.indexOf('GOT')===0" \
+    --eval "document.getElementById('r').textContent"
+check "--rewrite redirects a fetch() onto a mock" "GOT:42" "$(cat "$TMP/out")"
+
 # bad-size guard: a non-numeric width positional must fail fast (exit 2), not crash
 run 40 "$URL" --out "$PNG"; check "bad-size guard exit code" "2" "$RC"
 checkc "bad-size guard message" "must be positive" "$(cat "$TMP/err")"
