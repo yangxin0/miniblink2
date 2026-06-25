@@ -426,6 +426,11 @@ consistent. mb_smoke 23aa (set 2, get 1 by name, getAll 2, document.cookie refle
 host bound, blink's disconnect handler REJECTED the promise with AbortError, breaking feature probes.
 The outer list carries kNumMediaDeviceTypes empty per-type lists (a blink DCHECK); capability getters
 return empty; output-selection methods are unreached headless. mb_smoke 23ab.
+[DONE: File System Access (reject-stub)] `MbFileSystemAccessManager` (bound from the frame broker)
+makes `navigator.storage.getDirectory()` (OPFS) and the file pickers REJECT cleanly. BUG fixed:
+blink's FileSystemAccessManager sets no disconnect handler, so an unbound pipe HUNG getDirectory()'s
+promise forever; the manager now returns kOperationFailed. A real in-memory OPFS (directory/file
+handles + writers) is a DEFERRED multi-tick effort. mb_smoke 23ac.
 [DONE: Cache Storage] `frame/mb_cache_storage.{h,cc}` (`MbCacheStorage` + `MbCacheStorageCache`,
 bound from the frame broker). `caches.open/has/delete/keys`, `caches.match`, `cache.put`/`delete`
 (via `Batch`), and `cache.match`. Stores Request URL -> FetchAPIResponse in a process-wide
