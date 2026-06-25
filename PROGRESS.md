@@ -426,11 +426,17 @@ consistent. mb_smoke 23aa (set 2, get 1 by name, getAll 2, document.cookie refle
 host bound, blink's disconnect handler REJECTED the promise with AbortError, breaking feature probes.
 The outer list carries kNumMediaDeviceTypes empty per-type lists (a blink DCHECK); capability getters
 return empty; output-selection methods are unreached headless. mb_smoke 23ab.
-[DONE: File System Access (reject-stub)] `MbFileSystemAccessManager` (bound from the frame broker)
-makes `navigator.storage.getDirectory()` (OPFS) and the file pickers REJECT cleanly. BUG fixed:
-blink's FileSystemAccessManager sets no disconnect handler, so an unbound pipe HUNG getDirectory()'s
-promise forever; the manager now returns kOperationFailed. A real in-memory OPFS (directory/file
-handles + writers) is a DEFERRED multi-tick effort. mb_smoke 23ac.
+[IN PROGRESS: OPFS — slice 1 DONE] `frame/mb_opfs.{h,cc}` — a real in-memory Origin Private File
+System behind `blink.mojom.FileSystemAccessManager`. SLICE 1 (directory tree): `navigator.storage.
+getDirectory()` resolves to a usable root over a process-wide in-memory tree (FsNode = dir children
+or file bytes); directory handles support `getDirectoryHandle`/`getFileHandle` (create + navigate),
+`keys()`/`values()`/`entries()` enumeration (GetEntries binds a fresh handle per child), and
+`removeEntry`; a missing entry without `{create}` rejects with NotFoundError (kFileError +
+FILE_ERROR_NOT_FOUND). NOTE: FileSystemAccessError.message must be a NON-NULL empty String (a default
+WTF::String is null and fails mojo validation). Verified (mb_smoke 23ac: create docs/ + a.txt,b.txt,
+enumerate, not-found). SLICE 2 (DEFERRED): file CONTENT read/write — AsBlob (returns a refcounted
+BlobDataHandle), CreateFileWriter + the FileSystemAccessFileWriter data-pipe Write, OpenAccessHandle;
+all currently reject cleanly (kNotSupportedError), never hang.
 [DONE: Cache Storage] `frame/mb_cache_storage.{h,cc}` (`MbCacheStorage` + `MbCacheStorageCache`,
 bound from the frame broker). `caches.open/has/delete/keys`, `caches.match`, `cache.put`/`delete`
 (via `Batch`), and `cache.match`. Stores Request URL -> FetchAPIResponse in a process-wide
