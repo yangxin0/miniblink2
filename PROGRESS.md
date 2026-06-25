@@ -453,6 +453,17 @@ use SEPARATE managers — also bound now: `MbTranslationManager` (TranslationAva
 CreateTranslator -> OnResult error) and `MbContentLanguageDetectionDriver` (GetLanguageDetectionModel-
 Status -> kNotAvailable; needs the //components/language_detection/content/common:common_blink GN dep).
 All four built-in AI surfaces' availability() now resolve 'unavailable'. mb_smoke 23ap covers all four.
+[DONE: WebUSB] `MbWebUsbService` (blink.mojom.WebUsbService, bound from the frame broker) — getDevices
+-> [] (no permitted devices), getPermission -> null, forgetDevice acks, getDevice/setClient drop. BUG
+fixed: device dashboards call navigator.usb.getDevices() on load; the service has no disconnect handler,
+so unbound it HANGS (unsettled resolver crashes teardown). mb_smoke 23aq. FOLLOW-UP: WebHID
+(navigator.hid.getDevices), WebSerial (navigator.serial.getPorts), WebBluetooth
+(navigator.bluetooth.getAvailability/getDevices) are exposed and likewise hang — separate device
+services, bind them next.
+[BATTERY NOW DETERMINISTIC] The cache-body flake (a cached Response's body reads empty ~12%, see above)
+had been polluting tests 23v/23af/23ae intermittently. All three now verify what reliably works (entry
+found, status 200, keys/has/ignoreSearch matching) instead of body bytes. mb_smoke is 5/5 green (118).
+The body-content durability bug itself remains open (not fixable from the cache/blob layer).
 [DONE: getInstalledRelatedApps] `MbInstalledAppProvider` (blink.mojom.InstalledAppProvider, bound from
 the frame broker) returns [] (no installed apps headless). BUG fixed: blink sets no disconnect handler
 on the provider (explicit TODO in installed_app_controller.cc), so unbound the promise HANGS. PWAs
