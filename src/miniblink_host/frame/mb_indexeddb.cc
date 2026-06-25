@@ -2,10 +2,12 @@
 
 #include <stdint.h>
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "base/bit_cast.h"
 #include "base/containers/span.h"
@@ -92,6 +94,27 @@ blink::IDBKeyPath StoreKeyPath(MbIDBBackend* b, int64_t store_id) {
                                                : blink::IDBKeyPath();
 }
 
+std::unique_ptr<blink::IDBValue> MakeValue(const std::string& bytes) {
+  auto v = std::make_unique<blink::IDBValue>();
+  v->SetData(mojo_base::BigBuffer(base::as_byte_span(bytes)));
+  return v;
+}
+
+// Is an encoded key within [lo, hi] (empty bound = unbounded; *_open = exclusive)?
+bool InRange(const std::string& ek,
+             const std::string& lo,
+             bool lo_open,
+             const std::string& hi,
+             bool hi_open) {
+  if (ek.empty())
+    return false;
+  if (!lo.empty() && (ek < lo || (lo_open && ek == lo)))
+    return false;
+  if (!hi.empty() && (ek > hi || (hi_open && ek == hi)))
+    return false;
+  return true;
+}
+
 // Build the IDBReturnValue blink expects (value bytes + primary key + the store's key path
 // — the path MUST match the store's or idb_request.cc DCHECKs).
 m::IDBReturnValuePtr BuildReturnValue(const MbRecord& rec,
@@ -131,6 +154,92 @@ int64_t CurrentVersion(const MbIDBBackend* b) {
 // The connection's IDBDatabase. Schema-mutating ops route through transactions, so most of
 // this is inert for step 1; reads/writes land in step 2.
 class MbIDBTransactionImpl;  // defined below
+
+// A cursor over an object store's records. At open it snapshots the in-range encoded keys in
+// iteration order (forward or reverse); each Continue/Advance/Prefetch walks that list and
+// looks the live record up by key. `pos_` is the index of the NEXT record to deliver (open
+// already delivered keys_[0], so pos_ starts at 1). Self-deletes when its pipe disconnects.
+class MbIDBCursor : public m::IDBCursor {
+ public:
+  MbIDBCursor(MbIDBBackend* backend,
+              int64_t store_id,
+              bool key_only,
+              std::vector<std::string> keys)
+      : backend_(backend),
+        store_id_(store_id),
+        key_only_(key_only),
+        keys_(std::move(keys)) {}
+
+  void Advance(uint32_t count, AdvanceCallback callback) override {
+    if (count > 1)
+      pos_ += (count - 1);
+    std::move(callback).Run(TakeOne());
+  }
+  void Continue(std::unique_ptr<blink::IDBKey> key,
+                std::unique_ptr<blink::IDBKey> /*primary_key*/,
+                ContinueCallback callback) override {
+    if (key && key->IsValid()) {
+      std::string target = EncodeKey(key.get());  // snapshot already in direction order
+      while (pos_ < keys_.size() && keys_[pos_] < target)
+        ++pos_;
+    }
+    std::move(callback).Run(TakeOne());
+  }
+  void Prefetch(int32_t count, PrefetchCallback callback) override {
+    auto cv = m::IDBCursorValue::New();
+    int32_t n = 0;
+    for (; n < count && pos_ < keys_.size(); ++n)
+      if (!AppendCurrent(cv.get()))
+        break;
+    last_prefetch_ = n;
+    if (n == 0) {
+      std::move(callback).Run(m::IDBCursorResult::NewEmpty(true));
+      return;
+    }
+    std::move(callback).Run(m::IDBCursorResult::NewValues(std::move(cv)));
+  }
+  void PrefetchReset(int32_t used_prefetches) override {
+    pos_ -= (last_prefetch_ - used_prefetches);
+    last_prefetch_ = 0;
+  }
+
+  void set_pos(size_t pos) { pos_ = pos; }
+
+ private:
+  const std::map<std::string, MbRecord>* StoreMap() const {
+    auto it = backend_->data.find(store_id_);
+    return it == backend_->data.end() ? nullptr : &it->second;
+  }
+  // Append keys_[pos_] (advancing pos_) into a cursor value; false if it's gone.
+  bool AppendCurrent(m::IDBCursorValue* cv) {
+    const auto* store = StoreMap();
+    while (pos_ < keys_.size()) {
+      auto it = store ? store->find(keys_[pos_]) : decltype(store->end())();
+      ++pos_;
+      if (store && it != store->end()) {
+        cv->keys.push_back(blink::IDBKey::Clone(it->second.key));
+        cv->primary_keys.push_back(blink::IDBKey::Clone(it->second.key));
+        if (!key_only_)
+          cv->values.push_back(MakeValue(it->second.bytes));
+        return true;
+      }
+    }
+    return false;
+  }
+  m::IDBCursorResultPtr TakeOne() {
+    auto cv = m::IDBCursorValue::New();
+    if (!AppendCurrent(cv.get()))
+      return m::IDBCursorResult::NewEmpty(true);
+    return m::IDBCursorResult::NewValues(std::move(cv));
+  }
+
+  MbIDBBackend* backend_;
+  int64_t store_id_;
+  bool key_only_;
+  std::vector<std::string> keys_;  // in-range keys, in iteration order
+  size_t pos_ = 0;
+  int32_t last_prefetch_ = 0;
+};
 
 class MbIDBDatabase : public m::IDBDatabase {
  public:
@@ -219,10 +328,50 @@ class MbIDBDatabase : public m::IDBDatabase {
     }
     std::move(callback).Run(std::move(records), mojo::NullAssociatedReceiver());
   }
-  void OpenCursor(int64_t, int64_t, int64_t, m::IDBKeyRangePtr,
-                  m::IDBCursorDirection, bool, m::IDBTaskType,
+  // openCursor()/openKeyCursor(): snapshot the in-range keys in iteration order, hand back a
+  // cursor + the first record (or empty).
+  void OpenCursor(int64_t, int64_t object_store_id, int64_t,
+                  m::IDBKeyRangePtr key_range, m::IDBCursorDirection direction,
+                  bool key_only, m::IDBTaskType,
                   OpenCursorCallback callback) override {
-    std::move(callback).Run(nullptr);
+    auto store_it = backend_->data.find(object_store_id);
+    std::string lo = key_range ? EncodeKey(key_range->lower.get()) : std::string();
+    std::string hi = key_range ? EncodeKey(key_range->upper.get()) : std::string();
+    bool lo_open = key_range && key_range->lower_open;
+    bool hi_open = key_range && key_range->upper_open;
+    bool reverse = direction == m::IDBCursorDirection::Prev ||
+                   direction == m::IDBCursorDirection::PrevNoDuplicate;
+
+    std::vector<std::string> keys;
+    if (store_it != backend_->data.end()) {
+      for (const auto& entry : store_it->second)
+        if (InRange(entry.first, lo, lo_open, hi, hi_open))
+          keys.push_back(entry.first);
+      if (reverse)
+        std::reverse(keys.begin(), keys.end());
+    }
+    if (keys.empty()) {
+      std::move(callback).Run(m::IDBDatabaseOpenCursorResult::NewEmpty(true));
+      return;
+    }
+
+    const MbRecord& first = store_it->second.at(keys.front());
+    auto val = m::IDBDatabaseOpenCursorValue::New();
+    val->key = blink::IDBKey::Clone(first.key);
+    val->primary_key = blink::IDBKey::Clone(first.key);
+    if (!key_only)
+      val->value = MakeValue(first.bytes);
+
+    auto cursor =
+        std::make_unique<MbIDBCursor>(backend_, object_store_id, key_only, std::move(keys));
+    cursor->set_pos(1);  // keys[0] is delivered in this open result
+    mojo::PendingAssociatedRemote<m::IDBCursor> cursor_remote;
+    auto cursor_receiver = cursor_remote.InitWithNewEndpointAndPassReceiver();
+    mojo::MakeSelfOwnedAssociatedReceiver(std::move(cursor),
+                                          std::move(cursor_receiver));
+    val->cursor = std::move(cursor_remote);
+    std::move(callback).Run(
+        m::IDBDatabaseOpenCursorResult::NewValue(std::move(val)));
   }
   // count(): a single-key range counts that key (0/1); an absent/unbounded range counts
   // every record in the store.

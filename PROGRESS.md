@@ -435,10 +435,16 @@ primary key. `IDBDatabase.GetAll` emits records (Keys/Values/Records result type
 honoring the key range (encoded-key `lower_bound`/`upper_bound` with open/closed ends), max_count,
 and Next/Prev direction — and `Count`/`DeleteRange` use the same encoding. Verified (mb_smoke
 23o): insert id 3,1,2 -> `getAll()` returns them ordered 1,2,3. (Values-only getAll must NOT carry
-record primary keys — blink CHECKs that.) NOT yet: the stateful IDBCursor interface
-(openCursor), indexes, autoincrement key generation, transaction atomicity/rollback — and
-persistence is in-memory only (per-process, by db name). Object-store CRUD + getAll/ranges is the
-common app surface; cursors are the main remaining IDB piece.]
+record primary keys — blink CHECKs that.) STEP 5 (DONE): cursors. `IDBDatabase.OpenCursor`
+snapshots the in-range encoded keys in iteration order (forward or reverse) and hands back a
+`MbIDBCursor` (self-owned `IDBCursor` receiver) + the first record (or empty). `IDBCursor.Continue`
+(plain or to-a-key), `Advance`, and `Prefetch`/`PrefetchReset` walk that snapshot, looking each
+record up live by key and returning it as an `IDBCursorValue`. Verified (mb_smoke 23p): insert id
+3,1,2 -> `openCursor()` + `continue()` visits 1,2,3. The object-store read/write surface is now
+broad: open+schema, put/get, count/delete/clear, getAll/ranges, AND cursors. NOT yet: indexes
+(createIndex/index cursors), autoincrement key generation, transaction atomicity/rollback,
+prefetch position-rewind beyond the simple case — and persistence is in-memory (per-process, by
+db name).]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
    Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —

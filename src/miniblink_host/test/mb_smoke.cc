@@ -1241,6 +1241,30 @@ int main() {
            "idb3=[" + r + "]");
   }
 
+  // 23p. IndexedDB cursor (step 5): openCursor() walks records in key order via the
+  // stateful IDBCursor (continue()). Insert id 3,1,2; the cursor must visit 1,2,3.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://idb.test/");
+    Eval(v,
+         "window.__idb4='';"
+         "var __c=indexedDB.open('mbdb5',1);"
+         "__c.onupgradeneeded=function(e){e.target.result.createObjectStore('c',{keyPath:'id'});};"
+         "__c.onsuccess=function(e){var db=e.target.result;"
+         "var t=db.transaction('c','readwrite');var s=t.objectStore('c');"
+         "s.put({id:3,n:'c'});s.put({id:1,n:'a'});s.put({id:2,n:'b'});"
+         "t.oncomplete=function(){var out=[];"
+         "var cr=db.transaction('c').objectStore('c').openCursor();"
+         "cr.onsuccess=function(ev){var cur=ev.target.result;"
+         "if(cur){out.push(cur.value.id+cur.value.n);cur.continue();}"
+         "else{window.__idb4=out.join(',');}};"
+         "cr.onerror=function(){window.__idb4='err';};};};");
+    mbWaitForFunction(v, "window.__idb4!==''", 4000);
+    const std::string r = Eval(v, "window.__idb4");
+    Expect(r == "1a,2b,3c",
+           "IndexedDB cursor walks records in key order via continue()",
+           "idb4=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");
