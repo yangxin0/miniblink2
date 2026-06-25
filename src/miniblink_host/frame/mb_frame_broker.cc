@@ -16,6 +16,8 @@
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/network/public/mojom/cookie_manager.mojom-blink.h"
 #include "services/network/public/mojom/restricted_cookie_manager.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions/permission.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions/permission_status.mojom-blink.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -162,6 +164,64 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
   }
 };
 
+// Minimal in-process PermissionService. With no browser, navigator.permissions.query()
+// otherwise never resolves (the request is dropped) and a page awaiting it HANGS. Answer
+// every query DENIED — the headless reality (no permission is granted; geolocation etc.
+// already error out), so a permission-gated page takes its no-permission path instead of
+// stalling. Requests/observers are no-ops. Bound on the broker's thread (async; no [Sync]).
+class MbPermissionService : public blink::mojom::blink::PermissionService {
+ public:
+  void HasPermission(blink::mojom::blink::PermissionDescriptorPtr,
+                     HasPermissionCallback callback) override {
+    std::move(callback).Run(Denied());
+  }
+  void RegisterPageEmbeddedPermissionControl(
+      blink::Vector<blink::mojom::blink::PermissionDescriptorPtr>,
+      blink::mojom::blink::EmbeddedPermissionRequestDescriptorPtr,
+      mojo::PendingRemote<blink::mojom::blink::EmbeddedPermissionControlClient>)
+      override {}
+  void RequestPageEmbeddedPermission(
+      blink::Vector<blink::mojom::blink::PermissionDescriptorPtr>,
+      blink::mojom::blink::EmbeddedPermissionRequestDescriptorPtr,
+      RequestPageEmbeddedPermissionCallback callback) override {
+    std::move(callback).Run(
+        blink::mojom::blink::EmbeddedPermissionControlResult::kDismissed);
+  }
+  void RequestPermission(blink::mojom::blink::PermissionDescriptorPtr,
+                         RequestPermissionCallback callback) override {
+    std::move(callback).Run(Denied());
+  }
+  void RequestPermissions(
+      blink::Vector<blink::mojom::blink::PermissionDescriptorPtr> permissions,
+      RequestPermissionsCallback callback) override {
+    blink::Vector<blink::mojom::blink::PermissionStatusWithDetailsPtr> out;
+    out.reserve(permissions.size());
+    for (blink::wtf_size_t i = 0; i < permissions.size(); ++i)
+      out.push_back(Denied());
+    std::move(callback).Run(std::move(out));
+  }
+  void RevokePermission(blink::mojom::blink::PermissionDescriptorPtr,
+                        RevokePermissionCallback callback) override {
+    std::move(callback).Run(Denied());
+  }
+  void AddPermissionObserver(
+      blink::mojom::blink::PermissionDescriptorPtr,
+      blink::mojom::blink::PermissionStatusWithDetailsPtr,
+      mojo::PendingRemote<blink::mojom::blink::PermissionObserver>) override {}
+  void AddPageEmbeddedPermissionObserver(
+      blink::mojom::blink::PermissionDescriptorPtr,
+      blink::mojom::blink::PermissionStatus,
+      mojo::PendingRemote<blink::mojom::blink::PermissionObserver>) override {}
+  void NotifyEventListener(blink::mojom::blink::PermissionDescriptorPtr,
+                           const blink::String&, bool) override {}
+
+ private:
+  static blink::mojom::blink::PermissionStatusWithDetailsPtr Denied() {
+    return blink::mojom::blink::PermissionStatusWithDetails::New(
+        blink::mojom::blink::PermissionStatus::DENIED, nullptr);
+  }
+};
+
 class MbBrowserInterfaceBroker
     : public blink::mojom::blink::BrowserInterfaceBroker {
  public:
@@ -169,6 +229,12 @@ class MbBrowserInterfaceBroker
     if (auto r =
             receiver.As<network::mojom::blink::RestrictedCookieManager>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbCookieManager>(),
+                                  std::move(r));
+      return;
+    }
+    // navigator.permissions.query / .request — answer so the promise resolves.
+    if (auto r = receiver.As<blink::mojom::blink::PermissionService>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbPermissionService>(),
                                   std::move(r));
       return;
     }

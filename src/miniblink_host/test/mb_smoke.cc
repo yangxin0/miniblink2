@@ -856,6 +856,23 @@ int main() {
                " tok=[" + t + "] u=[" + u + "]");
   }
 
+  // 23c. navigator.permissions.query (broker #8): with no browser the request was
+  // dropped and the promise NEVER resolved (a permission-gated page hangs). The
+  // in-process PermissionService now answers it, so query() resolves to "denied"
+  // (the headless reality) and the page proceeds. Async -> wait on the result.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://perm.test/");
+    Eval(v,
+         "navigator.permissions.query({name:'geolocation'})"
+         ".then(function(s){window.__ps=s.state;},"
+         "function(e){window.__ps='rej:'+(e&&e.name);})");
+    mbWaitForFunction(v, "window.__ps!==undefined", 2000);
+    const std::string ps = Eval(v, "window.__ps");
+    Expect(ps == "denied",
+           "navigator.permissions.query resolves (denied) instead of hanging",
+           "state=[" + ps + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

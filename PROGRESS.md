@@ -234,7 +234,12 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
    or the worker derefs them. Needs a dedicated multi-tick effort, not a single loop tick.
    Flow map: dedicated_worker.cc ContinueStart→CreateWorkerHost→OnWorkerHostCreated→
    OnScriptLoadStarted→ContinueStart (worker thread + script fetch). 8. Broker binds cookies
-only — IndexedDB / WebSocket / Permissions / geolocation / clipboard / notifications dropped.
+only [+ Permissions, this tick]. [DONE: Permissions] `MbPermissionService` in the FRAME
+broker (mb_frame_broker.cc — the one navigator.* uses, not the platform thread broker)
+answers navigator.permissions.query/.request as DENIED, so the promise resolves instead
+of HANGING (it was dropped → a permission-gated page stalled forever). Verified (mb_smoke
+23c): query({name:'geolocation'}) → state "denied". [REMAINING at the broker: IndexedDB /
+WebSocket / geolocation position / clipboard / notifications — each its own mojo service.]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
    Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —
