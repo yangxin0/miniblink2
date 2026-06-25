@@ -55,7 +55,58 @@ struct MbIDBBackend {
       index_data;
   // The active connection's database callbacks (transaction completion is reported here).
   mojo::AssociatedRemote<IDBDatabaseCallbacks> db_callbacks;
+
+  // Per-transaction rollback snapshot of the mutable store state (data + key generators +
+  // indexes), captured lazily on a transaction's FIRST mutation. A subsequent Abort restores
+  // it, giving the whole transaction atomic all-or-nothing semantics; Commit discards it.
+  struct Snapshot {
+    std::map<int64_t, std::map<std::string, MbRecord>> data;
+    std::map<int64_t, int64_t> key_generator;
+    std::map<int64_t,
+             std::map<int64_t, std::map<std::string, std::set<std::string>>>>
+        index_data;
+  };
+  std::map<int64_t, Snapshot> txn_snapshots;  // transaction id -> pre-transaction state
 };
+
+// Deep-clone the records map (MbRecord holds a unique_ptr<IDBKey>, so it can't be copied).
+std::map<int64_t, std::map<std::string, MbRecord>> CloneData(
+    const std::map<int64_t, std::map<std::string, MbRecord>>& src) {
+  std::map<int64_t, std::map<std::string, MbRecord>> out;
+  for (const auto& store : src) {
+    auto& dst = out[store.first];
+    for (const auto& rec : store.second)
+      dst[rec.first] = MbRecord{blink::IDBKey::Clone(rec.second.key.get()),
+                                rec.second.bytes};
+  }
+  return out;
+}
+
+// Snapshot the backend before a transaction's first mutation (idempotent per txn).
+void EnsureSnapshot(MbIDBBackend* b, int64_t txn_id) {
+  if (b->txn_snapshots.count(txn_id))
+    return;
+  MbIDBBackend::Snapshot s;
+  s.data = CloneData(b->data);
+  s.key_generator = b->key_generator;
+  s.index_data = b->index_data;
+  b->txn_snapshots[txn_id] = std::move(s);
+}
+
+// Restore (and consume) a transaction's snapshot — its writes never happened.
+void RollbackSnapshot(MbIDBBackend* b, int64_t txn_id) {
+  auto it = b->txn_snapshots.find(txn_id);
+  if (it == b->txn_snapshots.end())
+    return;
+  b->data = std::move(it->second.data);
+  b->key_generator = std::move(it->second.key_generator);
+  b->index_data = std::move(it->second.index_data);
+  b->txn_snapshots.erase(it);
+}
+
+void DiscardSnapshot(MbIDBBackend* b, int64_t txn_id) {
+  b->txn_snapshots.erase(txn_id);
+}
 
 bool IsAutoIncrement(MbIDBBackend* b, int64_t store_id) {
   auto it = b->metadata.object_stores.find(store_id);
@@ -511,8 +562,10 @@ class MbIDBDatabase : public m::IDBDatabase {
     std::move(callback).Run(/*success=*/true, n);
   }
   // delete(key): remove the single-key record; an unbounded range removes all.
-  void DeleteRange(int64_t, int64_t object_store_id, m::IDBKeyRangePtr key_range,
+  void DeleteRange(int64_t transaction_id, int64_t object_store_id,
+                   m::IDBKeyRangePtr key_range,
                    DeleteRangeCallback callback) override {
+    EnsureSnapshot(backend_, transaction_id);
     auto it = backend_->data.find(object_store_id);
     if (it != backend_->data.end()) {
       std::string ekey =
@@ -534,8 +587,9 @@ class MbIDBDatabase : public m::IDBDatabase {
     int64_t current = it != backend_->key_generator.end() ? it->second : 1;
     std::move(callback).Run(current, nullptr);
   }
-  void Clear(int64_t, int64_t object_store_id,
+  void Clear(int64_t transaction_id, int64_t object_store_id,
              ClearCallback callback) override {
+    EnsureSnapshot(backend_, transaction_id);
     auto it = backend_->data.find(object_store_id);
     if (it != backend_->data.end())
       it->second.clear();
@@ -559,7 +613,14 @@ class MbIDBDatabase : public m::IDBDatabase {
     backend_->index_data[object_store_id].erase(index_id);
   }
   void RenameIndex(int64_t, int64_t, int64_t, const blink::String&) override {}
-  void Abort(int64_t) override {}
+  // transaction.abort() (or an unhandled request error) — roll back every write the
+  // transaction made, then fire its onabort via the database callbacks.
+  void Abort(int64_t transaction_id) override {
+    RollbackSnapshot(backend_, transaction_id);
+    if (backend_->db_callbacks)
+      backend_->db_callbacks->Abort(transaction_id, m::IDBException::kAbortError,
+                                    blink::String("transaction aborted"));
+  }
   void DidBecomeInactive() override {}
   void UpdatePriority(int32_t) override {}
 
@@ -608,6 +669,7 @@ class MbIDBTransactionImpl : public IDBTransaction {
            m::IDBPutMode,
            blink::Vector<blink::IDBIndexKeys> index_keys,
            PutCallback callback) override {
+    EnsureSnapshot(backend_, txn_id_);  // first mutation arms transaction rollback
     // Auto-increment: blink sends a null key for a key-generator store; the backend
     // assigns the next number. An explicit numeric key also bumps the generator.
     std::unique_ptr<blink::IDBKey> generated;
@@ -684,6 +746,7 @@ class MbIDBTransactionImpl : public IDBTransaction {
   }
   void SetIndexKeysDone() override {}
   void Commit(int64_t /*num_errors_handled*/) override {
+    DiscardSnapshot(backend_, txn_id_);  // changes are now durable; nothing to roll back
     // The transaction completed: notify its oncomplete, and (for the open's
     // version-change transaction) resolve the open request.
     if (backend_->db_callbacks)

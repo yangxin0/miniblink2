@@ -1431,6 +1431,32 @@ int main() {
            "idbME=[" + r + "]");
   }
 
+  // 23x. IndexedDB transaction rollback: a readwrite transaction that is abort()ed undoes
+  // ALL its writes atomically. Commit id:1='orig'; then in a second txn change id:1 to
+  // 'changed' and insert id:2, but abort — afterwards id:1 is back to 'orig' and id:2 is gone.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://idb.test/");
+    Eval(v,
+         "window.__idbAB='';"
+         "var __a=indexedDB.open('mdbAB',1);"
+         "__a.onupgradeneeded=function(e){e.target.result.createObjectStore('t',{keyPath:'id'});};"
+         "__a.onsuccess=function(e){var db=e.target.result;"
+         "var t1=db.transaction('t','readwrite');t1.objectStore('t').put({id:1,v:'orig'});"
+         "t1.oncomplete=function(){"
+         "var t2=db.transaction('t','readwrite');var s=t2.objectStore('t');"
+         "s.put({id:1,v:'changed'});s.put({id:2,v:'new'});"
+         "t2.onabort=function(){"
+         "var t3=db.transaction('t');var s3=t3.objectStore('t');"
+         "var g=s3.get(1);var c=s3.count();"
+         "t3.oncomplete=function(){window.__idbAB=g.result.v+',count:'+c.result;};};"
+         "t2.abort();};};");
+    mbWaitForFunction(v, "window.__idbAB!==''", 4000);
+    const std::string r = Eval(v, "window.__idbAB");
+    Expect(r == "orig,count:1",
+           "IndexedDB transaction.abort() rolls back all writes atomically",
+           "idbAB=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");
