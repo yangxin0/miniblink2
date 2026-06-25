@@ -93,9 +93,14 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
    - Delete the dead commented-out `widget/mb_sw_frame_sink.{h,cc}` scaffolding.
 
 **Tier 1 — genuine high-value automation capability (after the above):**
-3. **Iframe / sub-frame targeting** — selector ops / JS eval / screenshots are main-frame
-   only. Add a frame handle + per-frame selector/eval (`wkeRunJsByFrame`), so iframe content
-   is readable/clickable. (Local iframes already paint into the parent.)
+3. **Iframe / sub-frame targeting** (audit #2).
+   - [DONE] **per-frame eval** — `mbGetFrameCount()` + `mbEvalJSInFrame(frame_index, js)`:
+     evals host-privileged in the Nth child frame's own world, so it reads even a
+     CROSS-ORIGIN iframe the parent's `iframe.contentDocument` can't (single-process =
+     all iframes are local `WebLocalFrame`s). mb_smoke_render 78b: data: iframe under an
+     https parent -> parent read NULLDOC, `mbEvalJSInFrame(0,...)` reads XFRAME-SECRET.
+   - [NEXT] per-frame selector ops (click/fill/text-by-selector in a frame) via the same
+     child-frame mechanism + an `mb_shot --frame N` prefix + wke `wkeRunJsByFrame` peer.
 4. **Push callback model** — replace poll-only readiness: host `DidFinishLoad`/
    `DidMeaningfulLayout` signals (`mb_frame_client.h:122` TODO — fixes partial-capture
    races), navigation policy (`wkeOnNavigation`), new-window (`wkeOnCreateView`), downloads.

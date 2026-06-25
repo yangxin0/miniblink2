@@ -1450,6 +1450,61 @@ std::string MbWebView::EvalToString(const char* utf8_script) {
   return result;
 }
 
+// Number of direct child frames (top-level iframes) of the main document.
+int MbWebView::GetFrameCount() {
+  if (!main_frame_)
+    return 0;
+  int n = 0;
+  for (blink::WebFrame* c = main_frame_->FirstChild(); c; c = c->NextSibling())
+    ++n;
+  return n;
+}
+
+// Eval in the frame_index-th direct child frame (0-based, document order); -1 = the
+// main frame. Runs in that frame's main world host-privileged, so it reads even a
+// CROSS-ORIGIN iframe's content (the same-origin policy that blocks the parent's
+// iframe.contentDocument does not bind the host's own eval). Returns "" if the
+// index is out of range or the child is a remote frame (not used single-process).
+std::string MbWebView::EvalInFrame(int frame_index, const char* utf8_script) {
+  if (!main_frame_ || !utf8_script)
+    return {};
+  blink::WebLocalFrame* frame = main_frame_;
+  if (frame_index >= 0) {
+    blink::WebFrame* child = main_frame_->FirstChild();
+    for (int i = 0; i < frame_index && child; ++i)
+      child = child->NextSibling();
+    if (!child || !child->IsWebLocalFrame())
+      return {};
+    frame = child->ToWebLocalFrame();
+  }
+  std::string result;
+  RunInFrameTask(
+      base::BindOnce(
+          [](blink::WebLocalFrame* f, std::string s, std::string* out) {
+            v8::Isolate* isolate = v8::Isolate::GetCurrent();
+            if (!isolate)
+              return;
+            v8::HandleScope handle_scope(isolate);
+            v8::Local<v8::Context> context = f->MainWorldScriptContext();
+            if (context.IsEmpty())
+              return;
+            v8::Context::Scope context_scope(context);
+            v8::Local<v8::Value> value = f->ExecuteScriptAndReturnValue(
+                blink::WebScriptSource(blink::WebString::FromUtf8(s)));
+            if (value.IsEmpty())
+              return;
+            v8::Local<v8::String> str;
+            if (!value->ToString(context).ToLocal(&str))
+              return;
+            v8::String::Utf8Value utf8(isolate, str);
+            if (*utf8)
+              out->assign(*utf8, utf8.length());
+          },
+          frame, std::string(utf8_script), &result),
+      /*settle=*/false);
+  return result;
+}
+
 std::string MbWebView::EvalWithType(const char* utf8_script,
                                     std::string* out_type) {
   if (out_type)

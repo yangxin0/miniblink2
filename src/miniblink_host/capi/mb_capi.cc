@@ -685,6 +685,19 @@ int mbEvalJS(mbView* v, const char* utf8_script, char* out, int out_cap) {
   return static_cast<int>(result.size());
 }
 
+int mbGetFrameCount(mbView* v) {
+  return (v && v->impl) ? v->impl->GetFrameCount() : 0;
+}
+
+int mbEvalJSInFrame(mbView* v, int frame_index, const char* utf8_script, char* out,
+                    int out_cap) {
+  if (!v || !v->impl)
+    return 0;
+  std::string result = v->impl->EvalInFrame(frame_index, utf8_script);
+  CopyToBuffer(result, out, out_cap);
+  return static_cast<int>(result.size());
+}
+
 int mbEvalJSEx(mbView* v, const char* utf8_script, char* out_value,
                int value_cap, char* out_type, int type_cap) {
   if (!v || !v->impl)

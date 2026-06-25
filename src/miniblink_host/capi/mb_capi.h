@@ -540,6 +540,16 @@ MB_EXPORT int mbDrainConsole(mbView*, char* out, int out_cap);
 // indicating truncation). Lets the host read data back from the page (e.g. document.title).
 MB_EXPORT int mbEvalJS(mbView*, const char* utf8_script, char* out, int out_cap);
 
+// Sub-frame (iframe) targeting. mbGetFrameCount returns the number of direct child
+// frames (top-level iframes) of the main document. mbEvalJSInFrame evals in the
+// frame_index-th child frame's context (0-based, document order; -1 = the main
+// frame) — host-privileged, so it reads even a CROSS-ORIGIN iframe whose content
+// the parent's `iframe.contentDocument` can't (same-origin policy). Same out-buffer
+// contract as mbEvalJS. Returns "" for an out-of-range index.
+MB_EXPORT int mbGetFrameCount(mbView*);
+MB_EXPORT int mbEvalJSInFrame(mbView*, int frame_index, const char* utf8_script,
+                              char* out, int out_cap);
+
 // Like mbEvalJS, but ALSO reports the JS typeof the result via `out_type` (one of
 // "number"/"string"/"boolean"/"object"/"function"/"undefined"/"array"/"null"),
 // captured from the SAME single evaluation (no re-run, so side effects fire once).

@@ -292,6 +292,10 @@ class MbWebView {
   // steps that grew the page (0 = static).
   int ScrollToBottom(int max_steps);
   std::string EvalToString(const char* utf8_script);  // eval JS -> string result
+  int GetFrameCount();  // number of direct child frames (top-level iframes)
+  // Eval in the frame_index-th child frame (0-based; -1 = main frame), host-
+  // privileged so it reads even a cross-origin iframe. "" if out of range.
+  std::string EvalInFrame(int frame_index, const char* utf8_script);
   // Like EvalToString, but also reports the JS typeof the result (one of
   // "number"/"string"/"boolean"/"object"/"function"/"undefined"/"array"/"null")
   // via *out_type — captured from the SAME single eval (no re-run / side effects).

@@ -1288,6 +1288,34 @@ static void RunCases(mbView* v, int W, int H) {
         "iframe src= loads: child fetches + commits its document");
   }
 
+  // 78b. Sub-frame eval reads a CROSS-ORIGIN iframe (audit gap #2: per-frame
+  // targeting). Under an https parent a data: iframe gets an opaque origin, so the
+  // parent's iframe.contentDocument is same-origin-policy blocked — but
+  // mbEvalJSInFrame runs host-privileged in the child's OWN world and reads it.
+  // mbGetFrameCount reports the child. This is how iframe content (ads/embeds that
+  // are cross-origin) becomes scrapable.
+  {
+    mbLoadHTML(v,
+        "<body>parent<iframe src='data:text/html,"
+        "<body>XFRAME-SECRET</body>' width='80' height='40'></iframe></body>",
+        "https://parent.test/");
+    mbWait(v, 250);  // child navigation + commit
+    const int frames = mbGetFrameCount(v);
+    // Parent CANNOT read the cross-origin child via contentDocument (SOP).
+    const std::string parent_read = Eval(v,
+        "(function(){try{var d=document.querySelector('iframe').contentDocument;"
+        "return d?d.body.textContent:'NULLDOC';}catch(e){return 'THREW:'+e.name;}})()");
+    // ...but the host can, via a privileged eval in the child frame's own context.
+    char fb[128] = {0};
+    mbEvalJSInFrame(v, 0, "document.body.textContent", fb, sizeof(fb));
+    const std::string in_frame(fb);
+    Expect(frames == 1 && parent_read != "XFRAME-SECRET" &&
+               in_frame == "XFRAME-SECRET",
+           "mbEvalJSInFrame reads a cross-origin iframe the parent can't",
+           std::string("frames=") + std::to_string(frames) + " parent=[" +
+               parent_read + "] inframe=[" + in_frame + "]");
+  }
+
   // 79. <iframe sandbox> is enforced: the owner's FramePolicy sandbox flags
   // reach the committed child document (CreateChildFrame -> BeginNavigation
   // applies them). The cleanest origin-independent signal is script blocking:
