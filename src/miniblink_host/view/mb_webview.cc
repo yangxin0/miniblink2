@@ -310,6 +310,8 @@ void MbWebView::LoadURL(const char* utf8_url) {
     if (base::ReadFileToString(base::FilePath(url.substr(sizeof(kFile) - 1)),
                                &contents)) {
       CommitHtml(contents.data(), contents.size(), url.c_str());
+    } else {
+      NotifyLoadFailed();  // a failed load still "finishes" (signal waiters)
     }
     return;
   }
@@ -355,8 +357,19 @@ void MbWebView::LoadURL(const char* utf8_url) {
         charset = content_type.substr(p, end == std::string::npos ? end : end - p);
       }
       CommitHtml(body.data(), body.size(), doc_url.c_str(), charset);
+    } else {
+      NotifyLoadFailed();  // fetch failed -> still finish, so a waiter isn't stuck
     }
   }
+}
+
+void MbWebView::NotifyLoadFailed() {
+  // A top-level load that never commits (file read / fetch failure) still ENDED — mark
+  // it finished and fire the load-finish callback, so mbIsLoadFinished is true and a
+  // caller awaiting completion isn't stuck. (Success runs through DidFinishLoad instead.)
+  load_finished_ = true;
+  if (on_load_finish_)
+    on_load_finish_();
 }
 
 bool MbWebView::DownloadURL(const char* url_in, const char* dest_path) {

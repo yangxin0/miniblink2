@@ -322,6 +322,9 @@ class MbWebView {
   // Sets the load-finished flag and invokes the registered finish callback — the
   // real engine push signal (vs. polling / a fixed settle timer).
   void OnDidFinishLoad();
+  // A top-level load that never commits (file read / fetch failure) still ENDED: mark
+  // it finished and fire the finish callback so a caller awaiting completion isn't stuck.
+  void NotifyLoadFailed();
   // Register a callback fired on each main-frame load finish. Pass {} to clear.
   void SetLoadFinishCallback(std::function<void()> cb);
   // Called by MbFrameClient for each page console message (console.log/warn/error). A

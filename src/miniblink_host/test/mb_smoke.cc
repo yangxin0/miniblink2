@@ -378,6 +378,24 @@ int main() {
     mbOnDownload(v, nullptr, nullptr);
   }
 
+  // 0n. Failed-load finish (#4 tail): a top-level load that never commits (a file that
+  // can't be read) still ENDS — mbOnLoadFinish must fire and mbIsLoadFinished must read
+  // true, so a caller awaiting completion isn't stuck on a 404/missing file forever.
+  {
+    static int* fin = new int(0);  // -Wexit-time-destructors
+    *fin = 0;
+    mbLoadHTML(v, "<body>OK</body>", "about:blank");  // a real page first
+    mbOnLoadFinish(
+        v, [](mbView*, void* ud) { ++*static_cast<int*>(ud); }, fin);
+    const int before = *fin;
+    mbLoadURL(v, "file:///no/such/mb/missing/file.html");  // read fails -> no commit
+    Expect(*fin > before && mbIsLoadFinished(v) == 1,
+           "a failed top-level load still fires mbOnLoadFinish / sets mbIsLoadFinished",
+           "fin delta=" + std::to_string(*fin - before) +
+               " finished=" + std::to_string(mbIsLoadFinished(v)));
+    mbOnLoadFinish(v, nullptr, nullptr);  // clear before `fin` leaves scope
+  }
+
   // 0j. CSP does NOT leak across navigations in a reused view (#15). Load a page whose
   // strict <meta> CSP (script-src 'none') blocks its own inline script, then load a
   // normal page in the SAME view: the second page's script MUST run — each commit now
