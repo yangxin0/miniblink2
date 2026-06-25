@@ -47,6 +47,24 @@ int main() {
   if (!v)
     return 1;
 
+  // 0b. Push callback: mbOnLoadFinish fires on the real Blink DidFinishLoad signal
+  // (the document `load` event), not a poll or fixed timer; mbIsLoadFinished queries
+  // the same state. A counting callback (state via userdata; non-capturing lambda ->
+  // C function pointer) must fire once per load and leave the flag set.
+  {
+    int fin = 0;
+    mbOnLoadFinish(
+        v, [](mbView*, void* ud) { ++*static_cast<int*>(ud); }, &fin);
+    mbLoadHTML(v, "<body>load-a</body>", "about:blank");
+    const int after_a = fin;
+    mbLoadHTML(v, "<body>load-b</body>", "about:blank");
+    Expect(after_a >= 1 && fin > after_a && mbIsLoadFinished(v) == 1,
+           "mbOnLoadFinish fires on each DidFinishLoad; mbIsLoadFinished true",
+           std::string("after_a=") + std::to_string(after_a) + " fin=" +
+               std::to_string(fin));
+    mbOnLoadFinish(v, nullptr, nullptr);  // clear before `fin` leaves scope
+  }
+
   // 1. HTML parse + DOM.
   mbLoadHTML(v, "<body><div id='x'>hello</div></body>", "about:blank");
   Expect(Eval(v, "document.getElementById('x').textContent") == "hello",

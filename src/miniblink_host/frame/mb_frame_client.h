@@ -73,6 +73,11 @@ class MbFrameClient : public blink::WebLocalFrameClient {
       const network::ParsedPermissionsPolicy& permissions_policy_header,
       const blink::DocumentPolicyFeatureState& document_policy_header) override;
 
+  // Fires when the main frame's load finishes (the document's `load` event — all
+  // subresources done). Pushes the signal to MbWebView so embedders can react to
+  // real completion instead of polling / a fixed settle timer. Child frames ignored.
+  void DidFinishLoad() override;
+
   // Frame lifecycle. A child client self-destructs on detach; the main frame is
   // owned by MbWebView so it does nothing here.
   void FrameDetached(blink::DetachReason) override;

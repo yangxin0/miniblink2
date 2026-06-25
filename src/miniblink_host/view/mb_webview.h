@@ -16,6 +16,7 @@
 #define MINIBLINK_HOST_VIEW_MB_WEBVIEW_H_
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -280,6 +281,17 @@ class MbWebView {
   // Called by MbFrameClient when the MAIN frame commits a document. `standard`
   // is true for a normal (history-appending) commit, false for reload/initial.
   void OnDidCommitMainFrame(const std::string& url, bool standard);
+  // Called by MbFrameClient when the MAIN frame's load finishes (the `load` event).
+  // Sets the load-finished flag and invokes the registered finish callback — the
+  // real engine push signal (vs. polling / a fixed settle timer).
+  void OnDidFinishLoad();
+  // Register a callback fired on each main-frame load finish. Pass {} to clear.
+  void SetLoadFinishCallback(std::function<void()> cb);
+  // True once the current navigation's load has finished; reset when a new load
+  // is started (see ResetLoadFinished). Lets the load primitives wait for the real
+  // finish instead of a fixed delay.
+  bool load_finished() const { return load_finished_; }
+  void ResetLoadFinished() { load_finished_ = false; }
   // Set extra request headers (newline-separated "Name: Value") for navigation +
   // subresources. Set before LoadURL to apply to that navigation.
   void SetExtraHeaders(const char* utf8_headers);
@@ -385,6 +397,9 @@ class MbWebView {
   std::vector<std::string> history_;  // main-frame navigation stack (URLs)
   int history_index_ = -1;            // current position; -1 before first load
   bool in_history_nav_ = false;       // a Go{Back,Forward} is in flight
+
+  bool load_finished_ = false;        // main-frame load event has fired (DidFinishLoad)
+  std::function<void()> on_load_finish_;  // optional embedder finish callback
 
   std::vector<uint8_t> encoded_png_;  // retained bytes from the last EncodePng
   int http_status_ = 0;  // HTTP status of the last http(s) load; 0 if none/failed

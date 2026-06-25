@@ -132,9 +132,18 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      parent body=`parent`, `--frame 0 --eval document.body.textContent`=`CHILD-77`.
    - [NEXT] per-frame selector ops (click/fill/text-by-selector in a frame) via the same
      child-frame mechanism + a wke `wkeRunJsByFrame` peer.
-4. **Push callback model** — replace poll-only readiness: host `DidFinishLoad`/
-   `DidMeaningfulLayout` signals (`mb_frame_client.h:122` TODO — fixes partial-capture
-   races), navigation policy (`wkeOnNavigation`), new-window (`wkeOnCreateView`), downloads.
+4. **Push callback model** — replace poll-only readiness with real engine signals.
+   - [DONE] **load-finished push** — `MbFrameClient::DidFinishLoad()` (main frame) →
+     `MbWebView::OnDidFinishLoad()` sets a `load_finished_` flag (reset in CommitHtml on
+     every navigation) + invokes a registered callback. C ABI: `mbOnLoadFinish(view, cb,
+     userdata)` (the first push callback in mb_capi — fires during the synchronous load
+     pump on the genuine `load` event, not a poll/timer) + `mbIsLoadFinished(view)`.
+     Verified (mb_smoke +1=62): a counting callback fires once per load (fin=2 over 2
+     loads), flag set. This is the signal that lets a caller wait on real completion
+     rather than a fixed settle — addresses the partial-capture race.
+   - [NEXT] `DidFailLoad` → fire with a failed flag; wire the load primitives to wait on
+     `load_finished()` instead of fixed mbWait; navigation policy (`wkeOnNavigation`),
+     new-window (`wkeOnCreateView`), downloads.
 5. **JS dialogs** — alert/confirm/prompt are unhandled (`wke.h:462` even warns about it).
    Note the reverted `mbSetJsDialogPolicy` FATAL'd in `thread_collision_warner` — solve the
    `ScopedPagePauser` threading first.

@@ -119,6 +119,19 @@ void mbLoadURL(mbView* v, const char* utf8_url) {
     v->impl->LoadURL(utf8_url);
 }
 
+void mbOnLoadFinish(mbView* v, mbLoadFinishCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetLoadFinishCallback([v, cb, userdata]() { cb(v, userdata); });
+  else
+    v->impl->SetLoadFinishCallback({});
+}
+
+int mbIsLoadFinished(mbView* v) {
+  return (v && v->impl && v->impl->load_finished()) ? 1 : 0;
+}
+
 void mbPostURL(mbView* v, const char* utf8_url, const char* utf8_body,
                const char* content_type) {
   if (v && v->impl)

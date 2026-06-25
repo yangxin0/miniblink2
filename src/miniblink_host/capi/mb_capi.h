@@ -85,6 +85,16 @@ MB_EXPORT void    mbResize(mbView*, int width, int height);
 MB_EXPORT void mbLoadHTML(mbView*, const char* utf8_html, const char* base_url);
 MB_EXPORT void mbLoadURL(mbView*, const char* utf8_url);
 
+// Push notification of load completion — the real Blink DidFinishLoad signal (the
+// main document's `load` event, all subresources done), not a poll or a fixed timer.
+// Register a callback with mbOnLoadFinish (pass NULL to clear); it fires during the
+// load call (the synchronous load pumps the message loop). mbIsLoadFinished queries
+// the same state (1 once the current navigation's load has finished, 0 after a new
+// load starts), so callers can wait on the real finish instead of a fixed delay.
+typedef void (*mbLoadFinishCallback)(mbView*, void* userdata);
+MB_EXPORT void mbOnLoadFinish(mbView*, mbLoadFinishCallback, void* userdata);
+MB_EXPORT int  mbIsLoadFinished(mbView*);
+
 // Host-driven POST navigation: POST `body` to an http(s) `url` with `content_type`
 // (NULL/empty -> application/x-www-form-urlencoded) and commit the response as the
 // document. `body` is NUL-terminated (text bodies — form-encoded or JSON). After

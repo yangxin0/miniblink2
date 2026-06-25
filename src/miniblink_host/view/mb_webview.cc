@@ -210,6 +210,7 @@ void MbWebView::CommitHtml(const char* data, size_t len, const char* base_url,
                            const std::string& charset) {
   if (!main_frame_)
     return;
+  load_finished_ = false;  // a new navigation starts; DidFinishLoad will set it true
   // INSIDE_BLINK: WebURL is built from a KURL (the GURL ctor is non-INSIDE_BLINK only).
   blink::WebURL url{
       blink::KURL((base_url && *base_url) ? base_url : "about:blank")};
@@ -1103,6 +1104,16 @@ void MbWebView::OnDidCommitMainFrame(const std::string& url, bool standard) {
   history_.resize(history_index_ + 1);  // a new navigation truncates forward
   history_.push_back(url);
   history_index_ = static_cast<int>(history_.size()) - 1;
+}
+
+void MbWebView::OnDidFinishLoad() {
+  load_finished_ = true;
+  if (on_load_finish_)
+    on_load_finish_();
+}
+
+void MbWebView::SetLoadFinishCallback(std::function<void()> cb) {
+  on_load_finish_ = std::move(cb);
 }
 
 bool MbWebView::GoBack() {

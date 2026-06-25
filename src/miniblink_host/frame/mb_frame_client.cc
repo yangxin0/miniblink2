@@ -214,6 +214,13 @@ void MbFrameClient::DidCommitNavigation(
       commit_type == blink::kWebStandardCommit);
 }
 
+void MbFrameClient::DidFinishLoad() {
+  // Main frame only — child/iframe load-finishes don't signal the page's completion.
+  if (self_owned_ || !owner_)
+    return;
+  owner_->OnDidFinishLoad();
+}
+
 void MbFrameClient::FrameDetached(blink::DetachReason reason) {
   if (!self_owned_)
     return;  // main frame: MbWebView owns teardown
