@@ -1145,6 +1145,23 @@ int main() {
            "open=[" + open + "] msg=[" + msg + "] close=[" + closed + "]");
   }
 
+  // 23l. navigator.storage.estimate() (broker #8): the in-process QuotaManagerHost
+  // reports a generous quota + zero usage, so storage.estimate() resolves with a usable
+  // quota instead of hanging (the QuotaManagerHost was dropped before). Apps that gate
+  // caching on available storage can proceed.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://quota.test/");
+    Eval(v,
+         "window.__q='';"
+         "navigator.storage.estimate().then(function(e){"
+         "window.__q=(e.quota>0?'quota:ok':'quota:zero')+',usage:'+e.usage;});");
+    mbWaitForFunction(v, "window.__q!==''", 2000);
+    const std::string q = Eval(v, "window.__q");
+    Expect(q == "quota:ok,usage:0",
+           "navigator.storage.estimate() resolves with a usable quota",
+           "q=[" + q + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

@@ -30,6 +30,8 @@
 #include "services/device/public/mojom/geoposition.mojom-blink.h"
 #include "third_party/blink/public/mojom/geolocation/geolocation_service.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions/permission.mojom-blink.h"
+#include "third_party/blink/public/mojom/quota/quota_manager_host.mojom-blink.h"
+#include "third_party/blink/public/mojom/quota/quota_types.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom-blink.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
@@ -357,6 +359,20 @@ class MbClipboardHost : public blink::mojom::blink::ClipboardHost {
       mojo::PendingRemote<blink::mojom::blink::ClipboardListener>) override {}
 };
 
+// navigator.storage.estimate(): report a generous quota and zero usage. We have no real
+// persistent quota system; a non-zero quota lets apps that gate features on
+// storage.estimate() proceed instead of treating storage as unavailable.
+class MbQuotaManagerHost : public blink::mojom::blink::QuotaManagerHost {
+ public:
+  void QueryStorageUsageAndQuota(
+      QueryStorageUsageAndQuotaCallback callback) override {
+    std::move(callback).Run(blink::mojom::blink::QuotaStatusCode::kOk,
+                            /*current_usage=*/0,
+                            /*current_quota=*/int64_t{2} * 1024 * 1024 * 1024,
+                            blink::mojom::blink::UsageBreakdown::New());
+  }
+};
+
 // Process-wide configured geolocation fix (set via mbSetGeolocation). Read on the
 // broker's service thread, written from the main thread, so guard with a lock. When
 // unset, geolocation stays denied (the headless default — getCurrentPosition errors).
@@ -487,6 +503,12 @@ class MbBrowserInterfaceBroker
     // WebSocket — establishes the connection (onopen) + a loopback echo data plane.
     if (auto r = receiver.As<blink::mojom::blink::WebSocketConnector>()) {
       BindWebSocketConnector(std::move(r));
+      return;
+    }
+    // navigator.storage.estimate() — report a generous quota.
+    if (auto r = receiver.As<blink::mojom::blink::QuotaManagerHost>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbQuotaManagerHost>(),
+                                  std::move(r));
       return;
     }
     // Drop everything else (no browser process).
