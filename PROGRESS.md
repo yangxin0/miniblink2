@@ -657,8 +657,12 @@ constraints, atomic abort, and compound keys — the whole object-store/index AP
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —
    save to disk after login, reload next run (the localStorage peer of the cookie jar).
    Verified (mb_smoke 23b): set keys (incl. a quote needing escaping) → snapshot → clear
-   (fresh run) → restore → keys back. [REMAINING: async CookieStore API + storage change
-   events; IndexedDB persistence (needs the IndexedDB broker, see #8).] 10. Blob-from-file
+   (fresh run) → restore → keys back. [DONE: async CookieStore API (set/get/getAll, mb_smoke
+   23aa) AND cookieStore change events — AddChangeListener now registers the observer in a
+   process-wide per-origin registry and any cookie write (cookieStore.set/delete OR
+   document.cookie) fans out an OnCookieChange (INSERTED→changed[], EXPLICIT→deleted[]);
+   mb_smoke 23aa2.] [REMAINING: window 'storage' event (localStorage change across same-origin
+   contexts); IndexedDB persistence (needs the IndexedDB broker, see #8).] 10. Blob-from-file
 + ranged blob reads + DataPipeGetter uploads. 11. **GPU content path** (WebGL / accel-2d-canvas /
 `<video>` render blank) — the heaviest; needs a GL/media provider. Last.
 

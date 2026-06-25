@@ -1522,6 +1522,32 @@ int main() {
            "cks=[" + r + "]");
   }
 
+  // 23aa2. Cookie Store change events (cookieStore.onchange): registering a 'change' listener
+  // (AddChangeListener) now delivers OnCookieChange when a cookie is written — observable for both
+  // cookieStore.set/delete and document.cookie. A set lands in event.changed; a delete in
+  // event.deleted. Verifies the listener registry + fan-out, not just the set/get round-trip.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://cookiechange.test/");
+    Eval(v,
+         "window.__cc='';"
+         "if(window.cookieStore){"
+         "var log=[];"
+         "cookieStore.addEventListener('change',function(e){"
+         "  e.changed.forEach(function(c){log.push('+' +c.name+'='+c.value);});"
+         "  e.deleted.forEach(function(c){log.push('-'+c.name);});"
+         "  window.__cc=log.join(',');});"
+         // cookieStore.set -> changed; document.cookie -> changed; delete -> deleted.
+         "cookieStore.set('a','1')"
+         ".then(function(){document.cookie='b=2';"
+         "  return cookieStore.delete('a');});"
+         "}else{window.__cc='no-api';}");
+    mbWaitForFunction(v, "window.__cc.split(',').length>=3", 3000);
+    const std::string r = Eval(v, "window.__cc");
+    Expect(r == "+a=1,+b=2,-a",
+           "cookieStore.onchange fires on set/delete (cookieStore + document.cookie)",
+           "cc=[" + r + "]");
+  }
+
   // 23ab. MediaDevices.enumerateDevices() (broker MediaDevicesDispatcherHost): headless has no
   // cameras/mics/speakers, so it must RESOLVE to an empty list. Before the host was bound, the
   // unbound pipe disconnected and blink rejected the promise with AbortError — this verifies it

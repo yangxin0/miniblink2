@@ -99,6 +99,62 @@ std::string OriginKey(const blink::KURL& url) {
   return blink::SecurityOrigin::Create(url)->ToString().Utf8();
 }
 
+// Process-wide registry of cookieStore change observers, paired with the origin
+// they watch. A page calls cookieStore.addEventListener('change',...) ->
+// AddChangeListener; a cookie write (document.cookie or cookieStore.set/delete)
+// fans out an OnCookieChange to every connected listener on the same origin.
+// Service-thread only (same as CookieStore()), so no lock.
+using CookieListenerEntry =
+    std::pair<std::string,
+              mojo::Remote<network::mojom::blink::CookieChangeListener>>;
+std::vector<CookieListenerEntry>& CookieListeners() {
+  static std::vector<CookieListenerEntry>* l =
+      new std::vector<CookieListenerEntry>();
+  return *l;
+}
+
+// Build a net::CanonicalCookie for (url, name, value) — the post-change cookie
+// state carried in a CookieChangeInfo. Returns null if the cookie is invalid.
+std::unique_ptr<net::CanonicalCookie> MakeCanonicalCookie(
+    const blink::KURL& url,
+    const std::string& name,
+    const std::string& value) {
+  net::CookieInclusionStatus status;
+  return net::CanonicalCookie::CreateSanitizedCookie(
+      GURL(url.GetString().Utf8()), name, value, /*domain=*/std::string(),
+      /*path=*/"/", base::Time::Now(), /*expiration=*/base::Time(),
+      base::Time::Now(), /*secure=*/false, /*http_only=*/false,
+      net::CookieSameSite::UNSPECIFIED, net::COOKIE_PRIORITY_DEFAULT,
+      /*partition_key=*/std::nullopt, &status);
+}
+
+// Notify cookieStore 'change' observers on `origin` of a cookie change. `cause`
+// is INSERTED for a set (blink files it under changed[]) or EXPLICIT for a delete
+// (deleted[]). Prunes disconnected listeners as it goes.
+void NotifyCookieChange(const blink::KURL& url,
+                        const std::string& name,
+                        const std::string& value,
+                        network::mojom::blink::CookieChangeCause cause) {
+  auto& listeners = CookieListeners();
+  if (listeners.empty())
+    return;
+  const std::string origin = OriginKey(url);
+  std::unique_ptr<net::CanonicalCookie> cc = MakeCanonicalCookie(url, name, value);
+  if (!cc)
+    return;
+  for (auto it = listeners.begin(); it != listeners.end();) {
+    if (!it->second.is_connected()) {
+      it = listeners.erase(it);
+      continue;
+    }
+    if (it->first == origin) {
+      it->second->OnCookieChange(network::mojom::blink::CookieChangeInfo::New(
+          *cc, network::mojom::blink::CookieAccessResult::New(), cause));
+    }
+    ++it;
+  }
+}
+
 void Trim(std::string* s) {
   while (!s->empty() && (s->front() == ' ' || s->front() == '\t'))
     s->erase(s->begin());
@@ -150,10 +206,15 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
       }
     }
     if (!deleting)
-      jar.emplace_back(std::move(name), std::move(value));
+      jar.emplace_back(name, value);
     // Bridge to the HTTP cookie jar so a cookie set via document.cookie is also
     // sent on subsequent network requests (no-op for non-http(s) origins).
     MbAddCookieToJar(url.GetString().Utf8(), raw);
+    // Fan out a cookieStore 'change' event (document.cookie writes are observable).
+    NotifyCookieChange(url, name, value,
+                       deleting
+                           ? network::mojom::blink::CookieChangeCause::EXPLICIT
+                           : network::mojom::blink::CookieChangeCause::INSERTED);
   }
 
   void GetCookiesString(const blink::KURL& url,
@@ -257,18 +318,28 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
         jar.emplace_back(name, value);
       MbAddCookieToJar(url.GetString().Utf8(),
                        deleting ? (name + "=; max-age=0") : (name + "=" + value));
+      // cookieStore.set()/delete() is observable via cookieStore.onchange.
+      NotifyCookieChange(url, name, value,
+                         deleting
+                             ? network::mojom::blink::CookieChangeCause::EXPLICIT
+                             : network::mojom::blink::CookieChangeCause::INSERTED);
     }
     std::move(callback).Run(true);
   }
 
   void AddChangeListener(
-      const blink::KURL&,
+      const blink::KURL& url,
       const net::SiteForCookies&,
       const scoped_refptr<const blink::SecurityOrigin>&,
       net::StorageAccessApiStatus,
-      mojo::PendingRemote<network::mojom::blink::CookieChangeListener>,
+      mojo::PendingRemote<network::mojom::blink::CookieChangeListener> listener,
       AddChangeListenerCallback callback) override {
-    // No change notifications in this host; just acknowledge.
+    // Register the observer against its origin; a later cookie write fans out an
+    // OnCookieChange to it (see NotifyCookieChange). cookieStore.onchange now fires.
+    CookieListeners().emplace_back(
+        OriginKey(url),
+        mojo::Remote<network::mojom::blink::CookieChangeListener>(
+            std::move(listener)));
     std::move(callback).Run();
   }
 };
