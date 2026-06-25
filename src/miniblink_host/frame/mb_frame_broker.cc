@@ -37,6 +37,8 @@
 #include "base/files/file.h"
 #include "third_party/blink/public/mojom/clipboard/clipboard.mojom-blink.h"
 #include "miniblink_host/frame/mb_opfs.h"
+#include "miniblink_host/frame/mb_storage_buckets.h"
+#include "third_party/blink/public/mojom/buckets/bucket_manager_host.mojom-blink.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_manager.mojom-blink.h"
 #include "third_party/blink/public/common/mediastream/media_devices.h"
 #include "third_party/blink/public/mojom/mediastream/media_devices.mojom-blink.h"
@@ -723,6 +725,11 @@ class MbBrowserInterfaceBroker
     if (auto r =
             receiver.As<blink::mojom::blink::FileSystemAccessManager>()) {
       BindFileSystemAccessManager(std::move(r));
+      return;
+    }
+    // navigator.storageBuckets — named partitions re-exposing IDB/Cache/Locks/OPFS.
+    if (auto r = receiver.As<blink::mojom::blink::BucketManagerHost>()) {
+      BindBucketManagerHost(std::move(r));
       return;
     }
     // Drop everything else (no browser process).

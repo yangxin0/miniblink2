@@ -1586,6 +1586,28 @@ int main() {
            "opfsrw=[" + r + "]");
   }
 
+  // 23ae. Storage Buckets (navigator.storageBuckets, broker BucketManagerHost): open a named
+  // bucket, list it via keys(), and use the bucket's Cache Storage (which re-exposes the
+  // in-process CacheStorage) to round-trip a response — verifying the bucket wires through.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://buckets.test/");
+    Eval(v,
+         "window.__bk='';"
+         "(async function(){try{"
+         "var b=await navigator.storageBuckets.open('inbox');"
+         "var keys=await navigator.storageBuckets.keys();"
+         "var c=await b.caches.open('v1');"
+         "await c.put('/m',new Response('hi-bucket'));"
+         "var r=await c.match('/m');var t=await r.text();"
+         "window.__bk=b.name+','+keys.join(',')+','+t;"
+         "}catch(e){window.__bk='err:'+e.name;}})();");
+    mbWaitForFunction(v, "window.__bk!==''", 4000);
+    const std::string r = Eval(v, "window.__bk");
+    Expect(r == "inbox,inbox,hi-bucket",
+           "Storage Buckets: open/keys + bucket.caches round-trips through the in-process backend",
+           "bk=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

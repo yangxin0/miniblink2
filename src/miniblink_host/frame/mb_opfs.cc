@@ -363,4 +363,9 @@ void BindFileSystemAccessManager(
                               std::move(receiver));
 }
 
+mojo::PendingRemote<blink::mojom::blink::FileSystemAccessDirectoryHandle>
+MbBindOpfsRootDirectory() {
+  return BindDir(OpfsRoot());
+}
+
 }  // namespace mb
