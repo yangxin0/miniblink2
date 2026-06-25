@@ -139,8 +139,12 @@ class MbWorkerHostFactoryClient
     params->request_id = 1;
     params->response_head = network::mojom::URLResponseHead::New();
     params->response_head->mime_type = mime;
-    params->response_head->headers =
-        net::HttpResponseHeaders::TryToCreate("HTTP/1.1 200 OK\n\n");
+    // A Content-Type HEADER (not just the mime_type field) is required for MODULE
+    // workers: WorkerModuleScriptFetcher reads ResourceResponse::HttpContentType() and
+    // enforces a JavaScript MIME type. Classic workers don't check, but it's harmless
+    // for them.
+    params->response_head->headers = net::HttpResponseHeaders::TryToCreate(
+        "HTTP/1.1 200 OK\nContent-Type: " + mime + "\n\n");
 
     mojo::ScopedDataPipeProducerHandle producer;
     mojo::ScopedDataPipeConsumerHandle consumer;

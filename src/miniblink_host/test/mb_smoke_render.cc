@@ -117,22 +117,30 @@ static void RunCases(mbView* v, int W, int H) {
            "cnt=[" + cnt + "] sum=[" + Eval(v, "String(window.__sum)") + "]");
   }
 
-  // 37d. A MODULE worker (new Worker(url, {type:'module'})) must at least be crash-safe.
-  // KNOWN GAP: a module dedicated worker does not yet RUN its top-level script in this
-  // host — the module-instantiation path on the worker thread isn't fully wired (classic
-  // workers, 37b/c/e, do run). It must not take the host down, though: construct one,
-  // pump, and assert the host is still scriptable. (See PROGRESS "Workers" Step 3.)
+  // 37d. A MODULE worker (new Worker(url, {type:'module'})) runs its top-level script.
+  // Module workers take a different evaluation path than classic ones AND enforce strict
+  // JavaScript MIME checking, so the synthesized script response must carry a Content-Type
+  // header (see mb_dedicated_worker_host.cc). Modules are strict mode, so the handler binds
+  // via self.onmessage (a bare `onmessage=` would throw). Adds 100; 5 -> 105.
   mbLoadHTML(v, "<body>worker-module</body>", "about:blank");
   mbRunJS(v,
-    "window.__mok=false;"
-    "try{window.__mw=new Worker('data:text/javascript,'+"
+    "window.__mreply='';"
+    "window.__mw=new Worker('data:text/javascript,'+"
     "encodeURIComponent('self.onmessage=function(e){self.postMessage(e.data+100)}'),"
-    "{type:'module'});window.__mw.postMessage(5);window.__mok=true;}"
-    "catch(e){window.__merr=String(e);}");
-  mbWait(v, 60);
-  Expect(Eval(v, "1+1") == "2" &&
-             Eval(v, "document.body.textContent") == "worker-module",
-         "a module-type Worker is crash-safe (host still scriptable)");
+    "{type:'module'});"
+    "window.__mw.onmessage=function(e){window.__mreply=String(e.data)};"
+    "window.__mw.postMessage(5);");
+  {
+    std::string r;
+    for (int i = 0; i < 80; ++i) {
+      mbWait(v, 25);
+      r = Eval(v, "window.__mreply");
+      if (!r.empty())
+        break;
+    }
+    Expect(r == "105", "a module-type Worker runs its script (postMessage round-trip)",
+           "reply=[" + r + "]");
+  }
 
   // 37e. importScripts() inside a Worker loads a subresource through the worker's fetch
   // context (worker/mb_worker_fetch_context.cc) ON the worker thread — the end-to-end

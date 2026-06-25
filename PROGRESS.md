@@ -297,12 +297,17 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      85, stable): 37c three concurrent workers each deliver their own reply (sum=12); 37e
      `importScripts("data:…self.K=7")` loads on the worker thread and the worker replies e.data+K
      — end-to-end proof the worker fetch context works.
-   - [KNOWN GAP] **Module dedicated workers** (`new Worker(url,{type:'module'})`) do NOT yet run their
-     top-level script (classic workers do). No crash — 37d guards crash-safety only. The module-script
-     instantiation path on the worker thread needs wiring (the top-level module isn't evaluated from
-     the `WorkerMainScriptLoadParameters` data pipe the way the classic path is). Next worker item.
-   - [NEXT] SharedWorker (separate `WebSharedWorker`/`WebSharedWorkerClient` path), then module-worker
-     execution; http(s) worker scripts already flow through `MbFetchUrl` (untested offline).
+   - [DONE] **Module dedicated workers** (`new Worker(url,{type:'module'})`) now RUN their top-level
+     script. Root cause: `WorkerModuleScriptFetcher::OnStartLoadingBodyWorkerMainScript` enforces a
+     JavaScript MIME via `ResourceResponse::HttpContentType()` — which reads the Content-Type HEADER,
+     not the response's `mime_type` field. The synthesized script response only set `mime_type`, so
+     modules were rejected (classic workers don't MIME-check, so they were unaffected). Fix: the
+     `WorkerMainScriptLoadParameters` response head now includes a `Content-Type: <mime>` header
+     (mb_dedicated_worker_host.cc). Verified (mb_smoke_render 37d=85): a `{type:'module'}` worker
+     runs `self.onmessage=e=>self.postMessage(e.data+100)`; 5 -> 105 round-trip.
+   - [NEXT] SharedWorker (separate `WebSharedWorker`/`WebSharedWorkerClient` path); http(s) worker
+     scripts already flow through `MbFetchUrl` (untested offline); nested workers (CloneWorkerFetch-
+     Context returns null today).
    8. Broker binds cookies
 only [+ Permissions, this tick]. [DONE: Permissions] `MbPermissionService` in the FRAME
 broker (mb_frame_broker.cc — the one navigator.* uses, not the platform thread broker)
