@@ -435,11 +435,15 @@ probe it on load to detect a companion native app. mb_smoke 23ak.
 ROOT CAUSE: it shared the process-wide cache name 'v1' with test 23v; a cached Response body is a blob
 tied to the PAGE that created it, so when 23v's page navigated away those bodies could become
 unreadable, and the shared cache exposed it. Fixed the test by giving the bucket its own cache name
-(0/8, was ~1/10). DEEPER PRODUCT ISSUE (recorded for a focused fix): Cache Storage cached bodies should
-SURVIVE the originating page's navigation (that's the point of an offline cache) — today the cache
-keeps a page-tied BlobDataHandle, so a body cached on one page may read empty after navigation. The fix
-is to make the cache OWN the bytes at put time (e.g. read the blob and re-mint via MbCreateInlineBlob,
-a process-owned blob), independent of the page lifecycle. Same applies to IndexedDB blob values.
+(0/8, was ~1/10). DEEPER PRODUCT ISSUE (investigated; fix attempted + reverted — needs more digging): Cache Storage
+cached bodies should SURVIVE the originating page's navigation. Findings: SMALL bodies (`Response('..')`)
+ride INLINE in the FetchAPIResponse (response->blob is NULL) and survive trivially. LARGE bodies (>256KB)
+deterministically read back EMPTY after navigation (verified: a 300KB body -> length 0 on the next page).
+A put-time fix that read `response->blob` via BlobDataHandle::ReadAll and re-minted a process-owned blob
+(MbCreateInlineBlob) did NOT work — the read returned 0 bytes, so the large-body content is NOT delivered
+through `response->blob` at Batch time the way assumed. NEXT: instrument how cache.put delivers a large
+body (a separate body data-pipe? side_data_blob? a BytesProvider on the blob that our ReadAll doesn't
+drain?) before re-attempting. Same concern likely applies to IndexedDB blob values.
 [DONE: Cookie Store API] `cookieStore.get/getAll/set/delete` — `MbCookieManager` (the
 RestrictedCookieManager already serving document.cookie) gained real `GetAllForUrl` (returns the
 origin's cookies as net::CanonicalCookies via CreateSanitizedCookie, honoring the options name filter:
