@@ -243,8 +243,13 @@ in-process `MbGeolocationService`/`MbGeolocation` in the frame broker: once a fi
 `navigator.geolocation.getCurrentPosition` resolves to it (the service GRANTS); unset = the
 default PERMISSION_DENIED. Thread-safe (base::Lock; broker on the service thread, API on
 main). Verified (mb_smoke 23d): default → err code 1; after mbSetGeolocation(37.42,-122.08,5)
-→ coords 37.42,-122.08@5. [REMAINING at the broker: IndexedDB / WebSocket / clipboard /
-notifications — each its own mojo service, same frame-broker `receiver.As<...>()` pattern.]
+→ coords 37.42,-122.08@5. [DONE: clipboard] `MbClipboardHost` (all 24 ClipboardHost methods; plain-text store, other
+formats empty) + PermissionService now GRANTS clipboard-read/write → `navigator.clipboard`
+writeText/readText work (secure origin + document.hasFocus()==true, which the host reports).
+Host shares the store via `mbSetClipboard(text)` / `mbGetClipboard(out)`. Verified (mb_smoke
+23e): page writeText 'copied-from-page' → mbGetClipboard reads it; mbSetClipboard 'set-by-
+host' → page readText returns it. [REMAINING at the broker: IndexedDB / WebSocket /
+notifications — IndexedDB+WebSocket are genuinely heavy; same frame-broker pattern.]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
    Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —

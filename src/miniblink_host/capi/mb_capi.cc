@@ -623,6 +623,16 @@ void mbClearGeolocation(void) {
   mb::MbClearGeolocation();
 }
 
+void mbSetClipboard(const char* utf8_text) {
+  mb::MbSetClipboardText(utf8_text ? utf8_text : "");
+}
+
+int mbGetClipboard(char* out, int out_cap) {
+  std::string text = mb::MbGetClipboardText();
+  CopyToBuffer(text, out, out_cap);
+  return static_cast<int>(text.size());
+}
+
 int mbSaveLocalStorage(mbView* v, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;

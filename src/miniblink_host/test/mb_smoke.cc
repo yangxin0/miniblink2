@@ -896,6 +896,30 @@ int main() {
            "default=[" + deflt + "] got=[" + got + "]");
   }
 
+  // 23e. Clipboard (broker #8): navigator.clipboard read/write works against the
+  // in-process clipboard (permission granted), and the host shares it via mbGet/Set-
+  // Clipboard — a page's writeText is readable by the host; the host's set is readable
+  // by the page. (Secure origin + document.hasFocus()==true, which the host reports.)
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://clip.test/");
+    Eval(v,
+         "navigator.clipboard.writeText('copied-from-page').then("
+         "function(){window.__w='ok';},function(e){window.__w='err:'+e.name;})");
+    mbWaitForFunction(v, "window.__w!==undefined", 2000);
+    const std::string w = Eval(v, "window.__w");
+    char hb[128] = {0};
+    mbGetClipboard(hb, sizeof(hb));
+    mbSetClipboard("set-by-host");
+    Eval(v,
+         "navigator.clipboard.readText().then(function(t){window.__r=t;},"
+         "function(e){window.__r='err:'+e.name;})");
+    mbWaitForFunction(v, "window.__r!==undefined", 2000);
+    const std::string r = Eval(v, "window.__r");
+    Expect(w == "ok" && std::string(hb) == "copied-from-page" && r == "set-by-host",
+           "clipboard: page writeText->host reads; host sets->page readText",
+           "w=[" + w + "] host=[" + std::string(hb) + "] r=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

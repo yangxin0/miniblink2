@@ -10,6 +10,8 @@
 #ifndef MINIBLINK_HOST_FRAME_MB_FRAME_BROKER_H_
 #define MINIBLINK_HOST_FRAME_MB_FRAME_BROKER_H_
 
+#include <string>
+
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/mojom/browser_interface_broker.mojom-blink.h"
 
@@ -23,6 +25,12 @@ MakeFrameInterfaceBroker();
 // (and the GeolocationService grants); MbClearGeolocation reverts to denied. Thread-safe.
 void MbSetGeolocation(double lat, double lng, double accuracy);
 void MbClearGeolocation();
+
+// The in-process text clipboard shared by navigator.clipboard / execCommand and the
+// host. MbSetClipboardText makes the page's next paste/readText see `text`;
+// MbGetClipboardText reads what the page (or host) last wrote. Thread-safe.
+void MbSetClipboardText(const std::string& text);
+std::string MbGetClipboardText();
 
 }  // namespace mb
 

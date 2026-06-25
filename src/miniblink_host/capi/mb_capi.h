@@ -503,6 +503,14 @@ MB_EXPORT void mbClearStorage(mbView*);
 MB_EXPORT void mbSetGeolocation(double latitude, double longitude, double accuracy);
 MB_EXPORT void mbClearGeolocation(void);
 
+// In-process text clipboard shared with the page (navigator.clipboard / execCommand).
+// mbSetClipboard makes the page's next navigator.clipboard.readText() / paste see `text`;
+// mbGetClipboard writes the current clipboard text into `out` (NUL-terminated; size first
+// with out=NULL) and returns its length — read what a page copied via writeText/copy.
+// Process-wide. clipboard-read/write permission is granted so navigator.clipboard works.
+MB_EXPORT void mbSetClipboard(const char* utf8_text);
+MB_EXPORT int  mbGetClipboard(char* out, int out_cap);
+
 // Persist localStorage across process runs: mbSaveLocalStorage snapshots the WHOLE
 // localStorage for the current document's origin into `out` as a JSON object string
 // (NUL-terminated; size first with out=NULL), returning its length. mbLoadLocalStorage

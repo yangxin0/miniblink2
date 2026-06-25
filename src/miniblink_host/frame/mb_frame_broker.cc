@@ -18,7 +18,10 @@
 #include "services/network/public/mojom/restricted_cookie_manager.mojom-blink.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
+#include "mojo/public/cpp/base/big_buffer.h"
 #include "services/device/public/mojom/geolocation.mojom-blink.h"
+#include "third_party/blink/public/mojom/clipboard/clipboard.mojom-blink.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "services/device/public/mojom/geoposition.mojom-blink.h"
 #include "third_party/blink/public/mojom/geolocation/geolocation_service.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions/permission.mojom-blink.h"
@@ -176,9 +179,9 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
 // stalling. Requests/observers are no-ops. Bound on the broker's thread (async; no [Sync]).
 class MbPermissionService : public blink::mojom::blink::PermissionService {
  public:
-  void HasPermission(blink::mojom::blink::PermissionDescriptorPtr,
+  void HasPermission(blink::mojom::blink::PermissionDescriptorPtr permission,
                      HasPermissionCallback callback) override {
-    std::move(callback).Run(Denied());
+    std::move(callback).Run(StatusFor(permission));
   }
   void RegisterPageEmbeddedPermissionControl(
       blink::Vector<blink::mojom::blink::PermissionDescriptorPtr>,
@@ -192,9 +195,9 @@ class MbPermissionService : public blink::mojom::blink::PermissionService {
     std::move(callback).Run(
         blink::mojom::blink::EmbeddedPermissionControlResult::kDismissed);
   }
-  void RequestPermission(blink::mojom::blink::PermissionDescriptorPtr,
+  void RequestPermission(blink::mojom::blink::PermissionDescriptorPtr permission,
                          RequestPermissionCallback callback) override {
-    std::move(callback).Run(Denied());
+    std::move(callback).Run(StatusFor(permission));
   }
   void RequestPermissions(
       blink::Vector<blink::mojom::blink::PermissionDescriptorPtr> permissions,
@@ -202,7 +205,7 @@ class MbPermissionService : public blink::mojom::blink::PermissionService {
     blink::Vector<blink::mojom::blink::PermissionStatusWithDetailsPtr> out;
     out.reserve(permissions.size());
     for (blink::wtf_size_t i = 0; i < permissions.size(); ++i)
-      out.push_back(Denied());
+      out.push_back(StatusFor(permissions[i]));
     std::move(callback).Run(std::move(out));
   }
   void RevokePermission(blink::mojom::blink::PermissionDescriptorPtr,
@@ -225,6 +228,127 @@ class MbPermissionService : public blink::mojom::blink::PermissionService {
     return blink::mojom::blink::PermissionStatusWithDetails::New(
         blink::mojom::blink::PermissionStatus::DENIED, nullptr);
   }
+  // GRANT clipboard read/write (so navigator.clipboard works against our in-process
+  // ClipboardHost); everything else stays DENIED (the headless default).
+  static blink::mojom::blink::PermissionStatusWithDetailsPtr StatusFor(
+      const blink::mojom::blink::PermissionDescriptorPtr& d) {
+    const bool grant =
+        d && (d->name == blink::mojom::blink::PermissionName::CLIPBOARD_READ ||
+              d->name == blink::mojom::blink::PermissionName::CLIPBOARD_WRITE);
+    return blink::mojom::blink::PermissionStatusWithDetails::New(
+        grant ? blink::mojom::blink::PermissionStatus::GRANTED
+              : blink::mojom::blink::PermissionStatus::DENIED,
+        nullptr);
+  }
+};
+
+// Process-wide in-memory clipboard (plain text). Shared by the page (ClipboardHost) and
+// the host C-ABI (mbGet/SetClipboard). Guarded by a lock: ClipboardHost runs on the
+// broker's service thread, the C-ABI on the main thread.
+base::Lock& ClipLock() {
+  static base::Lock* l = new base::Lock();
+  return *l;
+}
+std::string& ClipText() {
+  static std::string* s = new std::string();
+  return *s;
+}
+uint64_t& ClipSeqRef() {
+  static uint64_t* n = new uint64_t(1);
+  return *n;
+}
+void ClipSet(const std::string& text) {
+  base::AutoLock al(ClipLock());
+  ClipText() = text;
+  ++ClipSeqRef();
+}
+std::string ClipGet() {
+  base::AutoLock al(ClipLock());
+  return ClipText();
+}
+uint64_t ClipSeq() {
+  base::AutoLock al(ClipLock());
+  return ClipSeqRef();
+}
+
+// blink.mojom.ClipboardHost: backs navigator.clipboard (read/write text) and
+// execCommand('copy'/'paste') with the in-memory store. Only plain text is kept; the
+// other formats read empty / write no-op. Reports the clipboard permission as allowed.
+class MbClipboardHost : public blink::mojom::blink::ClipboardHost {
+ public:
+  void GetSequenceNumber(blink::mojom::blink::ClipboardBuffer,
+                         GetSequenceNumberCallback cb) override {
+    std::move(cb).Run(absl::uint128(ClipSeq()));
+  }
+  void IsFormatAvailable(blink::mojom::blink::ClipboardFormat format,
+                         blink::mojom::blink::ClipboardBuffer,
+                         IsFormatAvailableCallback cb) override {
+    std::move(cb).Run(format == blink::mojom::blink::ClipboardFormat::kPlaintext &&
+                      !ClipGet().empty());
+  }
+  void ReadAvailableTypes(blink::mojom::blink::ClipboardBuffer,
+                          ReadAvailableTypesCallback cb) override {
+    blink::Vector<blink::String> types;
+    if (!ClipGet().empty())
+      types.push_back("text/plain");
+    std::move(cb).Run(std::move(types));
+  }
+  void ReadText(blink::mojom::blink::ClipboardBuffer,
+                ReadTextCallback cb) override {
+    std::move(cb).Run(blink::String::FromUtf8(ClipGet()));
+  }
+  void ReadHtml(blink::mojom::blink::ClipboardBuffer,
+                ReadHtmlCallback cb) override {
+    std::move(cb).Run(blink::String(), blink::KURL(), 0u, 0u);
+  }
+  void ReadSvg(blink::mojom::blink::ClipboardBuffer,
+               ReadSvgCallback cb) override {
+    std::move(cb).Run(blink::String());
+  }
+  void ReadRtf(blink::mojom::blink::ClipboardBuffer,
+               ReadRtfCallback cb) override {
+    std::move(cb).Run(blink::String());
+  }
+  void ReadPng(blink::mojom::blink::ClipboardBuffer,
+               ReadPngCallback cb) override {
+    std::move(cb).Run(mojo_base::BigBuffer());
+  }
+  void ReadFiles(blink::mojom::blink::ClipboardBuffer,
+                 ReadFilesCallback cb) override {
+    std::move(cb).Run(blink::mojom::blink::ClipboardFiles::New());
+  }
+  void ReadDataTransferCustomData(
+      blink::mojom::blink::ClipboardBuffer, const blink::String&,
+      ReadDataTransferCustomDataCallback cb) override {
+    std::move(cb).Run(blink::String());
+  }
+  void ReadAvailableCustomAndStandardFormats(
+      ReadAvailableCustomAndStandardFormatsCallback cb) override {
+    std::move(cb).Run(blink::Vector<blink::String>());
+  }
+  void ReadUnsanitizedCustomFormat(
+      const blink::String&, ReadUnsanitizedCustomFormatCallback cb) override {
+    std::move(cb).Run(mojo_base::BigBuffer());
+  }
+  void WriteText(const blink::String& text) override { ClipSet(text.Utf8()); }
+  void WriteHtml(const blink::String&, const blink::KURL&) override {}
+  void WriteSvg(const blink::String&) override {}
+  void WriteSmartPasteMarker() override {}
+  void WriteDataTransferCustomData(
+      const blink::HashMap<blink::String, blink::String>&) override {}
+  void WriteBookmark(const blink::String&, const blink::String&) override {}
+  void WriteImage(const SkBitmap&) override {}
+  void WriteUnsanitizedCustomFormat(const blink::String&,
+                                    mojo_base::BigBuffer) override {}
+  void CommitWrite() override {}
+  void WriteStringToFindPboard(const blink::String&) override {}
+  void GetPlatformPermissionState(
+      GetPlatformPermissionStateCallback cb) override {
+    std::move(cb).Run(
+        blink::mojom::blink::PlatformClipboardPermissionState::kAllow);
+  }
+  void RegisterClipboardListener(
+      mojo::PendingRemote<blink::mojom::blink::ClipboardListener>) override {}
 };
 
 // Process-wide configured geolocation fix (set via mbSetGeolocation). Read on the
@@ -315,6 +439,12 @@ class MbBrowserInterfaceBroker
                                   std::move(r));
       return;
     }
+    // navigator.clipboard / execCommand copy+paste — in-memory text clipboard.
+    if (auto r = receiver.As<blink::mojom::blink::ClipboardHost>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbClipboardHost>(),
+                                  std::move(r));
+      return;
+    }
     // Drop everything else (no browser process).
   }
 };
@@ -329,6 +459,14 @@ void MbSetGeolocation(double lat, double lng, double accuracy) {
 void MbClearGeolocation() {
   base::AutoLock al(GeoLock());
   GeoFix() = MbGeoFix{};
+}
+
+void MbSetClipboardText(const std::string& text) {
+  ClipSet(text);
+}
+
+std::string MbGetClipboardText() {
+  return ClipGet();
 }
 
 mojo::PendingRemote<blink::mojom::blink::BrowserInterfaceBroker>
