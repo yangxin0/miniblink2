@@ -855,3 +855,24 @@ Verified: mb_smoke 23at (back/forward/go traverse same-doc + popstate carries ev
   untouched at /a) and 86b (page-driven history nav is crash-safe / host survives).
 LIMITATIONS (deferred): child-frame (iframe) history not independently routed (sink is per main-frame
 client); cross-document traversal re-loads rather than restoring bfcache state; no scroll-position restore.
+
+[AUDIT — KNOWN LIMITATION (cross-origin isolation; security-relevant)] An architecture audit of the
+process-wide state confirmed two real cross-origin data-isolation gaps, both instances of the deferred
+"origin-agnostic broker" item:
+  * IndexedDB: the backend Registry is keyed by database NAME only (mb_indexeddb.cc GetOrCreate). Two
+    DIFFERENT origins that open IndexedDB with the SAME db name share ONE backend -> cross-origin
+    read/write of PERSISTENT data (a genuine isolation/security gap, not just a spec nit; worse than the
+    others because the data persists and mbSaveIndexedDB serializes it). IDB is strictly per-origin per spec.
+  * BroadcastChannel: the registry is keyed by channel NAME only (mb_broadcast_channel.cc BcRegistry) ->
+    cross-origin message delivery for same-named channels. (Lower impact: transient messages.)
+ROOT CAUSE: the mojom for both (IDBFactory.Open, BroadcastChannelProvider.ConnectToChannel) carries NO
+origin — the real browser binds these interfaces PER-ORIGIN (per storage bucket), so the origin is implicit
+in which factory/provider instance. Our broker (MakeFrameInterfaceBroker) is a single per-frame instance,
+bound at frame-creation (origin = initial empty doc, opaque) and REUSED across navigations, so it has no
+reliable document origin to scope by. The message-carried sender_origin doesn't help receiver-only channels.
+NOT A SINGLE-TICK FIX: a correct fix threads the document origin (updated on each commit) to the broker ->
+BindIDBFactory / BindBroadcastChannelProvider, keys the registries by (origin, name), AND extends the IDB
+persistence format to store metadata.name separately from the now-origin-qualified registry key — touching
+the central broker + the whole (heavily-tested) IDB subsystem + the on-disk format. Deferred as the
+deliberate "per-origin storage isolation" refactor. IMPACT TODAY: none for the common SINGLE-origin
+embedder; only multi-origin processes that reuse db/channel names across origins are affected.
