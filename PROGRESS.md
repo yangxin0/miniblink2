@@ -736,13 +736,35 @@ index/length in the embedder (incl. pushState/replaceState via DidUpdateHistory)
 renderer-side navigation-controller logic the in-process host currently lacks. The existing host-driven
 GoBack/GoForward (C ABI, re-loads URLs) is separate and unaffected.
 
-[IN PROGRESS: history traversal — slice 1 DONE] history.length was always 1 / back-list count 0
-(short-circuiting history.back()). FIXED slice 1: MbFrameClient::DidFinishSameDocumentNavigation now
-calls WebView::IncreaseHistoryListFromNavigation on a standard same-document commit (pushState),
-replicating RenderFrameImpl::UpdateNavigationHistory — history.length is correct and
-HistoryBackListCount > 0. mb_smoke 23ar (pushState grows length, replaceState doesn't). SLICE 2 (NEXT):
-history.back()/forward() still don't traverse — blink now calls LocalFrameHost.GoToEntryAtOffset(offset)
-which routes to the absent browser. Need to service that (implement/handle the frame host method) and
-drive the frame to commit the target entry: same-document -> a same-document navigation to the target
-URL + restored page state + popstate; cross-document -> re-load. Requires storing per-entry serialized
-state (blink sends it via the state-update path) keyed by history position.
+[DONE: history traversal — page-driven back/forward/go works] Both slices landed.
+- Slice 1: history.length / back-list count were wrong (always 1 / 0), short-circuiting history.back().
+- Slice 2: history.back()/forward()/go(delta) now actually traverse same-document entries, restoring
+  history.state and firing popstate.
+Implementation:
+  * `frame/mb_local_frame_host.{h,cc}` — MbLocalFrameHost, a real blink::mojom::blink::LocalFrameHost.
+    The ~70 no-op method bodies are copied from blink's FakeLocalFrameHost (that one is testonly and
+    can't link into our non-test host library). The single live method is GoToEntryAtOffset: blink sends
+    page-driven history.back()/forward()/go() there (History::go -> LocalFrameClientImpl::NavigateBack-
+    Forward); previously unbound -> dropped. It now routes (offset, has_user_gesture) through a lock-
+    protected single-slot global sink to the main/blink thread.
+  * Bound in the frame's nav-associated-interface provider (MbNavAssociatedInterfaceProvider in
+    blob/mb_blob_registry.cc) on the LocalFrameHost::Name_ request — the same provider already serving
+    BlobURLStore/BroadcastChannel — via MbBindLocalFrameHost (self-owned associated receiver).
+  * MbFrameClient owns the session history: `std::vector<Persistent<HistoryItem>> history_items_` +
+    `history_index_`, captured at each main-frame commit (DidCommitNavigation cross-doc, DidFinishSame-
+    DocumentNavigation same-doc) from DocumentLoader::GetHistoryItem(). Standard commit appends (truncating
+    forward entries); inert commit (replaceState/reload) overwrites in place. Capped at 50 to match blink's
+    kMaxSessionHistoryEntries (its WebView CHECKs history_length <= 50).
+  * SyncBlinkHistoryCursor() restates blink's WebView index+length (SetHistoryListFromNavigation) from our
+    list after every change — our cross-document commits reset blink's counters to 0, so without this the
+    two desync and NavigateBackForward wrongly short-circuits. This also drives history.length, replacing
+    slice 1's IncreaseHistoryListFromNavigation.
+  * GoToHistoryOffset (main thread): computes target = index + offset, then DocumentLoader::CommitSame-
+    DocumentNavigation(url, kBackForward, item, ...). blink returns Ok for a genuine same-document target
+    (restores state + fires popstate) — we sync the cursor; on RestartCrossDocument we fall back to the
+    host's LoadURL re-navigation.
+Verified: mb_smoke 23at (back/forward/go traverse same-doc + popstate carries event.state) and 23ar
+(pushState grows history.length clamped at 50; replaceState doesn't). Full battery 121/43/88/66/107.
+LIMITATIONS (deferred): single-slot sink => last main frame wins (one main frame per process here, fine;
+child-frame history not independently routed); cross-document traversal re-loads rather than restoring
+bfcache state; no scroll-position restore.
