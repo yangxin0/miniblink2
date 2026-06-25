@@ -1224,6 +1224,16 @@ void MbWebView::SetNavigationCallback(NavigationFn cb) {
   on_navigation_ = std::move(cb);
 }
 
+void MbWebView::OnCreateNewWindow(const std::string& url,
+                                  const std::string& name) {
+  if (on_new_window_)
+    on_new_window_(url, name);
+}
+
+void MbWebView::SetNewWindowCallback(NewWindowFn cb) {
+  on_new_window_ = std::move(cb);
+}
+
 bool MbWebView::GoBack() {
   if (!CanGoBack())
     return false;

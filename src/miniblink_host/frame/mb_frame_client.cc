@@ -134,6 +134,21 @@ void MbFrameClient::BeginNavigation(
                                 weak_factory_.GetWeakPtr(), std::move(info)));
 }
 
+blink::WebView* MbFrameClient::CreateNewWindow(
+    const blink::WebURLRequest& request, const blink::WebWindowFeatures&,
+    const blink::WebString& name, const gfx::Rect&, blink::WebNavigationPolicy,
+    network::mojom::WebSandboxFlags, const blink::SessionStorageNamespaceId&,
+    bool& /*consumed_user_gesture*/, const std::optional<blink::Impression>&,
+    const std::optional<blink::WebPictureInPictureWindowOptions>&,
+    const blink::WebURL& /*base_url*/) {
+  // Notify the host that the page tried to open a new window (window.open /
+  // target=_blank). We return null (deny the auto-popup — the embedder owns view
+  // creation) but surface the URL so it can react (e.g. load it somewhere).
+  if (owner_)
+    owner_->OnCreateNewWindow(request.Url().GetString().Utf8(), name.Utf8());
+  return nullptr;
+}
+
 void MbFrameClient::DoCommit(std::unique_ptr<blink::WebNavigationInfo> info) {
   if (!web_frame_)
     return;

@@ -175,8 +175,17 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      `DoCommit` honor mocks so a page navigation is served from the interception layer too.
      Verified (mb_smoke 0g, offline): a callback lets nav.test/ok commit (mock → GOOD) and
      vetoes nav.test/blocked (stays GOOD); the log shows both URLs.
-   - [NEXT] new-window (`wkeOnCreateView` / CreateView), `DidFailLoad` failed-flag, and
-     wiring the load primitives to wait on `load_finished()` instead of fixed mbWait.
+   - [DONE] **new-window notification** — `mbOnNewWindow(view, cb, userdata)`: fires when the
+     page calls `window.open()` / activates `target=_blank`, with the requested URL + window
+     name, via `MbFrameClient::CreateNewWindow` (which still returns null = popup denied, the
+     safe default). The embedder can react (e.g. load the URL in this/a new view). Verified
+     (mb_smoke 0h, offline): `window.open('https://popup.test/p','winname')` → callback logs
+     `popup.test/p|winname` and window.open returns null.
+   - [NEXT] `DidFailLoad` failed-flag on the load-finish signal, and wiring the load
+     primitives to wait on `load_finished()` instead of a fixed mbWait.
+
+   **→ Tier-1 push-callback model (#4) is now functionally complete: load-finish push,
+   navigation policy, AND new-window notification.**
 5. **JS dialogs** — [DONE]. `mbSetJsDialogCallback(view, cb, userdata)`: the callback is
    invoked per dialog (type 0/1/2 = alert/confirm/prompt) with the message + prompt default;
    returns accept(1)/dismiss(0) and writes prompt text. No callback → headless-safe defaults

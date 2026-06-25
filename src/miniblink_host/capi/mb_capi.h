@@ -110,6 +110,15 @@ MB_EXPORT int  mbIsLoadFinished(mbView*);
 typedef int (*mbNavigationCallback)(mbView*, void* userdata, const char* url);
 MB_EXPORT void mbOnNavigation(mbView*, mbNavigationCallback, void* userdata);
 
+// New-window notification: the callback fires when the page requests a new window
+// (window.open() or a target=_blank activation), with the requested `url` and window
+// `name`. It is a notification only — the popup is not auto-created (window.open returns
+// null), so an embedder can decide what to do (e.g. load `url` in this or a new view).
+// NULL clears it.
+typedef void (*mbNewWindowCallback)(mbView*, void* userdata, const char* url,
+                                    const char* name);
+MB_EXPORT void mbOnNewWindow(mbView*, mbNewWindowCallback, void* userdata);
+
 // Host-driven POST navigation: POST `body` to an http(s) `url` with `content_type`
 // (NULL/empty -> application/x-www-form-urlencoded) and commit the response as the
 // document. `body` is NUL-terminated (text bodies — form-encoded or JSON). After

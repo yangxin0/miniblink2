@@ -58,6 +58,18 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // document is still committed directly by MbWebView, not here.
   void BeginNavigation(std::unique_ptr<blink::WebNavigationInfo>) override;
 
+  // window.open() / target=_blank: notify the host of the requested URL + name, then
+  // return null (we don't auto-create popups — the embedder decides what to do, e.g.
+  // load it in the current or a new view). Keeps the safe "window.open -> null" default.
+  blink::WebView* CreateNewWindow(
+      const blink::WebURLRequest&, const blink::WebWindowFeatures&,
+      const blink::WebString& name, const gfx::Rect& requested_screen_rect,
+      blink::WebNavigationPolicy, network::mojom::WebSandboxFlags,
+      const blink::SessionStorageNamespaceId&, bool& consumed_user_gesture,
+      const std::optional<blink::Impression>&,
+      const std::optional<blink::WebPictureInPictureWindowOptions>&,
+      const blink::WebURL& base_url) override;
+
   // The frame's navigation-associated-interface provider. We return one that
   // binds BlobURLStore to our in-process store (so URL.createObjectURL +
   // blob: fetch work); without this, Blink would talk to the absent browser.

@@ -248,6 +248,31 @@ int main() {
     mbClearMocks();
   }
 
+  // 0h. New-window notification: mbOnNewWindow fires when the page calls window.open
+  // (or activates target=_blank) with the requested URL + name. The popup itself is
+  // still denied (window.open returns null) — safe for untrusted pages — but the host
+  // learns what was requested and can act on it.
+  {
+    static std::string* winlog = new std::string();  // -Wexit-time-destructors
+    winlog->clear();
+    mbOnNewWindow(
+        v,
+        [](mbView*, void*, const char* url, const char* name) {
+          *winlog += std::string(url ? url : "") + "|" + (name ? name : "") + ";";
+        },
+        nullptr);
+    mbLoadHTML(v,
+               "<body><script>window.__o=String(window.open("
+               "'https://popup.test/p','winname'));</script></body>",
+               "about:blank");
+    const std::string opened = Eval(v, "window.__o");
+    Expect(opened == "null" &&
+               winlog->find("https://popup.test/p|winname;") != std::string::npos,
+           "mbOnNewWindow notifies window.open URL+name; popup still denied",
+           "open=[" + opened + "] log=[" + *winlog + "]");
+    mbOnNewWindow(v, nullptr, nullptr);
+  }
+
   // 1. HTML parse + DOM.
   mbLoadHTML(v, "<body><div id='x'>hello</div></body>", "about:blank");
   Expect(Eval(v, "document.getElementById('x').textContent") == "hello",

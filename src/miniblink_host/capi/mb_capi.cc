@@ -148,6 +148,18 @@ void mbOnNavigation(mbView* v, mbNavigationCallback cb, void* userdata) {
     v->impl->SetNavigationCallback({});
 }
 
+void mbOnNewWindow(mbView* v, mbNewWindowCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetNewWindowCallback(
+        [v, cb, userdata](const std::string& url, const std::string& name) {
+          cb(v, userdata, url.c_str(), name.c_str());
+        });
+  else
+    v->impl->SetNewWindowCallback({});
+}
+
 void mbPostURL(mbView* v, const char* utf8_url, const char* utf8_body,
                const char* content_type) {
   if (v && v->impl)

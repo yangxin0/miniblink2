@@ -322,6 +322,13 @@ class MbWebView {
   // navigation's target URL and returns 1 to allow, 0 to block. {} clears it (allow all).
   using NavigationFn = std::function<int(const std::string& url)>;
   void SetNavigationCallback(NavigationFn cb);
+  // Called by MbFrameClient when the page requests a new window (window.open /
+  // target=_blank). A notification only — the popup itself is denied (returns null).
+  void OnCreateNewWindow(const std::string& url, const std::string& name);
+  // Register a new-window notification callback. {} clears it.
+  using NewWindowFn = std::function<void(const std::string& url,
+                                         const std::string& name)>;
+  void SetNewWindowCallback(NewWindowFn cb);
   // True once the current navigation's load has finished; reset when a new load
   // is started (see ResetLoadFinished). Lets the load primitives wait for the real
   // finish instead of a fixed delay.
@@ -439,6 +446,7 @@ class MbWebView {
   bool load_finished_ = false;        // main-frame load event has fired (DidFinishLoad)
   std::function<void()> on_load_finish_;  // optional embedder finish callback
   NavigationFn on_navigation_;  // optional page-initiated navigation policy callback
+  NewWindowFn on_new_window_;   // optional window.open / target=_blank notification
 
   std::vector<uint8_t> encoded_png_;  // retained bytes from the last EncodePng
   int http_status_ = 0;  // HTTP status of the last http(s) load; 0 if none/failed
