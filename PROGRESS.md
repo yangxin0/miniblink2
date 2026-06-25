@@ -438,6 +438,11 @@ BUG fixed: for a SUPPORTED video codec blink queries VideoDecodePerfHistory (no 
 decodingInfo() HANGS unbound. Video sites call it on load to pick a codec. Verified the build supports
 VP9/AV1 (libvpx/dav1d) but not H.264/VP8 — a vp9/av1 config triggered the hang; now resolves.
 mb_smoke 23an. (Aside: decodingInfo's supported flag confirms this build decodes VP9 + AV1.)
+[DONE: BrowsingTopics] `MbBrowsingTopicsDocumentService` (bound from the frame broker) returns an
+empty topics list, so `document.browsingTopics()` (Privacy Sandbox, called by ad scripts on load)
+resolves to []. BUG fixed: the service remote has no disconnect handler, so unbound the promise HANGS
+(verified bt=[] timeout). The GetBrowsingTopics `result<>` typemaps to base::expected; empty success
+Vector = no topics. mb_smoke 23ao.
 [DONE: getInstalledRelatedApps] `MbInstalledAppProvider` (blink.mojom.InstalledAppProvider, bound from
 the frame broker) returns [] (no installed apps headless). BUG fixed: blink sets no disconnect handler
 on the provider (explicit TODO in installed_app_controller.cc), so unbound the promise HANGS. PWAs
