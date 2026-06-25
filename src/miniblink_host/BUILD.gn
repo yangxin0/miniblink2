@@ -94,10 +94,16 @@ executable("mb_smoke") {
   deps = [ ":miniblink_host" ]
 }
 
-# mb_smoke_platform: split from the mb_smoke monolith (cookies/screenshots/scraping/
-# storage/history/blob/forms), sharing test/mb_smoke_harness.h. Its own process.
+# Split themed smoke programs (peeled from the mb_smoke monolith; share
+# test/mb_smoke_harness.h). Each runs as its own process.
 executable("mb_smoke_platform") {
   sources = [ "test/mb_smoke_platform.cc" ]
+  include_dirs = [ "//third_party/blink/renderer" ]
+  deps = [ ":miniblink_host" ]
+}
+
+executable("mb_smoke_render") {
+  sources = [ "test/mb_smoke_render.cc" ]
   include_dirs = [ "//third_party/blink/renderer" ]
   deps = [ ":miniblink_host" ]
 }

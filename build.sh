@@ -49,8 +49,8 @@ export PATH="$TREE/buildtools/mac:$PATH"
 echo "==> gn gen"
 ( cd "$TREE" && gn gen "$OUT" >/dev/null )
 
-echo "==> ninja miniblink_host mb_smoke mb_smoke_platform mb_shot mb_demo wke_smoke wke_demo"
-( cd "$TREE" && ninja -C "$OUT" miniblink_host mb_smoke mb_smoke_platform mb_shot mb_demo wke_smoke wke_demo )
+echo "==> ninja miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo wke_smoke wke_demo"
+( cd "$TREE" && ninja -C "$OUT" miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo wke_smoke wke_demo )
 
 echo "==> vendor resource paks next to the binary"
 cp "$TREE/$OUT/gen/third_party/blink/public/resources/blink_resources.pak" \
@@ -61,6 +61,7 @@ cp "$TREE/$OUT/gen/third_party/blink/renderer/modules/media_controls/resources/m
 echo "==> smoke tests (library/ABI — split into themed programs)"
 ( cd "$TREE/$OUT" && DYLD_LIBRARY_PATH="$PWD" ./mb_smoke )
 ( cd "$TREE/$OUT" && DYLD_LIBRARY_PATH="$PWD" ./mb_smoke_platform )
+( cd "$TREE/$OUT" && DYLD_LIBRARY_PATH="$PWD" ./mb_smoke_render )
 
 echo "==> mb_shot CLI smoke (argument parsing + stdout extraction)"
 bash "$(dirname "$0")/src/miniblink_host/test/mb_shot_smoke.sh" "$TREE/$OUT"

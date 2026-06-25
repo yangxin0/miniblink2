@@ -30,12 +30,14 @@ step is available and nothing is broken, **say so and stop** — do not invent c
 smoke programs (engine / scrape / input / net / platform), each its own executable.
 - [DONE] `test/mb_smoke_harness.h` — shared header-only helpers (`Eval`/`EvalIso`/
   `Expect`/counters) + `MB_SMOKE_MAIN(SUITE)`.
-- [DONE] `mb_smoke_platform.cc` — extracted cases 87–106 (cookies/screenshots/scraping/
-  storage/history/blob/forms/validation/PNG-encode), 43 assertions, its own executable.
-  Now: `mb_smoke` 137 + `mb_smoke_platform` 43 = 180. Both in BUILD.gn + build.sh.
-- [NEXT] Keep peeling contiguous ranges off `mb_smoke.cc` into themed programs
-  (e.g. net/loader, input, scrape, engine) until it's a handful of focused files. The
-  cut is verified by: both build, and the per-program counts still sum to 180.
+- [DONE] `mb_smoke_platform.cc` (cases 87–106, 43) and `mb_smoke_render.cc` (cases 35–86b
+  modern CSS / web components / platform crash-safety / blob / paint / fonts / SVG /
+  selector automation / navigation, 77). All three in BUILD.gn + build.sh.
+  Now: `mb_smoke` 60 + `mb_smoke_render` 77 + `mb_smoke_platform` 43 = **180**. mb_smoke.cc
+  is 3660 -> 1194 lines (engine basics 1–34 + the `MB_NET_TESTS` block + case 107 binding).
+- [OPTIONAL] Could peel the `MB_NET_TESTS` block into `mb_smoke_net.cc` to leave mb_smoke.cc
+  as pure engine basics — but the 3-way split already addresses the monolith; lower
+  priority than the #1 net-interception feature work.
 
 ## Current State (complete)
 - **Engine:** modern M150 Blink renders HTML→pixels in-process. V8/JS, modern + cutting-edge
