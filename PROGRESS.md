@@ -414,6 +414,13 @@ SCREEN_WAKE_LOCK, so request('screen') resolves with a live sentinel (mb_smoke 2
 the frame broker) reports a static plugged-in/full battery (level 1, charging true, chargingTime 0).
 QueryNextStatus long-polls for changes, so the first call answers and later calls are held open forever
 (headless value never changes). mb_smoke 23z.
+[DONE: Credential Management] `navigator.credentials.get/store/preventSilentAccess` —
+`MbCredentialManager` (blink.mojom.CredentialManager, bound from the frame broker). Headless has no
+credential store, so Get returns SUCCESS + an EMPTY-type CredentialInfo (converts to a null
+Credential -> get() resolves to null) and Store/PreventSilentAccess ack. BUG fixed: blink's basic
+CredentialManager remote has NO disconnect handler, so without the binding get() HANGS forever (a
+real hang on login pages that probe for stored credentials at load). NOTE: SUCCESS requires a
+non-null CredentialInfo (blink DCHECKs), hence EMPTY not null. mb_smoke 23ai.
 [DONE: Cookie Store API] `cookieStore.get/getAll/set/delete` — `MbCookieManager` (the
 RestrictedCookieManager already serving document.cookie) gained real `GetAllForUrl` (returns the
 origin's cookies as net::CanonicalCookies via CreateSanitizedCookie, honoring the options name filter:
