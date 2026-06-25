@@ -448,10 +448,17 @@ numeric key bumps the counter). `GetKeyGeneratorCurrentNumber` reports it. Two b
 handled in `BuildReturnValue`: `IDBReturnValue.primary_key` is non-nullable, and the key injector
 DCHECKs a String key path — so in-line (keyPath) stores send the real key + path while out-of-line
 stores send a None key (which blink ignores, skipping injection). Verified (mb_smoke 23q): two
-keyless puts on an `{autoIncrement:true}` store get keys 1 and 2, retrievable by those keys. NOT
-yet: indexes (createIndex/index cursors), transaction atomicity/rollback — and persistence is
-in-memory (per-process, by db name). The object-store surface (open/schema, put/get, count/delete/
-clear, getAll/ranges, cursors, autoincrement) covers what the vast majority of apps use.]
+keyless puts on an `{autoIncrement:true}` store get keys 1 and 2, retrievable by those keys. STEP 7 (DONE): secondary indexes.
+`IDBDatabase.CreateIndex`/`DeleteIndex` register index metadata on the store; `IDBTransaction.Put`
+populates a per-store/per-index map (encoded index key -> set of encoded primary keys) from the
+`index_keys` blink computes, and `SetIndexKeys` does the same for createIndex on an existing store;
+`IDBDatabase.Get` with `index_id != kInvalidId` resolves the index key to a primary key and returns
+the record (delete/clear/re-put shed stale index entries). Verified (mb_smoke 23r): a 'by_author'
+index on a books store -> `index('by_author').get('bob')` returns the matching record. NOT yet:
+index CURSORS (OpenCursor still walks the object store only), unique-constraint enforcement,
+multiEntry edge cases, transaction atomicity/rollback — and persistence is in-memory (per-process,
+by db name). IndexedDB now covers open/schema, put/get, count/delete/clear, getAll/ranges, cursors,
+autoincrement, and index lookups — the surface the vast majority of apps use.]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
    Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —

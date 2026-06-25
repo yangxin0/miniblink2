@@ -1289,6 +1289,31 @@ int main() {
            "idb5=[" + r + "]");
   }
 
+  // 23r. IndexedDB indexes (step 7): createIndex on a secondary key path, then look a
+  // record up by index. Store books keyed by isbn with a 'by_author' index; index.get a
+  // value by author returns the matching record.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://idb.test/");
+    Eval(v,
+         "window.__idb6='';"
+         "var __i=indexedDB.open('mbdb7',1);"
+         "__i.onupgradeneeded=function(e){var os=e.target.result.createObjectStore('b',{keyPath:'isbn'});"
+         "os.createIndex('by_author','author');};"
+         "__i.onsuccess=function(e){var db=e.target.result;"
+         "var t=db.transaction('b','readwrite');var s=t.objectStore('b');"
+         "s.put({isbn:'A',author:'alice',title:'X'});"
+         "s.put({isbn:'B',author:'bob',title:'Y'});"
+         "t.oncomplete=function(){"
+         "var g=db.transaction('b').objectStore('b').index('by_author').get('bob');"
+         "g.onsuccess=function(){var r=g.result;window.__idb6=r?(r.isbn+':'+r.title):'null';};"
+         "g.onerror=function(){window.__idb6='err';};};};");
+    mbWaitForFunction(v, "window.__idb6!==''", 4000);
+    const std::string r = Eval(v, "window.__idb6");
+    Expect(r == "B:Y",
+           "IndexedDB index.get looks a record up by a secondary key",
+           "idb6=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

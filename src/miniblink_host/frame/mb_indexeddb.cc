@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -47,6 +48,10 @@ struct MbIDBBackend {
   blink::IDBDatabaseMetadata metadata;  // name/version/object_stores
   std::map<int64_t, std::map<std::string, MbRecord>> data;  // store -> ekey -> record
   std::map<int64_t, int64_t> key_generator;  // store -> next auto-increment value
+  // Secondary indexes: store -> index -> (encoded index key -> set of encoded primary keys).
+  std::map<int64_t,
+           std::map<int64_t, std::map<std::string, std::set<std::string>>>>
+      index_data;
   // The active connection's database callbacks (transaction completion is reported here).
   mojo::AssociatedRemote<IDBDatabaseCallbacks> db_callbacks;
 };
@@ -54,6 +59,17 @@ struct MbIDBBackend {
 bool IsAutoIncrement(MbIDBBackend* b, int64_t store_id) {
   auto it = b->metadata.object_stores.find(store_id);
   return it != b->metadata.object_stores.end() && it->value->auto_increment;
+}
+
+// Remove a primary key from every index of a store (on delete / before re-put).
+void RemoveFromIndexes(MbIDBBackend* b, int64_t store_id,
+                       const std::string& primary_ekey) {
+  auto it = b->index_data.find(store_id);
+  if (it == b->index_data.end())
+    return;
+  for (auto& index : it->second)
+    for (auto& entry : index.second)
+      entry.second.erase(primary_ekey);
 }
 
 // Big-endian, order-preserving encoding of a double: flip the sign bit for positives and
@@ -267,17 +283,41 @@ class MbIDBDatabase : public m::IDBDatabase {
       m::IDBTransactionDurability) override;
   void VersionChangeIgnored() override {}
   // objectStore.get(key): look the value up by the (only-)key in the range.
-  void Get(int64_t, int64_t object_store_id, int64_t, m::IDBKeyRangePtr key_range,
-           bool key_only, GetCallback callback) override {
-    const blink::IDBKey* k = key_range ? key_range->lower.get() : nullptr;
-    std::string ekey = EncodeKey(k);
+  // get()/getKey() on an object store (index_id == kInvalidId) or an index. For an index,
+  // the range key is the INDEX key; resolve it to a primary key, then the record.
+  void Get(int64_t, int64_t object_store_id, int64_t index_id,
+           m::IDBKeyRangePtr key_range, bool key_only,
+           GetCallback callback) override {
+    std::string ekey = EncodeKey(key_range ? key_range->lower.get() : nullptr);
     auto store_it = backend_->data.find(object_store_id);
-    if (ekey.empty() || store_it == backend_->data.end() ||
-        !store_it->second.count(ekey)) {
+    if (ekey.empty() || store_it == backend_->data.end()) {
       std::move(callback).Run(m::IDBDatabaseGetResult::NewEmpty(true));
       return;
     }
-    const MbRecord& rec = store_it->second.at(ekey);
+
+    std::string primary_ekey;
+    if (index_id == blink::IDBIndexMetadata::kInvalidId) {
+      if (!store_it->second.count(ekey)) {
+        std::move(callback).Run(m::IDBDatabaseGetResult::NewEmpty(true));
+        return;
+      }
+      primary_ekey = ekey;
+    } else {
+      // Index lookup: ekey is the index key -> smallest matching primary key.
+      auto si = backend_->index_data.find(object_store_id);
+      const std::set<std::string>* pkeys =
+          (si != backend_->index_data.end() && si->second.count(index_id) &&
+           si->second.at(index_id).count(ekey))
+              ? &si->second.at(index_id).at(ekey)
+              : nullptr;
+      if (!pkeys || pkeys->empty() || !store_it->second.count(*pkeys->begin())) {
+        std::move(callback).Run(m::IDBDatabaseGetResult::NewEmpty(true));
+        return;
+      }
+      primary_ekey = *pkeys->begin();
+    }
+
+    const MbRecord& rec = store_it->second.at(primary_ekey);
     if (key_only) {
       std::move(callback).Run(
           m::IDBDatabaseGetResult::NewKey(blink::IDBKey::Clone(rec.key)));
@@ -406,10 +446,13 @@ class MbIDBDatabase : public m::IDBDatabase {
     if (it != backend_->data.end()) {
       std::string ekey =
           EncodeKey(key_range ? key_range->lower.get() : nullptr);
-      if (ekey.empty())
+      if (ekey.empty()) {
         it->second.clear();
-      else
+        backend_->index_data[object_store_id].clear();
+      } else {
         it->second.erase(ekey);
+        RemoveFromIndexes(backend_, object_store_id, ekey);
+      }
     }
     std::move(callback).Run(/*success=*/true);
   }
@@ -425,11 +468,25 @@ class MbIDBDatabase : public m::IDBDatabase {
     auto it = backend_->data.find(object_store_id);
     if (it != backend_->data.end())
       it->second.clear();
+    backend_->index_data[object_store_id].clear();
     std::move(callback).Run(/*success=*/true);
   }
-  void CreateIndex(int64_t, int64_t,
-                   const scoped_refptr<blink::IDBIndexMetadata>&) override {}
-  void DeleteIndex(int64_t, int64_t, int64_t) override {}
+  void CreateIndex(
+      int64_t, int64_t object_store_id,
+      const scoped_refptr<blink::IDBIndexMetadata>& index) override {
+    auto it = backend_->metadata.object_stores.find(object_store_id);
+    if (it != backend_->metadata.object_stores.end()) {
+      it->value->indexes.Set(index->id, index);
+      if (index->id > it->value->max_index_id)
+        it->value->max_index_id = index->id;
+    }
+  }
+  void DeleteIndex(int64_t, int64_t object_store_id, int64_t index_id) override {
+    auto it = backend_->metadata.object_stores.find(object_store_id);
+    if (it != backend_->metadata.object_stores.end())
+      it->value->indexes.erase(index_id);
+    backend_->index_data[object_store_id].erase(index_id);
+  }
   void RenameIndex(int64_t, int64_t, int64_t, const blink::String&) override {}
   void Abort(int64_t) override {}
   void DidBecomeInactive() override {}
@@ -478,7 +535,7 @@ class MbIDBTransactionImpl : public IDBTransaction {
            std::unique_ptr<blink::IDBValue> value,
            std::unique_ptr<blink::IDBKey> key,
            m::IDBPutMode,
-           blink::Vector<blink::IDBIndexKeys>,
+           blink::Vector<blink::IDBIndexKeys> index_keys,
            PutCallback callback) override {
     // Auto-increment: blink sends a null key for a key-generator store; the backend
     // assigns the next number. An explicit numeric key also bumps the generator.
@@ -509,14 +566,32 @@ class MbIDBTransactionImpl : public IDBTransaction {
                            blink::String("unsupported key type"))));
       return;
     }
+    RemoveFromIndexes(backend_, object_store_id, ekey);  // shed old index entries
     backend_->data[object_store_id][ekey] =
         MbRecord{blink::IDBKey::Clone(use_key), ValueBytes(value.get())};
+    // Populate this record's secondary-index entries (blink computes the keys per index).
+    for (const blink::IDBIndexKeys& ik : index_keys)
+      for (const std::unique_ptr<blink::IDBKey>& ikey : ik.keys) {
+        std::string e = EncodeKey(ikey.get());
+        if (!e.empty())
+          backend_->index_data[object_store_id][ik.id][e].insert(ekey);
+      }
     std::move(callback).Run(
         m::IDBTransactionPutResult::NewKey(blink::IDBKey::Clone(use_key)));
   }
-  void SetIndexKeys(int64_t,
-                    std::unique_ptr<blink::IDBKey>,
-                    blink::IDBIndexKeys) override {}
+  // Populate an index for an existing record (createIndex on a non-empty store).
+  void SetIndexKeys(int64_t object_store_id,
+                    std::unique_ptr<blink::IDBKey> primary_key,
+                    blink::IDBIndexKeys index_keys) override {
+    std::string pkey = EncodeKey(primary_key.get());
+    if (pkey.empty())
+      return;
+    for (const std::unique_ptr<blink::IDBKey>& ikey : index_keys.keys) {
+      std::string e = EncodeKey(ikey.get());
+      if (!e.empty())
+        backend_->index_data[object_store_id][index_keys.id][e].insert(pkey);
+    }
+  }
   void SetIndexKeysDone() override {}
   void Commit(int64_t /*num_errors_handled*/) override {
     // The transaction completed: notify its oncomplete, and (for the open's
