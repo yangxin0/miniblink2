@@ -65,6 +65,46 @@ int main() {
     mbOnLoadFinish(v, nullptr, nullptr);  // clear before `fin` leaves scope
   }
 
+  // 0c. Dynamic per-request hook: mbSetRequestCallback is consulted for EVERY request
+  // the loader handles and can block per-URL at runtime (vs the static substring
+  // tables). Two same-origin fetch()es — one served by a mock (allowed), one whose URL
+  // contains "blockme" (the hook blocks it) — prove both inspection (the hook records
+  // every URL it sees) and per-request veto. Fully offline (mock + hook, no network).
+  {
+    // Heap-owned, never destroyed (-Wexit-time-destructors); statics aren't captured
+    // so the lambda stays convertible to a C function pointer.
+    static std::vector<std::string>* seen = new std::vector<std::string>();
+    seen->clear();
+    mbMockResponse("site.test/ok", "{\"v\":7}", "application/json", 200);
+    mbSetRequestCallback(
+        [](const char* url, void*) -> int {
+          seen->push_back(url);
+          return std::strstr(url, "blockme") ? 1 : 0;  // veto only the blockme URL
+        },
+        nullptr);
+    mbLoadHTML(v,
+               "<body><div id='r'>?</div><script>(async()=>{"
+               "let a='aerr',b='?';"
+               "try{a='ok:'+(await (await fetch('https://site.test/ok')).json()).v;}"
+               "catch(e){a='aerr';}"
+               "try{await fetch('https://site.test/blockme');b='got';}"
+               "catch(e){b='blocked';}"
+               "document.getElementById('r').textContent=a+','+b;})();</script></body>",
+               "https://site.test/");
+    mbWaitForFunction(v, "document.getElementById('r').textContent!=='?'", 2000);
+    const std::string r = Eval(v, "document.getElementById('r').textContent");
+    bool saw_blockme = false;
+    for (const auto& u : *seen)
+      if (u.find("blockme") != std::string::npos)
+        saw_blockme = true;
+    Expect(r.find("ok:7") != std::string::npos &&
+               r.find("blocked") != std::string::npos && saw_blockme,
+           "mbSetRequestCallback inspects + vetoes per request (mock ok, blockme blocked)",
+           std::string("r=[") + r + "] seen=" + std::to_string(seen->size()));
+    mbSetRequestCallback(nullptr, nullptr);
+    mbClearMocks();
+  }
+
   // 1. HTML parse + DOM.
   mbLoadHTML(v, "<body><div id='x'>hello</div></body>", "about:blank");
   Expect(Eval(v, "document.getElementById('x').textContent") == "hello",

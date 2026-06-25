@@ -375,6 +375,14 @@ MB_EXPORT void mbClearRequestLog(void);
 MB_EXPORT void mbBlockUrl(const char* substring);
 MB_EXPORT void mbClearUrlBlocks(void);
 
+// Dynamic per-request hook: a process-wide callback invoked for EVERY request URL
+// the loader handles (alongside the static block/mock/rewrite tables), so you can
+// inspect and decide at runtime instead of pre-registering substrings. Return nonzero
+// to BLOCK the request (failed with ERR_BLOCKED_BY_CLIENT), zero to allow. The
+// callback runs on the main thread during the load. Pass NULL to clear.
+typedef int (*mbRequestCallback)(const char* url, void* userdata);
+MB_EXPORT void mbSetRequestCallback(mbRequestCallback cb, void* userdata);
+
 // Response mocking — the signature interception feature. Any request whose URL
 // CONTAINS `url_substring` is served `body` WITHOUT a real network fetch: run a
 // page fully offline, or substitute an API/XHR/fetch response in tests/automation.

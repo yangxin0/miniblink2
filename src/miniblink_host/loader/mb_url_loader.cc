@@ -649,6 +649,28 @@ bool MbIsUrlBlocked(const std::string& url) {
   return false;
 }
 
+// --- Dynamic per-request hook ------------------------------------------------
+namespace {
+struct RequestHook {
+  MbRequestHookFn fn = nullptr;
+  void* userdata = nullptr;
+};
+RequestHook& Hook() {
+  static RequestHook* h = new RequestHook();
+  return *h;
+}
+}  // namespace
+
+void MbSetRequestHook(MbRequestHookFn fn, void* userdata) {
+  Hook().fn = fn;
+  Hook().userdata = userdata;
+}
+
+bool MbRequestHookBlocks(const std::string& url) {
+  const RequestHook& h = Hook();
+  return h.fn && h.fn(url.c_str(), h.userdata) != 0;
+}
+
 // --- Response mocking --------------------------------------------------------
 // Serve a canned body for any request whose URL contains a registered substring,
 // WITHOUT a real fetch — run a page offline or substitute an API response. The
@@ -793,7 +815,9 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
 
   // Request blocking: fail a blocked URL up front (ERR_BLOCKED_BY_CLIENT), before
   // any fetch — the resource simply never loads (ad/tracker/image suppression).
-  if (MbIsUrlBlocked(fetch_url.spec())) {
+  // Both the static blocklist (matched on the post-rewrite fetch_url) and the dynamic
+  // per-request hook (given the page's original url to inspect) can veto the request.
+  if (MbIsUrlBlocked(fetch_url.spec()) || MbRequestHookBlocks(url.spec())) {
     client_->DidFail(
         blink::WebURLError(net::ERR_BLOCKED_BY_CLIENT, ToWebURL(url)),
         base::TimeTicks::Now(), blink::URLLoaderClient::kUnknownEncodedDataLength,

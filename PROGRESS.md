@@ -79,8 +79,15 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      fetch() path (mb_shot_smoke: a page fetch()es an API URL served from a local file
      -> GOT:42; a rewrite onto the mock -> GOT:42) — confirms the transparent rewrite
      holds against fetch()'s url_list_ DCHECK.
-   - [NEXT] request HEADER rewrite (add/override before fetch); a dynamic per-request
-     callback (`wkeNetHookRequest`/`wkeNetOnResponse`) for live inspect/modify; wke peers.
+   - [DONE] **dynamic per-request callback** — `mbSetRequestCallback(cb, userdata)`: a
+     process-wide hook consulted in the loader's `Deliver` for EVERY request URL (next to
+     the static block/mock/rewrite tables); returns nonzero to BLOCK, zero to allow, so an
+     embedder inspects + decides at runtime instead of pre-registering substrings. Loader
+     side `MbSetRequestHook`/`MbRequestHookBlocks` (main-thread, inside the load). Verified
+     (mb_smoke +1=63, offline): two same-origin fetch()es — the hook records both (seen=2),
+     allows the mocked one (ok:7), vetoes the "blockme" one (blocked).
+   - [NEXT] request HEADER rewrite (add/override before fetch); response-side callback
+     (inspect/modify the body); wke peers (`wkeOnLoadUrlBegin`/`wkeNetOnResponse`).
 
 2. **Quick-win correctness bugs** (real defects; fast; each independently verifiable —
    NOTE several have *existing tests that assert the stubbed/fake behavior* and must be

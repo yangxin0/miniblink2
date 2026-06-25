@@ -446,6 +446,11 @@ void mbClearUrlBlocks(void) {
   mb::MbClearUrlBlocks();
 }
 
+void mbSetRequestCallback(mbRequestCallback cb, void* userdata) {
+  // mbRequestCallback and MbRequestHookFn share the (const char*, void*)->int shape.
+  mb::MbSetRequestHook(reinterpret_cast<mb::MbRequestHookFn>(cb), userdata);
+}
+
 void mbMockResponse(const char* url_substring, const char* body,
                     const char* content_type, int status) {
   if (url_substring)

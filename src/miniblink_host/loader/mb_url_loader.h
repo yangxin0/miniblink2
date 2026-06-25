@@ -79,6 +79,15 @@ void MbBlockUrl(const std::string& substring);
 void MbClearUrlBlocks();
 bool MbIsUrlBlocked(const std::string& url);
 
+// Dynamic per-request hook: a process-wide callback consulted for EVERY request URL
+// (alongside the static block/mock/rewrite tables), so an embedder can inspect and
+// decide at runtime rather than pre-registering substrings. Returns nonzero to BLOCK
+// the request (failed like MbBlockUrl), zero to allow. Null clears it. MbRequestHookBlocks
+// invokes it (the loader's check). Runs on the main thread inside the load.
+typedef int (*MbRequestHookFn)(const char* url, void* userdata);
+void MbSetRequestHook(MbRequestHookFn fn, void* userdata);
+bool MbRequestHookBlocks(const std::string& url);
+
 // Response mocking: serve a canned body for any request whose URL contains
 // `substring`, WITHOUT a real fetch (run offline, substitute an API response).
 // content_type defaults to text/html, status to 200. MbAddMock registers one
