@@ -68,7 +68,14 @@ void MbFrameClient::SetFrame(blink::WebLocalFrame* frame) {
       base::BindRepeating(&MbFrameClient::GoToHistoryOffset,
                           weak_factory_.GetWeakPtr()),
       base::BindRepeating(&MbFrameClient::GoToHistoryKey,
+                          weak_factory_.GetWeakPtr()),
+      base::BindRepeating(&MbFrameClient::OnFaviconUrls,
                           weak_factory_.GetWeakPtr()));
+}
+
+void MbFrameClient::OnFaviconUrls(const std::string& favicon_urls) {
+  if (!self_owned_ && owner_)
+    owner_->OnFaviconChanged(favicon_urls);
 }
 
 blink::AssociatedInterfaceProvider*

@@ -377,6 +377,23 @@ int main() {
     mbOnTitleChanged(v, nullptr, nullptr);
   }
 
+  // 0l3. Favicon-changed: mbOnFaviconChanged fires with the page's favicon URL (resolved
+  // absolute), completing the browser tab-metadata trio (URL / title / favicon).
+  {
+    static std::string* fav = new std::string();  // -Wexit-time-destructors
+    fav->clear();
+    mbOnFaviconChanged(
+        v, [](mbView*, void*, const char* u) { *fav = u; }, nullptr);
+    mbLoadHTML(v,
+               "<head><link rel=\"icon\" href=\"/icon.png\"></head><body>x</body>",
+               "https://fav.test/page");
+    mbWait(v, 120);
+    Expect(fav->find("fav.test/icon.png") != std::string::npos,
+           "mbOnFaviconChanged fires with the page's favicon URL (resolved absolute)",
+           "fav=[" + *fav + "]");
+    mbOnFaviconChanged(v, nullptr, nullptr);
+  }
+
   // 0m. Download diversion (#6): a top-level navigation to a non-renderable response (a
   // data: URL with application/octet-stream) is handed to mbOnDownload (mime + bytes)
   // instead of committed — so the current page stays and a download link saves a file.

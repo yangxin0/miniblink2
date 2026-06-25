@@ -199,6 +199,13 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      (the main-thread WebLocalFrameClient hook Document::DispatchDidReceiveTitle calls alongside
      LocalFrameHost.UpdateTitle) -> MbWebView::OnTitleChanged. Verified (mb_smoke 0l2): initial
      "First" + JS-set "Second"/"Third" all delivered.
+   - [DONE] **Favicon-changed notification** — `mbOnFaviconChanged(view, cb)` fires with the page's
+     favicon URL(s) (newline-separated, absolute; standard <link rel=icon> first). Completes the
+     browser tab-metadata trio (URL/title/favicon). No main-thread WebLocalFrameClient hook exists
+     for favicon (unlike title), so it's routed from LocalFrameHost.UpdateFaviconURL (service
+     thread) through the existing history-sink mechanism (a third favicon callback slot) to
+     MbFrameClient::OnFaviconUrls -> MbWebView. Verified (mb_smoke 0l3): <link rel=icon href=/icon.png>
+     -> https://fav.test/icon.png.
    - [DONE] **new-window notification** — `mbOnNewWindow(view, cb, userdata)`: fires when the
      page calls `window.open()` / activates `target=_blank`, with the requested URL + window
      name, via `MbFrameClient::CreateNewWindow` (which still returns null = popup denied, the

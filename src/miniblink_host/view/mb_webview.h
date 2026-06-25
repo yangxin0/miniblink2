@@ -363,6 +363,11 @@ class MbWebView {
   void SetTitleChangedCallback(TitleChangedFn cb);
   // Called by MbFrameClient when the main frame reports a new document title.
   void OnTitleChanged(const std::string& title);
+  // Register a callback fired when the main frame reports its favicon URL(s)
+  // (newline-separated, standard <link rel=icon> first). {} clears it.
+  using FaviconChangedFn = std::function<void(const std::string& favicon_urls)>;
+  void SetFaviconChangedCallback(FaviconChangedFn cb);
+  void OnFaviconChanged(const std::string& favicon_urls);
   // Register a callback for a top-level navigation that is a DOWNLOAD (Content-Disposition
   // attachment / non-renderable MIME) — it receives the URL, MIME, suggested filename and
   // body bytes INSTEAD of the response being rendered as a document. {} clears (default:
@@ -504,6 +509,7 @@ class MbWebView {
   NavigationFn on_navigation_;  // optional page-initiated navigation policy callback
   UrlChangedFn on_url_changed_;  // optional per-commit URL-changed notification
   TitleChangedFn on_title_changed_;  // optional title-changed notification
+  FaviconChangedFn on_favicon_changed_;  // optional favicon-changed notification
   DownloadFn on_download_;  // optional top-level-download diversion callback
   NewWindowFn on_new_window_;   // optional window.open / target=_blank notification
 

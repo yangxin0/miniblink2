@@ -1387,6 +1387,15 @@ void MbWebView::OnTitleChanged(const std::string& title) {
     on_title_changed_(title);
 }
 
+void MbWebView::SetFaviconChangedCallback(FaviconChangedFn cb) {
+  on_favicon_changed_ = std::move(cb);
+}
+
+void MbWebView::OnFaviconChanged(const std::string& favicon_urls) {
+  if (on_favicon_changed_)
+    on_favicon_changed_(favicon_urls);
+}
+
 void MbWebView::SetDownloadCallback(DownloadFn cb) {
   on_download_ = std::move(cb);
 }

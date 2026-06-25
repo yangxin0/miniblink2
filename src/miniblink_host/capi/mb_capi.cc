@@ -171,6 +171,18 @@ void mbOnTitleChanged(mbView* v, mbTitleChangedCallback cb, void* userdata) {
     v->impl->SetTitleChangedCallback({});
 }
 
+void mbOnFaviconChanged(mbView* v, mbFaviconChangedCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetFaviconChangedCallback(
+        [v, cb, userdata](const std::string& urls) {
+          cb(v, userdata, urls.c_str());
+        });
+  else
+    v->impl->SetFaviconChangedCallback({});
+}
+
 void mbOnDownload(mbView* v, mbDownloadCallback cb, void* userdata) {
   if (!v || !v->impl)
     return;

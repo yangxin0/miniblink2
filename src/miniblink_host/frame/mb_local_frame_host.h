@@ -44,7 +44,9 @@ void MbSetHistoryGoToHandler(
     scoped_refptr<base::SingleThreadTaskRunner> runner,
     base::RepeatingCallback<void(int offset, bool has_user_gesture)> handler,
     base::RepeatingCallback<void(const std::string& key, bool has_user_gesture)>
-        key_handler);
+        key_handler,
+    base::RepeatingCallback<void(const std::string& favicon_urls)>
+        favicon_handler);
 void MbClearHistoryGoToHandler();
 
 // Bind a self-owned MbLocalFrameHost to `handle` (called from the frame's

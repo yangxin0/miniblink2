@@ -217,6 +217,10 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // traverseTo() arrive keyed by the target entry's navigation-api key.
   void GoToHistoryKey(const std::string& key, bool has_user_gesture);
 
+  // The page's favicon URL(s) (newline-separated) reported via LocalFrameHost
+  // .UpdateFaviconURL; forwarded to MbWebView's favicon callback. Main frame only.
+  void OnFaviconUrls(const std::string& favicon_urls);
+
   // Shared traversal: commit the session-history entry at `target` (same-document
   // via CommitSameDocumentNavigation, else a cross-document re-navigation).
   void GoToHistoryTarget(int target, bool has_user_gesture);

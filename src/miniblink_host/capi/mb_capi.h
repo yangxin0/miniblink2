@@ -122,6 +122,13 @@ MB_EXPORT void mbOnUrlChanged(mbView*, mbUrlChangedCallback, void* userdata);
 typedef void (*mbTitleChangedCallback)(mbView*, void* userdata, const char* title);
 MB_EXPORT void mbOnTitleChanged(mbView*, mbTitleChangedCallback, void* userdata);
 
+// Favicon-changed notification: fires when the main document reports its favicon URL(s)
+// — `favicon_urls` is newline-separated (the standard <link rel=icon> first, then any
+// apple-touch-icon etc.), absolute URLs. Completes the browser tab-metadata trio with
+// mbOnUrlChanged / mbOnTitleChanged. NULL clears it.
+typedef void (*mbFaviconChangedCallback)(mbView*, void* userdata, const char* favicon_urls);
+MB_EXPORT void mbOnFaviconChanged(mbView*, mbFaviconChangedCallback, void* userdata);
+
 // Download diversion: when a top-level navigation (mbLoadURL to an http(s)/data: URL)
 // returns a DOWNLOAD — Content-Disposition: attachment, or a non-renderable MIME — and a
 // callback is registered, the response is handed to it (url, mime, suggested filename, and

@@ -31,6 +31,7 @@ struct HistoryGoToSink {
   scoped_refptr<base::SingleThreadTaskRunner> runner;
   base::RepeatingCallback<void(int, bool)> handler;
   base::RepeatingCallback<void(const std::string&, bool)> key_handler;
+  base::RepeatingCallback<void(const std::string&)> favicon_handler;
 };
 
 HistoryGoToSink& Sink() {
@@ -43,12 +44,14 @@ HistoryGoToSink& Sink() {
 void MbSetHistoryGoToHandler(
     scoped_refptr<base::SingleThreadTaskRunner> runner,
     base::RepeatingCallback<void(int, bool)> handler,
-    base::RepeatingCallback<void(const std::string&, bool)> key_handler) {
+    base::RepeatingCallback<void(const std::string&, bool)> key_handler,
+    base::RepeatingCallback<void(const std::string&)> favicon_handler) {
   HistoryGoToSink& s = Sink();
   base::AutoLock guard(s.lock);
   s.runner = std::move(runner);
   s.handler = std::move(handler);
   s.key_handler = std::move(key_handler);
+  s.favicon_handler = std::move(favicon_handler);
 }
 
 void MbClearHistoryGoToHandler() {
@@ -57,6 +60,7 @@ void MbClearHistoryGoToHandler() {
   s.runner = nullptr;
   s.handler.Reset();
   s.key_handler.Reset();
+  s.favicon_handler.Reset();
 }
 
 void MbBindLocalFrameHost(mojo::ScopedInterfaceEndpointHandle handle) {
@@ -190,7 +194,30 @@ void MbLocalFrameHost::RunBeforeUnloadConfirm(
   std::move(callback).Run(true);
 }
 void MbLocalFrameHost::UpdateFaviconURL(
-    blink::Vector<blink::mojom::blink::FaviconURLPtr>) {}
+    blink::Vector<blink::mojom::blink::FaviconURLPtr> favicon_urls) {
+  // Report the page's favicon(s) — newline-separated URLs, the standard <link
+  // rel=icon> first as blink ordered them — to the host (browser tab-icon use).
+  std::string urls;
+  for (const auto& f : favicon_urls) {
+    if (!f || f->icon_url.IsEmpty())
+      continue;
+    if (!urls.empty())
+      urls += "\n";
+    urls += f->icon_url.GetString().Utf8();
+  }
+  if (urls.empty())
+    return;
+  HistoryGoToSink& s = Sink();
+  scoped_refptr<base::SingleThreadTaskRunner> runner;
+  base::RepeatingCallback<void(const std::string&)> handler;
+  {
+    base::AutoLock guard(s.lock);
+    runner = s.runner;
+    handler = s.favicon_handler;
+  }
+  if (runner && handler)
+    runner->PostTask(FROM_HERE, base::BindOnce(handler, std::move(urls)));
+}
 void MbLocalFrameHost::DownloadURL(
     blink::mojom::blink::DownloadURLParamsPtr) {}
 void MbLocalFrameHost::FocusedElementChanged(bool,
