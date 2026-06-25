@@ -238,7 +238,12 @@ only — IndexedDB / WebSocket / Permissions / geolocation / clipboard / notific
 `<video>` render blank) — the heaviest; needs a GL/media provider. Last.
 
 **Tier 3 — input & rendering refinements:**
-12. Input fidelity (modifier flags, right/middle-click, IME, native drag-drop, trusted touch/wheel).
+12. Input fidelity. [DONE: button + modifier clicks] `mbSendMouseClickEx(x, y, button, modifiers)`
+    — button 0=left/1=middle/2=right, modifiers bitmask 1=ctrl 2=shift 4=alt 8=meta — so the
+    page sees e.button + e.ctrlKey/shiftKey/altKey/metaKey (left→click, middle→auxclick,
+    right→contextmenu). Verified (mb_smoke 0i): shift+alt left → "0,true,true", middle →
+    auxclick button 1, right → contextmenu. (NB ctrl+click = macOS secondary click.)
+    [REMAINING: IME composition, native HTML5 drag-drop, trusted touch/wheel.]
 13. [DONE] PDF options. `mbSavePdfEx(path, width_pt, height_pt, landscape, scale, margin_pt)`
 (mbSavePdf kept = Letter default) + `mb_shot --pdf-size letter|a4|legal|a3|tabloid|WxH
 --landscape --pdf-scale N --pdf-margin PT`. Page size in points; landscape swaps w/h; content

@@ -168,6 +168,40 @@ void MbWidget::SendRightClick(int x, int y) {
       make(blink::WebInputEvent::Type::kMouseUp), ui::LatencyInfo()));
 }
 
+void MbWidget::SendMouseClickEx(int x, int y, int button, int modifiers) {
+  if (!widget_)
+    return;
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  // button: 0=left, 1=middle, 2=right. modifiers bitmask: 1=ctrl 2=shift 4=alt 8=meta.
+  blink::WebMouseEvent::Button btn = blink::WebMouseEvent::Button::kLeft;
+  if (button == 1)
+    btn = blink::WebMouseEvent::Button::kMiddle;
+  else if (button == 2)
+    btn = blink::WebMouseEvent::Button::kRight;
+  int mods = 0;
+  if (modifiers & 1)
+    mods |= blink::WebInputEvent::kControlKey;
+  if (modifiers & 2)
+    mods |= blink::WebInputEvent::kShiftKey;
+  if (modifiers & 4)
+    mods |= blink::WebInputEvent::kAltKey;
+  if (modifiers & 8)
+    mods |= blink::WebInputEvent::kMetaKey;
+  auto make = [&](blink::WebInputEvent::Type type) {
+    blink::WebMouseEvent e(type, mods, base::TimeTicks::Now());
+    e.pointer_type = blink::WebPointerProperties::PointerType::kMouse;
+    e.SetPositionInWidget(x, y);
+    e.SetPositionInScreen(x, y);
+    e.button = btn;
+    e.click_count = 1;
+    return e;
+  };
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+      make(blink::WebInputEvent::Type::kMouseDown), ui::LatencyInfo()));
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+      make(blink::WebInputEvent::Type::kMouseUp), ui::LatencyInfo()));
+}
+
 void MbWidget::SendMouseDown(int x, int y) {
   if (!widget_)
     return;

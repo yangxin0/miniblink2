@@ -99,6 +99,9 @@ class MbWebView {
                      char* out, int out_cap);
 
   void SendMouseClick(int x, int y);
+  // General click at (x,y): button 0=left/1=middle/2=right; modifiers bitmask
+  // 1=ctrl 2=shift 4=alt 8=meta. Covers ctrl/shift-click + middle/right-click.
+  void SendMouseClickEx(int x, int y, int button, int modifiers);
   // Press / release the left button at (x,y). Down then move(s) then up performs a
   // drag (intermediate SendMouseMove calls carry the held button). Down+Up at one
   // point equals a click.

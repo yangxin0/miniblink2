@@ -148,6 +148,10 @@ MB_EXPORT int mbInsertCSS(mbView*, const char* css);
 
 // Synthesize a left mouse click (down+up) at (x,y) in the view.
 MB_EXPORT void mbSendMouseClick(mbView*, int x, int y);
+// General click at (x,y): `button` 0=left/1=middle/2=right; `modifiers` is a bitmask
+// 1=ctrl 2=shift 4=alt 8=meta — so the page sees e.button + e.ctrlKey/shiftKey/altKey/
+// metaKey. Left fires `click`; middle/right fire `auxclick` (right also `contextmenu`).
+MB_EXPORT void mbSendMouseClickEx(mbView*, int x, int y, int button, int modifiers);
 
 // Press / release the left mouse button at (x,y) as separate events. Down ->
 // mbSendMouseMove(...) -> ... -> Up performs a DRAG (the moves in between carry

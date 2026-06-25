@@ -195,6 +195,11 @@ void mbSendMouseClick(mbView* v, int x, int y) {
     v->impl->SendMouseClick(x, y);
 }
 
+void mbSendMouseClickEx(mbView* v, int x, int y, int button, int modifiers) {
+  if (v && v->impl)
+    v->impl->SendMouseClickEx(x, y, button, modifiers);
+}
+
 void mbSendMouseDown(mbView* v, int x, int y) {
   if (v && v->impl)
     v->impl->SendMouseDown(x, y);

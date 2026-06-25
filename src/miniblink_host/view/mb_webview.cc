@@ -369,6 +369,11 @@ void MbWebView::SendMouseClick(int x, int y) {
     widget_->SendMouseClick(x, y);
 }
 
+void MbWebView::SendMouseClickEx(int x, int y, int button, int modifiers) {
+  if (widget_)
+    widget_->SendMouseClickEx(x, y, button, modifiers);
+}
+
 void MbWebView::SendMouseDown(int x, int y) {
   if (widget_)
     widget_->SendMouseDown(x, y);

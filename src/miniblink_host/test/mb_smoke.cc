@@ -273,6 +273,30 @@ int main() {
     mbOnNewWindow(v, nullptr, nullptr);
   }
 
+  // 0i. Mouse-click fidelity (#12): mbSendMouseClickEx carries the button + modifier
+  // keys. A shift+alt LEFT click fires `click` with button 0 + shiftKey + altKey; a
+  // MIDDLE click fires `auxclick` with button 1; a RIGHT click fires `contextmenu`.
+  // (Ctrl+click isn't used here — on macOS that is the secondary/context-menu click.)
+  {
+    mbLoadHTML(v,
+        "<body style='margin:0'><script>window.c='';window.a='';window.x='';"
+        "addEventListener('click',function(e){window.c=e.button+','+e.shiftKey+','"
+        "+e.altKey;});"
+        "addEventListener('auxclick',function(e){window.a=''+e.button;});"
+        "addEventListener('contextmenu',function(e){window.x='ctx';"
+        "e.preventDefault();});</script></body>",
+        "about:blank");
+    mbSendMouseClickEx(v, 50, 50, 0, 2 | 4);  // left + shift + alt
+    const std::string c = Eval(v, "window.c");
+    mbSendMouseClickEx(v, 50, 50, 1, 0);  // middle
+    const std::string a = Eval(v, "window.a");
+    mbSendMouseClickEx(v, 50, 50, 2, 0);  // right
+    const std::string x = Eval(v, "window.x");
+    Expect(c == "0,true,true" && a == "1" && x == "ctx",
+           "mbSendMouseClickEx carries button + shift/alt (left/middle/right)",
+           "c=[" + c + "] a=[" + a + "] x=[" + x + "]");
+  }
+
   // 1. HTML parse + DOM.
   mbLoadHTML(v, "<body><div id='x'>hello</div></body>", "about:blank");
   Expect(Eval(v, "document.getElementById('x').textContent") == "hello",
