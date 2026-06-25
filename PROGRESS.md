@@ -419,8 +419,12 @@ whole response just `.Clone()`s — the blob is shared by refcount and a cached 
 number of times, no blob-remote plumbing needed. `Open`/`Match` use `base::expected<Success,
 CacheStorageError>` callbacks (success = the value; miss = `base::unexpected(kErrorNotFound)`).
 Verified (mb_smoke 23v): `caches.open('v1')` -> `cache.put('/data',new Response('cached-body'))` ->
-`cache.match('/data')` -> text 'cached-body'; `caches.has('v1')` true. Matching is by URL only
-(ignores method/ignoreSearch/vary); MatchAll/GetAllMatchedEntries/cache.keys are empty stubs.
+`cache.put('/data2',...)` -> `cache.match('/data')` -> text 'cached-body'; `cache.keys().length`==2;
+`caches.has('v1')` true. `cache.matchAll(req?)` returns matching/all responses; `cache.keys(req?)`
+rebuilds minimal GET requests from the stored URLs (FetchAPIRequest has NO Clone — its
+`ResourceRequestBody body` field is non-clonable — so the cache keeps only URL->Response and
+reconstructs requests for keys()). Matching is by URL only (ignores method/ignoreSearch/vary);
+GetAllMatchedEntries still an empty stub.
 [IN PROGRESS: IndexedDB — step 1 DONE] `frame/mb_indexeddb.{h,cc}` (`MbIDBFactory`, bound from
 the frame broker) — an in-memory IDB backend. STEP 1 (open + schema): `indexedDB.open(name,ver)`
 opens a database keyed by name in a process-wide registry; a new version fires the OPEN handshake
