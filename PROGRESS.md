@@ -463,8 +463,10 @@ Verified (mb_smoke 23v): `caches.open('v1')` -> `cache.put('/data',new Response(
 `caches.has('v1')` true. `cache.matchAll(req?)` returns matching/all responses; `cache.keys(req?)`
 rebuilds minimal GET requests from the stored URLs (FetchAPIRequest has NO Clone — its
 `ResourceRequestBody body` field is non-clonable — so the cache keeps only URL->Response and
-reconstructs requests for keys()). Matching is by URL only (ignores method/ignoreSearch/vary);
-GetAllMatchedEntries still an empty stub.
+reconstructs requests for keys()). Query options honored: `{ignoreSearch}` drops the query/fragment
+before comparison across Match/MatchAll/Keys/Batch-delete + caches.match (which also applies the
+cache_name filter); ignoreMethod/ignoreVary are inherently satisfied (we store neither method nor
+Vary). mb_smoke 23af. GetAllMatchedEntries still an empty stub.
 [IN PROGRESS: IndexedDB — step 1 DONE] `frame/mb_indexeddb.{h,cc}` (`MbIDBFactory`, bound from
 the frame broker) — an in-memory IDB backend. STEP 1 (open + schema): `indexedDB.open(name,ver)`
 opens a database keyed by name in a process-wide registry; a new version fires the OPEN handshake
