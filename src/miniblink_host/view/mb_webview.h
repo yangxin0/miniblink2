@@ -308,6 +308,11 @@ class MbWebView {
   // "Name: Value" lines, as the server sent them, including the status line).
   // Empty for non-http loads or a failed fetch.
   const std::string& GetResponseHeaders() const { return response_headers_; }
+  // Human-readable reason the last top-level load FAILED at the network/transport
+  // layer (DNS, connection refused, TLS, timeout, file not found). Empty if the
+  // last load succeeded (incl. HTTP 4xx/5xx, which commit — use GetHttpStatus for
+  // those). Complements GetHttpStatus: HTTP-level vs network-level diagnosis.
+  const std::string& GetLastError() const { return last_error_; }
   // Re-navigate to the current document URL, re-fetching it (file/http only).
   void Reload();
 
@@ -505,6 +510,7 @@ class MbWebView {
   std::vector<uint8_t> encoded_png_;  // retained bytes from the last EncodePng
   int http_status_ = 0;  // HTTP status of the last http(s) load; 0 if none/failed
   std::string response_headers_;  // raw response headers of the last http(s) load
+  std::string last_error_;  // network/transport failure reason of the last load ("" if ok)
 };
 
 // Set the process-wide network connectivity state: navigator.onLine and the

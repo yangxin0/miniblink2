@@ -108,8 +108,16 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      Verified (wke_smoke +1=103, offline): a file:// CSS subresource — the request cb logs its URL,
      the response cb gets its bytes, the CSS applies; blocking the CSS via the request cb stops it.
 
+   - [DONE] **load-error reason** — `mbGetLastError(view, out, cap)`: the network/transport
+     failure reason of the last top-level load (DNS / connect / TLS / timeout / "file not found"),
+     captured in `FetchHttp` via `curl_easy_strerror(rc)` and threaded out through `MbFetchUrl`
+     -> `MbWebView::last_error_`. Empty on success — including HTTP 4xx/5xx, which COMMIT (use
+     `mbGetHttpStatus` for those), so it cleanly splits network-level vs HTTP-level diagnosis.
+     Verified (mb_smoke 0n2): empty after a good load, "file not found or unreadable" after a
+     missing file://, cleared again on the next success.
+
    **→ Network interception (#1) is now comprehensive: static block/mock/URL-rewrite +
-   per-URL header inject + dynamic request hook + response hook + CLI (--mock/--rewrite).**
+   per-URL header inject + dynamic request hook + response hook + load-error reason + CLI.**
 
 2. **Quick-win correctness bugs** (real defects; fast; each independently verifiable —
    NOTE several have *existing tests that assert the stubbed/fake behavior* and must be

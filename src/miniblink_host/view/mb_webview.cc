@@ -262,6 +262,7 @@ void MbWebView::CommitHtml(const char* data, size_t len, const char* base_url,
 void MbWebView::LoadHTML(const char* utf8_html, const char* base_url) {
   http_status_ = 0;  // in-memory doc; no HTTP status
   response_headers_.clear();
+  last_error_.clear();  // an in-memory document always loads successfully
   const char* html = utf8_html ? utf8_html : "";
   CommitHtml(html, std::strlen(html), base_url);
 }
@@ -315,6 +316,7 @@ void MbWebView::LoadURL(const char* utf8_url) {
   std::string url(utf8_url ? utf8_url : "");
   http_status_ = 0;  // reset; only an http(s) load sets a real status
   response_headers_.clear();
+  last_error_.clear();  // cleared up front; set only if this load fails
   constexpr char kFile[] = "file://";
   if (url.rfind(kFile, 0) == 0) {
     // Top-level file load: read it and commit. (Self-contained docs + data: URIs
@@ -324,6 +326,7 @@ void MbWebView::LoadURL(const char* utf8_url) {
                                &contents)) {
       CommitHtml(contents.data(), contents.size(), url.c_str());
     } else {
+      last_error_ = "file not found or unreadable";
       NotifyLoadFailed();  // a failed load still "finishes" (signal waiters)
     }
     return;
@@ -338,7 +341,7 @@ void MbWebView::LoadURL(const char* utf8_url) {
         frame_client_ ? frame_client_->extra_headers() : std::string(),
         /*post_body=*/std::string(), /*post_content_type=*/std::string(),
         /*http_method=*/std::string(), &final_url, &http_status_,
-        &response_headers_);
+        &response_headers_, &last_error_);
     // If the server redirected us, commit with the FINAL URL as the document's
     // base so location.href and relative subresources reflect where we landed.
     const std::string& doc_url = final_url.empty() ? url : final_url;

@@ -417,6 +417,26 @@ int main() {
     mbOnLoadFinish(v, nullptr, nullptr);  // clear before `fin` leaves scope
   }
 
+  // 0n2. mbGetLastError reports the network/transport failure reason (complements mbGetHttpStatus,
+  // which is HTTP-level): empty after a successful load; non-empty (with a useful message) after a
+  // failed top-level load. Uses a missing file:// (deterministic, no network).
+  {
+    char buf[256];
+    mbLoadHTML(v, "<body>ok</body>", "about:blank");  // success -> no error
+    mbGetLastError(v, buf, sizeof(buf));
+    const std::string after_ok(buf);
+    mbLoadURL(v, "file:///no/such/mb/missing/file.html");  // fails to read
+    mbGetLastError(v, buf, sizeof(buf));
+    const std::string after_fail(buf);
+    mbLoadHTML(v, "<body>ok2</body>", "about:blank");  // success again -> cleared
+    mbGetLastError(v, buf, sizeof(buf));
+    const std::string after_ok2(buf);
+    Expect(after_ok.empty() && after_fail.find("file") != std::string::npos &&
+               after_ok2.empty(),
+           "mbGetLastError: empty on success, set on failed load, cleared again",
+           "err=[" + after_ok + "|" + after_fail + "|" + after_ok2 + "]");
+  }
+
   // 0j. CSP does NOT leak across navigations in a reused view (#15). Load a page whose
   // strict <meta> CSP (script-src 'none') blocks its own inline script, then load a
   // normal page in the SAME view: the second page's script MUST run — each commit now

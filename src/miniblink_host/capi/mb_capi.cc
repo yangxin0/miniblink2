@@ -888,6 +888,14 @@ int mbGetResponseHeaders(mbView* v, char* out, int out_cap) {
   return static_cast<int>(result.size());
 }
 
+int mbGetLastError(mbView* v, char* out, int out_cap) {
+  if (!v || !v->impl)
+    return 0;
+  const std::string& result = v->impl->GetLastError();
+  CopyToBuffer(result, out, out_cap);
+  return static_cast<int>(result.size());
+}
+
 int mbCanGoBack(mbView* v) {
   return (v && v->impl && v->impl->CanGoBack()) ? 1 : 0;
 }

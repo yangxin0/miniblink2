@@ -163,7 +163,8 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
                const std::string& http_method = "", int* out_status = nullptr,
                std::string* out_headers = nullptr,
                std::string* out_final_url = nullptr,
-               bool follow_redirects = true) {
+               bool follow_redirects = true,
+               std::string* out_error = nullptr) {
   CURL* curl = curl_easy_init();
   if (!curl)
     return false;
@@ -303,7 +304,16 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   // Those are real answers the caller must deliver (fetch needs response.status
   // and the error body; a 404 page should render), NOT network failures. Only a
   // transport error (no response at all) returns false.
-  return rc == CURLE_OK && http_code > 0;
+  const bool ok = rc == CURLE_OK && http_code > 0;
+  if (out_error) {
+    if (ok)
+      out_error->clear();
+    else if (rc != CURLE_OK)
+      *out_error = curl_easy_strerror(rc);  // "Couldn't resolve host name", etc.
+    else
+      *out_error = "no response from server";
+  }
+  return ok;
 }
 }  // namespace
 
@@ -814,7 +824,10 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 const std::string& extra_headers, const std::string& post_body,
                 const std::string& post_content_type,
                 const std::string& http_method, std::string* out_final_url,
-                int* out_status, std::string* out_headers) {
+                int* out_status, std::string* out_headers,
+                std::string* out_error) {
+  if (out_error)
+    out_error->clear();
   GURL url(url_spec);
   // Response mocking: a registered URL substring serves its canned body without a real fetch.
   // Checked before any scheme — matching the async loader (Deliver) — so worker scripts,
@@ -837,13 +850,16 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
     // Convert via net (percent-decodes the path; "Andale%20Mono.ttf" -> a space)
     // — a raw url.path() leaves it encoded and ReadFileToString fails.
     base::FilePath fp;
-    return net::FileURLToFilePath(url, &fp) &&
-           base::ReadFileToString(fp, body);
+    const bool ok =
+        net::FileURLToFilePath(url, &fp) && base::ReadFileToString(fp, body);
+    if (!ok && out_error)
+      *out_error = "file not found or unreadable";
+    return ok;
   }
   if (url.SchemeIsHTTPOrHTTPS())
     return FetchHttp(url_spec, body, content_type, user_agent, extra_headers,
                      post_body, post_content_type, http_method, out_status,
-                     out_headers, out_final_url, MbFollowRedirects());
+                     out_headers, out_final_url, MbFollowRedirects(), out_error);
   if (url.SchemeIs("data")) {
     std::string mime, charset;
     if (!net::DataURL::Parse(url, &mime, &charset, body))
