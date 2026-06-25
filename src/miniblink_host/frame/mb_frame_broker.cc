@@ -48,7 +48,9 @@
 #include "third_party/blink/public/mojom/ai/ai_summarizer.mojom-blink.h"
 #include "components/language_detection/content/common/language_detection.mojom-blink.h"
 #include "third_party/blink/public/mojom/ai/ai_writer.mojom-blink.h"
+#include "services/device/public/mojom/usb_device.mojom-blink.h"
 #include "third_party/blink/public/mojom/on_device_translation/translation_manager.mojom-blink.h"
+#include "third_party/blink/public/mojom/usb/web_usb_service.mojom-blink.h"
 #include "third_party/blink/public/mojom/browsing_topics/browsing_topics.mojom-blink.h"
 #include "media/mojo/mojom/webrtc_video_perf.mojom-blink.h"
 #include "third_party/blink/public/mojom/sms/webotp_service.mojom-blink.h"
@@ -777,6 +779,28 @@ class MbTranslationManager : public blink::mojom::blink::TranslationManager {
   }
 };
 
+// blink.mojom.WebUsbService for navigator.usb. Device dashboards call usb.getDevices() on load to
+// list already-permitted devices; the service has no disconnect handler, so unbound that promise
+// HANGS (verified — left an unsettled resolver, crashing teardown). Headless: no devices.
+class MbWebUsbService : public blink::mojom::blink::WebUsbService {
+ public:
+  void GetDevices(GetDevicesCallback cb) override {
+    std::move(cb).Run({});  // no permitted USB devices
+  }
+  void GetDevice(
+      const blink::String&,
+      mojo::PendingReceiver<device::mojom::blink::UsbDevice>) override {}
+  void GetPermission(blink::mojom::blink::WebUsbRequestDeviceOptionsPtr,
+                     GetPermissionCallback cb) override {
+    std::move(cb).Run(nullptr);  // no device chosen -> requestDevice() rejects
+  }
+  void ForgetDevice(const blink::String&, ForgetDeviceCallback cb) override {
+    std::move(cb).Run();
+  }
+  void SetClient(mojo::PendingAssociatedRemote<
+                 device::mojom::blink::UsbDeviceManagerClient>) override {}
+};
+
 // language_detection.mojom ContentLanguageDetectionDriver for LanguageDetector.availability().
 // No on-device model: report the model not-available and hand back an invalid File.
 class MbContentLanguageDetectionDriver
@@ -1053,6 +1077,12 @@ class MbBrowserInterfaceBroker
     // Built-in on-device AI (LanguageModel/Summarizer/...) — headless: model unavailable.
     if (auto r = receiver.As<blink::mojom::blink::AIManager>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbAIManager>(), std::move(r));
+      return;
+    }
+    // navigator.usb.getDevices() — headless: no permitted USB devices ([]).
+    if (auto r = receiver.As<blink::mojom::blink::WebUsbService>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbWebUsbService>(),
+                                  std::move(r));
       return;
     }
     // Translator API — headless: no translation service.

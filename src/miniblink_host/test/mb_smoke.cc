@@ -1820,6 +1820,24 @@ int main() {
            "ai=[" + r + "]");
   }
 
+  // 23aq. WebUSB navigator.usb.getDevices() (broker WebUsbService): device dashboards call it on
+  // load to list permitted devices. The service remote has no disconnect handler, so unbound the
+  // promise HANGS (it left an unsettled resolver, crashing teardown); bound, it resolves to [].
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://usb.test/");
+    Eval(v,
+         "window.__usb='';"
+         "if(navigator.usb&&navigator.usb.getDevices){"
+         "navigator.usb.getDevices().then(function(d){window.__usb='ok:'+d.length;})"
+         ".catch(function(e){window.__usb='err:'+e.name;});}"
+         "else{window.__usb='no-api';}");
+    mbWaitForFunction(v, "window.__usb!==''", 3000);
+    const std::string r = Eval(v, "window.__usb");
+    Expect(r == "ok:0" || r == "no-api",
+           "WebUSB navigator.usb.getDevices() resolves to [] (no hang)",
+           "usb=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");
