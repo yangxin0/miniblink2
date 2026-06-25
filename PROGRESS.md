@@ -735,3 +735,14 @@ index/length in the embedder (incl. pushState/replaceState via DidUpdateHistory)
 (same-document -> CommitSameDocumentNavigation + popstate; cross-document -> re-load). This is the
 renderer-side navigation-controller logic the in-process host currently lacks. The existing host-driven
 GoBack/GoForward (C ABI, re-loads URLs) is separate and unaffected.
+
+[IN PROGRESS: history traversal — slice 1 DONE] history.length was always 1 / back-list count 0
+(short-circuiting history.back()). FIXED slice 1: MbFrameClient::DidFinishSameDocumentNavigation now
+calls WebView::IncreaseHistoryListFromNavigation on a standard same-document commit (pushState),
+replicating RenderFrameImpl::UpdateNavigationHistory — history.length is correct and
+HistoryBackListCount > 0. mb_smoke 23ar (pushState grows length, replaceState doesn't). SLICE 2 (NEXT):
+history.back()/forward() still don't traverse — blink now calls LocalFrameHost.GoToEntryAtOffset(offset)
+which routes to the absent browser. Need to service that (implement/handle the frame host method) and
+drive the frame to commit the target entry: same-document -> a same-document navigation to the target
+URL + restored page state + popstate; cross-document -> re-load. Requires storing per-entry serialized
+state (blink sends it via the state-update path) keyed by history position.
