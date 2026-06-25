@@ -460,10 +460,13 @@ index on a books store -> `index('by_author').get('bob')` returns the matching r
 cursor key by DECODING the encoded index key (a new `DecodeKey`/`DecodeDouble`, the inverse of the
 order-preserving encoding) while the primary key + value come from the live record. Verified
 (mb_smoke 23s): books inserted by isbn C,A,B walk in author order alice,bob,carl with correct
-index keys. NOT yet: unique-constraint enforcement, multiEntry edge cases, transaction atomicity/
-rollback — and persistence is in-memory (per-process, by db name). IndexedDB now covers
-open/schema, put/get, count/delete/clear, getAll/ranges, object-store + INDEX cursors,
-autoincrement, and index lookups — the full object-store/index read+write surface apps use.]
+index keys. STEP 9 (DONE): unique-index constraints —
+a `{unique:true}` index rejects a `put` whose index key already maps to a different record
+(`ConstraintError`). Verified (mb_smoke 23t): a duplicate email on a unique 'email' index is
+rejected. NOT yet: multiEntry edge cases, transaction atomicity/rollback — and persistence is
+in-memory (per-process, by db name). IndexedDB now covers open/schema, put/get, count/delete/
+clear, getAll/ranges, object-store + index cursors, autoincrement, index lookups, and unique
+constraints — effectively the whole object-store/index API real apps use.]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
    Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —

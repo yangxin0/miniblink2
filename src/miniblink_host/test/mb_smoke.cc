@@ -1340,6 +1340,29 @@ int main() {
            "idb7=[" + r + "]");
   }
 
+  // 23t. IndexedDB unique index constraint (step 9): a {unique:true} index rejects a
+  // second record with a duplicate index key (ConstraintError), while distinct keys are
+  // accepted.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://idb.test/");
+    Eval(v,
+         "window.__idb8='';"
+         "var __u=indexedDB.open('mbdb9',1);"
+         "__u.onupgradeneeded=function(e){var os=e.target.result.createObjectStore('u',{keyPath:'id'});"
+         "os.createIndex('email','email',{unique:true});};"
+         "__u.onsuccess=function(e){var db=e.target.result;"
+         "var t=db.transaction('u','readwrite');var s=t.objectStore('u');"
+         "s.put({id:1,email:'a@x'});"
+         "var dup=s.put({id:2,email:'a@x'});"
+         "dup.onsuccess=function(){window.__idb8='dup-accepted';};"
+         "dup.onerror=function(ev){ev.preventDefault();window.__idb8='rejected:'+dup.error.name;};};");
+    mbWaitForFunction(v, "window.__idb8!==''", 4000);
+    const std::string r = Eval(v, "window.__idb8");
+    Expect(r == "rejected:ConstraintError",
+           "IndexedDB unique index rejects a duplicate key with ConstraintError",
+           "idb8=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

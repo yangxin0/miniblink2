@@ -62,6 +62,14 @@ bool IsAutoIncrement(MbIDBBackend* b, int64_t store_id) {
   return it != b->metadata.object_stores.end() && it->value->auto_increment;
 }
 
+bool IsUniqueIndex(MbIDBBackend* b, int64_t store_id, int64_t index_id) {
+  auto it = b->metadata.object_stores.find(store_id);
+  if (it == b->metadata.object_stores.end())
+    return false;
+  auto ix = it->value->indexes.find(index_id);
+  return ix != it->value->indexes.end() && ix->value->unique;
+}
+
 // Remove a primary key from every index of a store (on delete / before re-put).
 void RemoveFromIndexes(MbIDBBackend* b, int64_t store_id,
                        const std::string& primary_ekey) {
@@ -615,6 +623,25 @@ class MbIDBTransactionImpl : public IDBTransaction {
                            blink::String("unsupported key type"))));
       return;
     }
+    // Enforce unique-index constraints: reject if a unique index key already maps to a
+    // DIFFERENT record.
+    for (const blink::IDBIndexKeys& ik : index_keys) {
+      if (!IsUniqueIndex(backend_, object_store_id, ik.id))
+        continue;
+      auto& idx = backend_->index_data[object_store_id][ik.id];
+      for (const std::unique_ptr<blink::IDBKey>& ikey : ik.keys) {
+        std::string e = EncodeKey(ikey.get());
+        auto it = idx.find(e);
+        if (it != idx.end() &&
+            (it->second.size() > 1 || !it->second.count(ekey))) {
+          std::move(callback).Run(m::IDBTransactionPutResult::NewErrorResult(
+              m::IDBError::New(m::IDBException::kConstraintError,
+                               blink::String("uniqueness constraint violated"))));
+          return;
+        }
+      }
+    }
+
     RemoveFromIndexes(backend_, object_store_id, ekey);  // shed old index entries
     backend_->data[object_store_id][ekey] =
         MbRecord{blink::IDBKey::Clone(use_key), ValueBytes(value.get())};
