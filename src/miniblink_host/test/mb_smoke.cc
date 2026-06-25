@@ -1808,13 +1808,15 @@ int main() {
     mbLoadHTML(v, "<body>x</body>", "https://ai.test/");
     Eval(v,
          "window.__ai='';"
-         "Promise.all([LanguageModel.availability(),Summarizer.availability()])"
+         "Promise.all([LanguageModel.availability(),Summarizer.availability(),"
+         "Translator.availability({sourceLanguage:'en',targetLanguage:'fr'}),"
+         "LanguageDetector.availability()])"
          ".then(function(a){window.__ai=a.join(',');})"
          ".catch(function(e){window.__ai='err:'+e.name;});");
     mbWaitForFunction(v, "window.__ai!==''", 4000);
     const std::string r = Eval(v, "window.__ai");
-    Expect(r == "unavailable,unavailable",
-           "Built-in AI availability() resolves 'unavailable' (no hang)",
+    Expect(r == "unavailable,unavailable,unavailable,unavailable",
+           "Built-in AI availability() (LM/Summarizer/Translator/LangDetector) -> 'unavailable'",
            "ai=[" + r + "]");
   }
 

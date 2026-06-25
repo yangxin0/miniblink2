@@ -78,6 +78,7 @@ component("miniblink_host") {
     # Substrate.
     "//base",
     "//cc",
+    "//components/language_detection/content/common:common_blink",  # LanguageDetector broker stub
     "//components/webcrypto",  # WebCrypto impl for Platform::Crypto() (SubtleCrypto)
     "//media",  # media::AudioRendererSink / OutputDeviceStatus for CreateAudioDevice
     "//cc/paint",

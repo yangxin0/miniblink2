@@ -46,7 +46,9 @@
 #include "third_party/blink/public/mojom/ai/ai_proofreader.mojom-blink.h"
 #include "third_party/blink/public/mojom/ai/ai_rewriter.mojom-blink.h"
 #include "third_party/blink/public/mojom/ai/ai_summarizer.mojom-blink.h"
+#include "components/language_detection/content/common/language_detection.mojom-blink.h"
 #include "third_party/blink/public/mojom/ai/ai_writer.mojom-blink.h"
+#include "third_party/blink/public/mojom/on_device_translation/translation_manager.mojom-blink.h"
 #include "third_party/blink/public/mojom/browsing_topics/browsing_topics.mojom-blink.h"
 #include "media/mojo/mojom/webrtc_video_perf.mojom-blink.h"
 #include "third_party/blink/public/mojom/sms/webotp_service.mojom-blink.h"
@@ -752,6 +754,46 @@ class MbAIManager : public blink::mojom::blink::AIManager {
   }
 };
 
+// blink.mojom.TranslationManager for the Translator API. Translator.availability() probes this;
+// no on-device translation service, so report unavailable and reject create().
+class MbTranslationManager : public blink::mojom::blink::TranslationManager {
+ public:
+  void CreateTranslator(
+      mojo::PendingRemote<
+          blink::mojom::blink::TranslationManagerCreateTranslatorClient> client,
+      blink::mojom::blink::TranslatorCreateOptionsPtr) override {
+    mojo::Remote<blink::mojom::blink::TranslationManagerCreateTranslatorClient>
+        remote(std::move(client));
+    remote->OnResult(
+        blink::mojom::blink::CreateTranslatorResult::NewError(
+            blink::mojom::blink::CreateTranslatorError::kFailedToCreateTranslator),
+        nullptr, nullptr);
+  }
+  void TranslationAvailable(blink::mojom::blink::TranslatorLanguageCodePtr,
+                            blink::mojom::blink::TranslatorLanguageCodePtr,
+                            TranslationAvailableCallback cb) override {
+    std::move(cb).Run(
+        blink::mojom::blink::CanCreateTranslatorResult::kNoServiceCrashed);
+  }
+};
+
+// language_detection.mojom ContentLanguageDetectionDriver for LanguageDetector.availability().
+// No on-device model: report the model not-available and hand back an invalid File.
+class MbContentLanguageDetectionDriver
+    : public language_detection::mojom::blink::ContentLanguageDetectionDriver {
+ public:
+  void GetLanguageDetectionModel(
+      GetLanguageDetectionModelCallback cb) override {
+    std::move(cb).Run(base::File());  // invalid — no model
+  }
+  void GetLanguageDetectionModelStatus(
+      GetLanguageDetectionModelStatusCallback cb) override {
+    std::move(cb).Run(
+        language_detection::mojom::blink::LanguageDetectionModelStatus::
+            kNotAvailable);
+  }
+};
+
 // blink.mojom.MediaDevicesDispatcherHost for navigator.mediaDevices. Headless has no cameras,
 // mics, or speakers, so every query returns an EMPTY list. This must be bound: if the pipe is
 // left unbound, blink's disconnect handler REJECTS enumerateDevices() with an AbortError
@@ -1011,6 +1053,19 @@ class MbBrowserInterfaceBroker
     // Built-in on-device AI (LanguageModel/Summarizer/...) — headless: model unavailable.
     if (auto r = receiver.As<blink::mojom::blink::AIManager>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbAIManager>(), std::move(r));
+      return;
+    }
+    // Translator API — headless: no translation service.
+    if (auto r = receiver.As<blink::mojom::blink::TranslationManager>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbTranslationManager>(),
+                                  std::move(r));
+      return;
+    }
+    // LanguageDetector API — headless: no detection model.
+    if (auto r = receiver.As<
+            language_detection::mojom::blink::ContentLanguageDetectionDriver>()) {
+      mojo::MakeSelfOwnedReceiver(
+          std::make_unique<MbContentLanguageDetectionDriver>(), std::move(r));
       return;
     }
     // navigator.mediaDevices — headless: no devices (enumerateDevices() -> []).
