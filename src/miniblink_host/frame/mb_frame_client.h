@@ -19,7 +19,10 @@
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-shared.h"
+#include "third_party/blink/public/mojom/frame/policy_container.mojom-blink.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_console_message.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
@@ -27,6 +30,26 @@
 namespace mb {
 
 class MbWebView;  // owner / callback sink
+
+// In-renderer PolicyContainerHost for committing navigations: it gives each commit a
+// FRESH, empty (advisory CSP/referrer; no-op) policy container with a bound dedicated
+// remote, so a prior document's <meta> CSP does not leak into the next document in a
+// reused frame. Used as a stack local that outlives the CommitNavigation call (like
+// frame_test_helpers' MockPolicyContainerHost). A null remote here would CHECK-fail.
+class MbPolicyContainerHost : public blink::mojom::blink::PolicyContainerHost {
+ public:
+  mojo::PendingAssociatedRemote<blink::mojom::blink::PolicyContainerHost>
+  BindRemote() {
+    return receiver_.BindNewEndpointAndPassDedicatedRemote();
+  }
+  void SetReferrerPolicy(network::mojom::blink::ReferrerPolicy) override {}
+  void AddContentSecurityPolicies(
+      blink::Vector<network::mojom::blink::ContentSecurityPolicyPtr>) override {}
+
+ private:
+  mojo::AssociatedReceiver<blink::mojom::blink::PolicyContainerHost> receiver_{
+      this};
+};
 
 class MbFrameClient : public blink::WebLocalFrameClient {
  public:

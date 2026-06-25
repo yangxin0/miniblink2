@@ -297,6 +297,25 @@ int main() {
            "c=[" + c + "] a=[" + a + "] x=[" + x + "]");
   }
 
+  // 0j. CSP does NOT leak across navigations in a reused view (#15). Load a page whose
+  // strict <meta> CSP (script-src 'none') blocks its own inline script, then load a
+  // normal page in the SAME view: the second page's script MUST run — each commit now
+  // gets a fresh, empty policy container so the prior document's CSP is shed.
+  {
+    mbLoadHTML(v,
+        "<meta http-equiv='Content-Security-Policy' content=\"script-src 'none'\">"
+        "<body><script>window.__csp1=1;</script>x</body>",
+        "https://csp.test/");
+    const bool blocked = Eval(v, "String(typeof window.__csp1)") == "undefined";
+    mbLoadHTML(v, "<body><script>window.__csp2=1;</script>y</body>",
+               "https://nocsp.test/");
+    const bool ran = Eval(v, "String(window.__csp2|0)") == "1";
+    Expect(blocked && ran,
+           "CSP from a prior page is shed on the next navigation (reused view)",
+           std::string("blocked=") + (blocked ? "1" : "0") +
+               " ran=" + (ran ? "1" : "0"));
+  }
+
   // 1. HTML parse + DOM.
   mbLoadHTML(v, "<body><div id='x'>hello</div></body>", "about:blank");
   Expect(Eval(v, "document.getElementById('x').textContent") == "hello",

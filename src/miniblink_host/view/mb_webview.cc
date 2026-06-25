@@ -14,6 +14,7 @@
 
 #include "miniblink_host/frame/mb_frame_broker.h"
 #include "miniblink_host/frame/mb_frame_client.h"
+#include "third_party/blink/public/platform/web_policy_container.h"
 #include "miniblink_host/frame/mb_view_client.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/loader/mb_url_loader.h"
@@ -225,12 +226,14 @@ void MbWebView::CommitHtml(const char* data, size_t len, const char* base_url,
   // (from the HTTP Content-Type) is passed through as authoritative.
   auto params = std::make_unique<blink::WebNavigationParams>();
   params->url = url;
-  // NOTE: we deliberately leave params->policy_container null. Supplying a fresh
-  // empty WebPolicyContainer (to stop a prior page's <meta> CSP leaking into the
-  // next document in a reused view) CRASHES Blink at commit — its null mojo remote
-  // trips a CHECK. A real fix needs a bound PolicyContainerHost receiver, which is
-  // more plumbing than the quirk warrants (mb_shot is one-page-per-process; reused
-  // views should use a fresh mbView). Documented under Known gaps in PROGRESS.
+  // Give the new document a FRESH, empty policy container so a prior page's <meta> CSP
+  // does not leak into this one in a reused view. The remote must be BOUND (a null
+  // remote CHECK-fails at commit) — MbPolicyContainerHost provides a dedicated bound
+  // receiver. policy_host is a stack local that outlives CommitNavigation below (same
+  // as DoCommit for child/navigation commits).
+  MbPolicyContainerHost policy_host;
+  params->policy_container = std::make_unique<blink::WebPolicyContainer>(
+      blink::WebPolicyContainerPolicies(), policy_host.BindRemote());
   blink::WebNavigationParams::FillStaticResponse(
       params.get(), "text/html", blink::WebString::FromUtf8(charset),
       base::span<const char>(data, len));

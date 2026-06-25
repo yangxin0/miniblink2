@@ -38,26 +38,6 @@
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace mb {
-namespace {
-// In-renderer PolicyContainerHost for committing child navigations (advisory
-// CSP/referrer, no-ops). Like frame_test_helpers' MockPolicyContainerHost it is
-// a transient local: the dedicated remote is handed to the WebPolicyContainer;
-// any later host calls just drop after it disconnects.
-class MbPolicyContainerHost : public blink::mojom::blink::PolicyContainerHost {
- public:
-  mojo::PendingAssociatedRemote<blink::mojom::blink::PolicyContainerHost>
-  BindRemote() {
-    return receiver_.BindNewEndpointAndPassDedicatedRemote();
-  }
-  void SetReferrerPolicy(network::mojom::blink::ReferrerPolicy) override {}
-  void AddContentSecurityPolicies(
-      blink::Vector<network::mojom::blink::ContentSecurityPolicyPtr>) override {}
-
- private:
-  mojo::AssociatedReceiver<blink::mojom::blink::PolicyContainerHost> receiver_{
-      this};
-};
-}  // namespace
 
 MbFrameClient::MbFrameClient(MbWebView* owner) : owner_(owner) {}
 MbFrameClient::~MbFrameClient() {

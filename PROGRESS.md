@@ -253,7 +253,12 @@ landscape → [0 0 842 595]; CLI `--pdf-size a4 --landscape` → [0 0 842 595].
 iframes; `DoCommit` now honors an explicit `charset=` from the fetched Content-Type
 (default still UTF-8, so UTF-8/srcdoc/data: cases are unchanged). Verified (mb_smoke_render
 78c): a `charset=shift_jis` iframe serving the Shift-JIS bytes for 日本 decodes to U+65E5
-U+672C, not U+FFFD. 15. CSP/PolicyContainer leaks across navigations in a reused view.
+U+672C, not U+FFFD. 15. [DONE] CSP/PolicyContainer no longer leaks across navigations in a reused view.
+`CommitHtml` now attaches a FRESH empty `WebPolicyContainer` with a BOUND remote
+(`MbPolicyContainerHost`, moved to the header + shared with `DoCommit`) — the earlier
+crash was an *unbound null* remote (a CHECK), not the policy container itself. Verified
+(mb_smoke 0j): a `script-src 'none'` page blocks its own script, then a normal page in
+the SAME view runs its script (CSP shed). Every-load path; no crash, all suites green.
 
 ### Accepted, by-design (NOT tasks):
 - `<meta name=viewport>` ignored (mobile = narrow view + UA, works). Color emoji monochrome
