@@ -530,6 +530,13 @@ MB_EXPORT void mbClearStorage(mbView*);
 MB_EXPORT void mbSetGeolocation(double latitude, double longitude, double accuracy);
 MB_EXPORT void mbClearGeolocation(void);
 
+// Network connectivity (process-wide): set navigator.onLine and fire the window
+// online/offline events. online=0 simulates going offline (pages can show an
+// offline banner, pause sync, etc.); online=1 (the default) restores connectivity.
+// Affects every view. Note: does not block actual fetches — it only drives the
+// JS-visible online state.
+MB_EXPORT void mbSetOnline(int online);
+
 // In-process text clipboard shared with the page (navigator.clipboard / execCommand).
 // mbSetClipboard makes the page's next navigator.clipboard.readText() / paste see `text`;
 // mbGetClipboard writes the current clipboard text into `out` (NUL-terminated; size first

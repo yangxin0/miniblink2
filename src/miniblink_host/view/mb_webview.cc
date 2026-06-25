@@ -51,6 +51,7 @@
 #include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/public/mojom/page/page_visibility_state.mojom-shared.h"
 #include "third_party/blink/public/web/web_view.h"
+#include "third_party/blink/renderer/platform/network/network_state_notifier.h"
 #include "third_party/icu/source/common/unicode/unistr.h"
 #include "third_party/icu/source/common/unicode/uscript.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
@@ -187,6 +188,11 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
   // DidAttachLocalMainFrame so the FocusController is on a live main frame.
   v->web_view_->SetIsActive(true);
   v->web_view_->SetPageFocus(true);
+
+  // Initialize the process-wide online state (default true). This marks it
+  // "initialized" so a later MbSetOnline(false) actually fires the offline event
+  // (NetworkStateNotifier suppresses the event for the very first transition).
+  blink::GetNetworkStateNotifier().SetOnLine(true);
 
   // 4. Attach a session-storage namespace to the page so window.sessionStorage
   //    resolves (without it StorageNamespace::From(page) is null -> TypeError).
@@ -1538,6 +1544,12 @@ void MbWebView::SetFocus(bool focused) {
     web_view_->SetIsActive(focused);
     web_view_->SetPageFocus(focused);
   }
+}
+
+void MbSetOnline(bool online) {
+  // Process-global: flips navigator.onLine and dispatches the window online/
+  // offline events on every frame observing the NetworkStateNotifier.
+  blink::GetNetworkStateNotifier().SetOnLine(online);
 }
 
 void MbWebView::SetVisible(bool visible) {

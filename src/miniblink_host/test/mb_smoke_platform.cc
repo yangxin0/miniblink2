@@ -90,6 +90,29 @@ static void RunCases(mbView* v, int W, int H) {
            "vis=[" + r + "]");
   }
 
+  // 89c. mbSetOnline drives navigator.onLine + window online/offline events. The page starts
+  // online; going offline flips navigator.onLine false and fires 'offline'; coming back fires
+  // 'online'. Lets a host test offline-aware behavior (banners, sync pausing, PWA fallbacks).
+  {
+    mbLoadHTML(v, "<body>x</body>", "about:blank");
+    Eval(v,
+         "window.__net=[];"
+         "addEventListener('offline',function(){window.__net.push('off:'+navigator.onLine);});"
+         "addEventListener('online',function(){window.__net.push('on:'+navigator.onLine);});");
+    const std::string start = Eval(v, "String(navigator.onLine)");
+    mbSetOnline(0);
+    mbWait(v, 30);
+    const std::string off = Eval(v, "String(navigator.onLine)");
+    mbSetOnline(1);
+    mbWait(v, 30);
+    const std::string on = Eval(v, "String(navigator.onLine)");
+    const std::string events = Eval(v, "window.__net.join(',')");
+    const std::string r = start + "|" + off + "|" + on + "|" + events;
+    Expect(r == "true|false|true|off:false,on:true",
+           "mbSetOnline toggles navigator.onLine + fires online/offline events",
+           "net=[" + r + "]");
+  }
+
   // 90. mbGetElementRect + element screenshot: get a colored div's box, paint
   // exactly that rect, and verify the captured center pixel is the div's color.
   {

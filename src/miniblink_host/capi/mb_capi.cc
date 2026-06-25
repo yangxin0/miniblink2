@@ -653,6 +653,10 @@ void mbSetGeolocation(double latitude, double longitude, double accuracy) {
   mb::MbSetGeolocation(latitude, longitude, accuracy);
 }
 
+void mbSetOnline(int online) {
+  mb::MbSetOnline(online != 0);
+}
+
 void mbClearGeolocation(void) {
   mb::MbClearGeolocation();
 }

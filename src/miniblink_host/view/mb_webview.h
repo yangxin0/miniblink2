@@ -496,6 +496,11 @@ class MbWebView {
   std::string response_headers_;  // raw response headers of the last http(s) load
 };
 
+// Set the process-wide network connectivity state: navigator.onLine and the
+// window online/offline events. Process-global (blink's NetworkStateNotifier is
+// a singleton), so it affects every view. Must be called on the main thread.
+void MbSetOnline(bool online);
+
 }  // namespace mb
 
 #endif  // MINIBLINK_HOST_VIEW_MB_WEBVIEW_H_

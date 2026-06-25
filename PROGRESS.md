@@ -675,6 +675,12 @@ constraints, atomic abort, and compound keys — the whole object-store/index AP
 `<video>` render blank) — the heaviest; needs a GL/media provider. Last.
 
 **Tier 3 — input & rendering refinements:**
+[DONE: online/offline] `mbSetOnline(online)` -> MbSetOnline -> blink::GetNetworkStateNotifier()
+.SetOnLine, flipping navigator.onLine and firing the window online/offline events on every frame
+(process-global). The online state is initialized to true at view creation so the first toggle to
+offline actually fires (NetworkStateNotifier suppresses the very first transition). Lets a host test
+offline-aware behavior (banners, sync pausing, PWA fallbacks); does not block real fetches. Verified
+mb_smoke_platform 89c (true -> false (+offline) -> true (+online)).
 [DONE: page visibility] `mbSetVisibility(view, visible)` -> MbWebView::SetVisible ->
 WebView::SetVisibilityState(kVisible/kHidden, is_initial_state=false), so a host can simulate
 tab backgrounding: document.visibilityState / document.hidden flip and the visibilitychange event
