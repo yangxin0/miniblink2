@@ -94,7 +94,13 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      used `POSTFIELDSIZE`/`COPYPOSTFIELDS(.size())`, so binary bodies now post whole.
      Verified (wke_smoke +1 net): POST "AB\0CD" (5 bytes) → httpbin echoes Content-Length 5
      (pre-fix would truncate to "AB" = 2).
-   - `wkeFireKeyUpEvent` is a no-op — implement it.
+   - [DONE] `wkeFireKeyUpEvent` was a no-op → now dispatches a real key RELEASE so page
+     `keyup` handlers fire. New `MbWidget::SendKeyUp(vk)` emits a single kKeyUp
+     WebKeyboardEvent (dom_key from the shared `kKeys` table for named keys, else the
+     unshifted ASCII char; keyCode from the VK), exposed as `mbSendKeyUp(view, vk)`;
+     `wkeFireKeyUpEvent` calls it. Press events untouched (no decouple → no regression
+     to the Enter-submit path). Verified (wke_smoke +1): VK_RIGHT keyup → page sees
+     keyCode 39. (Refactored `kKeys` to file scope; SendKey behavior unchanged, 182 green.)
    - `mbShutdown` leaks on repeated init (`runtime/mb_runtime.cc:203`).
    - Delete the dead commented-out `widget/mb_sw_frame_sink.{h,cc}` scaffolding.
 

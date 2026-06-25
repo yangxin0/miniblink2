@@ -290,6 +290,11 @@ MB_EXPORT void mbSendText(mbView*, const char* utf8_text);
 // action. No-op for an unknown key name.
 MB_EXPORT void mbSendKey(mbView*, const char* key_name);
 
+// Dispatch a standalone key RELEASE (a `keyup` event) for a Win32 virtual-key code,
+// so page handlers that watch for key release fire. Use when driving key down/up
+// separately rather than as one press (mbSendKey already includes the release).
+MB_EXPORT void mbSendKeyUp(mbView*, int windows_key_code);
+
 // Synthesize a gesture scroll at (x,y) by (dx,dy) pixels. Positive dy scrolls
 // the page downward (toward larger window.scrollY), matching natural intent.
 MB_EXPORT void mbSendScroll(mbView*, int x, int y, int dx, int dy);

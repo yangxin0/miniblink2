@@ -43,6 +43,10 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   // trusted key event, so default actions fire (Enter submits a form, Tab moves
   // focus) — unlike a JS-dispatched (untrusted) event. No-op for unknown names.
   void SendKey(const char* key_name);
+  // Dispatch a standalone key RELEASE (kKeyUp) for a Win32 VK code, so page `keyup`
+  // handlers fire on release. Pairs with SendKey for callers that drive down/up
+  // separately (e.g. wke's wkeFireKeyUpEvent).
+  void SendKeyUp(int windows_key_code);
 
   blink::WebFrameWidget* widget() { return widget_; }
 

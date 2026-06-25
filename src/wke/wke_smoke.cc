@@ -385,6 +385,17 @@ int main() {
   check(jsToInt(es, wkeRunJS(wv, "window.__sub|0")) == 1,
         "wkeFireKeyDownEvent Enter triggers the form submit handler");
 
+  // wkeFireKeyUpEvent dispatches a REAL keyup (was a no-op). A page records the
+  // keyCode of the last keyup; firing VK_RIGHT (0x27 = 39) must deliver it.
+  wkeLoadHTML(wv,
+              "<body tabindex='0'><script>window.__ku=0;"
+              "addEventListener('keyup',function(e){window.__ku=e.keyCode;});"
+              "</script>x</body>");
+  wkeRunJS(wv, "document.body.focus()");
+  wkeFireKeyUpEvent(wv, 0x27, 0, false);  // VK_RIGHT -> keyCode 39
+  check(jsToInt(es, wkeRunJS(wv, "window.__ku|0")) == 0x27,
+        "wkeFireKeyUpEvent dispatches a real keyup (keyCode reaches the page)");
+
   // Navigation history: load two distinct file pages, then go back/forward and
   // confirm the title follows. (file:// gives distinct URLs the history records.)
   if (FILE* fa = std::fopen("/tmp/wke_nav_a.html", "wb")) {

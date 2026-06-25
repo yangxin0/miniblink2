@@ -1378,9 +1378,15 @@ bool wkeFireKeyDownEvent(wkeWebView webView, unsigned int virtualKeyCode,
   return true;
 }
 
-bool wkeFireKeyUpEvent(wkeWebView webView, unsigned int /*virtualKeyCode*/,
+bool wkeFireKeyUpEvent(wkeWebView webView, unsigned int virtualKeyCode,
                        unsigned int /*flags*/, bool /*systemKey*/) {
-  return webView && webView->view;  // no-op (the down/press did the work)
+  if (!webView || !webView->view)
+    return false;
+  // Dispatch a real key RELEASE so page `keyup` handlers fire (key-release
+  // detection, games, shortcut bookkeeping) — pre-fix this was a no-op.
+  mbSendKeyUp(webView->view, static_cast<int>(virtualKeyCode));
+  mbWait(webView->view, 20);  // let keyup handlers run before the next read
+  return true;
 }
 
 bool wkeFireKeyPressEvent(wkeWebView webView, unsigned int charCode,

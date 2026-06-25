@@ -345,6 +345,11 @@ void mbSendKey(mbView* v, const char* key_name) {
     v->impl->SendKey(key_name);
 }
 
+void mbSendKeyUp(mbView* v, int windows_key_code) {
+  if (v && v->impl)
+    v->impl->SendKeyUp(windows_key_code);
+}
+
 void mbSendScroll(mbView* v, int x, int y, int dx, int dy) {
   if (v && v->impl)
     v->impl->SendScroll(x, y, dx, dy);

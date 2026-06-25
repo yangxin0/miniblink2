@@ -25,6 +25,46 @@
 
 namespace mb {
 
+namespace {
+// Named non-text keys -> their Win32 VK code, encoded ui::DomKey (KeyboardEvent.key,
+// which gates default handlers like Tab focus-advance / Enter submit), and the kChar
+// they emit (Enter -> '\r', Tab -> '\t'; 0 = no character). Shared by SendKey (full
+// press) and SendKeyUp (release only).
+struct KeyDef {
+  const char* name;
+  int vk;
+  ui::DomKey dom_key;
+  char16_t ch;
+};
+constexpr KeyDef kKeys[] = {
+    {"Enter", 0x0D, ui::DomKey::ENTER, u'\r'},
+    {"Tab", 0x09, ui::DomKey::TAB, u'\t'},
+    {"Escape", 0x1B, ui::DomKey::ESCAPE, 0},
+    {"Backspace", 0x08, ui::DomKey::BACKSPACE, 0},
+    {"Delete", 0x2E, ui::DomKey::DEL, 0},
+    {"ArrowLeft", 0x25, ui::DomKey::ARROW_LEFT, 0},
+    {"ArrowUp", 0x26, ui::DomKey::ARROW_UP, 0},
+    {"ArrowRight", 0x27, ui::DomKey::ARROW_RIGHT, 0},
+    {"ArrowDown", 0x28, ui::DomKey::ARROW_DOWN, 0},
+    {"Home", 0x24, ui::DomKey::HOME, 0},
+    {"End", 0x23, ui::DomKey::END, 0},
+    {"PageUp", 0x21, ui::DomKey::PAGE_UP, 0},
+    {"PageDown", 0x22, ui::DomKey::PAGE_DOWN, 0},
+};
+const KeyDef* FindKeyByName(const char* name) {
+  for (const auto& e : kKeys)
+    if (std::strcmp(e.name, name) == 0)
+      return &e;
+  return nullptr;
+}
+const KeyDef* FindKeyByVk(int vk) {
+  for (const auto& e : kKeys)
+    if (e.vk == vk)
+      return &e;
+  return nullptr;
+}
+}  // namespace
+
 MbWidget::MbWidget() = default;
 MbWidget::~MbWidget() = default;
 
@@ -224,38 +264,11 @@ void MbWidget::SendText(const char* utf8) {
 void MbWidget::SendKey(const char* key_name) {
   if (!widget_ || !key_name)
     return;
-  // vk = a Windows VK code (drives default actions). dom_key must be the encoded
-  // ui::DomKey value (NOT the raw code point) — KeyboardEvent.key, which gates
-  // page default handlers like Tab focus-advance (key == "Tab"), is derived from
-  // it. ch != 0 means the key also produces a kChar (Enter -> '\r', Tab -> '\t').
-  struct KeyDef {
-    const char* name;
-    int vk;
-    ui::DomKey dom_key;
-    char16_t ch;
-  };
-  static const KeyDef kKeys[] = {
-      {"Enter", 0x0D, ui::DomKey::ENTER, u'\r'},
-      {"Tab", 0x09, ui::DomKey::TAB, u'\t'},
-      {"Escape", 0x1B, ui::DomKey::ESCAPE, 0},
-      {"Backspace", 0x08, ui::DomKey::BACKSPACE, 0},
-      {"Delete", 0x2E, ui::DomKey::DEL, 0},
-      {"ArrowLeft", 0x25, ui::DomKey::ARROW_LEFT, 0},
-      {"ArrowUp", 0x26, ui::DomKey::ARROW_UP, 0},
-      {"ArrowRight", 0x27, ui::DomKey::ARROW_RIGHT, 0},
-      {"ArrowDown", 0x28, ui::DomKey::ARROW_DOWN, 0},
-      {"Home", 0x24, ui::DomKey::HOME, 0},
-      {"End", 0x23, ui::DomKey::END, 0},
-      {"PageUp", 0x21, ui::DomKey::PAGE_UP, 0},
-      {"PageDown", 0x22, ui::DomKey::PAGE_DOWN, 0},
-  };
-  const KeyDef* k = nullptr;
-  for (const auto& e : kKeys) {
-    if (std::strcmp(e.name, key_name) == 0) {
-      k = &e;
-      break;
-    }
-  }
+  // vk = a Windows VK code (drives default actions). dom_key is the encoded
+  // ui::DomKey value (NOT the raw code point) — KeyboardEvent.key, which gates page
+  // default handlers like Tab focus-advance (key == "Tab"). ch != 0 means the key
+  // also produces a kChar (Enter -> '\r', Tab -> '\t').
+  const KeyDef* k = FindKeyByName(key_name);
   if (!k)
     return;
   auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
@@ -278,6 +291,31 @@ void MbWidget::SendKey(const char* key_name) {
   }
   impl->HandleInputEvent(blink::WebCoalescedInputEvent(
       make(blink::WebInputEvent::Type::kKeyUp, false), ui::LatencyInfo()));
+}
+
+void MbWidget::SendKeyUp(int windows_key_code) {
+  if (!widget_)
+    return;
+  // A standalone key RELEASE (kKeyUp) for the given Win32 VK code — page handlers
+  // listening for `keyup` (key-release detection, games, shortcut bookkeeping) fire.
+  // Derive KeyboardEvent.key (dom_key): a named special key from the table, else the
+  // unshifted character for an ASCII letter/digit; e.keyCode comes from the VK.
+  ui::DomKey dom = ui::DomKey::NONE;
+  if (const KeyDef* k = FindKeyByVk(windows_key_code)) {
+    dom = k->dom_key;
+  } else if (windows_key_code >= 'A' && windows_key_code <= 'Z') {
+    dom = ui::DomKey::FromCharacter(windows_key_code - 'A' + 'a');  // unshifted
+  } else if (windows_key_code >= '0' && windows_key_code <= '9') {
+    dom = ui::DomKey::FromCharacter(windows_key_code);
+  }
+  blink::WebKeyboardEvent e(blink::WebInputEvent::Type::kKeyUp,
+                            blink::WebInputEvent::kNoModifiers,
+                            base::TimeTicks::Now());
+  e.windows_key_code = windows_key_code;
+  e.dom_key = static_cast<int>(dom);
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  impl->HandleInputEvent(
+      blink::WebCoalescedInputEvent(e, ui::LatencyInfo()));
 }
 
 }  // namespace mb
