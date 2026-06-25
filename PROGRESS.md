@@ -415,11 +415,18 @@ via the version-change `IDBTransaction.CreateObjectStore`, and the vc transactio
 `IDBDatabaseCallbacks.Complete` + `IDBFactoryClient.OpenSuccess` -> `onsuccess`. Reopen at the same
 version succeeds immediately. Verified (mb_smoke 23m + render 39): `open('mbdb',1)` ->
 onupgradeneeded createObjectStore('items') -> onsuccess with `db.version==1` and
-`objectStoreNames==['items']`. STEP 2 (TODO): `IDBTransaction.Put` + `IDBDatabase.Get`/cursors —
-the value/key plane (`blink::IDBValue` bytes keyed by `blink::IDBKey`), currently stubbed (Put
-returns an error, Get returns empty). The mojo interfaces (IDBFactory/Database/Transaction +
-FactoryClient/DatabaseCallbacks remotes) and the open handshake are all wired; step 2 fills the
-data ops.]
+`objectStoreNames==['items']`. STEP 2 (DONE): the value/key data plane.
+`IDBDatabase.CreateTransaction` binds a working transaction; `IDBTransaction.Put` stores the
+serialized value bytes (`blink::IDBValue::Data()`) under the record's key in a per-object-store
+map (the backend now holds `store_id -> {encoded_key -> bytes}`); `IDBTransaction.Commit` fires
+`IDBDatabaseCallbacks.Complete` (so `tx.oncomplete` runs); `IDBDatabase.Get` looks the value up by
+the range's only-key and returns an `IDBReturnValue` (the bytes + primary key + the store's key
+path — which MUST match or `idb_request.cc` DCHECKs). Keys are encoded to a comparable string
+(number/date/string/binary; arrays/none unsupported). Verified (mb_smoke 23m + render 39):
+open -> createObjectStore -> readwrite put({id:7,name:'widget',qty:3}) -> tx.oncomplete -> get(7)
+returns the structured-cloned object intact ("widgetx3"). NOT yet: cursors, indexes, key ranges
+beyond a single key, getAll, count, delete, autoincrement key generation — and persistence is
+in-memory only (per-process, by db name).]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
    Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —

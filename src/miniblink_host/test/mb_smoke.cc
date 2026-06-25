@@ -1162,25 +1162,31 @@ int main() {
            "q=[" + q + "]");
   }
 
-  // 23m. IndexedDB open + schema (broker #8, step 1): the in-process IDBFactory opens a
-  // database; open at a new version fires onupgradeneeded (where createObjectStore records
-  // the store), then the version-change transaction's commit fires onsuccess. Verifies the
-  // db opens (version 1) and the created object store is reflected in objectStoreNames.
-  // (Reads/writes are step 2.)
+  // 23m. IndexedDB full round-trip (broker #8, step 1+2): open a database (onupgradeneeded
+  // createObjectStore), put a record in a readwrite transaction, then get it back in a
+  // separate transaction — the value (a structured-cloned object) survives the
+  // serialize/store/deserialize round-trip through the in-memory backend.
   {
     mbLoadHTML(v, "<body>x</body>", "https://idb.test/");
     Eval(v,
          "window.__idb='';"
-         "var __rq=indexedDB.open('mbdb',1);"
+         "var __rq=indexedDB.open('mbdb2',1);"
          "__rq.onupgradeneeded=function(e){"
          "e.target.result.createObjectStore('items',{keyPath:'id'});};"
          "__rq.onsuccess=function(e){var db=e.target.result;"
-         "window.__idb='v'+db.version+',stores:'+Array.from(db.objectStoreNames).join('|');};"
-         "__rq.onerror=function(e){window.__idb='err:'+(e.target.error&&e.target.error.name);};");
-    mbWaitForFunction(v, "window.__idb!==''", 3000);
+         "var tx=db.transaction('items','readwrite');"
+         "tx.objectStore('items').put({id:7,name:'widget',qty:3});"
+         "tx.oncomplete=function(){"
+         "var g=db.transaction('items').objectStore('items').get(7);"
+         "g.onsuccess=function(){var r=g.result;"
+         "window.__idb=r?('v'+db.version+',got:'+r.name+'x'+r.qty):'v'+db.version+',got:null';};"
+         "g.onerror=function(){window.__idb='geterr';};};"
+         "tx.onerror=function(){window.__idb='txerr';};};"
+         "__rq.onerror=function(e){window.__idb='operr';};");
+    mbWaitForFunction(v, "window.__idb!==''", 4000);
     const std::string r = Eval(v, "window.__idb");
-    Expect(r == "v1,stores:items",
-           "IndexedDB: open fires upgrade+success; createObjectStore is reflected",
+    Expect(r == "v1,got:widgetx3",
+           "IndexedDB: open + createObjectStore + put + get round-trips a record",
            "idb=[" + r + "]");
   }
 
