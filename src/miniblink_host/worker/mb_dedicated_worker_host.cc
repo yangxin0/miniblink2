@@ -33,6 +33,7 @@
 
 #include "miniblink_host/frame/mb_frame_broker.h"
 #include "miniblink_host/loader/mb_url_loader.h"
+#include "miniblink_host/worker/mb_worker_fetch_context.h"
 
 namespace mb {
 namespace {
@@ -175,9 +176,13 @@ class MbWorkerHostFactoryClient
   }
 
   scoped_refptr<blink::WebWorkerFetchContext> CloneWorkerFetchContext(
-      blink::WebWorkerFetchContext*,
+      blink::WebWorkerFetchContext* parent,
       scoped_refptr<base::SingleThreadTaskRunner>) override {
-    return nullptr;  // nested workers unsupported
+    // A nested worker reuses the parent worker's network identity. The parent is always
+    // one of ours (we created it), so clone it for the sub-worker's subresource loads.
+    if (parent)
+      return static_cast<MbWorkerFetchContext*>(parent)->CloneContext();
+    return nullptr;
   }
 
  private:

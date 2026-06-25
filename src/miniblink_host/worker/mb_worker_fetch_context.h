@@ -77,6 +77,10 @@ class MbWorkerFetchContext : public blink::WebWorkerFetchContext {
   std::optional<blink::WebSecurityOrigin> TopFrameOrigin() const override;
   blink::WebString GetAcceptLanguages() const override;
 
+  // Make a fresh context with the same identity, for a nested worker (the worker-host
+  // factory client's CloneWorkerFetchContext).
+  scoped_refptr<MbWorkerFetchContext> CloneContext() const;
+
  private:
   ~MbWorkerFetchContext() override;
 

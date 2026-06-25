@@ -168,6 +168,34 @@ static void RunCases(mbView* v, int W, int H) {
            "reply=[" + r + "]");
   }
 
+  // 37f. NESTED worker: a Worker that spawns a sub-Worker (and relays through it). The
+  // sub-worker is created ON the outer worker's thread, so its fetch context comes from
+  // CloneWorkerFetchContext (not the frame) — returning null there used to FATAL on the
+  // sub-worker's script load (no resource-load observer). Now the outer context is cloned.
+  // Outer relays 10 -> inner doubles to 20 -> outer replies "inner:20".
+  mbLoadHTML(v, "<body>worker-nested</body>", "about:blank");
+  mbRunJS(v,
+    "window.__nreply='';"
+    "var __o=new Worker('data:text/javascript,'+encodeURIComponent("
+    "\"var inner=new Worker('data:text/javascript,'+encodeURIComponent('onmessage=function(e){postMessage(e.data*2)}'));\""
+    "+\"inner.onmessage=function(e){postMessage('inner:'+e.data)};\""
+    "+\"onmessage=function(e){inner.postMessage(e.data)}\""
+    "));"
+    "__o.onmessage=function(e){window.__nreply=String(e.data)};"
+    "__o.postMessage(10);");
+  {
+    std::string r;
+    for (int i = 0; i < 80; ++i) {
+      mbWait(v, 25);
+      r = Eval(v, "window.__nreply");
+      if (!r.empty())
+        break;
+    }
+    Expect(r == "inner:20",
+           "a nested Worker (sub-Worker spawned on the worker thread) runs and relays",
+           "reply=[" + r + "]");
+  }
+
   // 38. The rest of the Worker family must also be crash-safe. SharedWorker's
   // Connect() is a fire-and-forget mojo call our empty broker drops (inert, no
   // crash); navigator.serviceWorker.register() either rejects cleanly or, on a

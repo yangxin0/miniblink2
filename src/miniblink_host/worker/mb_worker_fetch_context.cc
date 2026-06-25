@@ -82,4 +82,9 @@ blink::WebString MbWorkerFetchContext::GetAcceptLanguages() const {
   return blink::WebString::FromUtf8("en-US");
 }
 
+scoped_refptr<MbWorkerFetchContext> MbWorkerFetchContext::CloneContext() const {
+  return base::MakeRefCounted<MbWorkerFetchContext>(user_agent_, extra_headers_,
+                                                    top_frame_origin_);
+}
+
 }  // namespace mb

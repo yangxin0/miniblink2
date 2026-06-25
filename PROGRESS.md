@@ -305,9 +305,29 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      `WorkerMainScriptLoadParameters` response head now includes a `Content-Type: <mime>` header
      (mb_dedicated_worker_host.cc). Verified (mb_smoke_render 37d=85): a `{type:'module'}` worker
      runs `self.onmessage=e=>self.postMessage(e.data+100)`; 5 -> 105 round-trip.
-   - [NEXT] SharedWorker (separate `WebSharedWorker`/`WebSharedWorkerClient` path); http(s) worker
-     scripts already flow through `MbFetchUrl` (untested offline); nested workers (CloneWorkerFetch-
-     Context returns null today).
+   - [DONE] **Nested workers** (a Worker spawning a sub-Worker). The sub-worker is created ON the
+     parent worker's thread, so its fetch context comes from `CloneWorkerFetchContext` (not the
+     frame). That returned null → the sub-worker's script load FATAL'd at
+     `worker_main_script_loader.cc:45` (null resource-load observer). Fix:
+     `MbWorkerHostFactoryClient::CloneWorkerFetchContext` now clones the parent (a new
+     `MbWorkerFetchContext` with the same UA/headers/origin via `MbWorkerFetchContext::CloneContext`).
+     Verified (mb_smoke_render 37f=86): an outer worker relays 10 to an inner worker that doubles to
+     20; the page receives "inner:20".
+   - [NEXT] **SharedWorker** — SCOPED (2026-06, mapped against M150): `new SharedWorker(url)` →
+     `SharedWorkerClientHolder::Connect` → `mojom::SharedWorkerConnector.Connect` requested from the
+     FRAME broker (mb_frame_broker.cc — bind it there). Implement `SharedWorkerConnector::Connect(info,
+     client_remote, ctx_type, message_port, blob_token)`: bind `client_remote` (`mojom::SharedWorker-
+     Client` — call `OnCreated(ctx_type)` then `OnConnected({})`); fetch `info.url`, synthesize the
+     same `WorkerMainScriptLoadParameters` (reuse `MbWorkerScript`); `WebSharedWorker::CreateAndStart(
+     ~25 params: token, url, script_type, name, origins, UA, default UserAgentMetadata, empty CSPs,
+     WebFetchClientSettingsObject, MakeFrameInterfaceBroker(), a WorkerContentSettingsProxy remote
+     [HAS [Sync] AllowIndexedDB/CacheStorage/WebLocks → bind on the SERVICE thread like cookies/blob],
+     synth load params, WebPolicyContainer, MbWorkerFetchContext, SharedWorkerHost self-owned receiver
+     [no-op], WebSharedWorkerClient impl [1 method: WorkerContextDestroyed], NullReceiver coep/dip)`;
+     then `worker->Connect(request_id, message_port)` to deliver the port to `onconnect`. RISK: the
+     [Sync] content-settings proxy + the WebPolicyContainer/WebFetchClientSettingsObject construction
+     are the fiddly bits. Heavier than dedicated (more params, sharing-by-url state) — multi-tick.
+   - [NEXT] http(s) worker scripts (flow through `MbFetchUrl`, untested offline); ServiceWorker (heavy).
    8. Broker binds cookies
 only [+ Permissions, this tick]. [DONE: Permissions] `MbPermissionService` in the FRAME
 broker (mb_frame_broker.cc — the one navigator.* uses, not the platform thread broker)
