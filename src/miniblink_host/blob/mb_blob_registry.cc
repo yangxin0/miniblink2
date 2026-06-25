@@ -598,6 +598,22 @@ void BindBlobRegistryOnServiceThread(
           std::move(receiver)));
 }
 
+scoped_refptr<blink::BlobDataHandle> MbCreateInlineBlob(
+    const std::string& bytes,
+    const blink::String& content_type) {
+  static uint64_t next_id = 0;  // service-thread only
+  blink::String uuid = "mb-inline-" + blink::String::Number(next_id++);
+  MbBlob::Part part;
+  part.inline_bytes.assign(bytes.begin(), bytes.end());
+  std::vector<MbBlob::Part> parts;
+  parts.push_back(std::move(part));
+  mojo::PendingRemote<blink::mojom::blink::Blob> remote;
+  mojo::MakeSelfOwnedReceiver(std::make_unique<MbBlob>(uuid, std::move(parts)),
+                              remote.InitWithNewPipeAndPassReceiver());
+  return blink::BlobDataHandle::Create(uuid, content_type, bytes.size(),
+                                       std::move(remote));
+}
+
 blink::AssociatedInterfaceProvider* MakeBlobUrlNavAssociatedInterfaces() {
   // Build a dedicated associated pipe and bind the provider impl on the SERVICE
   // thread. The provider's master endpoint then lives off the main thread, so

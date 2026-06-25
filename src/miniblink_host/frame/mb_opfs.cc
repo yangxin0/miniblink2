@@ -7,16 +7,21 @@
 #include <utility>
 #include <vector>
 
+#include "base/containers/span.h"
 #include "base/files/file.h"
+#include "miniblink_host/blob/mb_blob_registry.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
+#include "mojo/public/cpp/system/data_pipe_drainer.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_cloud_identifier.mojom-blink.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_directory_handle.mojom-blink.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_error.mojom-blink.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_file_handle.mojom-blink.h"
+#include "third_party/blink/public/mojom/file_system_access/file_system_access_file_writer.mojom-blink.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_manager.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom-blink.h"
+#include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace mb {
@@ -57,6 +62,78 @@ m::FileSystemAccessErrorPtr NotSupported(const char* msg) {
 mojo::PendingRemote<m::FileSystemAccessFileHandle> BindFile(FsNode* node);
 mojo::PendingRemote<m::FileSystemAccessDirectoryHandle> BindDir(FsNode* node);
 
+// ----------------------------- file writer -----------------------------
+// A writable session over one file. Writes accumulate into a working buffer (a copy of the
+// file's bytes when keep_existing_data); Close() commits the buffer back to the node, Abort()
+// discards it. Each Write drains its data pipe, then splices the bytes in at the given offset.
+class MbFsFileWriter : public m::FileSystemAccessFileWriter {
+ public:
+  MbFsFileWriter(FsNode* node, bool keep_existing_data)
+      : node_(node),
+        buffer_(keep_existing_data ? node->bytes : std::string()) {}
+
+  void Write(uint64_t offset, mojo::ScopedDataPipeConsumerHandle stream,
+             WriteCallback cb) override {
+    ops_.push_back(std::make_unique<WriteOp>(
+        this, static_cast<size_t>(offset), std::move(stream), std::move(cb)));
+  }
+  void Truncate(uint64_t length, TruncateCallback cb) override {
+    buffer_.resize(static_cast<size_t>(length), '\0');
+    std::move(cb).Run(Ok());
+  }
+  void Close(CloseCallback cb) override {
+    node_->bytes = buffer_;  // commit the session atomically
+    std::move(cb).Run(Ok());
+  }
+  void Abort(AbortCallback cb) override {
+    std::move(cb).Run(Ok());  // drop the uncommitted buffer
+  }
+
+ private:
+  // Drains one Write's data pipe, then asks the writer to splice + answer the callback.
+  class WriteOp : public mojo::DataPipeDrainer::Client {
+   public:
+    WriteOp(MbFsFileWriter* writer, size_t offset,
+            mojo::ScopedDataPipeConsumerHandle stream, WriteCallback cb)
+        : writer_(writer),
+          offset_(offset),
+          cb_(std::move(cb)),
+          drainer_(this, std::move(stream)) {}
+    void OnDataAvailable(base::span<const uint8_t> data) override {
+      data_.append(reinterpret_cast<const char*>(data.data()), data.size());
+    }
+    void OnDataComplete() override {
+      // Don't delete this op here (its drainer is mid-callback) — the writer keeps it
+      // until the session ends.
+      writer_->ApplyWrite(offset_, data_, std::move(cb_));
+    }
+
+   private:
+    MbFsFileWriter* writer_;
+    size_t offset_;
+    WriteCallback cb_;
+    std::string data_;
+    mojo::DataPipeDrainer drainer_;
+  };
+
+  void ApplyWrite(size_t offset, const std::string& data, WriteCallback cb) {
+    if (offset > buffer_.size())
+      buffer_.resize(offset, '\0');  // a gap past EOF is zero-filled
+    for (size_t i = 0; i < data.size(); ++i) {
+      const size_t pos = offset + i;
+      if (pos < buffer_.size())
+        buffer_[pos] = data[i];
+      else
+        buffer_.push_back(data[i]);
+    }
+    std::move(cb).Run(Ok(), data.size());
+  }
+
+  FsNode* node_;
+  std::string buffer_;
+  std::vector<std::unique_ptr<WriteOp>> ops_;
+};
+
 // ----------------------------- file handle -----------------------------
 class MbFsFileHandle : public m::FileSystemAccessFileHandle {
  public:
@@ -70,17 +147,25 @@ class MbFsFileHandle : public m::FileSystemAccessFileHandle {
                          RequestPermissionCallback cb) override {
     std::move(cb).Run(Ok(), m::PermissionStatus::GRANTED);
   }
-  // File content read/write is deferred (slice 2): reject fast, never hang.
+  // getFile(): hand back a Blob serving the file's current bytes (+ size metadata).
   void AsBlob(AsBlobCallback cb) override {
-    std::move(cb).Run(NotSupported("OPFS file read not yet supported"),
-                      base::File::Info(), nullptr);
+    base::File::Info info;
+    info.size = static_cast<int64_t>(node_->bytes.size());
+    scoped_refptr<blink::BlobDataHandle> blob =
+        MbCreateInlineBlob(node_->bytes, blink::String::FromUtf8(""));
+    std::move(cb).Run(Ok(), info, blob);
   }
-  void CreateFileWriter(bool, bool,
+  // createWritable(): open a writing session over this file.
+  void CreateFileWriter(bool keep_existing_data, bool /*auto_close*/,
                         m::FileSystemAccessWritableFileStreamLockMode,
                         CreateFileWriterCallback cb) override {
-    std::move(cb).Run(NotSupported("OPFS file write not yet supported"),
-                      mojo::NullRemote());
+    mojo::PendingRemote<m::FileSystemAccessFileWriter> remote;
+    mojo::MakeSelfOwnedReceiver(
+        std::make_unique<MbFsFileWriter>(node_, keep_existing_data),
+        remote.InitWithNewPipeAndPassReceiver());
+    std::move(cb).Run(Ok(), std::move(remote));
   }
+  // Synchronous access handles (Worker-only) remain deferred.
   void OpenAccessHandle(m::FileSystemAccessAccessHandleLockMode,
                         OpenAccessHandleCallback cb) override {
     std::move(cb).Run(NotSupported("OPFS access handle not supported"), nullptr,
@@ -110,8 +195,7 @@ class MbFsFileHandle : public m::FileSystemAccessFileHandle {
   }
 
  private:
-  // Holds the file's bytes; read/write lands here in slice 2 (unused for the tree slice).
-  [[maybe_unused]] FsNode* node_;
+  FsNode* node_;  // the file node whose bytes back read (AsBlob) and write sessions
 };
 
 // --------------------------- directory handle ---------------------------

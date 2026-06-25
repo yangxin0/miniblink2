@@ -1564,6 +1564,28 @@ int main() {
            "opfs=[" + r + "]");
   }
 
+  // 23ad. OPFS file content round-trip (slice 2): write bytes through a FileSystemWritableFile-
+  // Stream and read them back via getFile().text(). Create a file, createWritable(), write
+  // 'hello opfs', close, then getFile().text() returns exactly those bytes — and .size matches.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://opfs.test/");
+    Eval(v,
+         "window.__opfsrw='';"
+         "(async function(){try{"
+         "var root=await navigator.storage.getDirectory();"
+         "var fh=await root.getFileHandle('note.txt',{create:true});"
+         "var w=await fh.createWritable();"
+         "await w.write('hello opfs');await w.close();"
+         "var f=await fh.getFile();var t=await f.text();"
+         "window.__opfsrw=t+',size:'+f.size;"
+         "}catch(e){window.__opfsrw='err:'+e.name;}})();");
+    mbWaitForFunction(v, "window.__opfsrw!==''", 4000);
+    const std::string r = Eval(v, "window.__opfsrw");
+    Expect(r == "hello opfs,size:10",
+           "OPFS: createWritable/write/close then getFile().text() round-trips file bytes",
+           "opfsrw=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

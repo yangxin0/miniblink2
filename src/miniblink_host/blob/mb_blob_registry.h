@@ -13,11 +13,16 @@
 #ifndef MINIBLINK_HOST_BLOB_MB_BLOB_REGISTRY_H_
 #define MINIBLINK_HOST_BLOB_MB_BLOB_REGISTRY_H_
 
+#include <string>
+
+#include "base/memory/scoped_refptr.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "third_party/blink/public/mojom/blob/blob_registry.mojom-blink.h"
 
 namespace blink {
 class AssociatedInterfaceProvider;
+class BlobDataHandle;
+class String;
 }
 
 namespace mb {
@@ -33,6 +38,12 @@ void BindBlobRegistryOnServiceThread(
 // from MbFrameClient::GetRemoteNavigationAssociatedInterfaces(). Created + used
 // on the main thread.
 blink::AssociatedInterfaceProvider* MakeBlobUrlNavAssociatedInterfaces();
+
+// Mint a BlobDataHandle serving `bytes` inline (a self-owned in-process Blob on the
+// current/service thread). Used by OPFS file reads (FileSystemAccessFileHandle.AsBlob).
+scoped_refptr<blink::BlobDataHandle> MbCreateInlineBlob(
+    const std::string& bytes,
+    const blink::String& content_type);
 
 }  // namespace mb
 
