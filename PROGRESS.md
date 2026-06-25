@@ -434,9 +434,14 @@ or file bytes); directory handles support `getDirectoryHandle`/`getFileHandle` (
 `removeEntry`; a missing entry without `{create}` rejects with NotFoundError (kFileError +
 FILE_ERROR_NOT_FOUND). NOTE: FileSystemAccessError.message must be a NON-NULL empty String (a default
 WTF::String is null and fails mojo validation). Verified (mb_smoke 23ac: create docs/ + a.txt,b.txt,
-enumerate, not-found). SLICE 2 (DEFERRED): file CONTENT read/write — AsBlob (returns a refcounted
-BlobDataHandle), CreateFileWriter + the FileSystemAccessFileWriter data-pipe Write, OpenAccessHandle;
-all currently reject cleanly (kNotSupportedError), never hang.
+enumerate, not-found). SLICE 2 (DONE): file CONTENT read/write — `createWritable()` returns an
+`MbFsFileWriter` whose `Write(offset, data_pipe)` drains the pipe (mojo::DataPipeDrainer) and splices
+bytes into a working buffer (a copy of the file when keep_existing_data); `Truncate` resizes, `Close`
+commits the buffer to the node, `Abort` discards. `getFile()` -> `AsBlob` mints a BlobDataHandle
+serving the bytes via a new blob-registry helper `MbCreateInlineBlob` (self-owned in-process Blob).
+OPFS now round-trips create -> write -> close -> getFile().text(). Verified (mb_smoke 23ad: write
+'hello opfs', read back, size 10). STILL DEFERRED: `OpenAccessHandle` (Worker-only sync access
+handles) rejects cleanly; per-origin isolation (single process-wide root today).
 [DONE: Cache Storage] `frame/mb_cache_storage.{h,cc}` (`MbCacheStorage` + `MbCacheStorageCache`,
 bound from the frame broker). `caches.open/has/delete/keys`, `caches.match`, `cache.put`/`delete`
 (via `Batch`), and `cache.match`. Stores Request URL -> FetchAPIResponse in a process-wide
