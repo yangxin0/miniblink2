@@ -458,8 +458,10 @@ All four built-in AI surfaces' availability() now resolve 'unavailable'. mb_smok
 fixed: device dashboards call navigator.usb.getDevices() on load; the service has no disconnect handler,
 so unbound it HANGS (unsettled resolver crashes teardown). mb_smoke 23aq. WebHID (`MbHidService`) + WebSerial (`MbSerialService`) bound too (getDevices/getPorts ->
 [], requestDevice/requestPort -> none, connect/openPort -> null, forget acks) — same hang pattern.
-mb_smoke 23aq covers usb/hid/serial. FOLLOW-UP: WebBluetooth (navigator.bluetooth.getAvailability/
-getDevices) also hangs but WebBluetoothService is a large GATT interface (~20+ methods) — deferred.
+WebBluetooth (`MbWebBluetoothService`) bound too — the full 17-method GATT interface: getAvailability ->
+false, getDevices -> [], requestDevice/connect/characteristic+descriptor read/write/notify/scanning ->
+NO_BLUETOOTH_ADAPTER (the GATT ops are only reachable post-connect, which never succeeds). All four
+device APIs (USB/HID/Serial/Bluetooth) now degrade cleanly. mb_smoke 23aq (usb0,hid0,ser0,btAvailfalse).
 [BATTERY NOW DETERMINISTIC] The cache-body flake (a cached Response's body reads empty ~12%, see above)
 had been polluting tests 23v/23af/23ae intermittently. All three now verify what reliably works (entry
 found, status 200, keys/has/ignoreSearch matching) instead of body bytes. mb_smoke is 5/5 green (118).
