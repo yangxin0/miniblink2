@@ -17,6 +17,7 @@
 #include "base/no_destructor.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
+#include "miniblink_host/frame/mb_broadcast_channel.h"
 #include "miniblink_host/runtime/mb_runtime.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
@@ -39,6 +40,7 @@
 #include "third_party/blink/public/mojom/associated_interfaces/associated_interfaces.mojom.h"
 #include "third_party/blink/public/mojom/blob/blob.mojom-blink.h"
 #include "third_party/blink/public/mojom/blob/blob_url_store.mojom-blink.h"
+#include "third_party/blink/public/mojom/broadcastchannel/broadcast_channel.mojom-blink.h"
 #include "third_party/blink/public/mojom/blob/data_element.mojom-blink.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -567,6 +569,12 @@ class MbNavAssociatedInterfaceProvider
           std::make_unique<MbBlobURLStore>(),
           mojo::PendingAssociatedReceiver<blink::mojom::blink::BlobURLStore>(
               receiver.PassHandle()));
+      return;
+    }
+    // navigator BroadcastChannel (window path): in-process same-name fan-out.
+    if (name == blink::mojom::blink::BroadcastChannelProvider::Name_) {
+      BindBroadcastChannelProvider(receiver.PassHandle());
+      return;
     }
     // Other associated interfaces are not provided here (dropped).
   }

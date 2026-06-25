@@ -1058,6 +1058,27 @@ int main() {
            "av=[" + av + "]");
   }
 
+  // 23h. BroadcastChannel (window path, broker #8-adjacent): a window's BroadcastChannel
+  // uses an ASSOCIATED provider from the frame's navigation-associated interfaces (not the
+  // broker). The host serves it in-process: a message posted on one channel is delivered to
+  // every OTHER same-name channel. Two channels 'ch' in one window — a.postMessage -> b
+  // receives; the sender (a) does NOT receive its own message.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://bc.test/");
+    Eval(v,
+         "window.__bcB='';window.__bcA='self';"
+         "var __a=new BroadcastChannel('ch');var __b=new BroadcastChannel('ch');"
+         "__b.onmessage=function(e){window.__bcB=e.data;};"
+         "__a.onmessage=function(e){window.__bcA='GOT:'+e.data;};"
+         "__a.postMessage('ping');");
+    mbWaitForFunction(v, "window.__bcB!==''", 2000);
+    const std::string b = Eval(v, "window.__bcB");
+    const std::string a = Eval(v, "window.__bcA");
+    Expect(b == "ping" && a == "self",
+           "BroadcastChannel delivers to other same-name channels, not the sender",
+           "b=[" + b + "] a=[" + a + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

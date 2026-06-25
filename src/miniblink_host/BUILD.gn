@@ -24,6 +24,8 @@ component("miniblink_host") {
     "blob/mb_blob_registry.h",
     "capi/mb_capi.cc",
     "capi/mb_capi.h",
+    "frame/mb_broadcast_channel.cc",
+    "frame/mb_broadcast_channel.h",
     "frame/mb_frame_broker.cc",
     "frame/mb_frame_broker.h",
     "frame/mb_frame_client.cc",

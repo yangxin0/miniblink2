@@ -373,6 +373,17 @@ handler), then the queue is reprocessed. The `LockHandle` sent to `Granted` is l
 UNassociated pending endpoint so it associates with the `LockRequest` pipe (a dedicated one
 DCHECKs). Verified (mb_smoke 23f/23g): two exclusive requests on one name serialize ("AaB" —
 2nd waits for 1st's async release), and `{ifAvailable:true}` on a held lock yields null.
+[DONE: BroadcastChannel] `frame/mb_broadcast_channel.{h,cc}`. A WINDOW's BroadcastChannel does
+NOT use the broker — it requests an ASSOCIATED `BroadcastChannelProvider` from the frame's
+navigation-associated interface provider. The host already serves that provider on the SERVICE
+thread (`MbNavAssociatedInterfaceProvider` in mb_blob_registry.cc, for blob URLs); a new branch
+there binds an in-process `MbBroadcastChannelProvider`. `ConnectToChannel` registers each channel
+in a process-wide name→channels map; a page's `postMessage` (the channel's `connection` receiver)
+fans out to every OTHER same-name channel's `client` remote (sender excluded). The blink-variant
+`OnMessage` carries a move-only `BlinkCloneableMessage`, shallow-cloned field-wise per recipient
+(the SerializedScriptValue is immutable+refcounted). Verified (mb_smoke 23h): two channels named
+'ch' in one window — `a.postMessage('ping')` → `b` receives 'ping', `a` does NOT. Scope: window
+(same-thread) channels; worker BroadcastChannels (broker path, worker thread) not yet wired.
 [REMAINING at the broker: IndexedDB / WebSocket / notifications — genuinely heavy backends;
 same frame-broker entry point, but each needs a real store/network/connector.]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
