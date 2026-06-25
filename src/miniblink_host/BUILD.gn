@@ -38,8 +38,6 @@ component("miniblink_host") {
     "runtime/mb_runtime.h",
     "view/mb_webview.cc",
     "view/mb_webview.h",
-    "widget/mb_sw_frame_sink.cc",
-    "widget/mb_sw_frame_sink.h",
     "widget/mb_widget.cc",
     "widget/mb_widget.h",
     # wke compatibility layer (staged alongside at ../wke; wraps the mb_capi ABI).

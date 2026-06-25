@@ -114,7 +114,11 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      engine is one-time and stays resident; `mbShutdown` is a safe no-op and
      `mbInitialize` is idempotent (reuses it). Verified (mb_smoke 0 +1=61): shutdown ->
      re-init succeeds AND all 60 subsequent tests run against the post-cycle engine.
-   - Delete the dead commented-out `widget/mb_sw_frame_sink.{h,cc}` scaffolding.
+   - [DONE] Deleted the dead `widget/mb_sw_frame_sink.{h,cc}` scaffolding (an empty
+     `MbSoftwareFrameSink` stub never referenced — the real readback is paint-record
+     playback in mb_widget.cc) + its BUILD.gn entries. Builds clean, mb_smoke 61.
+
+   **→ Quick-win cluster (item 2) COMPLETE — all five defects fixed & verified.**
 
 **Tier 1 — genuine high-value automation capability (after the above):**
 3. **Iframe / sub-frame targeting** (audit #2).
