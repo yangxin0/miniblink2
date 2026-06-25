@@ -25,9 +25,11 @@ std::unique_ptr<blink::URLLoader> MbWorkerURLLoaderFactory::CreateURLLoader(
 }
 
 MbWorkerFetchContext::MbWorkerFetchContext(std::string user_agent,
-                                           std::string extra_headers)
+                                           std::string extra_headers,
+                                           std::string top_frame_origin)
     : user_agent_(std::move(user_agent)),
       extra_headers_(std::move(extra_headers)),
+      top_frame_origin_(std::move(top_frame_origin)),
       factory_(std::make_unique<MbWorkerURLLoaderFactory>(user_agent_,
                                                           extra_headers_)) {}
 
@@ -69,9 +71,11 @@ net::SiteForCookies MbWorkerFetchContext::SiteForCookies() const {
 
 std::optional<blink::WebSecurityOrigin> MbWorkerFetchContext::TopFrameOrigin()
     const {
-  // Unset: the host doesn't model a top-frame origin for the worker. Cookie
-  // isolation falls back to the request URL's own origin.
-  return std::nullopt;
+  // Must be non-null for a dedicated worker (WorkerFetchContext DCHECKs this). Rebuild
+  // from the serialized string on the calling (worker) thread; "null" yields an opaque
+  // origin, which is still an engaged optional.
+  return blink::WebSecurityOrigin::CreateFromString(blink::WebString::FromUtf8(
+      top_frame_origin_.empty() ? std::string("null") : top_frame_origin_));
 }
 
 blink::WebString MbWorkerFetchContext::GetAcceptLanguages() const {

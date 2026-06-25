@@ -93,6 +93,73 @@ static void RunCases(mbView* v, int W, int H) {
            "reply=[" + reply + "]");
   }
 
+  // 37c. Multiple concurrent Workers each run independently (no shared-state clobber,
+  // no thread cross-talk). Spawn three workers, each doubling its input; the page sums
+  // the replies. 1*2 + 2*2 + 3*2 = 12 across 3 replies proves they ran concurrently
+  // and each delivered its own result.
+  mbLoadHTML(v, "<body>worker-multi</body>", "about:blank");
+  mbRunJS(v,
+    "window.__sum=0;window.__cnt=0;"
+    "function __mk(x){var w=new Worker('data:text/javascript,'+"
+    "encodeURIComponent('onmessage=function(e){postMessage(e.data*2)}'));"
+    "w.onmessage=function(e){window.__sum+=e.data;window.__cnt++};w.postMessage(x);}"
+    "__mk(1);__mk(2);__mk(3);");
+  {
+    std::string cnt;
+    for (int i = 0; i < 80; ++i) {
+      mbWait(v, 25);
+      cnt = Eval(v, "String(window.__cnt)");
+      if (cnt == "3")
+        break;
+    }
+    Expect(cnt == "3" && Eval(v, "String(window.__sum)") == "12",
+           "three concurrent Workers each run and deliver their own reply",
+           "cnt=[" + cnt + "] sum=[" + Eval(v, "String(window.__sum)") + "]");
+  }
+
+  // 37d. A MODULE worker (new Worker(url, {type:'module'})) must at least be crash-safe.
+  // KNOWN GAP: a module dedicated worker does not yet RUN its top-level script in this
+  // host — the module-instantiation path on the worker thread isn't fully wired (classic
+  // workers, 37b/c/e, do run). It must not take the host down, though: construct one,
+  // pump, and assert the host is still scriptable. (See PROGRESS "Workers" Step 3.)
+  mbLoadHTML(v, "<body>worker-module</body>", "about:blank");
+  mbRunJS(v,
+    "window.__mok=false;"
+    "try{window.__mw=new Worker('data:text/javascript,'+"
+    "encodeURIComponent('self.onmessage=function(e){self.postMessage(e.data+100)}'),"
+    "{type:'module'});window.__mw.postMessage(5);window.__mok=true;}"
+    "catch(e){window.__merr=String(e);}");
+  mbWait(v, 60);
+  Expect(Eval(v, "1+1") == "2" &&
+             Eval(v, "document.body.textContent") == "worker-module",
+         "a module-type Worker is crash-safe (host still scriptable)");
+
+  // 37e. importScripts() inside a Worker loads a subresource through the worker's fetch
+  // context (worker/mb_worker_fetch_context.cc) ON the worker thread — the end-to-end
+  // exercise of Step 1. The worker imports a data: script defining self.K=7, then replies
+  // e.data + K; posting 1 yields 8. Proves worker-thread subresource loading works.
+  mbLoadHTML(v, "<body>worker-import</body>", "about:blank");
+  mbRunJS(v,
+    "window.__ireply='';"
+    "window.__iw=new Worker('data:text/javascript,'+encodeURIComponent("
+    "'importScripts(\"data:text/javascript,self.K=7\");"
+    "onmessage=function(e){postMessage(e.data+self.K)}'));"
+    "window.__iw.onmessage=function(e){window.__ireply=String(e.data)};"
+    "window.__iw.onerror=function(e){window.__ireply='ERR:'+e.message};"
+    "window.__iw.postMessage(1);");
+  {
+    std::string r;
+    for (int i = 0; i < 80; ++i) {
+      mbWait(v, 25);
+      r = Eval(v, "window.__ireply");
+      if (!r.empty())
+        break;
+    }
+    Expect(r == "8",
+           "importScripts() inside a Worker loads via the worker fetch context (Step 1)",
+           "reply=[" + r + "]");
+  }
+
   // 38. The rest of the Worker family must also be crash-safe. SharedWorker's
   // Connect() is a fire-and-forget mojo call our empty broker drops (inert, no
   // crash); navigator.serviceWorker.register() either rejects cleanly or, on a

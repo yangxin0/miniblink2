@@ -286,10 +286,23 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      VERIFIED (mb_smoke_render 37b=82, stable across repeated runs, no leaked threads): a Worker built
      from a `data:` script runs `onmessage=e=>postMessage(e.data*2)`, the page posts 21 and receives
      42 — a full two-way `postMessage` round-trip. **Dedicated workers now actually RUN in-process.**
-   - [NEXT] **Step 3 — exercise/​harden.** Verify worker subresource loads (importScripts/fetch) drive
-     the Step-1 fetch context on the worker thread (fix the loader's task-runner to the worker thread,
-     per the Step-1 note); confirm multiple concurrent workers, module workers (`type:'module'`), and
-     http(s) worker scripts. Then SharedWorker (separate `WebSharedWorker` path) if wanted.
+   - [DONE] **Step 3 — exercise/​harden (classic workers).** Fixed a real bug surfaced here:
+     `MbWorkerFetchContext::TopFrameOrigin()` returned `nullopt`, but `WorkerFetchContext::GetTop-
+     FrameOrigin` DCHECKs that only shared/service workers may have a null top-frame origin — so a
+     dedicated worker's first subresource load FATAL-crashed. Now the fetch context carries the
+     creating document's serialized origin (`MbFrameClient::CreateWorkerFetchContext` reads
+     `web_frame_->GetSecurityOrigin()`), rebuilt per call on the worker thread. The Step-1 loader's
+     `GetTaskRunnerForBodyLoader()` returns `GetCurrentDefault()`, which resolves to the WORKER
+     thread's runner at load time — so no task-runner fix was needed. Verified (mb_smoke_render
+     85, stable): 37c three concurrent workers each deliver their own reply (sum=12); 37e
+     `importScripts("data:…self.K=7")` loads on the worker thread and the worker replies e.data+K
+     — end-to-end proof the worker fetch context works.
+   - [KNOWN GAP] **Module dedicated workers** (`new Worker(url,{type:'module'})`) do NOT yet run their
+     top-level script (classic workers do). No crash — 37d guards crash-safety only. The module-script
+     instantiation path on the worker thread needs wiring (the top-level module isn't evaluated from
+     the `WorkerMainScriptLoadParameters` data pipe the way the classic path is). Next worker item.
+   - [NEXT] SharedWorker (separate `WebSharedWorker`/`WebSharedWorkerClient` path), then module-worker
+     execution; http(s) worker scripts already flow through `MbFetchUrl` (untested offline).
    8. Broker binds cookies
 only [+ Permissions, this tick]. [DONE: Permissions] `MbPermissionService` in the FRAME
 broker (mb_frame_broker.cc — the one navigator.* uses, not the platform thread broker)

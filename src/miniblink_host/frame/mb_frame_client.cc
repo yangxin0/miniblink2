@@ -274,8 +274,14 @@ MbFrameClient::CreateWorkerFetchContext(
     blink::WebDedicatedWorkerHostFactoryClient*) {
   // Same network identity (UA + extra headers) as the frame's own subresources, so a
   // worker's importScripts()/fetch() looks identical on the wire to the page's loads.
+  // The worker's top-frame origin is this document's origin (required non-null for a
+  // dedicated worker — see MbWorkerFetchContext::TopFrameOrigin).
+  std::string top_origin;
+  if (web_frame_)
+    top_origin = web_frame_->GetSecurityOrigin().ToString().Utf8();
   return base::MakeRefCounted<MbWorkerFetchContext>(
-      user_agent_.empty() ? MbDefaultUserAgent() : user_agent_, extra_headers_);
+      user_agent_.empty() ? MbDefaultUserAgent() : user_agent_, extra_headers_,
+      std::move(top_origin));
 }
 
 blink::WebString MbFrameClient::UserAgentOverride() {

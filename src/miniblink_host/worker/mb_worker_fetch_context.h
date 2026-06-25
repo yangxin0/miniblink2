@@ -53,7 +53,12 @@ class MbWorkerURLLoaderFactory : public blink::URLLoaderFactory {
 // substantive one is GetURLLoaderFactory(), which returns the libcurl-backed factory.
 class MbWorkerFetchContext : public blink::WebWorkerFetchContext {
  public:
-  MbWorkerFetchContext(std::string user_agent, std::string extra_headers);
+  // `top_frame_origin` is the serialized origin of the document that created the worker
+  // (e.g. "https://example.com" or "null" for an opaque/about:blank page). A DEDICATED
+  // worker MUST report a non-null top-frame origin (WorkerFetchContext DCHECKs that only
+  // shared/service workers may have none), so this is required, not optional.
+  MbWorkerFetchContext(std::string user_agent, std::string extra_headers,
+                       std::string top_frame_origin);
 
   // blink::WebWorkerFetchContext:
   void SetTerminateSyncLoadEvent(base::WaitableEvent*) override;
@@ -77,6 +82,7 @@ class MbWorkerFetchContext : public blink::WebWorkerFetchContext {
 
   std::string user_agent_;
   std::string extra_headers_;
+  std::string top_frame_origin_;  // serialized; rebuilt per call (worker-thread safe)
   std::unique_ptr<MbWorkerURLLoaderFactory> factory_;
 };
 
