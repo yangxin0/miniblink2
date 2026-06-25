@@ -1596,7 +1596,7 @@ int main() {
          "(async function(){try{"
          "var b=await navigator.storageBuckets.open('inbox');"
          "var keys=await navigator.storageBuckets.keys();"
-         "var c=await b.caches.open('v1');"
+         "var c=await b.caches.open('bkt-v1');"
          "await c.put('/m',new Response('hi-bucket'));"
          "var r=await c.match('/m');var t=await r.text();"
          "window.__bk=b.name+','+keys.join(',')+','+t;"
