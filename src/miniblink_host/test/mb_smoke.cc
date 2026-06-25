@@ -1863,6 +1863,26 @@ int main() {
            "sp=[" + sp + "]");
   }
 
+  // 23as. Common platform capabilities: sendBeacon (analytics) queues, navigator.connection /
+  // deviceMemory / hardwareConcurrency present, reportError + scheduler.postTask available.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://beacon.test/");
+    Eval(v,
+         "var b1=navigator.sendBeacon('/collect','hi');"
+         "var b2=navigator.sendBeacon('/c2',new Blob(['x']));"
+         "window.__bc='beacon:'+b1+'/'+b2"
+         "+',conn:'+(navigator.connection&&navigator.connection.effectiveType.length>0)"
+         "+',mem:'+(typeof navigator.deviceMemory==='number')"
+         "+',hwc:'+(navigator.hardwareConcurrency>0)"
+         "+',re:'+(typeof reportError==='function')"
+         "+',pt:'+(!!(window.scheduler&&scheduler.postTask));");
+    mbWait(v, 30);
+    const std::string r = Eval(v, "window.__bc");
+    Expect(r == "beacon:true/true,conn:true,mem:true,hwc:true,re:true,pt:true",
+           "Common platform capabilities: sendBeacon/connection/deviceMemory/reportError/postTask",
+           "bc=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");
