@@ -847,6 +847,11 @@ Implementation:
     host's LoadURL re-navigation.
 Verified: mb_smoke 23at (back/forward/go traverse same-doc + popstate carries event.state) and 23ar
 (pushState grows history.length clamped at 50; replaceState doesn't). Full battery 121/43/88/66/107.
-LIMITATIONS (deferred): single-slot sink => last main frame wins (one main frame per process here, fine;
-child-frame history not independently routed); cross-document traversal re-loads rather than restoring
-bfcache state; no scroll-position restore.
+- Slice 4 (multi-view correctness): the LocalFrameHost traversal/favicon sink was a single global
+  slot, so a second view's SetFrame clobbered the first -> view1's history.back()/navigation.back()/
+  favicon routed to view2. Fixed: keyed the sink by a per-MbFrameClient frame id (threaded through the
+  nav-assoc provider -> MbBindLocalFrameHost -> MbLocalFrameHost). Each view now routes to its own
+  frame. Verified mb_smoke_render 78c (two views: view1.history.back() -> /start+popstate, view2
+  untouched at /a) and 86b (page-driven history nav is crash-safe / host survives).
+LIMITATIONS (deferred): child-frame (iframe) history not independently routed (sink is per main-frame
+client); cross-document traversal re-loads rather than restoring bfcache state; no scroll-position restore.

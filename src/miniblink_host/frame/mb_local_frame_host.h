@@ -13,6 +13,7 @@
 #ifndef MINIBLINK_HOST_FRAME_MB_LOCAL_FRAME_HOST_H_
 #define MINIBLINK_HOST_FRAME_MB_LOCAL_FRAME_HOST_H_
 
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -41,21 +42,24 @@ namespace mb {
 // Navigation API's navigation.back()/forward()/traverseTo() (keyed by entry key).
 // Single-slot (last writer wins): one main frame per process. Thread-safe.
 void MbSetHistoryGoToHandler(
+    uint64_t frame_key,
     scoped_refptr<base::SingleThreadTaskRunner> runner,
     base::RepeatingCallback<void(int offset, bool has_user_gesture)> handler,
     base::RepeatingCallback<void(const std::string& key, bool has_user_gesture)>
         key_handler,
     base::RepeatingCallback<void(const std::string& favicon_urls)>
         favicon_handler);
-void MbClearHistoryGoToHandler();
+void MbClearHistoryGoToHandler(uint64_t frame_key);
 
 // Bind a self-owned MbLocalFrameHost to `handle` (called from the frame's
-// navigation-associated-interface provider on the service thread).
-void MbBindLocalFrameHost(mojo::ScopedInterfaceEndpointHandle handle);
+// navigation-associated-interface provider on the service thread). `frame_key`
+// identifies which frame's registered callbacks its host calls route to.
+void MbBindLocalFrameHost(mojo::ScopedInterfaceEndpointHandle handle,
+                          uint64_t frame_key);
 
 class MbLocalFrameHost : public blink::mojom::blink::LocalFrameHost {
  public:
-  MbLocalFrameHost() = default;
+  explicit MbLocalFrameHost(uint64_t frame_key) : frame_key_(frame_key) {}
   ~MbLocalFrameHost() override = default;
 
   // THE one method with real behavior — routes to the main-thread sink.
@@ -257,6 +261,9 @@ class MbLocalFrameHost : public blink::mojom::blink::LocalFrameHost {
           client,
       const gfx::Rect& bounds) override {}
   void NotifyDocumentInteractive() override;
+
+ private:
+  const uint64_t frame_key_;  // which frame's registered callbacks we route to
 };
 
 }  // namespace mb

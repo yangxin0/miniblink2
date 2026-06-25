@@ -3,6 +3,8 @@
 // has real behavior (routes page-driven history traversal to the main thread).
 #include "miniblink_host/frame/mb_local_frame_host.h"
 
+#include <cstdint>
+#include <map>
 #include <utility>
 
 #include "base/functional/bind.h"
@@ -23,49 +25,66 @@
 namespace mb {
 namespace {
 
-// Single-slot, lock-protected route to the main frame's history-traversal sinks:
-// `handler` for offset-based traversal (history.go), `key_handler` for the
-// Navigation API's key-based traversal (navigation.back/forward/traverseTo).
-struct HistoryGoToSink {
-  base::Lock lock;
+// A frame's host-side callbacks: `handler` for offset-based traversal (history.go),
+// `key_handler` for the Navigation API's key-based traversal, `favicon_handler` for
+// favicon URLs. Posted to `runner` (the main/blink thread).
+struct SinkEntry {
   scoped_refptr<base::SingleThreadTaskRunner> runner;
   base::RepeatingCallback<void(int, bool)> handler;
   base::RepeatingCallback<void(const std::string&, bool)> key_handler;
   base::RepeatingCallback<void(const std::string&)> favicon_handler;
 };
 
-HistoryGoToSink& Sink() {
-  static base::NoDestructor<HistoryGoToSink> s;
+// Per-frame registry keyed by a frame id, so multiple views each route their own
+// LocalFrameHost callbacks (a single global slot would let a second view clobber
+// the first). Lock-protected; touched from the service thread (bind/route) and the
+// main thread (register/clear).
+struct SinkRegistry {
+  base::Lock lock;
+  std::map<uint64_t, SinkEntry> by_frame;
+};
+
+SinkRegistry& Sinks() {
+  static base::NoDestructor<SinkRegistry> s;
   return *s;
+}
+
+// Snapshot a frame's entry (returns false if none registered).
+bool LookupSink(uint64_t frame_key, SinkEntry* out) {
+  SinkRegistry& s = Sinks();
+  base::AutoLock guard(s.lock);
+  auto it = s.by_frame.find(frame_key);
+  if (it == s.by_frame.end())
+    return false;
+  *out = it->second;
+  return true;
 }
 
 }  // namespace
 
 void MbSetHistoryGoToHandler(
+    uint64_t frame_key,
     scoped_refptr<base::SingleThreadTaskRunner> runner,
     base::RepeatingCallback<void(int, bool)> handler,
     base::RepeatingCallback<void(const std::string&, bool)> key_handler,
     base::RepeatingCallback<void(const std::string&)> favicon_handler) {
-  HistoryGoToSink& s = Sink();
+  SinkRegistry& s = Sinks();
   base::AutoLock guard(s.lock);
-  s.runner = std::move(runner);
-  s.handler = std::move(handler);
-  s.key_handler = std::move(key_handler);
-  s.favicon_handler = std::move(favicon_handler);
+  s.by_frame[frame_key] = SinkEntry{std::move(runner), std::move(handler),
+                                    std::move(key_handler),
+                                    std::move(favicon_handler)};
 }
 
-void MbClearHistoryGoToHandler() {
-  HistoryGoToSink& s = Sink();
+void MbClearHistoryGoToHandler(uint64_t frame_key) {
+  SinkRegistry& s = Sinks();
   base::AutoLock guard(s.lock);
-  s.runner = nullptr;
-  s.handler.Reset();
-  s.key_handler.Reset();
-  s.favicon_handler.Reset();
+  s.by_frame.erase(frame_key);
 }
 
-void MbBindLocalFrameHost(mojo::ScopedInterfaceEndpointHandle handle) {
+void MbBindLocalFrameHost(mojo::ScopedInterfaceEndpointHandle handle,
+                          uint64_t frame_key) {
   mojo::MakeSelfOwnedAssociatedReceiver(
-      std::make_unique<MbLocalFrameHost>(),
+      std::make_unique<MbLocalFrameHost>(frame_key),
       mojo::PendingAssociatedReceiver<blink::mojom::blink::LocalFrameHost>(
           std::move(handle)));
 }
@@ -77,17 +96,10 @@ void MbLocalFrameHost::GoToEntryAtOffset(
     std::optional<blink::scheduler::TaskAttributionId>) {
   if (offset == 0)
     return;
-  HistoryGoToSink& s = Sink();
-  scoped_refptr<base::SingleThreadTaskRunner> runner;
-  base::RepeatingCallback<void(int, bool)> handler;
-  {
-    base::AutoLock guard(s.lock);
-    runner = s.runner;
-    handler = s.handler;
-  }
-  if (runner && handler) {
-    runner->PostTask(FROM_HERE,
-                     base::BindOnce(handler, offset, has_user_gesture));
+  SinkEntry e;
+  if (LookupSink(frame_key_, &e) && e.runner && e.handler) {
+    e.runner->PostTask(FROM_HERE,
+                       base::BindOnce(e.handler, offset, has_user_gesture));
   }
 }
 
@@ -97,17 +109,10 @@ void MbLocalFrameHost::NavigateToNavigationApiKey(
     base::TimeTicks /*actual_navigation_start*/,
     std::optional<blink::scheduler::TaskAttributionId>) {
   // The Navigation API's navigation.back()/forward()/traverseTo(key) routes here.
-  HistoryGoToSink& s = Sink();
-  scoped_refptr<base::SingleThreadTaskRunner> runner;
-  base::RepeatingCallback<void(const std::string&, bool)> handler;
-  {
-    base::AutoLock guard(s.lock);
-    runner = s.runner;
-    handler = s.key_handler;
-  }
-  if (runner && handler) {
-    runner->PostTask(
-        FROM_HERE, base::BindOnce(handler, key.Utf8(), has_user_gesture));
+  SinkEntry e;
+  if (LookupSink(frame_key_, &e) && e.runner && e.key_handler) {
+    e.runner->PostTask(
+        FROM_HERE, base::BindOnce(e.key_handler, key.Utf8(), has_user_gesture));
   }
 }
 
@@ -207,16 +212,10 @@ void MbLocalFrameHost::UpdateFaviconURL(
   }
   if (urls.empty())
     return;
-  HistoryGoToSink& s = Sink();
-  scoped_refptr<base::SingleThreadTaskRunner> runner;
-  base::RepeatingCallback<void(const std::string&)> handler;
-  {
-    base::AutoLock guard(s.lock);
-    runner = s.runner;
-    handler = s.favicon_handler;
-  }
-  if (runner && handler)
-    runner->PostTask(FROM_HERE, base::BindOnce(handler, std::move(urls)));
+  SinkEntry e;
+  if (LookupSink(frame_key_, &e) && e.runner && e.favicon_handler)
+    e.runner->PostTask(FROM_HERE,
+                       base::BindOnce(e.favicon_handler, std::move(urls)));
 }
 void MbLocalFrameHost::DownloadURL(
     blink::mojom::blink::DownloadURLParamsPtr) {}

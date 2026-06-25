@@ -49,12 +49,20 @@
 
 namespace mb {
 
-MbFrameClient::MbFrameClient(MbWebView* owner) : owner_(owner) {}
+namespace {
+uint64_t NextFrameKey() {
+  static uint64_t counter = 0;  // main-thread only (clients created on main thread)
+  return ++counter;
+}
+}  // namespace
+
+MbFrameClient::MbFrameClient(MbWebView* owner)
+    : owner_(owner), frame_key_(NextFrameKey()) {}
 MbFrameClient::~MbFrameClient() {
   // If we registered the main frame's history-traversal sink, clear it so a
   // stray GoToEntryAtOffset doesn't post to a freed client.
   if (!self_owned_)
-    MbClearHistoryGoToHandler();
+    MbClearHistoryGoToHandler(frame_key_);
   delete nav_assoc_interfaces_;
 }
 
@@ -64,7 +72,7 @@ void MbFrameClient::SetFrame(blink::WebLocalFrame* frame) {
   // blink sends to LocalFrameHost.GoToEntryAtOffset) back to this client on the
   // current (main/blink) thread, where GoToHistoryOffset replays the entry.
   MbSetHistoryGoToHandler(
-      base::SingleThreadTaskRunner::GetCurrentDefault(),
+      frame_key_, base::SingleThreadTaskRunner::GetCurrentDefault(),
       base::BindRepeating(&MbFrameClient::GoToHistoryOffset,
                           weak_factory_.GetWeakPtr()),
       base::BindRepeating(&MbFrameClient::GoToHistoryKey,
@@ -81,7 +89,7 @@ void MbFrameClient::OnFaviconUrls(const std::string& favicon_urls) {
 blink::AssociatedInterfaceProvider*
 MbFrameClient::GetRemoteNavigationAssociatedInterfaces() {
   if (!nav_assoc_interfaces_)
-    nav_assoc_interfaces_ = MakeBlobUrlNavAssociatedInterfaces();
+    nav_assoc_interfaces_ = MakeBlobUrlNavAssociatedInterfaces(frame_key_);
   return nav_assoc_interfaces_;
 }
 

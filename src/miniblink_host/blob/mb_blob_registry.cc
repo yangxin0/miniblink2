@@ -561,6 +561,9 @@ class MbBlobURLStore : public blink::mojom::blink::BlobURLStore {
 class MbNavAssociatedInterfaceProvider
     : public blink::mojom::AssociatedInterfaceProvider {
  public:
+  explicit MbNavAssociatedInterfaceProvider(uint64_t frame_key)
+      : frame_key_(frame_key) {}
+
   void GetAssociatedInterface(
       const std::string& name,
       mojo::PendingAssociatedReceiver<blink::mojom::AssociatedInterface>
@@ -581,11 +584,14 @@ class MbNavAssociatedInterfaceProvider
     // page-driven history.back()/forward()/go() — sent as GoToEntryAtOffset — is
     // serviced (replayed onto the main frame) instead of dropped into the void.
     if (name == blink::mojom::blink::LocalFrameHost::Name_) {
-      MbBindLocalFrameHost(receiver.PassHandle());
+      MbBindLocalFrameHost(receiver.PassHandle(), frame_key_);
       return;
     }
     // Other associated interfaces are not provided here (dropped).
   }
+
+ private:
+  const uint64_t frame_key_;
 };
 
 }  // namespace
@@ -622,7 +628,8 @@ scoped_refptr<blink::BlobDataHandle> MbCreateInlineBlob(
                                        std::move(remote));
 }
 
-blink::AssociatedInterfaceProvider* MakeBlobUrlNavAssociatedInterfaces() {
+blink::AssociatedInterfaceProvider* MakeBlobUrlNavAssociatedInterfaces(
+    uint64_t frame_key) {
   // Build a dedicated associated pipe and bind the provider impl on the SERVICE
   // thread. The provider's master endpoint then lives off the main thread, so
   // when the main thread blocks in createObjectURL's [Sync] BlobURLStore.Register,
@@ -637,12 +644,13 @@ blink::AssociatedInterfaceProvider* MakeBlobUrlNavAssociatedInterfaces() {
         FROM_HERE,
         base::BindOnce(
             [](mojo::PendingAssociatedReceiver<
-                blink::mojom::AssociatedInterfaceProvider> r) {
+                   blink::mojom::AssociatedInterfaceProvider> r,
+               uint64_t key) {
               mojo::MakeSelfOwnedAssociatedReceiver(
-                  std::make_unique<MbNavAssociatedInterfaceProvider>(),
+                  std::make_unique<MbNavAssociatedInterfaceProvider>(key),
                   std::move(r));
             },
-            std::move(receiver)));
+            std::move(receiver), frame_key));
   }
   return new blink::AssociatedInterfaceProvider(
       remote.Unbind(), base::SingleThreadTaskRunner::GetCurrentDefault());

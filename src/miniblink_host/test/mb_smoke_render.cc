@@ -1228,6 +1228,32 @@ static void RunCases(mbView* v, int W, int H) {
     }
   }
 
+  // 78c. Multi-view history isolation: each view's page-driven history.back() routes to ITS
+  // OWN frame. The LocalFrameHost traversal sink is keyed per-frame (not a single global slot
+  // that a second view would clobber). v pushes /a then back()s to /start (popstate fires);
+  // v2 — which also pushed /a — must be untouched (still /a, no popstate).
+  {
+    mbView* v2 = mbCreateView(W, H);
+    if (v2) {
+      mbLoadHTML(v, "<body>x</body>", "https://hv1.test/start");
+      mbLoadHTML(v2, "<body>x</body>", "https://hv2.test/start");
+      mbRunJS(v, "window.__p='';addEventListener('popstate',function(){window.__p='pop';});"
+                 "history.pushState({},'','/a');");
+      mbRunJS(v2, "window.__p='';addEventListener('popstate',function(){window.__p='pop';});"
+                  "history.pushState({},'','/a');");
+      mbWait(v, 20);
+      mbWait(v2, 20);
+      mbRunJS(v, "history.back();");
+      mbWaitForFunction(v, "window.__p==='pop'", 3000);
+      const std::string r1 = Eval(v, "location.pathname+','+window.__p");
+      const std::string r2 = Eval(v2, "location.pathname+','+window.__p");
+      Expect(r1 == "/start,pop" && r2 == "/a,",
+             "multi-view: page-driven history.back() routes to its own view only",
+             "mvh=[v1:" + r1 + "|v2:" + r2 + "]");
+      mbDestroyView(v2);
+    }
+  }
+
   // 74. Stability across many sequential loads (a long-running scraper does
   // thousands). Load varied documents repeatedly on one view, evaluating and
   // painting each, and confirm every load renders correctly — no state leak or
@@ -1811,24 +1837,23 @@ static void RunCases(mbView* v, int W, int H) {
                " fwd_b=" + (fwd_b ? "1" : "0"));
   }
 
-  // 86b. Page-driven history (history.back/forward/go from JS) is crash-safe. The
-  // host routes page-initiated session-history nav through LocalFrameHost
-  // (GoToEntryAtOffset); wiring that to actually navigate is an in-progress effort
-  // (host-driven mbGoBack/mbGoForward already work, case 86). Until then it's a
-  // graceful no-op — but an untrusted page calling history.back() must never crash
-  // the single-process host. (pushState/replaceState DO work, case 39b.) This
-  // safety invariant holds before AND after that wiring lands.
+  // 86b. Page-driven history (history.back/forward/go from JS) is crash-safe. The host now
+  // SERVICES page-initiated session-history nav (GoToEntryAtOffset -> traversal; verified in
+  // mb_smoke 23at), so back()/go(-1) here may actually navigate the view away. The invariant
+  // under test is the safety one: an untrusted page driving session history must never crash
+  // the single-process host. We confirm by driving it, then loading a fresh page and checking
+  // the host is still alive and scriptable.
   {
     mbLoadHTML(v,
-        "<body><p id='m'>alive</p><script>window.__hr='pre';"
-        "try{history.back();history.forward();history.go(-1);window.__hr='ok';}"
-        "catch(e){window.__hr='THREW:'+e.name;}</script></body>",
+        "<body><script>try{history.back();history.forward();history.go(-1);}"
+        "catch(e){}</script></body>",
         "https://hist.test/");
-    Expect(Eval(v, "window.__hr") == "ok" &&
-               Eval(v, "document.getElementById('m').textContent") == "alive" &&
+    mbWait(v, 50);  // let any async traversal settle
+    mbLoadHTML(v, "<body><p id='m'>alive</p></body>", "https://hist2.test/");
+    Expect(Eval(v, "document.getElementById('m').textContent") == "alive" &&
                Eval(v, "1+1") == "2",
-           "page-driven history.back/forward/go is crash-safe",
-           Eval(v, "window.__hr"));
+           "page-driven history.back/forward/go is crash-safe (host survives)",
+           Eval(v, "1+1"));
   }
 
 

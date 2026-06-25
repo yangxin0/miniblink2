@@ -245,6 +245,10 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   std::vector<blink::Persistent<blink::HistoryItem>> history_items_;
   int history_index_ = -1;
 
+  // Unique per-client id so this frame's LocalFrameHost callbacks (history /
+  // Navigation API / favicon) route to THIS client, not another view's.
+  const uint64_t frame_key_;
+
   // Guards posted main-frame commits: if the client is torn down before the
   // task runs, it no-ops. Must be the last member.
   base::WeakPtrFactory<MbFrameClient> weak_factory_{this};

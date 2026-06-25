@@ -13,6 +13,7 @@
 #ifndef MINIBLINK_HOST_BLOB_MB_BLOB_REGISTRY_H_
 #define MINIBLINK_HOST_BLOB_MB_BLOB_REGISTRY_H_
 
+#include <cstdint>
 #include <string>
 
 #include "base/memory/scoped_refptr.h"
@@ -37,7 +38,8 @@ void BindBlobRegistryOnServiceThread(
 // URL.createObjectURL registration and blob: URL fetch resolution work. Returned
 // from MbFrameClient::GetRemoteNavigationAssociatedInterfaces(). Created + used
 // on the main thread.
-blink::AssociatedInterfaceProvider* MakeBlobUrlNavAssociatedInterfaces();
+blink::AssociatedInterfaceProvider* MakeBlobUrlNavAssociatedInterfaces(
+    uint64_t frame_key);
 
 // Mint a BlobDataHandle serving `bytes` inline (a self-owned in-process Blob on the
 // current/service thread). Used by OPFS file reads (FileSystemAccessFileHandle.AsBlob).
