@@ -18,6 +18,12 @@ namespace mb {
 mojo::PendingRemote<blink::mojom::blink::BrowserInterfaceBroker>
 MakeFrameInterfaceBroker();
 
+// Configure the geolocation fix served to navigator.geolocation (process-wide). Once
+// set, getCurrentPosition/watchPosition resolve to (lat,lng) with `accuracy` metres
+// (and the GeolocationService grants); MbClearGeolocation reverts to denied. Thread-safe.
+void MbSetGeolocation(double lat, double lng, double accuracy);
+void MbClearGeolocation();
+
 }  // namespace mb
 
 #endif  // MINIBLINK_HOST_FRAME_MB_FRAME_BROKER_H_

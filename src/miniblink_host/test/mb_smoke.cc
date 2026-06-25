@@ -873,6 +873,29 @@ int main() {
            "state=[" + ps + "]");
   }
 
+  // 23d. navigator.geolocation (broker #8): by default it errors PERMISSION_DENIED;
+  // after mbSetGeolocation it resolves getCurrentPosition to the configured fix.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://geo.test/");
+    Eval(v, "navigator.geolocation.getCurrentPosition("
+            "function(p){window.__g='ok';},"
+            "function(e){window.__g='err:'+e.code;},{timeout:1500})");
+    mbWaitForFunction(v, "window.__g!==undefined", 2500);
+    const std::string deflt = Eval(v, "window.__g");
+    mbSetGeolocation(37.42, -122.08, 5.0);
+    mbLoadHTML(v, "<body>y</body>", "https://geo.test/");  // re-query on a fresh doc
+    Eval(v, "navigator.geolocation.getCurrentPosition("
+            "function(p){window.__g2=p.coords.latitude.toFixed(2)+','+"
+            "p.coords.longitude.toFixed(2)+'@'+p.coords.accuracy;},"
+            "function(e){window.__g2='err:'+e.code;},{timeout:1500})");
+    mbWaitForFunction(v, "window.__g2!==undefined", 2500);
+    const std::string got = Eval(v, "window.__g2");
+    mbClearGeolocation();
+    Expect(deflt == "err:1" && got == "37.42,-122.08@5",
+           "mbSetGeolocation: getCurrentPosition returns the configured fix",
+           "default=[" + deflt + "] got=[" + got + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

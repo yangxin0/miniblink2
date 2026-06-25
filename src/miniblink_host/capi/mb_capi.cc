@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "miniblink_host/frame/mb_frame_broker.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/runtime/mb_runtime.h"
 #include "miniblink_host/view/mb_webview.h"
@@ -612,6 +613,14 @@ int mbSetSessionStorage(mbView* v, const char* key, const char* value) {
 void mbClearStorage(mbView* v) {
   if (v && v->impl)
     v->impl->ClearStorage();
+}
+
+void mbSetGeolocation(double latitude, double longitude, double accuracy) {
+  mb::MbSetGeolocation(latitude, longitude, accuracy);
+}
+
+void mbClearGeolocation(void) {
+  mb::MbClearGeolocation();
 }
 
 int mbSaveLocalStorage(mbView* v, char* out, int out_cap) {

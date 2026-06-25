@@ -238,8 +238,13 @@ only [+ Permissions, this tick]. [DONE: Permissions] `MbPermissionService` in th
 broker (mb_frame_broker.cc — the one navigator.* uses, not the platform thread broker)
 answers navigator.permissions.query/.request as DENIED, so the promise resolves instead
 of HANGING (it was dropped → a permission-gated page stalled forever). Verified (mb_smoke
-23c): query({name:'geolocation'}) → state "denied". [REMAINING at the broker: IndexedDB /
-WebSocket / geolocation position / clipboard / notifications — each its own mojo service.]
+23c): query({name:'geolocation'}) → state "denied". [DONE: geolocation] `mbSetGeolocation(lat, lng, accuracy)` / `mbClearGeolocation()` + an
+in-process `MbGeolocationService`/`MbGeolocation` in the frame broker: once a fix is set,
+`navigator.geolocation.getCurrentPosition` resolves to it (the service GRANTS); unset = the
+default PERMISSION_DENIED. Thread-safe (base::Lock; broker on the service thread, API on
+main). Verified (mb_smoke 23d): default → err code 1; after mbSetGeolocation(37.42,-122.08,5)
+→ coords 37.42,-122.08@5. [REMAINING at the broker: IndexedDB / WebSocket / clipboard /
+notifications — each its own mojo service, same frame-broker `receiver.As<...>()` pattern.]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
    Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —

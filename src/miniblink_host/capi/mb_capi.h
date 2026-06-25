@@ -495,6 +495,14 @@ MB_EXPORT int mbSetSessionStorage(mbView*, const char* key, const char* value);
 // login session.
 MB_EXPORT void mbClearStorage(mbView*);
 
+// Geolocation override (process-wide): give navigator.geolocation a fixed position so
+// location-aware pages work headlessly. After mbSetGeolocation, getCurrentPosition /
+// watchPosition resolve to (latitude, longitude) with `accuracy` metres (and the
+// permission is granted); mbClearGeolocation reverts to the default (denied -> the page
+// gets a PERMISSION_DENIED error). Set before the page queries position.
+MB_EXPORT void mbSetGeolocation(double latitude, double longitude, double accuracy);
+MB_EXPORT void mbClearGeolocation(void);
+
 // Persist localStorage across process runs: mbSaveLocalStorage snapshots the WHOLE
 // localStorage for the current document's origin into `out` as a JSON object string
 // (NUL-terminated; size first with out=NULL), returning its length. mbLoadLocalStorage

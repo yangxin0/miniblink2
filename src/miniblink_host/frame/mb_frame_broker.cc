@@ -16,6 +16,11 @@
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/network/public/mojom/cookie_manager.mojom-blink.h"
 #include "services/network/public/mojom/restricted_cookie_manager.mojom-blink.h"
+#include "base/synchronization/lock.h"
+#include "base/time/time.h"
+#include "services/device/public/mojom/geolocation.mojom-blink.h"
+#include "services/device/public/mojom/geoposition.mojom-blink.h"
+#include "third_party/blink/public/mojom/geolocation/geolocation_service.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions/permission.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom-blink.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -222,6 +227,72 @@ class MbPermissionService : public blink::mojom::blink::PermissionService {
   }
 };
 
+// Process-wide configured geolocation fix (set via mbSetGeolocation). Read on the
+// broker's service thread, written from the main thread, so guard with a lock. When
+// unset, geolocation stays denied (the headless default — getCurrentPosition errors).
+struct MbGeoFix {
+  bool set = false;
+  double lat = 0, lng = 0, accuracy = 0;
+};
+base::Lock& GeoLock() {
+  static base::Lock* l = new base::Lock();
+  return *l;
+}
+MbGeoFix& GeoFix() {
+  static MbGeoFix* g = new MbGeoFix();
+  return *g;
+}
+bool GeoGet(MbGeoFix* out) {
+  base::AutoLock al(GeoLock());
+  *out = GeoFix();
+  return out->set;
+}
+
+// device.mojom.Geolocation: hands back the configured fix on every position query.
+class MbGeolocation : public device::mojom::blink::Geolocation {
+ public:
+  void SetHighAccuracyHint(bool) override {}
+  void QueryNextPosition(QueryNextPositionCallback callback) override {
+    std::move(callback).Run(MakeResult());
+  }
+  void QueryCachedPosition(QueryCachedPositionCallback callback) override {
+    std::move(callback).Run(MakeResult());
+  }
+
+ private:
+  static device::mojom::blink::GeopositionResultPtr MakeResult() {
+    MbGeoFix fix;
+    GeoGet(&fix);  // only reached when granted, i.e. fix.set is true
+    auto pos = device::mojom::blink::Geoposition::New();
+    pos->latitude = fix.lat;
+    pos->longitude = fix.lng;
+    pos->accuracy = fix.accuracy > 0 ? fix.accuracy : 10.0;
+    pos->timestamp = base::Time::Now();
+    return device::mojom::blink::GeopositionResult::NewPosition(std::move(pos));
+  }
+};
+
+// blink.mojom.GeolocationService: grants only when a fix is configured (else the page's
+// getCurrentPosition errors PERMISSION_DENIED, the headless default), then binds an
+// MbGeolocation that serves the fix.
+class MbGeolocationService : public blink::mojom::blink::GeolocationService {
+ public:
+  void CreateGeolocation(
+      mojo::PendingReceiver<device::mojom::blink::Geolocation> receiver,
+      bool /*user_gesture*/, blink::mojom::blink::GeolocationAccuracy,
+      CreateGeolocationCallback callback) override {
+    MbGeoFix fix;
+    const bool granted = GeoGet(&fix);
+    if (granted) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbGeolocation>(),
+                                  std::move(receiver));
+    }
+    std::move(callback).Run(granted
+                                ? blink::mojom::blink::PermissionStatus::GRANTED
+                                : blink::mojom::blink::PermissionStatus::DENIED);
+  }
+};
+
 class MbBrowserInterfaceBroker
     : public blink::mojom::blink::BrowserInterfaceBroker {
  public:
@@ -238,11 +309,27 @@ class MbBrowserInterfaceBroker
                                   std::move(r));
       return;
     }
+    // navigator.geolocation — serve the configured fix (or deny if none set).
+    if (auto r = receiver.As<blink::mojom::blink::GeolocationService>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbGeolocationService>(),
+                                  std::move(r));
+      return;
+    }
     // Drop everything else (no browser process).
   }
 };
 
 }  // namespace
+
+void MbSetGeolocation(double lat, double lng, double accuracy) {
+  base::AutoLock al(GeoLock());
+  GeoFix() = MbGeoFix{/*set=*/true, lat, lng, accuracy};
+}
+
+void MbClearGeolocation() {
+  base::AutoLock al(GeoLock());
+  GeoFix() = MbGeoFix{};
+}
 
 mojo::PendingRemote<blink::mojom::blink::BrowserInterfaceBroker>
 MakeFrameInterfaceBroker() {
