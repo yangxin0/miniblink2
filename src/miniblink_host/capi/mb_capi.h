@@ -418,6 +418,15 @@ MB_EXPORT void mbClearMocks(void);
 MB_EXPORT void mbRewriteUrl(const char* from, const char* to);
 MB_EXPORT void mbClearUrlRewrites(void);
 
+// Per-URL request header injection: add/override the outgoing http(s) header `name:
+// value` for any request whose URL CONTAINS `url_substring` — e.g. send an Authorization
+// or API-key header only to its own host (not leaked to every origin the page touches),
+// or a per-domain User-Agent. Conditional on the URL, unlike the global mbSetExtraHeaders.
+// Register several; mbClearRequestHeaders removes all. Process-wide, applied at the loader.
+MB_EXPORT void mbSetRequestHeader(const char* url_substring, const char* name,
+                                  const char* value);
+MB_EXPORT void mbClearRequestHeaders(void);
+
 // localStorage access for the current document's origin — inject an auth token /
 // app state before an SPA boots (pair with mbSetInitScript), or read it back.
 // mbGetLocalStorage writes the value of `key` into `out` and returns its length

@@ -519,6 +519,16 @@ void mbClearUrlRewrites(void) {
   mb::MbClearUrlRewrites();
 }
 
+void mbSetRequestHeader(const char* url_substring, const char* name,
+                        const char* value) {
+  if (url_substring && name)
+    mb::MbAddRequestHeader(url_substring, name, value ? value : "");
+}
+
+void mbClearRequestHeaders(void) {
+  mb::MbClearRequestHeaders();
+}
+
 int mbGetLocalStorage(mbView* v, const char* key, char* out, int out_cap) {
   if (!v || !v->impl || !key)
     return -1;

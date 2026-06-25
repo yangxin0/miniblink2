@@ -802,6 +802,25 @@ int main() {
   }
   mbSetExtraHeaders(v, "");  // reset
 
+  // 32b. Per-URL request header injection: a header registered for the "/headers" URL
+  // is echoed; one registered for a non-matching host is NOT — proving it's conditional
+  // on the URL (vs the global extra-headers above), e.g. an API key sent only to its host.
+  mbSetRequestHeader("/headers", "X-Mb-Inject", "inj-77");
+  mbSetRequestHeader("other.example", "X-Mb-Skip", "should-not-appear");
+  mbLoadURL(v, (host + "/headers").c_str());
+  mbWait(v, 400);
+  {
+    std::string h = Eval(v, "document.body?document.body.innerText:''");
+    if (h.find("headers") != std::string::npos) {  // host responded
+      Expect(h.find("inj-77") != std::string::npos &&
+                 h.find("should-not-appear") == std::string::npos,
+             "per-URL request header injected for the matching URL only");
+    } else {
+      std::fprintf(stderr, "  [SKIP] header injection (host unreachable)\n");
+    }
+  }
+  mbClearRequestHeaders();  // reset
+
   // 33. Cookie bridge: a cookie set via document.cookie on an http origin must be
   // sent on a subsequent network request (JS jar -> HTTP jar).
   mbLoadURL(v, (host + "/").c_str());

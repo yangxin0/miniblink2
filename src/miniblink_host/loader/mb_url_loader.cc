@@ -219,6 +219,10 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   bool has_accept_language = false;
   std::string line;
   std::string lines = extra_headers;
+  // Per-URL injected headers (mbSetRequestHeader) — conditional on the URL. Done here
+  // so BOTH the top-level navigation (MbFetchUrl) and subresources/fetch (Deliver),
+  // which share this function, get them.
+  mb::MbApplyRequestHeaders(url, &lines);
   lines.push_back('\n');  // sentinel so the last line flushes
   for (char c : lines) {
     if (c == '\n' || c == '\r') {
@@ -768,6 +772,43 @@ std::string MbApplyUrlRewrites(const std::string& url) {
   return out;
 }
 
+// --- Per-URL request header injection ----------------------------------------
+// Add/override an outgoing request header for any http(s) request whose URL contains a
+// registered substring — e.g. send an Authorization / API-key header only to its own
+// API host (not leaked to every origin a page touches), or set a per-domain UA. Unlike
+// the global extra-headers, this is conditional on the URL.
+namespace {
+struct HeaderEntry {
+  std::string substring;
+  std::string name;
+  std::string value;
+};
+std::vector<HeaderEntry>& HeaderList() {
+  static std::vector<HeaderEntry>* h = new std::vector<HeaderEntry>();
+  return *h;
+}
+}  // namespace
+
+void MbAddRequestHeader(const std::string& substring, const std::string& name,
+                        const std::string& value) {
+  if (!substring.empty() && !name.empty())
+    HeaderList().push_back({substring, name, value});
+}
+
+void MbClearRequestHeaders() {
+  HeaderList().clear();
+}
+
+void MbApplyRequestHeaders(const std::string& url, std::string* req_headers) {
+  for (const HeaderEntry& e : HeaderList()) {
+    if (url.find(e.substring) == std::string::npos)
+      continue;
+    if (!req_headers->empty())
+      *req_headers += "\n";
+    *req_headers += e.name + ": " + e.value;
+  }
+}
+
 bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* content_type, const std::string& user_agent,
                 const std::string& extra_headers, const std::string& post_body,
@@ -887,6 +928,8 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
         req_headers += "\n";
       req_headers += kv.key + ": " + kv.value;
     }
+    // (Per-URL injected headers from mbSetRequestHeader are applied inside FetchHttp,
+    // the shared http chokepoint, so the top-level navigation gets them too.)
     // Follow redirects MANUALLY (curl auto-follow off) so each hop is reported to
     // the client via WillFollowRedirect — that updates Blink's url_list_, making
     // fetch's response.url (the final URL) and response.redirected correct. (You

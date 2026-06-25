@@ -119,6 +119,16 @@ void MbAddUrlRewrite(const std::string& from, const std::string& to);
 void MbClearUrlRewrites();
 std::string MbApplyUrlRewrites(const std::string& url);
 
+// Per-URL request header injection: add/override an outgoing http(s) header for any
+// request whose URL contains `substring` (e.g. send an Authorization / API-key header
+// only to its own host, not every origin; or set a per-domain UA). Conditional on the
+// URL, unlike the global extra-headers. MbAddRequestHeader registers one; MbClearRequest-
+// Headers removes all; MbApplyRequestHeaders appends matches to the loader's header block.
+void MbAddRequestHeader(const std::string& substring, const std::string& name,
+                        const std::string& value);
+void MbClearRequestHeaders();
+void MbApplyRequestHeaders(const std::string& url, std::string* req_headers);
+
 // Process-wide HTTP(S) proxy for all network fetches, as a libcurl proxy string:
 // "http://host:port", "socks5://host:port", "host:port" (defaults to http), or
 // "" to force a direct connection (overriding any *_proxy env vars). Once set

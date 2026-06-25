@@ -94,8 +94,20 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      `MbSetResponseHook`/`MbInvokeResponseHook` (std::function so the capi binds a lambda).
      Verified (mb_smoke +1=64, offline): a mock serves {"v":1}; the hook records it and
      rewrites to {"v":99}; the page's fetch() observes v=99.
-   - [NEXT] request HEADER rewrite (add/override before fetch); wke peers
-     (`wkeOnLoadUrlBegin` onto the request hook, `wkeNetOnResponse` onto the response hook).
+   - [DONE] **per-URL request header injection** — `mbSetRequestHeader(url_substring, name,
+     value)` + `mbClearRequestHeaders()`: add an outgoing http(s) header for requests whose
+     URL contains the substring (e.g. an Authorization/API key sent ONLY to its host, not
+     leaked to every origin; or a per-domain UA) — conditional on the URL, unlike global
+     extra-headers. Applied in `FetchHttp` (the shared http chokepoint), so it covers BOTH
+     the top-level navigation (MbFetchUrl) and subresources/fetch (Deliver). Verified
+     (mb_smoke 32b, MB_NET_TESTS vs httpbin /headers): the header registered for "/headers"
+     is echoed; one for a non-matching host is not.
+   - [NEXT] wke peers — wire the host hooks into the wke layer (`wkeOnLoadUrlBegin` onto the
+     request hook, `wkeNetOnResponse` onto the response hook). Friction: wke's job-based API
+     + per-view vs our process-wide hooks; needs a pragmatic mapping.
+
+   **→ Network interception (#1) is now comprehensive: static block/mock/URL-rewrite +
+   per-URL header inject + dynamic request hook + response hook + CLI (--mock/--rewrite).**
 
 2. **Quick-win correctness bugs** (real defects; fast; each independently verifiable —
    NOTE several have *existing tests that assert the stubbed/fake behavior* and must be
