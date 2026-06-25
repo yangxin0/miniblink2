@@ -13,6 +13,7 @@
 #include "base/unguessable_token.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "miniblink_host/blob/mb_blob_registry.h"
+#include "miniblink_host/frame/mb_frame_origin.h"
 #include "miniblink_host/frame/mb_local_frame_host.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/view/mb_webview.h"
@@ -63,6 +64,7 @@ MbFrameClient::~MbFrameClient() {
   // stray GoToEntryAtOffset doesn't post to a freed client.
   if (!self_owned_)
     MbClearHistoryGoToHandler(frame_key_);
+  MbClearFrameOrigin(frame_key_);
   delete nav_assoc_interfaces_;
 }
 
@@ -275,6 +277,13 @@ void MbFrameClient::DidCommitNavigation(
     bool /*should_reset_browser_interface_broker*/,
     const network::ParsedPermissionsPolicy& /*permissions_policy_header*/,
     const blink::DocumentPolicyFeatureState& /*document_policy_header*/) {
+  // Publish this frame's new document origin (main AND child frames) so origin-
+  // agnostic frame-keyed services (BroadcastChannel) can scope cross-origin
+  // isolation. Done before the main-frame-only history bookkeeping below.
+  if (web_frame_) {
+    MbSetFrameOrigin(frame_key_,
+                     web_frame_->GetSecurityOrigin().ToString().Utf8());
+  }
   // Only the main frame feeds the view's history (child/iframe commits don't).
   if (self_owned_ || !web_frame_ || !owner_)
     return;

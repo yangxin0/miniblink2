@@ -1254,6 +1254,30 @@ static void RunCases(mbView* v, int W, int H) {
     }
   }
 
+  // 78d. BroadcastChannel cross-origin isolation: two views of DIFFERENT origins with the SAME
+  // channel name must NOT cross-talk (BroadcastChannel is same-origin per spec). The in-process
+  // registry now scopes delivery by the frame's origin (frame_key->origin map).
+  {
+    mbView* v2 = mbCreateView(W, H);
+    if (v2) {
+      mbLoadHTML(v, "<body>x</body>", "https://bca.test/");   // origin A
+      mbLoadHTML(v2, "<body>x</body>", "https://bcb.test/");  // origin B (cross-origin)
+      mbRunJS(v, "window.__bc='none';var c=new BroadcastChannel('shared');"
+                 "c.onmessage=function(e){window.__bc=e.data;};");
+      mbRunJS(v2, "var c2=new BroadcastChannel('shared');");
+      mbWait(v, 30);
+      mbWait(v2, 30);
+      mbRunJS(v2, "c2.postMessage('from-B');");
+      mbWait(v, 60);
+      mbWait(v2, 60);
+      const std::string r = Eval(v, "window.__bc");
+      Expect(r == "none",
+             "BroadcastChannel: cross-origin views with same channel name don't cross-talk",
+             "bc=[" + r + "]");
+      mbDestroyView(v2);
+    }
+  }
+
   // 74. Stability across many sequential loads (a long-running scraper does
   // thousands). Load varied documents repeatedly on one view, evaluating and
   // painting each, and confirm every load renders correctly — no state leak or

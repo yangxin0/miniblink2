@@ -1,6 +1,7 @@
 #include "miniblink_host/frame/mb_broadcast_channel.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <utility>
@@ -16,6 +17,7 @@
 #include "mojo/public/cpp/bindings/self_owned_associated_receiver.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "mojo/public/cpp/system/message_pipe.h"
+#include "miniblink_host/frame/mb_frame_origin.h"
 #include "third_party/blink/public/mojom/broadcastchannel/broadcast_channel.mojom-blink.h"
 #include "third_party/blink/renderer/core/messaging/blink_cloneable_message.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -58,10 +60,12 @@ blink::BlinkCloneableMessage CloneMessage(const blink::BlinkCloneableMessage& m)
 class MbBroadcastChannel : public BroadcastChannelClient {
  public:
   MbBroadcastChannel(
+      uint64_t frame_key,
       const blink::String& name,
       mojo::PendingAssociatedRemote<BroadcastChannelClient> client,
       mojo::PendingAssociatedReceiver<BroadcastChannelClient> connection)
-      : name_(name.Utf8()),
+      : frame_key_(frame_key),
+        name_(name.Utf8()),
         client_(std::move(client)),
         receiver_(this, std::move(connection)) {
     receiver_.set_disconnect_handler(
@@ -70,14 +74,25 @@ class MbBroadcastChannel : public BroadcastChannelClient {
   }
 
   // BroadcastChannelClient: a message posted by this channel's page. Fan it out to every
-  // OTHER channel of the same name (the spec excludes the sender).
+  // OTHER same-name channel of the SAME ORIGIN (BroadcastChannel is same-origin per spec).
+  // Origins come from the frame_key->origin map; a channel whose origin is unknown (e.g. a
+  // worker bound without a frame_key) acts as a wildcard so existing same-origin window<->
+  // worker communication is preserved — we withhold ONLY when both origins are known and
+  // differ. That isolates the common cross-origin window<->window case without regressions.
   void OnMessage(blink::BlinkCloneableMessage message) override {
     auto it = BcRegistry().find(name_);
     if (it == BcRegistry().end())
       return;
+    const std::string sender_origin = MbGetFrameOrigin(frame_key_);
     for (MbBroadcastChannel* ch : it->second) {
-      if (ch != this)
-        ch->client_->OnMessage(CloneMessage(message));
+      if (ch == this)
+        continue;
+      const std::string recv_origin = MbGetFrameOrigin(ch->frame_key_);
+      if (!sender_origin.empty() && !recv_origin.empty() &&
+          sender_origin != recv_origin) {
+        continue;  // both known and cross-origin -> isolate
+      }
+      ch->client_->OnMessage(CloneMessage(message));
     }
   }
 
@@ -99,6 +114,7 @@ class MbBroadcastChannel : public BroadcastChannelClient {
     delete this;
   }
 
+  const uint64_t frame_key_;
   std::string name_;
   mojo::AssociatedRemote<BroadcastChannelClient> client_;
   mojo::AssociatedReceiver<BroadcastChannelClient> receiver_;
@@ -106,28 +122,38 @@ class MbBroadcastChannel : public BroadcastChannelClient {
 
 class MbBroadcastChannelProvider : public BroadcastChannelProvider {
  public:
+  explicit MbBroadcastChannelProvider(uint64_t frame_key)
+      : frame_key_(frame_key) {}
+
   void ConnectToChannel(
       const blink::String& name,
       mojo::PendingAssociatedRemote<BroadcastChannelClient> client,
       mojo::PendingAssociatedReceiver<BroadcastChannelClient> connection)
       override {
-    new MbBroadcastChannel(name, std::move(client), std::move(connection));
+    new MbBroadcastChannel(frame_key_, name, std::move(client),
+                           std::move(connection));
   }
+
+ private:
+  const uint64_t frame_key_;
 };
 
 }  // namespace
 
-void BindBroadcastChannelProvider(mojo::ScopedInterfaceEndpointHandle handle) {
+void BindBroadcastChannelProvider(mojo::ScopedInterfaceEndpointHandle handle,
+                                  uint64_t frame_key) {
   mojo::MakeSelfOwnedAssociatedReceiver(
-      std::make_unique<MbBroadcastChannelProvider>(),
+      std::make_unique<MbBroadcastChannelProvider>(frame_key),
       mojo::PendingAssociatedReceiver<BroadcastChannelProvider>(
           std::move(handle)));
 }
 
 void BindBroadcastChannelProviderPipe(
     mojo::PendingReceiver<BroadcastChannelProvider> receiver) {
-  mojo::MakeSelfOwnedReceiver(std::make_unique<MbBroadcastChannelProvider>(),
-                              std::move(receiver));
+  // Worker path (no frame id available) -> origin unknown -> wildcard delivery.
+  mojo::MakeSelfOwnedReceiver(
+      std::make_unique<MbBroadcastChannelProvider>(/*frame_key=*/0),
+      std::move(receiver));
 }
 
 }  // namespace mb

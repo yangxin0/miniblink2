@@ -863,8 +863,16 @@ process-wide state confirmed two real cross-origin data-isolation gaps, both ins
     DIFFERENT origins that open IndexedDB with the SAME db name share ONE backend -> cross-origin
     read/write of PERSISTENT data (a genuine isolation/security gap, not just a spec nit; worse than the
     others because the data persists and mbSaveIndexedDB serializes it). IDB is strictly per-origin per spec.
-  * BroadcastChannel: the registry is keyed by channel NAME only (mb_broadcast_channel.cc BcRegistry) ->
-    cross-origin message delivery for same-named channels. (Lower impact: transient messages.)
+  * BroadcastChannel: [FIXED this tick] was keyed by channel NAME only -> cross-origin message delivery.
+    Now origin-scoped: a process-wide frame_key->origin map (frame/mb_frame_origin.{h,cc}, set by
+    MbFrameClient on each commit) lets a channel recover its frame's origin (the window path's provider
+    already carries frame_key via the nav-assoc provider). Fan-out WITHHOLDS a message only when BOTH the
+    sender's and receiver's origins are KNOWN and DIFFER; an unknown origin (a worker, bound via the broker
+    pipe with no frame_key) acts as a wildcard, so same-origin window<->worker communication is preserved
+    (strict improvement, no regression). Verified mb_smoke_render 78d (two views, cross-origin, same channel
+    name -> isolated) + 23h (same-origin delivery) + 23i (window<->worker bridge). RESIDUAL: worker<->worker
+    and opaque-origin ("null") channels not isolated (niche). The frame_key->origin map is now available to
+    fix IDB the same way once the broker carries frame_key (the remaining, heavier half).
 ROOT CAUSE: the mojom for both (IDBFactory.Open, BroadcastChannelProvider.ConnectToChannel) carries NO
 origin — the real browser binds these interfaces PER-ORIGIN (per storage bucket), so the origin is implicit
 in which factory/provider instance. Our broker (MakeFrameInterfaceBroker) is a single per-frame instance,

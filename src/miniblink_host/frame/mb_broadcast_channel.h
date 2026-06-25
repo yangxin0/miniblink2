@@ -14,6 +14,8 @@
 #ifndef MINIBLINK_HOST_FRAME_MB_BROADCAST_CHANNEL_H_
 #define MINIBLINK_HOST_FRAME_MB_BROADCAST_CHANNEL_H_
 
+#include <cstdint>
+
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/scoped_interface_endpoint_handle.h"
 #include "third_party/blink/public/mojom/broadcastchannel/broadcast_channel.mojom-blink.h"
@@ -22,8 +24,10 @@ namespace mb {
 
 // Bind an in-process BroadcastChannelProvider to an ASSOCIATED-interface endpoint handle.
 // Called from the frame's navigation-associated interface provider (window path) when blink
-// requests BroadcastChannelProvider::Name_.
-void BindBroadcastChannelProvider(mojo::ScopedInterfaceEndpointHandle handle);
+// requests BroadcastChannelProvider::Name_. `frame_key` identifies the binding frame so the
+// provider's channels can be scoped to the frame's origin (cross-origin isolation).
+void BindBroadcastChannelProvider(mojo::ScopedInterfaceEndpointHandle handle,
+                                  uint64_t frame_key);
 
 // Bind one to a regular (non-associated) pipe receiver. Called from the BrowserInterface
 // Broker for the WORKER path (a worker's BroadcastChannel asks its broker). Both paths share

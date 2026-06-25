@@ -577,7 +577,7 @@ class MbNavAssociatedInterfaceProvider
     }
     // navigator BroadcastChannel (window path): in-process same-name fan-out.
     if (name == blink::mojom::blink::BroadcastChannelProvider::Name_) {
-      BindBroadcastChannelProvider(receiver.PassHandle());
+      BindBroadcastChannelProvider(receiver.PassHandle(), frame_key_);
       return;
     }
     // The frame's host channel. We bind a (mostly no-op) LocalFrameHost so that
