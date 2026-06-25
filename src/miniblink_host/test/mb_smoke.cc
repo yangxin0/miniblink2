@@ -1630,6 +1630,26 @@ int main() {
            "cis=[" + r + "]");
   }
 
+  // 23ag. Worker from a mocked same-origin URL: MbFetchUrl now consults the mock table, so a
+  // worker script served by mbMockResponse loads and runs — and is SAME-ORIGIN with the page
+  // (unlike a data: worker, which is opaque). This is the route to origin-bound worker tests.
+  {
+    mbMockResponse("https://opfs.test/w.js",
+                   "self.postMessage('mock-worker-ran');", "text/javascript",
+                   200);
+    mbLoadHTML(v, "<body>x</body>", "https://opfs.test/");
+    Eval(v,
+         "window.__mw='';"
+         "var __mwk=new Worker('/w.js');"
+         "__mwk.onmessage=function(e){window.__mw=e.data;};");
+    mbWaitForFunction(v, "window.__mw!==''", 4000);
+    const std::string r = Eval(v, "window.__mw");
+    mbClearMocks();
+    Expect(r == "mock-worker-ran",
+           "a Worker loaded from a mocked same-origin URL runs",
+           "mw=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

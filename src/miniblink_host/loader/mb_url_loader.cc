@@ -816,6 +816,23 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 const std::string& http_method, std::string* out_final_url,
                 int* out_status, std::string* out_headers) {
   GURL url(url_spec);
+  // Response mocking: a registered URL substring serves its canned body without a real fetch.
+  // Checked before any scheme — matching the async loader (Deliver) — so worker scripts,
+  // iframes, and top-level navigations (all of which fetch through here) can be mocked too.
+  {
+    std::string mock_body, mock_ct;
+    int mock_status = 0;
+    if (MbFindMock(url.spec(), &mock_body, &mock_ct, &mock_status)) {
+      *body = std::move(mock_body);
+      if (content_type)
+        *content_type = mock_ct;
+      if (out_status)
+        *out_status = mock_status > 0 ? mock_status : 200;
+      if (out_final_url)
+        *out_final_url = url_spec;
+      return true;
+    }
+  }
   if (url.SchemeIsFile()) {
     // Convert via net (percent-decodes the path; "Andale%20Mono.ttf" -> a space)
     // — a raw url.path() leaves it encoded and ReadFileToString fails.
