@@ -246,30 +246,42 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      NOT work here — no file-reading blob backend — which is why we read the bytes ourselves.
 
 **Tier 2 — web-platform fidelity (host infra; heavier):**
-7. Workers (dedicated/shared/service). **SCOPED (2026-06):** `new Worker()` is deliberately
-   INERT, not broken — `MbPlatform::CreateDedicatedWorkerHostFactoryClient` returns a stub
-   whose `CreateWorkerHost` does nothing (the script-load callback never fires), so a
-   worker-using page degrades (worker silent) instead of the SIGSEGV the base null factory
-   would cause. Making workers RUN is a large big-bang (NOT incrementally verifiable):
-   the stub must drive `WebDedicatedWorker::OnWorkerHostCreated(...)` + `OnScriptLoadStarted(
-   null-params, ...)` (so the worker thread fetches its script itself), AND `MbFrameClient`
-   must override `CreateWorkerFetchContext` to return a real `WebWorkerFetchContext` (~20-method
-   interface) backed by `MbURLLoader` — plus the worker-host/broker mojo remotes can't be null
-   or the worker derefs them. Needs a dedicated multi-tick effort, not a single loop tick.
-   Flow map: dedicated_worker.cc ContinueStart→CreateWorkerHost→OnWorkerHostCreated→
-   OnScriptLoadStarted→ContinueStart (worker thread + script fetch).
-   DEEPER SCOPE (investigated 2026-06): the factory-client stub must call, on the stored
-   `blink::WebDedicatedWorker*`: (a) `OnWorkerHostCreated(broker_remote, dedicated_worker_host
-   _remote, origin)` — needs a bound BrowserInterfaceBroker remote (reuse MakeFrameInterface-
-   Broker) AND a bound DedicatedWorkerHost remote (a new mojom stub); (b) `OnScriptLoadStarted(
-   nullptr load_params, bfcache_host_remote, coep/dip observer receivers, …)` so the worker
-   fetches its own script — but those remotes/receivers are non-optional, so each needs a
-   stub. THEN `MbFrameClient::CreateWorkerFetchContext` must return a real `WebWorkerFetchContext`
-   (21 virtuals; the load-bearing `GetURLLoaderFactory()` must hand back a blink::URLLoaderFactory
-   that creates MbURLLoaders). No minimal fake exists in the donor to model. RISK: null/wrong
-   remotes crash on deref, and the worker thread brings its own isolate+cppgc heap setup that may
-   hit further CHECKs — i.e. intermediate states likely crash, so it does NOT fit the
-   verify-each-tick loop. Needs a dedicated, focused multi-hour session, not 5-min ticks.
+7. Workers (dedicated/shared/service). **RE-SCOPED + STEP 1 STARTED (2026-06):** the earlier
+   "big-bang, maybe-infeasible" framing was over-pessimistic. A re-investigation against M150
+   source shows an in-process dedicated worker is TRACTABLE and built entirely from blink-PUBLIC
+   types (no content/renderer infrastructure required). Key findings:
+   - `blink::mojom::DedicatedWorkerHost` is an **EMPTY interface** (zero methods) — the host
+     "remote" is a trivial self-owned receiver, not a real mojom stub.
+   - `WorkerMainScriptLoadParameters` + the loader-bundle types live in `third_party/blink/public/`
+     (host-reachable). The content `DedicatedWorkerHostFactoryClient` is only ~177 lines and its
+     content-only deps (ServiceWorkerProviderContext, RenderThreadImpl cors list) are optional/empty.
+   - `WebWorkerFetchContext` is **10 pure-virtuals** (not ~21); the concrete giant is
+     `WebDedicatedOrSharedWorkerGlobalScopeContext`, which we DON'T need — a minimal context suffices.
+   - Script delivery model (`WorkerMainScriptLoader::Start`): blink BINDS the
+     `url_loader_client_endpoints` (it is the URLLoaderClient) and reads `response_body` (a data
+     pipe) to EOF, then awaits our `OnComplete`. So we synthesize: a 200 `URLResponseHead`, a data
+     pipe holding the script bytes (producer closed = EOF), a held inert URLLoader receiver, and a
+     URLLoaderClient remote we use to push `OnComplete(net::OK)`.
+
+   **Plan (each step compiles + keeps the render worker-spawn guard green until the last):**
+   - [DONE] **Step 1 — subresource fetch context.** `src/miniblink_host/worker/mb_worker_fetch_context.{h,cc}`:
+     `MbWorkerFetchContext : WebWorkerFetchContext` (10 methods; `GetURLLoaderFactory()` hands back
+     `MbWorkerURLLoaderFactory : blink::URLLoaderFactory`, which creates `mb::MbURLLoader`). Wired via
+     `MbFrameClient::CreateWorkerFetchContext`. CRASH-SAFE: the worker thread is still not started
+     (CreateWorkerHost stays inert), so `new Worker()` still degrades gracefully (render 81 green).
+     KNOWN follow-up: MbURLLoader's body-loader task runner is the creation-thread runner; once the
+     worker actually runs, `GetURLLoaderFactory()` is consulted ON the worker thread and the loader
+     must use the worker-thread runner. Harmless until Step 2 (factory created but never invoked).
+   - [NEXT] **Step 2 — drive the worker thread.** In `MbDedicatedWorkerHostFactoryClient` (mb_platform.cc):
+     store the `WebDedicatedWorker*`; on `CreateWorkerHost`, (a) call `worker_->OnWorkerHostCreated(
+     broker_remote, dedicated_worker_host_remote, origin)` — broker remote reuses the frame broker
+     impl, host remote is the empty self-owned receiver; (b) fetch the script (MbFetchUrl), synthesize
+     `WorkerMainScriptLoadParameters` (response_head + data-pipe body + inert URLLoader receiver +
+     URLLoaderClient remote), and call `worker_->OnScriptLoadStarted(params, bfcache_host_remote,
+     coep_receiver, dip_receiver)`; (c) after EOF, push `OnComplete(net::OK)`. RISK concentrated here:
+     the worker thread brings its own isolate+cppgc heap setup that may hit CHECKs in this minimal host;
+     if it crashes, REVERT step 2 and keep step 1's dormant context. First verifiable milestone:
+     a Worker runs its script and `postMessage`s back to the page.
    8. Broker binds cookies
 only [+ Permissions, this tick]. [DONE: Permissions] `MbPermissionService` in the FRAME
 broker (mb_frame_broker.cc — the one navigator.* uses, not the platform thread broker)

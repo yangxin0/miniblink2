@@ -60,6 +60,12 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // a non-null loader makes Blink use it for subresources. -> our file-backed loader.
   std::unique_ptr<blink::URLLoader> CreateURLLoaderForTesting() override;
 
+  // A Worker's subresource fetch context (importScripts/fetch inside the worker).
+  // Returns the host's libcurl-backed context so worker loads don't die at creation.
+  // (Step 1 of worker bring-up; the worker thread itself is still started elsewhere.)
+  scoped_refptr<blink::WebWorkerFetchContext> CreateWorkerFetchContext(
+      blink::WebDedicatedWorkerHostFactoryClient*) override;
+
   // Child frames (<iframe>). Without this, Blink leaves subframes empty
   // (frames.length 0, contentDocument null). We create a real local child frame
   // with its own MbFrameClient (self-owned) so iframe content loads. Modeled on

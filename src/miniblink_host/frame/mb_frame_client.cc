@@ -15,6 +15,7 @@
 #include "miniblink_host/blob/mb_blob_registry.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/view/mb_webview.h"
+#include "miniblink_host/worker/mb_worker_fetch_context.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
@@ -265,6 +266,15 @@ std::unique_ptr<blink::URLLoader> MbFrameClient::CreateURLLoaderForTesting() {
   // Subresources use the same UA + extra headers the top-level fetch does, so the
   // network identity is consistent across the document and its subresources.
   return std::make_unique<MbURLLoader>(
+      user_agent_.empty() ? MbDefaultUserAgent() : user_agent_, extra_headers_);
+}
+
+scoped_refptr<blink::WebWorkerFetchContext>
+MbFrameClient::CreateWorkerFetchContext(
+    blink::WebDedicatedWorkerHostFactoryClient*) {
+  // Same network identity (UA + extra headers) as the frame's own subresources, so a
+  // worker's importScripts()/fetch() looks identical on the wire to the page's loads.
+  return base::MakeRefCounted<MbWorkerFetchContext>(
       user_agent_.empty() ? MbDefaultUserAgent() : user_agent_, extra_headers_);
 }
 
