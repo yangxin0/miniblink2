@@ -1541,22 +1541,26 @@ int main() {
            "md=[" + r + "]");
   }
 
-  // 23ac. OPFS navigator.storage.getDirectory() (broker FileSystemAccessManager): a real
-  // in-memory OPFS is deferred, but the manager must be bound so getDirectory() REJECTS cleanly
-  // instead of hanging (blink sets no disconnect handler, so an unbound pipe stalls the promise
-  // forever). This verifies the promise settles (rejects) rather than hanging.
+  // 23ac. OPFS directory tree (broker FileSystemAccessManager + in-memory tree): getDirectory()
+  // resolves to a usable root; create a subdirectory and two files in it, enumerate via keys(),
+  // and verify getFileHandle without {create} on a missing name rejects with NotFoundError.
   {
     mbLoadHTML(v, "<body>x</body>", "https://opfs.test/");
     Eval(v,
          "window.__opfs='';"
-         "if(navigator.storage&&navigator.storage.getDirectory){"
-         "navigator.storage.getDirectory().then(function(d){window.__opfs='resolved';})"
-         ".catch(function(e){window.__opfs='rejected';});}"
-         "else{window.__opfs='no-api';}");
-    mbWaitForFunction(v, "window.__opfs!==''", 3000);
+         "(async function(){try{"
+         "var root=await navigator.storage.getDirectory();"
+         "var docs=await root.getDirectoryHandle('docs',{create:true});"
+         "await docs.getFileHandle('a.txt',{create:true});"
+         "await docs.getFileHandle('b.txt',{create:true});"
+         "var names=[];for await (var n of docs.keys())names.push(n);names.sort();"
+         "var nf='';try{await docs.getFileHandle('missing');}catch(e){nf=e.name;}"
+         "window.__opfs=names.join(',')+';'+nf;"
+         "}catch(e){window.__opfs='err:'+e.name;}})();");
+    mbWaitForFunction(v, "window.__opfs!==''", 4000);
     const std::string r = Eval(v, "window.__opfs");
-    Expect(r == "rejected" || r == "no-api",
-           "OPFS getDirectory() settles (rejects cleanly) instead of hanging",
+    Expect(r == "a.txt,b.txt;NotFoundError",
+           "OPFS: getDirectory tree — create dirs/files, enumerate, not-found rejects",
            "opfs=[" + r + "]");
   }
 

@@ -36,8 +36,7 @@
 #include "services/device/public/mojom/geolocation.mojom-blink.h"
 #include "base/files/file.h"
 #include "third_party/blink/public/mojom/clipboard/clipboard.mojom-blink.h"
-#include "third_party/blink/public/mojom/file_system_access/file_system_access_directory_handle.mojom-blink.h"
-#include "third_party/blink/public/mojom/file_system_access/file_system_access_error.mojom-blink.h"
+#include "miniblink_host/frame/mb_opfs.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_manager.mojom-blink.h"
 #include "third_party/blink/public/common/mediastream/media_devices.h"
 #include "third_party/blink/public/mojom/mediastream/media_devices.mojom-blink.h"
@@ -552,53 +551,6 @@ class MbMediaDevicesDispatcherHost
                          SelectAudioOutputCallback) override {}
 };
 
-// blink.mojom.FileSystemAccessManager for navigator.storage.getDirectory() (OPFS) and the
-// file/directory pickers. A real in-memory OPFS is a large multi-interface effort (directory
-// + file handles + writers) deferred for now; this binding exists so the calls FAIL FAST
-// instead of HANGING. blink's FileSystemAccessManager sets no disconnect handler, so an unbound
-// pipe leaves getDirectory()'s promise pending forever — binding a manager that returns an
-// error makes getDirectory()/showOpenFilePicker() reject cleanly ("not supported").
-class MbFileSystemAccessManager
-    : public blink::mojom::blink::FileSystemAccessManager {
- public:
-  void GetSandboxedFileSystem(GetSandboxedFileSystemCallback callback) override {
-    std::move(callback).Run(NotSupported(), mojo::NullRemote());
-  }
-  void GetSandboxedFileSystemForDevtools(
-      const blink::Vector<blink::String>&,
-      GetSandboxedFileSystemForDevtoolsCallback callback) override {
-    std::move(callback).Run(NotSupported(), mojo::NullRemote());
-  }
-  void ChooseEntries(blink::mojom::blink::FilePickerOptionsPtr,
-                     ChooseEntriesCallback callback) override {
-    std::move(callback).Run(NotSupported(), {});
-  }
-  void GetFileHandleFromToken(
-      mojo::PendingRemote<blink::mojom::blink::FileSystemAccessTransferToken>,
-      mojo::PendingReceiver<blink::mojom::blink::FileSystemAccessFileHandle>)
-      override {}
-  void GetDirectoryHandleFromToken(
-      mojo::PendingRemote<blink::mojom::blink::FileSystemAccessTransferToken>,
-      mojo::PendingReceiver<blink::mojom::blink::FileSystemAccessDirectoryHandle>)
-      override {}
-  void GetEntryFromDataTransferToken(
-      mojo::PendingRemote<
-          blink::mojom::blink::FileSystemAccessDataTransferToken>,
-      GetEntryFromDataTransferTokenCallback callback) override {
-    std::move(callback).Run(NotSupported(), nullptr);
-  }
-  void BindObserverHost(
-      mojo::PendingReceiver<blink::mojom::blink::FileSystemAccessObserverHost>)
-      override {}
-
- private:
-  static blink::mojom::blink::FileSystemAccessErrorPtr NotSupported() {
-    return blink::mojom::blink::FileSystemAccessError::New(
-        blink::mojom::blink::FileSystemAccessStatus::kOperationFailed,
-        base::File::FILE_ERROR_FAILED,
-        blink::String("File System Access is not available in this host"));
-  }
-};
 
 // Process-wide configured geolocation fix (set via mbSetGeolocation). Read on the
 // broker's service thread, written from the main thread, so guard with a lock. When
@@ -767,11 +719,10 @@ class MbBrowserInterfaceBroker
                                   std::move(r));
       return;
     }
-    // navigator.storage.getDirectory() (OPFS) + file pickers — reject cleanly (no hang).
+    // navigator.storage.getDirectory() (OPFS) — in-memory directory/file tree.
     if (auto r =
             receiver.As<blink::mojom::blink::FileSystemAccessManager>()) {
-      mojo::MakeSelfOwnedReceiver(std::make_unique<MbFileSystemAccessManager>(),
-                                  std::move(r));
+      BindFileSystemAccessManager(std::move(r));
       return;
     }
     // Drop everything else (no browser process).

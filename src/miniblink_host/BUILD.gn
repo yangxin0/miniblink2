@@ -38,6 +38,8 @@ component("miniblink_host") {
     "frame/mb_lock_manager.h",
     "frame/mb_notification_service.cc",
     "frame/mb_notification_service.h",
+    "frame/mb_opfs.cc",
+    "frame/mb_opfs.h",
     "frame/mb_websocket.cc",
     "frame/mb_websocket.h",
     "frame/mb_view_client.cc",
