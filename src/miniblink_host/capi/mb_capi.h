@@ -449,6 +449,14 @@ MB_EXPORT void mbClearCookies(mbView*);
 MB_EXPORT int mbSaveCookies(const char* path);
 MB_EXPORT int mbLoadCookies(const char* path);
 
+// Persist / restore the WHOLE in-memory IndexedDB store (every database, by name) to/from a
+// private binary file — the IndexedDB peer of mbSaveCookies/mbSaveLocalStorage, for carrying
+// app state (auth tokens, offline caches) across process runs. Process-wide (no view param).
+// Return 1 on success, 0 on failure. Call mbLoadIndexedDB BEFORE the page opens its databases.
+// Blob-valued records are not captured (the backend stores only the value byte payload).
+MB_EXPORT int mbSaveIndexedDB(const char* path);
+MB_EXPORT int mbLoadIndexedDB(const char* path);
+
 // Network observability: the loader records every subresource URL it fetches
 // (img, css, fetch/XHR, …). mbGetRequestLog writes them newline-separated,
 // oldest first, into `out` and returns the full length (size first with

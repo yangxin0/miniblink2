@@ -13,7 +13,13 @@
 
 #include "base/bit_cast.h"
 #include "base/containers/span.h"
+#include "base/files/file_path.h"
+#include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/synchronization/waitable_event.h"
+#include "base/task/single_thread_task_runner.h"
+#include "miniblink_host/runtime/mb_runtime.h"
 #include "mojo/public/cpp/base/big_buffer.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
@@ -878,12 +884,241 @@ class MbIDBFactory : public m::IDBFactory {
   }
 };
 
+// ---- Persistence: serialize the whole Registry to a flat byte buffer ----------
+// Format is private (we own both ends): a length-prefixed binary dump of every
+// database's metadata (object stores + indexes + key paths), records (encoded key
+// + opaque value bytes), key generators, and secondary-index data. Blob-referenced
+// values aren't captured (the backend already stores only the value byte payload).
+
+void WU8(std::string* o, uint8_t v) { o->push_back(static_cast<char>(v)); }
+void WU32(std::string* o, uint32_t v) {
+  for (int i = 0; i < 4; ++i) o->push_back(static_cast<char>((v >> (8 * i)) & 0xff));
+}
+void WI64(std::string* o, int64_t v) {
+  uint64_t u = static_cast<uint64_t>(v);
+  for (int i = 0; i < 8; ++i) o->push_back(static_cast<char>((u >> (8 * i)) & 0xff));
+}
+void WStr(std::string* o, const std::string& s) {
+  WU32(o, static_cast<uint32_t>(s.size()));
+  o->append(s);
+}
+void WKeyPath(std::string* o, const blink::IDBKeyPath& kp) {
+  switch (kp.GetType()) {
+    case blink::mojom::IDBKeyPathType::Null:
+      WU8(o, 0);
+      break;
+    case blink::mojom::IDBKeyPathType::String:
+      WU8(o, 1);
+      WStr(o, kp.GetString().Utf8());
+      break;
+    case blink::mojom::IDBKeyPathType::Array: {
+      WU8(o, 2);
+      const blink::Vector<blink::String>& a = kp.Array();
+      WU32(o, a.size());
+      for (const blink::String& e : a) WStr(o, e.Utf8());
+      break;
+    }
+  }
+}
+
+// Reader with a bounds-checked cursor; any underflow sets ok=false and yields zeros.
+struct Reader {
+  const std::string& b;
+  size_t pos = 0;
+  bool ok = true;
+  explicit Reader(const std::string& buf) : b(buf) {}
+  uint8_t U8() {
+    if (pos + 1 > b.size()) { ok = false; return 0; }
+    return static_cast<uint8_t>(b[pos++]);
+  }
+  uint32_t U32() {
+    if (pos + 4 > b.size()) { ok = false; return 0; }
+    uint32_t v = 0;
+    for (int i = 0; i < 4; ++i) v |= static_cast<uint32_t>(static_cast<uint8_t>(b[pos++])) << (8 * i);
+    return v;
+  }
+  int64_t I64() {
+    if (pos + 8 > b.size()) { ok = false; return 0; }
+    uint64_t v = 0;
+    for (int i = 0; i < 8; ++i) v |= static_cast<uint64_t>(static_cast<uint8_t>(b[pos++])) << (8 * i);
+    return static_cast<int64_t>(v);
+  }
+  std::string Str() {
+    uint32_t n = U32();
+    if (!ok || pos + n > b.size()) { ok = false; return std::string(); }
+    std::string s = b.substr(pos, n);
+    pos += n;
+    return s;
+  }
+  blink::IDBKeyPath KeyPath() {
+    uint8_t t = U8();
+    if (t == 1)
+      return blink::IDBKeyPath(blink::String::FromUtf8(Str()));
+    if (t == 2) {
+      uint32_t n = U32();
+      blink::Vector<blink::String> a;
+      for (uint32_t i = 0; i < n && ok; ++i) a.push_back(blink::String::FromUtf8(Str()));
+      return blink::IDBKeyPath(a);
+    }
+    return blink::IDBKeyPath();  // Null
+  }
+};
+
+constexpr char kIdbMagic[] = "MBIDB001";
+
+// Whether a database has any secondary index. We can persist only index-FREE
+// databases (the common keyval-style case): blink's IDBIndexMetadata is not an
+// exported symbol, so it can't be reconstructed from this separate dylib. A
+// database with indexes is skipped (not persisted) rather than restored broken.
+bool HasAnyIndex(const MbIDBBackend& b) {
+  for (const auto& [sid, os] : b.metadata.object_stores) {
+    if (!os->indexes.empty())
+      return true;
+  }
+  return false;
+}
+
+std::string SerializeRegistry() {
+  std::string o;
+  o.append(kIdbMagic, 8);
+  // Count the databases we will actually persist (index-free only).
+  uint32_t persistable = 0;
+  for (const auto& [name, b] : Registry())
+    if (!HasAnyIndex(*b)) ++persistable;
+  WU32(&o, persistable);
+  for (const auto& [name, b] : Registry()) {
+    if (HasAnyIndex(*b))
+      continue;  // skip — see HasAnyIndex (index metadata isn't reconstructable)
+    const blink::IDBDatabaseMetadata& md = b->metadata;
+    WStr(&o, name);
+    WI64(&o, md.version);
+    WI64(&o, md.max_object_store_id);
+    WU32(&o, md.object_stores.size());
+    for (const auto& [sid, os] : md.object_stores) {
+      WI64(&o, sid);
+      WStr(&o, os->name.Utf8());
+      WKeyPath(&o, os->key_path);
+      WU8(&o, os->auto_increment ? 1 : 0);
+      WI64(&o, os->max_index_id);
+    }
+    // Records.
+    WU32(&o, b->data.size());
+    for (const auto& [sid, recs] : b->data) {
+      WI64(&o, sid);
+      WU32(&o, recs.size());
+      for (const auto& [ekey, rec] : recs) {
+        WStr(&o, ekey);
+        WStr(&o, rec.bytes);
+      }
+    }
+    // Key generators.
+    WU32(&o, b->key_generator.size());
+    for (const auto& [sid, next] : b->key_generator) {
+      WI64(&o, sid);
+      WI64(&o, next);
+    }
+  }
+  return o;
+}
+
+bool DeserializeRegistry(const std::string& buf) {
+  Reader r(buf);
+  if (buf.size() < 8 || buf.compare(0, 8, kIdbMagic, 8) != 0)
+    return false;
+  r.pos = 8;
+  uint32_t db_count = r.U32();
+  std::map<std::string, std::unique_ptr<MbIDBBackend>> loaded;
+  for (uint32_t d = 0; d < db_count && r.ok; ++d) {
+    auto b = std::make_unique<MbIDBBackend>();
+    std::string name = r.Str();
+    b->metadata.name = blink::String::FromUtf8(name);
+    b->metadata.version = r.I64();
+    b->metadata.max_object_store_id = r.I64();
+    uint32_t store_count = r.U32();
+    for (uint32_t s = 0; s < store_count && r.ok; ++s) {
+      int64_t sid = r.I64();
+      auto os = blink::IDBObjectStoreMetadata::Create();
+      os->id = sid;
+      os->name = blink::String::FromUtf8(r.Str());
+      os->key_path = r.KeyPath();
+      os->auto_increment = r.U8() != 0;
+      os->max_index_id = r.I64();
+      b->metadata.object_stores.Set(sid, os);
+    }
+    uint32_t data_store_count = r.U32();
+    for (uint32_t s = 0; s < data_store_count && r.ok; ++s) {
+      int64_t sid = r.I64();
+      uint32_t rec_count = r.U32();
+      auto& recs = b->data[sid];
+      for (uint32_t k = 0; k < rec_count && r.ok; ++k) {
+        std::string ekey = r.Str();
+        std::string bytes = r.Str();
+        recs[ekey] = MbRecord{DecodeKey(ekey), std::move(bytes)};
+      }
+    }
+    uint32_t keygen_count = r.U32();
+    for (uint32_t s = 0; s < keygen_count && r.ok; ++s) {
+      int64_t sid = r.I64();
+      b->key_generator[sid] = r.I64();
+    }
+    if (r.ok)
+      loaded[name] = std::move(b);
+  }
+  if (!r.ok)
+    return false;
+  // Commit: replace the live registry with the restored set.
+  Registry() = std::move(loaded);
+  return true;
+}
+
 }  // namespace
 
 void BindIDBFactory(
     mojo::PendingReceiver<blink::mojom::blink::IDBFactory> receiver) {
   mojo::MakeSelfOwnedReceiver(std::make_unique<MbIDBFactory>(),
                               std::move(receiver));
+}
+
+namespace {
+// Run `task` on the IDB service thread (where the Registry + its backends' mojo
+// endpoints live) and block until it finishes. The Registry must only be touched
+// there — replacing it on the main thread would destroy service-thread-bound
+// AssociatedRemotes off-sequence (a mojo sequence-checker FATAL).
+void RunOnServiceSync(base::OnceClosure task) {
+  scoped_refptr<base::SingleThreadTaskRunner> runner =
+      MbRuntime::ServiceTaskRunner();
+  if (!runner || runner->RunsTasksInCurrentSequence()) {
+    std::move(task).Run();  // pre-init or already on the service thread
+    return;
+  }
+  base::WaitableEvent done;
+  runner->PostTask(FROM_HERE,
+                   base::BindOnce(
+                       [](base::OnceClosure t, base::WaitableEvent* e) {
+                         std::move(t).Run();
+                         e->Signal();
+                       },
+                       std::move(task), &done));
+  done.Wait();
+}
+}  // namespace
+
+bool MbSaveIndexedDB(const std::string& path) {
+  std::string blob;
+  RunOnServiceSync(base::BindOnce(
+      [](std::string* out) { *out = SerializeRegistry(); }, &blob));
+  return base::WriteFile(base::FilePath(path), blob);
+}
+
+bool MbLoadIndexedDB(const std::string& path) {
+  std::string blob;
+  if (!base::ReadFileToString(base::FilePath(path), &blob))
+    return false;
+  bool ok = false;
+  RunOnServiceSync(base::BindOnce(
+      [](const std::string& b, bool* out) { *out = DeserializeRegistry(b); },
+      blob, &ok));
+  return ok;
 }
 
 }  // namespace mb

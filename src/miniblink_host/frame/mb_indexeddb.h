@@ -13,6 +13,8 @@
 #ifndef MINIBLINK_HOST_FRAME_MB_INDEXEDDB_H_
 #define MINIBLINK_HOST_FRAME_MB_INDEXEDDB_H_
 
+#include <string>
+
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom-blink.h"
 
@@ -22,6 +24,14 @@ namespace mb {
 // service thread.
 void BindIDBFactory(
     mojo::PendingReceiver<blink::mojom::blink::IDBFactory> receiver);
+
+// Persist / restore the whole in-memory IndexedDB store (every database, by name) to/from
+// `path` as a private binary file — the IndexedDB peer of the cookie/localStorage jars, for
+// carrying app state (auth tokens, caches) across process runs. Save returns false if the
+// file can't be written; Load returns false if it's missing/unreadable/corrupt. Call Load
+// BEFORE the page opens its databases. Blob-valued records are not captured.
+bool MbSaveIndexedDB(const std::string& path);
+bool MbLoadIndexedDB(const std::string& path);
 
 }  // namespace mb
 

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "miniblink_host/frame/mb_frame_broker.h"
+#include "miniblink_host/frame/mb_indexeddb.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/runtime/mb_runtime.h"
 #include "miniblink_host/view/mb_webview.h"
@@ -523,6 +524,16 @@ int mbSaveCookies(const char* path) {
 int mbLoadCookies(const char* path) {
   // Process-wide: load a previously-saved jar from `path` into the shared jar.
   return (path && mb::MbLoadCookies(path)) ? 1 : 0;
+}
+
+int mbSaveIndexedDB(const char* path) {
+  // Process-wide: snapshot every in-memory IndexedDB database to `path`.
+  return (path && mb::MbSaveIndexedDB(path)) ? 1 : 0;
+}
+
+int mbLoadIndexedDB(const char* path) {
+  // Process-wide: restore IndexedDB databases from `path` (call before open()).
+  return (path && mb::MbLoadIndexedDB(path)) ? 1 : 0;
 }
 
 int mbGetRequestLog(char* out, int out_cap) {

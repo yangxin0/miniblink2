@@ -689,7 +689,19 @@ constraints, atomic abort, and compound keys — the whole object-store/index AP
    cache and FATAL-DCHECKs if it ever receives a mojo KeyChanged for session — confirmed by a
    crash, then fixed with a broadcast=false flag). Verified mb_smoke_render 78b: two views, same
    origin -> sessionStorage isolated (viewA vs null), localStorage shared (per-origin).]
-   [REMAINING: IndexedDB persistence (needs the IndexedDB broker, see #8).] 10. Blob-from-file
+   [DONE (slice 1): IndexedDB persistence] `mbSaveIndexedDB(path)` / `mbLoadIndexedDB(path)` —
+   the IndexedDB peer of the cookie/localStorage jars. Serializes the whole in-memory Registry
+   (every database by name: metadata + object-store schemas + key paths + records[encoded key +
+   opaque value bytes] + key generators) to a private binary file and restores it (call Load
+   BEFORE the page opens). Registry access hops to the IDB SERVICE thread via a WaitableEvent
+   (touching it from the main C-ABI thread would destroy service-thread-bound AssociatedRemotes
+   off-sequence — confirmed by a mojo sequence-checker FATAL, then fixed). LIMITATION: databases
+   with SECONDARY INDEXES are skipped (not persisted) — blink's IDBIndexMetadata isn't an exported
+   symbol, so it can't be reconstructed from the separate miniblink_host dylib; only index-free
+   keyval-style DBs (the common auth-token/state case, e.g. idb-keyval) persist. Blob-valued
+   records also not captured. Verified mb_smoke 23m2: save 'authtoken' -> overwrite 'CHANGED' ->
+   restore -> reopen reads back 'authtoken'. [REMAINING: secondary-index persistence (blocked on
+   blink export); per-origin IDB partitioning.] 10. Blob-from-file
 + ranged blob reads + DataPipeGetter uploads. 11. **GPU content path** (WebGL / accel-2d-canvas /
 `<video>` render blank) — the heaviest; needs a GL/media provider. Last.
 

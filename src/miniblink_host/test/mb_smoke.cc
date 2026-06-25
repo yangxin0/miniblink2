@@ -1231,6 +1231,54 @@ int main() {
            "idb=[" + r + "]");
   }
 
+  // 23m2. IndexedDB persistence (mbSaveIndexedDB/mbLoadIndexedDB): an index-free keyval database
+  // survives a save -> modify -> restore cycle. Save a snapshot ('authtoken'), overwrite the value
+  // ('CHANGED'), restore the snapshot, reopen, and confirm the value reverted — the cross-run
+  // session-reuse contract. The connection is dropped (navigate + close) before each restore so
+  // replacing the registry can't dangle a live backend pointer.
+  {
+    const std::string path = "/tmp/mb_idb_persist_test.bin";
+    mbLoadHTML(v, "<body>x</body>", "https://idbp.test/");
+    Eval(v,
+         "window.__p='';"
+         "var q=indexedDB.open('mbdbpersist',1);"
+         "q.onupgradeneeded=function(e){e.target.result.createObjectStore('kv',{keyPath:'id'});};"
+         "q.onsuccess=function(e){var db=e.target.result;"
+         "var tx=db.transaction('kv','readwrite');tx.objectStore('kv').put({id:1,tok:'authtoken'});"
+         "tx.oncomplete=function(){db.close();window.__p='saved';};};"
+         "q.onerror=function(){window.__p='err1';};");
+    mbWaitForFunction(v, "window.__p!==''", 4000);
+    const bool saved = mbSaveIndexedDB(path.c_str()) == 1;
+    mbLoadHTML(v, "<body>y</body>", "https://idbp.test/");  // drop the connection
+    mbWait(v, 50);
+    Eval(v,
+         "window.__p2='';"
+         "var q2=indexedDB.open('mbdbpersist',1);"
+         "q2.onsuccess=function(e){var db=e.target.result;"
+         "var tx=db.transaction('kv','readwrite');tx.objectStore('kv').put({id:1,tok:'CHANGED'});"
+         "tx.oncomplete=function(){db.close();window.__p2='changed';};};"
+         "q2.onerror=function(){window.__p2='err2';};");
+    mbWaitForFunction(v, "window.__p2!==''", 4000);
+    mbLoadHTML(v, "<body>z</body>", "https://idbp.test/");  // drop the connection
+    mbWait(v, 50);
+    const bool loaded = mbLoadIndexedDB(path.c_str()) == 1;  // restore the snapshot
+    Eval(v,
+         "window.__p3='';"
+         "var q3=indexedDB.open('mbdbpersist',1);"
+         "q3.onsuccess=function(e){var db=e.target.result;"
+         "var g=db.transaction('kv').objectStore('kv').get(1);"
+         "g.onsuccess=function(){window.__p3=g.result?g.result.tok:'null';};"
+         "g.onerror=function(){window.__p3='geterr';};};"
+         "q3.onerror=function(){window.__p3='err3';};");
+    mbWaitForFunction(v, "window.__p3!==''", 4000);
+    const std::string got = Eval(v, "window.__p3");
+    Expect(saved && loaded && got == "authtoken",
+           "IndexedDB persistence: save/restore reverts an overwritten record",
+           "idbp=[saved:" + std::to_string(saved) + ",loaded:" + std::to_string(loaded) +
+               ",got:" + got + "]");
+    std::remove(path.c_str());
+  }
+
   // 23n. IndexedDB count/delete/clear (step 3): round out object-store CRUD. Put 3
   // records; delete one (count drops 3->2); clear the store (count -> 0). Exercises
   // IDBDatabase.Count / DeleteRange / Clear against the in-memory backend.
