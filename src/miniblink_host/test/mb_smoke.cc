@@ -1778,6 +1778,25 @@ int main() {
            "mc=[" + r + "]");
   }
 
+  // 23ao. document.browsingTopics() (Privacy Sandbox, broker BrowsingTopicsDocumentService): ad
+  // scripts call it on load. The service remote has no disconnect handler, so unbound it HANGS;
+  // bound, a headless host (no topics) resolves it to []. (rej:* if the permissions policy gates
+  // it — also a clean settle, not a hang.)
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://topics.test/");
+    Eval(v,
+         "window.__bt='';"
+         "try{ if(document.browsingTopics){document.browsingTopics()"
+         ".then(function(t){window.__bt='ok:'+t.length;})"
+         ".catch(function(e){window.__bt='rej:'+e.name;});} else window.__bt='no-api'; }"
+         "catch(e){window.__bt='throw:'+e.name;}");
+    mbWaitForFunction(v, "window.__bt!==''", 3000);
+    const std::string r = Eval(v, "window.__bt");
+    Expect(r.rfind("ok:", 0) == 0 || r.rfind("rej:", 0) == 0 || r == "no-api",
+           "document.browsingTopics() settles (no hang)",
+           "bt=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

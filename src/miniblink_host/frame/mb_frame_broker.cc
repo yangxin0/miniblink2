@@ -39,6 +39,7 @@
 #include "third_party/blink/public/mojom/credentialmanagement/credential_manager.mojom-blink.h"
 #include "third_party/blink/public/mojom/installedapp/installed_app_provider.mojom-blink.h"
 #include "media/mojo/mojom/video_decode_perf_history.mojom-blink.h"
+#include "third_party/blink/public/mojom/browsing_topics/browsing_topics.mojom-blink.h"
 #include "media/mojo/mojom/webrtc_video_perf.mojom-blink.h"
 #include "third_party/blink/public/mojom/sms/webotp_service.mojom-blink.h"
 #include "third_party/blink/public/mojom/installedapp/related_application.mojom-blink.h"
@@ -631,6 +632,18 @@ class MbWebrtcVideoPerfHistory
   }
 };
 
+// blink.mojom.BrowsingTopicsDocumentService for document.browsingTopics() (Privacy Sandbox ad
+// topics, called by ad scripts). The remote has no disconnect handler, so unbound the promise
+// HANGS (verified). A headless host has no topics, so return an empty list — browsingTopics()
+// resolves to [].
+class MbBrowsingTopicsDocumentService
+    : public blink::mojom::blink::BrowsingTopicsDocumentService {
+ public:
+  void GetBrowsingTopics(bool, GetBrowsingTopicsCallback callback) override {
+    std::move(callback).Run(blink::Vector<blink::mojom::blink::EpochTopicPtr>());
+  }
+};
+
 // blink.mojom.MediaDevicesDispatcherHost for navigator.mediaDevices. Headless has no cameras,
 // mics, or speakers, so every query returns an EMPTY list. This must be bound: if the pipe is
 // left unbound, blink's disconnect handler REJECTS enumerateDevices() with an AbortError
@@ -878,6 +891,13 @@ class MbBrowserInterfaceBroker
     if (auto r = receiver.As<media::mojom::blink::WebrtcVideoPerfHistory>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbWebrtcVideoPerfHistory>(),
                                   std::move(r));
+      return;
+    }
+    // document.browsingTopics() (Privacy Sandbox) — headless: no topics ([]).
+    if (auto r =
+            receiver.As<blink::mojom::blink::BrowsingTopicsDocumentService>()) {
+      mojo::MakeSelfOwnedReceiver(
+          std::make_unique<MbBrowsingTopicsDocumentService>(), std::move(r));
       return;
     }
     // navigator.mediaDevices — headless: no devices (enumerateDevices() -> []).
