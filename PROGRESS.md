@@ -482,10 +482,21 @@ order-preserving encoding) while the primary key + value come from the live reco
 index keys. STEP 9 (DONE): unique-index constraints —
 a `{unique:true}` index rejects a `put` whose index key already maps to a different record
 (`ConstraintError`). Verified (mb_smoke 23t): a duplicate email on a unique 'email' index is
-rejected. NOT yet: multiEntry edge cases, transaction atomicity/rollback — and persistence is
-in-memory (per-process, by db name). IndexedDB now covers open/schema, put/get, count/delete/
-clear, getAll/ranges, object-store + index cursors, autoincrement, index lookups, and unique
-constraints — effectively the whole object-store/index API real apps use.]
+rejected. STEP 10 (DONE): multiEntry indexes + index getAll — `GetAll` ignored `index_id`
+(applied the range to primary keys), so `index.getAll(key)`/`getAllKeys(key)` found nothing;
+fixed to walk `index_data[store][index]` in index-key order and resolve each key's primary-key
+set to records. multiEntry then works end to end (blink expands an array key path into one
+`IDBIndexKeys` list renderer-side; the backend inserts each element; `index.get(element)` +
+`index.getAll(element)` both resolve). Verified (mb_smoke 23w). STEP 11 (DONE): transaction
+atomicity/rollback — a lazy per-transaction snapshot (deep-cloned data + key generators +
+indexes, captured on the first `Put`/`DeleteRange`/`Clear`, keyed by txn id) lets
+`IDBDatabase.Abort` restore pre-transaction state and fire `IDBDatabaseCallbacks.Abort(kAbortError)`
+-> `onabort`; `Commit` discards it. Read-your-writes preserved (writes go live). Verified
+(mb_smoke 23x: abort undoes a modify + an insert). NOT yet: persistence is in-memory
+(per-process, by db name); compound/array primary keys unsupported by the key encoder.
+IndexedDB now covers open/schema, put/get, count/delete/clear, getAll/ranges, object-store +
+index cursors, autoincrement, index lookups (incl. multiEntry + index getAll), unique
+constraints, and atomic abort — effectively the whole object-store/index API real apps use.]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
    Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —
