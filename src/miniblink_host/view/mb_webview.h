@@ -82,6 +82,22 @@ class MbWebView {
   // Called by the frame client at document-element-available; runs the init
   // script and installs bound native functions.
   void RunDocumentStartScript();
+
+  // JS dialog handling (alert/confirm/prompt). Without a callback the defaults are
+  // headless-safe (alert no-op, confirm=false, prompt=null). A registered callback is
+  // invoked synchronously for each dialog with the type (0=alert,1=confirm,2=prompt),
+  // message and prompt default; it returns accept(1)/dismiss(0) and, for prompt-accept,
+  // writes the entered text into out_value. Handled via a JS-level override of
+  // window.alert/confirm/prompt installed before page scripts (no browser, no modal).
+  using JsDialogFn = int (*)(int type, const char* message,
+                             const char* default_value, char* out_value,
+                             int out_cap, void* userdata);
+  void SetJsDialogCallback(JsDialogFn fn, void* userdata);
+  // Bridge entry (called by the injected override via the __mbDlg native binding):
+  // returns accept(1)/dismiss(0); fills `out` with the prompt text when accepting.
+  int HandleJsDialog(int type, const char* message, const char* default_value,
+                     char* out, int out_cap);
+
   void SendMouseClick(int x, int y);
   // Press / release the left button at (x,y). Down then move(s) then up performs a
   // drag (intermediate SendMouseMove calls carry the held button). Down+Up at one
@@ -402,6 +418,9 @@ class MbWebView {
   float dsf_ = 1.0f;  // device pixel ratio; PaintInto scales the canvas by it
   std::string init_script_;  // runs before each new document's own scripts
   std::vector<std::unique_ptr<NativeBinding>> js_bindings_;  // BindJsFunction
+  JsDialogFn dialog_cb_ = nullptr;       // alert/confirm/prompt handler (optional)
+  void* dialog_userdata_ = nullptr;
+  bool dialog_registered_ = false;       // __mbDlg bridge pushed into js_bindings_ once
   void InstallJsBindings();  // install all bindings into the current main world
   bool transparent_bg_ = false;  // omitBackground: clear to alpha 0
 

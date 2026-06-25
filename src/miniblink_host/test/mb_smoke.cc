@@ -174,6 +174,46 @@ int main() {
                std::to_string(d2) + " f2=[" + f2 + "]");
   }
 
+  // 0f. JS dialogs (alert/confirm/prompt) handled in-process via mbSetJsDialogCallback:
+  // a registered callback captures each message and drives the result (accept confirm,
+  // return prompt text); with NO callback the headless-safe defaults apply (confirm=
+  // false, prompt=null). Implemented as a pre-page JS override — no browser/modal.
+  {
+    static std::string* dlg = new std::string();  // -Wexit-time-destructors
+    dlg->clear();
+    mbSetJsDialogCallback(
+        v,
+        [](int type, const char* msg, const char* /*def*/, char* out, int cap,
+           void*) -> int {
+          *dlg += std::to_string(type) + ":" + (msg ? msg : "") + ";";  // capture
+          if (type == 2 && out && cap > 0)
+            std::snprintf(out, static_cast<size_t>(cap), "REPLY");  // prompt text
+          return 1;  // accept alert/confirm/prompt
+        },
+        nullptr);
+    mbLoadHTML(v,
+               "<body><script>window.__a=(alert('hi'),'ok');"
+               "window.__c=confirm('go?');window.__p=prompt('name?','d');"
+               "</script></body>",
+               "about:blank");
+    const std::string c = Eval(v, "''+window.__c");
+    const std::string p = Eval(v, "''+window.__p");
+    Expect(Eval(v, "window.__a") == "ok" && c == "true" && p == "REPLY" &&
+               dlg->find("0:hi;") != std::string::npos &&
+               dlg->find("1:go?;") != std::string::npos &&
+               dlg->find("2:name?;") != std::string::npos,
+           "mbSetJsDialogCallback handles alert/confirm/prompt (capture + accept + text)",
+           "c=[" + c + "] p=[" + p + "] log=[" + *dlg + "]");
+    // No callback -> headless-safe defaults.
+    mbSetJsDialogCallback(v, nullptr, nullptr);
+    mbLoadHTML(v,
+               "<body><script>window.__c2=confirm('x');window.__p2=prompt('y');"
+               "</script></body>",
+               "about:blank");
+    Expect(Eval(v, "''+window.__c2") == "false" && Eval(v, "''+window.__p2") == "null",
+           "JS dialog default (no callback): confirm=false, prompt=null");
+  }
+
   // 1. HTML parse + DOM.
   mbLoadHTML(v, "<body><div id='x'>hello</div></body>", "about:blank");
   Expect(Eval(v, "document.getElementById('x').textContent") == "hello",

@@ -171,9 +171,17 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
    - [NEXT] `DidFailLoad` → fire with a failed flag; wire the load primitives to wait on
      `load_finished()` instead of fixed mbWait; navigation policy (`wkeOnNavigation`),
      new-window (`wkeOnCreateView`), downloads.
-5. **JS dialogs** — alert/confirm/prompt are unhandled (`wke.h:462` even warns about it).
-   Note the reverted `mbSetJsDialogPolicy` FATAL'd in `thread_collision_warner` — solve the
-   `ScopedPagePauser` threading first.
+5. **JS dialogs** — [DONE]. `mbSetJsDialogCallback(view, cb, userdata)`: the callback is
+   invoked per dialog (type 0/1/2 = alert/confirm/prompt) with the message + prompt default;
+   returns accept(1)/dismiss(0) and writes prompt text. No callback → headless-safe defaults
+   (confirm=false, prompt=null). **Sidesteps the earlier landmine entirely**: instead of
+   re-entering ChromeClient's `[Sync]` RunModal*Dialog (which deadlocks / the reverted
+   `mbSetJsDialogPolicy` FATAL'd in `thread_collision_warner` via `ScopedPagePauser`), it
+   installs a pure JS-level override of window.alert/confirm/prompt before page scripts
+   (in RunDocumentStartScript) that routes to an internal `__mbDlg` native binding → the
+   view's handler — synchronous, main-thread, no browser/modal/mojo. Verified (mb_smoke 0f):
+   callback captures "0:hi;1:go?;2:name?;", confirm→true, prompt→"REPLY"; no-callback →
+   confirm=false, prompt=null.
 6. **File upload + download** — [DONE] (both).
    - [DONE] **`mbDownloadURL(url, dest_path)`**: fetch a URL through the engine network stack
      (MbFetchUrl) and write the body to disk WITHOUT rendering it as a document. Honors the

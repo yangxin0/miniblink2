@@ -223,6 +223,18 @@ MB_EXPORT int mbFillSelector(mbView*, const char* css_selector, const char* utf8
 MB_EXPORT int mbSetFileForSelector(mbView*, const char* css_selector,
                                    const char* paths_newline);
 
+// Handle JavaScript dialogs (alert/confirm/prompt) instead of the headless default
+// (alert no-op, confirm=false, prompt=null). The callback is invoked synchronously for
+// each dialog: `type` is 0=alert / 1=confirm / 2=prompt, `message` the dialog text,
+// `default_value` the prompt default. Return 1 to ACCEPT (confirm OK / prompt entered)
+// or 0 to DISMISS (confirm Cancel / prompt null); for an accepted prompt, write the
+// entered text into out_value (capacity out_cap). Lets automation capture dialog text
+// and drive confirm/prompt. Pass NULL to restore the defaults. Per view.
+typedef int (*mbJsDialogCallback)(int type, const char* message,
+                                  const char* default_value, char* out_value,
+                                  int out_cap, void* userdata);
+MB_EXPORT void mbSetJsDialogCallback(mbView*, mbJsDialogCallback cb, void* userdata);
+
 // Select the option of the <select> matching `css_selector` whose value OR
 // visible text equals `value`, firing input+change (Puppeteer page.select).
 // Returns 1 on success, 0 if no <select> or no matching option.

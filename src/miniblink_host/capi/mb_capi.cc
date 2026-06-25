@@ -273,6 +273,14 @@ int mbSetFileForSelector(mbView* v, const char* css_selector,
   return v->impl->SetFileForSelector(css_selector, paths_newline) ? 1 : 0;
 }
 
+void mbSetJsDialogCallback(mbView* v, mbJsDialogCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  // mbJsDialogCallback matches MbWebView::JsDialogFn exactly.
+  v->impl->SetJsDialogCallback(
+      reinterpret_cast<mb::MbWebView::JsDialogFn>(cb), userdata);
+}
+
 int mbSelectOption(mbView* v, const char* css_selector, const char* value) {
   if (!v || !v->impl || !css_selector)
     return 0;

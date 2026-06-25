@@ -1474,7 +1474,63 @@ void MbNativeTrampoline(const v8::FunctionCallbackInfo<v8::Value>& info) {
       return;
   }
 }
+
+// The __mbDlg native bridge: the injected window.alert/confirm/prompt override calls
+// this with (typeName, message, default). It routes to the view's dialog handler and
+// returns a typed JS value — undefined (alert), boolean (confirm), or string|null
+// (prompt) — via *out_type. userdata is the owning MbWebView*.
+const char* MbDialogBridge(void* userdata, int argc, const char** argv,
+                           const int* /*argtypes*/, int* out_type) {
+  thread_local std::string* result = new std::string();  // -Wexit-time-destructors
+  result->clear();
+  auto* view = static_cast<MbWebView*>(userdata);
+  if (!view || argc < 2 || !argv) {
+    *out_type = 4;  // undefined
+    return "";
+  }
+  int kind = 0;  // 0 alert, 1 confirm, 2 prompt
+  if (std::strcmp(argv[0], "confirm") == 0)
+    kind = 1;
+  else if (std::strcmp(argv[0], "prompt") == 0)
+    kind = 2;
+  const char* message = argv[1] ? argv[1] : "";
+  const char* def = (argc >= 3 && argv[2]) ? argv[2] : "";
+  char buf[8192] = {0};
+  const int accept = view->HandleJsDialog(kind, message, def, buf, sizeof(buf));
+  if (kind == 0) {            // alert -> undefined
+    *out_type = 4;
+    return "";
+  }
+  if (kind == 1) {           // confirm -> boolean
+    *out_type = 2;
+    return accept ? "true" : "false";
+  }
+  if (!accept) {             // prompt cancel -> null
+    *out_type = 3;
+    return "";
+  }
+  *out_type = 0;             // prompt accept -> the entered text
+  result->assign(buf);
+  return result->c_str();
+}
 }  // namespace
+
+int MbWebView::HandleJsDialog(int type, const char* message,
+                              const char* default_value, char* out, int out_cap) {
+  if (dialog_cb_) {
+    return dialog_cb_(type, message ? message : "",
+                      default_value ? default_value : "", out, out_cap,
+                      dialog_userdata_);
+  }
+  // No callback: headless-safe defaults — alert "shows" (accept), confirm/prompt
+  // dismiss (false / null). Matches the suppressed-dialog behavior.
+  return type == 0 ? 1 : 0;
+}
+
+void MbWebView::SetJsDialogCallback(JsDialogFn fn, void* userdata) {
+  dialog_cb_ = fn;
+  dialog_userdata_ = userdata;
+}
 
 void MbWebView::InstallJsBindings() {
   // Install each bound native function onto the main world's window. Runs at
@@ -1521,16 +1577,36 @@ void MbWebView::BindJsFunction(const char* name, MbJsNativeFn fn,
 }
 
 void MbWebView::RunDocumentStartScript() {
-  // Called at document-element-available (before the page's own scripts). Run the
-  // host init script, then install bound native functions, so both are present
-  // before the page's own scripts run.
+  // Called at document-element-available (before the page's own scripts). Install
+  // bound native functions (incl. the internal __mbDlg dialog bridge), override the
+  // JS dialog functions to route through it, then run the host init script — all
+  // before the page's own scripts.
   if (!main_frame_)
     return;
+  // Ensure the internal dialog bridge is registered (once) so it installs with the
+  // other bindings. Reserved name; userdata is this view.
+  if (!dialog_registered_) {
+    auto b = std::make_unique<NativeBinding>();
+    b->name = "__mbDlg";
+    b->fn = &MbDialogBridge;
+    b->userdata = this;
+    js_bindings_.push_back(std::move(b));
+    dialog_registered_ = true;
+  }
+  InstallJsBindings();
+  // Replace window.alert/confirm/prompt with shims that call the bridge. The bridge
+  // returns a properly typed value (undefined / boolean / string|null), so confirm()
+  // and prompt() behave correctly. No browser, no modal, no main-thread block.
+  main_frame_->ExecuteScript(blink::WebScriptSource(blink::WebString::FromUtf8(
+      "(function(){var B=window.__mbDlg;if(!B)return;"
+      "window.alert=function(m){B('alert',m===undefined?'':String(m),'');};"
+      "window.confirm=function(m){return B('confirm',m===undefined?'':String(m),'');};"
+      "window.prompt=function(m,d){return B('prompt',m===undefined?'':String(m),"
+      "d===undefined||d===null?'':String(d));};})()")));
   if (!init_script_.empty()) {
     main_frame_->ExecuteScript(
         blink::WebScriptSource(blink::WebString::FromUtf8(init_script_)));
   }
-  InstallJsBindings();
 }
 
 std::string MbWebView::EvalToString(const char* utf8_script) {
