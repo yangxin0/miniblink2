@@ -7,14 +7,20 @@
 #include <utility>
 #include <vector>
 
+#include <algorithm>
+
 #include "base/containers/span.h"
 #include "base/files/file.h"
 #include "miniblink_host/blob/mb_blob_registry.h"
+#include "mojo/public/cpp/base/big_buffer.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "mojo/public/cpp/system/data_pipe_drainer.h"
+#include "mojo/public/cpp/system/data_pipe_utils.h"
+#include "third_party/blink/public/mojom/file_system_access/file_system_access_access_handle_host.mojom-blink.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_cloud_identifier.mojom-blink.h"
+#include "third_party/blink/public/mojom/file_system_access/file_system_access_file_delegate_host.mojom-blink.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_directory_handle.mojom-blink.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_error.mojom-blink.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_file_handle.mojom-blink.h"
@@ -134,6 +140,66 @@ class MbFsFileWriter : public m::FileSystemAccessFileWriter {
   std::vector<std::unique_ptr<WriteOp>> ops_;
 };
 
+// ------------------------- sync access handle --------------------------
+// The in-memory ("incognito") delegate behind createSyncAccessHandle(). A worker reads/writes
+// the file synchronously via these [Sync] RPCs; they operate directly on the node's bytes.
+class MbFsFileDelegateHost : public m::FileSystemAccessFileDelegateHost {
+ public:
+  explicit MbFsFileDelegateHost(FsNode* node) : node_(node) {}
+
+  void Read(int64_t offset, int32_t bytes_to_read, ReadCallback cb) override {
+    const std::string& b = node_->bytes;
+    if (offset < 0 || bytes_to_read < 0) {
+      std::move(cb).Run(std::nullopt, base::File::FILE_ERROR_FAILED, 0);
+      return;
+    }
+    const size_t off = static_cast<size_t>(offset);
+    const size_t n = off >= b.size()
+                         ? 0
+                         : std::min(static_cast<size_t>(bytes_to_read),
+                                    b.size() - off);
+    std::string slice = b.substr(off, n);
+    std::move(cb).Run(mojo_base::BigBuffer(base::as_byte_span(slice)),
+                      base::File::FILE_OK, static_cast<int32_t>(n));
+  }
+  // blink feeds `data` from another thread and closes it, so a blocking drain can't deadlock.
+  void Write(int64_t offset, mojo::ScopedDataPipeConsumerHandle data,
+             WriteCallback cb) override {
+    std::string incoming;
+    mojo::BlockingCopyToString(std::move(data), &incoming);
+    std::string& b = node_->bytes;
+    const size_t off = static_cast<size_t>(offset < 0 ? 0 : offset);
+    if (off > b.size())
+      b.resize(off, '\0');
+    for (size_t i = 0; i < incoming.size(); ++i) {
+      const size_t p = off + i;
+      if (p < b.size())
+        b[p] = incoming[i];
+      else
+        b.push_back(incoming[i]);
+    }
+    std::move(cb).Run(base::File::FILE_OK,
+                      static_cast<int32_t>(incoming.size()));
+  }
+  void GetLength(GetLengthCallback cb) override {
+    std::move(cb).Run(base::File::FILE_OK,
+                      static_cast<int64_t>(node_->bytes.size()));
+  }
+  void SetLength(int64_t length, SetLengthCallback cb) override {
+    node_->bytes.resize(static_cast<size_t>(length < 0 ? 0 : length), '\0');
+    std::move(cb).Run(base::File::FILE_OK);
+  }
+
+ private:
+  FsNode* node_;
+};
+
+// The browser-side handle whose Close() releases the file lock — a no-op ack here.
+class MbFsAccessHandleHost : public m::FileSystemAccessAccessHandleHost {
+ public:
+  void Close(CloseCallback cb) override { std::move(cb).Run(); }
+};
+
 // ----------------------------- file handle -----------------------------
 class MbFsFileHandle : public m::FileSystemAccessFileHandle {
  public:
@@ -165,11 +231,21 @@ class MbFsFileHandle : public m::FileSystemAccessFileHandle {
         remote.InitWithNewPipeAndPassReceiver());
     std::move(cb).Run(Ok(), std::move(remote));
   }
-  // Synchronous access handles (Worker-only) remain deferred.
+  // createSyncAccessHandle() (Worker-only): hand back an in-memory file delegate the worker
+  // drives synchronously, plus a host whose Close() releases the (notional) lock.
   void OpenAccessHandle(m::FileSystemAccessAccessHandleLockMode,
                         OpenAccessHandleCallback cb) override {
-    std::move(cb).Run(NotSupported("OPFS access handle not supported"), nullptr,
-                      mojo::NullRemote());
+    mojo::PendingRemote<m::FileSystemAccessFileDelegateHost> delegate;
+    mojo::MakeSelfOwnedReceiver(std::make_unique<MbFsFileDelegateHost>(node_),
+                                delegate.InitWithNewPipeAndPassReceiver());
+    mojo::PendingRemote<m::FileSystemAccessAccessHandleHost> host;
+    mojo::MakeSelfOwnedReceiver(std::make_unique<MbFsAccessHandleHost>(),
+                                host.InitWithNewPipeAndPassReceiver());
+    std::move(cb).Run(
+        Ok(),
+        m::FileSystemAccessAccessHandleFile::NewIncognitoFileDelegate(
+            std::move(delegate)),
+        std::move(host));
   }
   void Rename(const blink::String&, RenameCallback cb) override {
     std::move(cb).Run(NotSupported("rename not supported"));

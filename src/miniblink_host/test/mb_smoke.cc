@@ -1650,6 +1650,36 @@ int main() {
            "mw=[" + r + "]");
   }
 
+  // 23ah. OPFS sync access handles (createSyncAccessHandle, Worker-only): in a same-origin
+  // worker (served via a mock so the origin isn't opaque), open a file, write bytes
+  // synchronously, getSize/read them back, and postMessage the result. Exercises the in-memory
+  // FileSystemAccessFileDelegateHost over the [Sync] Read/Write/GetLength path.
+  {
+    mbMockResponse(
+        "https://opfs.test/sw.js",
+        "(async function(){try{"
+        "var root=await navigator.storage.getDirectory();"
+        "var fh=await root.getFileHandle('sync.bin',{create:true});"
+        "var ah=await fh.createSyncAccessHandle();"
+        "var n=ah.write(new TextEncoder().encode('SYNC-DATA'),{at:0});"
+        "ah.flush();var sz=ah.getSize();"
+        "var buf=new Uint8Array(sz);ah.read(buf,{at:0});ah.close();"
+        "self.postMessage(new TextDecoder().decode(buf)+',wrote:'+n);"
+        "}catch(e){self.postMessage('err:'+e.name);}})();",
+        "text/javascript", 200);
+    mbLoadHTML(v, "<body>x</body>", "https://opfs.test/");
+    Eval(v,
+         "window.__opfsw='';"
+         "var __sw=new Worker('/sw.js');"
+         "__sw.onmessage=function(e){window.__opfsw=e.data;};");
+    mbWaitForFunction(v, "window.__opfsw!==''", 5000);
+    const std::string r = Eval(v, "window.__opfsw");
+    mbClearMocks();
+    Expect(r == "SYNC-DATA,wrote:9",
+           "OPFS sync access handle: worker write/getSize/read round-trips in-memory",
+           "opfsw=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");
