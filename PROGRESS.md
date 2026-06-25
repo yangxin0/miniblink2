@@ -442,6 +442,14 @@ serving the bytes via a new blob-registry helper `MbCreateInlineBlob` (self-owne
 OPFS now round-trips create -> write -> close -> getFile().text(). Verified (mb_smoke 23ad: write
 'hello opfs', read back, size 10). STILL DEFERRED: `OpenAccessHandle` (Worker-only sync access
 handles) rejects cleanly; per-origin isolation (single process-wide root today).
+[DONE: Storage Buckets] `frame/mb_storage_buckets.{h,cc}` (`MbBucketManagerHost` + `MbBucketHost`,
+bound from the frame broker). `navigator.storageBuckets.open/keys/delete` track bucket names; each
+bucket re-exposes the existing in-process backends — `GetIdbFactory`/`GetLockManager`/`GetCaches`
+delegate to BindIDBFactory/BindLockManager/BindCacheStorage, `GetDirectory` to the OPFS root
+(`MbBindOpfsRootDirectory`), with persist/estimate(2GB)/durability(relaxed)/expiry metadata. So
+`navigator.storageBuckets.open('x')` gives a working bucket with indexedDB/caches/locks/getDirectory.
+Verified (mb_smoke 23ae: open + keys + bucket.caches round-trip). NOTE: buckets are NOT yet isolated
+from the default partition (the backing IDB/Cache/OPFS stores are process-wide, keyed by name).
 [DONE: Cache Storage] `frame/mb_cache_storage.{h,cc}` (`MbCacheStorage` + `MbCacheStorageCache`,
 bound from the frame broker). `caches.open/has/delete/keys`, `caches.match`, `cache.put`/`delete`
 (via `Batch`), and `cache.match`. Stores Request URL -> FetchAPIResponse in a process-wide
