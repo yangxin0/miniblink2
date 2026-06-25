@@ -448,10 +448,20 @@ isolated, fix still open). Findings, all verified with stderr instrumentation:
     `data_` out on the first Request*; something drains it before/instead of our materialize.)
   - Net: ANY >256KB blob (not just cache — also fetch().blob() of a large response, FileReader on a
     big Blob, large IndexedDB blob values) likely materializes EMPTY in this host.
-NEXT: figure out who consumes the BytesProvider before MbBlob does, OR why our Request* gets empty —
-likely a threading/ordering issue between the [Sync] Register reply and the provider's data move, or we
-need to drain the provider synchronously inside Register before returning. This is the blocking item
-for large-blob support; small blobs (the common case) work fully.
+CORRECTED (further instrumentation): the bug is CACHE-SPECIFIC, not general. A plain
+`new Blob(['Q'.repeat(300000)]).text()` reads back 300000 ✓ — large blobs work fine outside cache.
+The cache.put body blob registers IDENTICALLY (`embedded=no provider=yes len=300000`) but its
+BytesProvider yields 0 at materialize. Tried materializing LAZILY (defer to first read, when data
+should be ready) — STILL 0, even reading on the same page right after put. So the cache-put Response
+body's BytesProvider is empty at ALL times; blink does NOT deliver the body bytes to us through the
+blob provider for cache puts — they arrive via a different channel (blink reads the Response body
+stream during put serialization; in a real browser the browser-side cache persists them). Lazy
+materialization reverted (didn't help, risks Clone-before-read correctness). NEXT (different approach
+needed): find how cache.put streams the body to the "browser" — likely we must intercept the body at
+the Response/FetchAPIResponse level (a body data-pipe on the response?) rather than via the blob
+provider. LOW PRIORITY: only affects >256KB cached bodies; small cached bodies + all non-cache blobs
+work. Net so far across 3 sessions: precisely bounded the bug, ruled out the general-blob and
+lazy-timing hypotheses.
 [DONE: Cookie Store API] `cookieStore.get/getAll/set/delete` — `MbCookieManager` (the
 RestrictedCookieManager already serving document.cookie) gained real `GetAllForUrl` (returns the
 origin's cookies as net::CanonicalCookies via CreateSanitizedCookie, honoring the options name filter:
