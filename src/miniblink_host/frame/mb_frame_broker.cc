@@ -11,6 +11,7 @@
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/task/single_thread_task_runner.h"
 #include "miniblink_host/frame/mb_broadcast_channel.h"
+#include "miniblink_host/frame/mb_cache_storage.h"
 #include "miniblink_host/frame/mb_indexeddb.h"
 #include "miniblink_host/frame/mb_lock_manager.h"
 #include "miniblink_host/frame/mb_notification_service.h"
@@ -556,6 +557,11 @@ class MbBrowserInterfaceBroker
     if (auto r = receiver.As<blink::mojom::blink::WakeLockService>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbWakeLockService>(),
                                   std::move(r));
+      return;
+    }
+    // caches (Cache Storage) — in-process Request/Response cache.
+    if (auto r = receiver.As<blink::mojom::blink::CacheStorage>()) {
+      BindCacheStorage(std::move(r));
       return;
     }
     // Drop everything else (no browser process).

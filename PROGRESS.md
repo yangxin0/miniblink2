@@ -410,15 +410,17 @@ later with identical plumbing.
 [DONE: Wake Lock] `navigator.wakeLock.request('screen')` — `MbWakeLockService.GetWakeLock` binds a
 no-op `device::mojom::WakeLock` (headless: no real screen) and the permission service grants
 SCREEN_WAKE_LOCK, so request('screen') resolves with a live sentinel (mb_smoke 23u: released==false).
-[NEXT BIG: Cache Storage — SCOPED] `caches.*` is requested from the FRAME broker
-(`cache_storage.cc:788` GetInterface<mojom::blink::CacheStorage>). Implement `CacheStorage`
-(Has/Delete/Keys/Match/Open — note `Open`/`Match` use `base::expected<Success,CacheStorageError>`
-callbacks) + `CacheStorageCache` (Match/MatchAll/Keys/Batch). `Batch([{kPut,FetchAPIRequest,
-FetchAPIResponse}])` is put; `Match(FetchAPIRequest)` returns the response. CRUX: `FetchAPIResponse`
-carries its body as `SerializedBlob? blob` (a `mojo::PendingRemote<Blob>`); to replay across
-multiple matches, bind the put's blob to a persistent `mojo::Remote<Blob>` and `Blob.Clone()` a
-fresh remote per Match (or read the bytes once and re-register via MbBlobRegistry). Key the cache by
-`request->url`. Genuinely multi-tick + blob-plumbing-heavy (DCHECK-prone like IDB) — start fresh.
+[DONE: Cache Storage] `frame/mb_cache_storage.{h,cc}` (`MbCacheStorage` + `MbCacheStorageCache`,
+bound from the frame broker). `caches.open/has/delete/keys`, `caches.match`, `cache.put`/`delete`
+(via `Batch`), and `cache.match`. Stores Request URL -> FetchAPIResponse in a process-wide
+per-cache-name registry. KEY SIMPLIFICATION vs the original plan: in the blink variant the response
+body is a refcounted `scoped_refptr<BlobDataHandle>` (NOT a move-only SerializedBlob remote), so the
+whole response just `.Clone()`s — the blob is shared by refcount and a cached response matches any
+number of times, no blob-remote plumbing needed. `Open`/`Match` use `base::expected<Success,
+CacheStorageError>` callbacks (success = the value; miss = `base::unexpected(kErrorNotFound)`).
+Verified (mb_smoke 23v): `caches.open('v1')` -> `cache.put('/data',new Response('cached-body'))` ->
+`cache.match('/data')` -> text 'cached-body'; `caches.has('v1')` true. Matching is by URL only
+(ignores method/ignoreSearch/vary); MatchAll/GetAllMatchedEntries/cache.keys are empty stubs.
 [IN PROGRESS: IndexedDB — step 1 DONE] `frame/mb_indexeddb.{h,cc}` (`MbIDBFactory`, bound from
 the frame broker) — an in-memory IDB backend. STEP 1 (open + schema): `indexedDB.open(name,ver)`
 opens a database keyed by name in a process-wide registry; a new version fires the OPEN handshake

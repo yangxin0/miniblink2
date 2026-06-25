@@ -1380,6 +1380,27 @@ int main() {
            "wl=[" + r + "]");
   }
 
+  // 23v. Cache Storage (caches API, broker #8): the in-process CacheStorage stores
+  // Request/Response pairs; caches.open -> cache.put -> cache.match round-trips the
+  // response body (a blob, cloned per match). Put a Response under '/data', match it back,
+  // read the text. Also caches.has reflects the open.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://cache.test/");
+    Eval(v,
+         "window.__cs='';"
+         "caches.open('v1').then(function(c){"
+         "return c.put('/data',new Response('cached-body')).then(function(){"
+         "return c.match('/data');});}).then(function(resp){"
+         "return resp?resp.text():'no-match';}).then(function(txt){"
+         "return caches.has('v1').then(function(h){window.__cs=txt+',has:'+h;});})"
+         ".catch(function(e){window.__cs='err:'+e.name;});");
+    mbWaitForFunction(v, "window.__cs!==''", 3000);
+    const std::string r = Eval(v, "window.__cs");
+    Expect(r == "cached-body,has:true",
+           "Cache Storage: open/put/match round-trips a Response body; has() works",
+           "cs=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");
