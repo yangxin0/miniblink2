@@ -1800,6 +1800,24 @@ int main() {
            "bt=[" + r + "]");
   }
 
+  // 23ap. Built-in on-device AI (LanguageModel/Summarizer, broker AIManager): sites probe
+  // X.availability() on load. The AIManager remote has no disconnect handler, so unbound the
+  // availability() promise HANGS (leaving an unsettled resolver -> teardown DCHECK). A headless
+  // host has no model, so availability() resolves to 'unavailable'.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://ai.test/");
+    Eval(v,
+         "window.__ai='';"
+         "Promise.all([LanguageModel.availability(),Summarizer.availability()])"
+         ".then(function(a){window.__ai=a.join(',');})"
+         ".catch(function(e){window.__ai='err:'+e.name;});");
+    mbWaitForFunction(v, "window.__ai!==''", 4000);
+    const std::string r = Eval(v, "window.__ai");
+    Expect(r == "unavailable,unavailable",
+           "Built-in AI availability() resolves 'unavailable' (no hang)",
+           "ai=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

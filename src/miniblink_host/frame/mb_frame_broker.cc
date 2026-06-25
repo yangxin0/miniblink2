@@ -21,6 +21,7 @@
 #include "miniblink_host/runtime/mb_runtime.h"
 #include "miniblink_host/worker/mb_shared_worker.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_constants.h"
@@ -39,6 +40,13 @@
 #include "third_party/blink/public/mojom/credentialmanagement/credential_manager.mojom-blink.h"
 #include "third_party/blink/public/mojom/installedapp/installed_app_provider.mojom-blink.h"
 #include "media/mojo/mojom/video_decode_perf_history.mojom-blink.h"
+#include "third_party/blink/public/mojom/ai/ai_classifier.mojom-blink.h"
+#include "third_party/blink/public/mojom/ai/ai_language_model.mojom-blink.h"
+#include "third_party/blink/public/mojom/ai/ai_manager.mojom-blink.h"
+#include "third_party/blink/public/mojom/ai/ai_proofreader.mojom-blink.h"
+#include "third_party/blink/public/mojom/ai/ai_rewriter.mojom-blink.h"
+#include "third_party/blink/public/mojom/ai/ai_summarizer.mojom-blink.h"
+#include "third_party/blink/public/mojom/ai/ai_writer.mojom-blink.h"
 #include "third_party/blink/public/mojom/browsing_topics/browsing_topics.mojom-blink.h"
 #include "media/mojo/mojom/webrtc_video_perf.mojom-blink.h"
 #include "third_party/blink/public/mojom/sms/webotp_service.mojom-blink.h"
@@ -644,6 +652,106 @@ class MbBrowsingTopicsDocumentService
   }
 };
 
+// blink.mojom.AIManager for the built-in on-device AI APIs (LanguageModel, Summarizer, Writer,
+// Rewriter, Proofreader, Classifier — window.* surfaces). Sites probe `X.availability()` on load.
+// This headless host has no on-device model, so every CanCreate* reports the model UNAVAILABLE
+// (availability() -> 'unavailable') and every create() rejects via the client's OnError. MUST be
+// bound: the AIManager remote has no disconnect handler, so an availability() probe HANGS unbound
+// (verified — it crashed teardown with an unsettled ScriptPromiseResolver).
+class MbAIManager : public blink::mojom::blink::AIManager {
+ public:
+  void CanCreateLanguageModel(
+      blink::mojom::blink::AILanguageModelCreateOptionsPtr,
+      CanCreateLanguageModelCallback cb) override {
+    Unavailable(std::move(cb));
+  }
+  void CreateLanguageModel(
+      mojo::PendingRemote<
+          blink::mojom::blink::AIManagerCreateLanguageModelClient> client,
+      blink::mojom::blink::AILanguageModelCreateOptionsPtr,
+      mojo::PendingRemote<on_device_model::mojom::blink::DownloadObserver>)
+      override {
+    RejectCreate(std::move(client));
+  }
+  void CanCreateSummarizer(blink::mojom::blink::AISummarizerCreateOptionsPtr,
+                           CanCreateSummarizerCallback cb) override {
+    Unavailable(std::move(cb));
+  }
+  void CreateSummarizer(
+      mojo::PendingRemote<blink::mojom::blink::AIManagerCreateSummarizerClient>
+          client,
+      blink::mojom::blink::AISummarizerCreateOptionsPtr,
+      mojo::PendingRemote<on_device_model::mojom::blink::DownloadObserver>)
+      override {
+    RejectCreate(std::move(client));
+  }
+  void GetLanguageModelParams(GetLanguageModelParamsCallback cb) override {
+    std::move(cb).Run(nullptr);
+  }
+  void CanCreateWriter(blink::mojom::blink::AIWriterCreateOptionsPtr,
+                       CanCreateWriterCallback cb) override {
+    Unavailable(std::move(cb));
+  }
+  void CreateWriter(
+      mojo::PendingRemote<blink::mojom::blink::AIManagerCreateWriterClient>
+          client,
+      blink::mojom::blink::AIWriterCreateOptionsPtr,
+      mojo::PendingRemote<on_device_model::mojom::blink::DownloadObserver>)
+      override {
+    RejectCreate(std::move(client));
+  }
+  void CanCreateRewriter(blink::mojom::blink::AIRewriterCreateOptionsPtr,
+                         CanCreateRewriterCallback cb) override {
+    Unavailable(std::move(cb));
+  }
+  void CreateRewriter(
+      mojo::PendingRemote<blink::mojom::blink::AIManagerCreateRewriterClient>
+          client,
+      blink::mojom::blink::AIRewriterCreateOptionsPtr,
+      mojo::PendingRemote<on_device_model::mojom::blink::DownloadObserver>)
+      override {
+    RejectCreate(std::move(client));
+  }
+  void CanCreateProofreader(blink::mojom::blink::AIProofreaderCreateOptionsPtr,
+                            CanCreateProofreaderCallback cb) override {
+    Unavailable(std::move(cb));
+  }
+  void CreateProofreader(
+      mojo::PendingRemote<blink::mojom::blink::AIManagerCreateProofreaderClient>
+          client,
+      blink::mojom::blink::AIProofreaderCreateOptionsPtr,
+      mojo::PendingRemote<on_device_model::mojom::blink::DownloadObserver>)
+      override {
+    RejectCreate(std::move(client));
+  }
+  void CanCreateClassifier(blink::mojom::blink::AIClassifierCreateOptionsPtr,
+                           CanCreateClassifierCallback cb) override {
+    Unavailable(std::move(cb));
+  }
+  void CreateClassifier(
+      mojo::PendingRemote<blink::mojom::blink::AIManagerCreateClassifierClient>
+          client,
+      blink::mojom::blink::AIClassifierCreateOptionsPtr,
+      mojo::PendingRemote<on_device_model::mojom::blink::DownloadObserver>)
+      override {
+    RejectCreate(std::move(client));
+  }
+
+ private:
+  template <typename Cb>
+  static void Unavailable(Cb cb) {
+    std::move(cb).Run(blink::mojom::blink::ModelAvailabilityCheckResult::
+                          kUnavailableServiceNotRunning);
+  }
+  template <typename Client>
+  static void RejectCreate(mojo::PendingRemote<Client> client) {
+    mojo::Remote<Client> remote(std::move(client));
+    remote->OnError(
+        blink::mojom::blink::AIManagerCreateClientError::kUnableToCreateSession,
+        nullptr);
+  }
+};
+
 // blink.mojom.MediaDevicesDispatcherHost for navigator.mediaDevices. Headless has no cameras,
 // mics, or speakers, so every query returns an EMPTY list. This must be bound: if the pipe is
 // left unbound, blink's disconnect handler REJECTS enumerateDevices() with an AbortError
@@ -898,6 +1006,11 @@ class MbBrowserInterfaceBroker
             receiver.As<blink::mojom::blink::BrowsingTopicsDocumentService>()) {
       mojo::MakeSelfOwnedReceiver(
           std::make_unique<MbBrowsingTopicsDocumentService>(), std::move(r));
+      return;
+    }
+    // Built-in on-device AI (LanguageModel/Summarizer/...) — headless: model unavailable.
+    if (auto r = receiver.As<blink::mojom::blink::AIManager>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbAIManager>(), std::move(r));
       return;
     }
     // navigator.mediaDevices — headless: no devices (enumerateDevices() -> []).
