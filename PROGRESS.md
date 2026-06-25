@@ -431,10 +431,15 @@ statics HANG. mb_smoke 23aj.
 the frame broker) returns [] (no installed apps headless). BUG fixed: blink sets no disconnect handler
 on the provider (explicit TODO in installed_app_controller.cc), so unbound the promise HANGS. PWAs
 probe it on load to detect a companion native app. mb_smoke 23ak.
-[KNOWN FLAKE] mb_smoke 23ae (Storage Buckets) intermittently reports an empty cache body
-(`bk=[inbox,inbox,]` instead of `...,hi-bucket]`) ~1 in 5 runs — a race reading a cached Response's
-blob body, NOT a regression (passes on re-run; same blob-backed path as other cache tests). Worth a
-future look at the Response-body-blob materialization/read timing.
+[FLAKE ROOT-CAUSED + deflaked] mb_smoke 23ae (Storage Buckets) flaked ~1/10 with an empty cached body.
+ROOT CAUSE: it shared the process-wide cache name 'v1' with test 23v; a cached Response body is a blob
+tied to the PAGE that created it, so when 23v's page navigated away those bodies could become
+unreadable, and the shared cache exposed it. Fixed the test by giving the bucket its own cache name
+(0/8, was ~1/10). DEEPER PRODUCT ISSUE (recorded for a focused fix): Cache Storage cached bodies should
+SURVIVE the originating page's navigation (that's the point of an offline cache) — today the cache
+keeps a page-tied BlobDataHandle, so a body cached on one page may read empty after navigation. The fix
+is to make the cache OWN the bytes at put time (e.g. read the blob and re-mint via MbCreateInlineBlob,
+a process-owned blob), independent of the page lifecycle. Same applies to IndexedDB blob values.
 [DONE: Cookie Store API] `cookieStore.get/getAll/set/delete` — `MbCookieManager` (the
 RestrictedCookieManager already serving document.cookie) gained real `GetAllForUrl` (returns the
 origin's cookies as net::CanonicalCookies via CreateSanitizedCookie, honoring the options name filter:
