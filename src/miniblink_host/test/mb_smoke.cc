@@ -1853,13 +1853,16 @@ int main() {
          "window.__sp='';"
          "try{"
          "sessionStorage.setItem('k','v1');var ss=sessionStorage.getItem('k');"
-         "history.pushState({n:1},'','/a');history.replaceState({n:2},'','/b');"
-         "window.__sp='ss:'+ss+',path:'+location.pathname+',st:'+(history.state?history.state.n:'-');"
+         "var l0=history.length;"
+         "history.pushState({n:1},'','/a');history.pushState({n:2},'','/b');"
+         "var l2=history.length;history.replaceState({n:3},'','/c');"
+         "window.__sp='ss:'+ss+',path:'+location.pathname+',st:'+(history.state?history.state.n:'-')"
+         "+',grew:'+(l2===l0+2)+',rs:'+(history.length===l2);"
          "}catch(e){window.__sp='throw:'+e.name;}");
     mbWait(v, 30);
     const std::string sp = Eval(v, "window.__sp");
-    Expect(sp == "ss:v1,path:/b,st:2",
-           "History pushState/replaceState (location + state) + sessionStorage round-trip",
+    Expect(sp == "ss:v1,path:/c,st:3,grew:true,rs:true",
+           "History pushState grows history.length; replaceState doesn't; state/location update",
            "sp=[" + sp + "]");
   }
 

@@ -30,6 +30,7 @@
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_history_commit_type.h"
 #include "third_party/blink/public/web/web_local_frame.h"
+#include "third_party/blink/public/web/web_view.h"
 #include "third_party/blink/public/web/web_navigation_params.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
@@ -240,6 +241,26 @@ void MbFrameClient::DidCommitNavigation(
   owner_->OnDidCommitMainFrame(
       web_frame_->GetDocument().Url().GetString().Utf8(),
       commit_type == blink::kWebStandardCommit);
+}
+
+void MbFrameClient::DidFinishSameDocumentNavigation(
+    blink::WebHistoryCommitType commit_type,
+    bool /*is_synchronously_committed*/,
+    blink::mojom::SameDocumentNavigationType /*type*/,
+    bool /*is_client_redirect*/,
+    const std::optional<blink::SameDocNavigationScreenshotDestinationToken>&
+    /*screenshot_destination*/,
+    base::UnguessableToken /*same_document_metrics_token*/,
+    bool /*caused_by_ad*/) {
+  // A standard same-document commit (pushState, a new fragment entry) appends a session-history
+  // entry — advance blink's history index/length, matching RenderFrameImpl. replaceState/reload
+  // come through as kWebHistoryInertCommit and must NOT advance.
+  if (self_owned_ || !web_frame_)
+    return;
+  if (commit_type == blink::kWebStandardCommit) {
+    if (blink::WebView* view = web_frame_->View())
+      view->IncreaseHistoryListFromNavigation();
+  }
 }
 
 void MbFrameClient::DidFinishLoad() {

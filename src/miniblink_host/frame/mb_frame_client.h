@@ -114,6 +114,19 @@ class MbFrameClient : public blink::WebLocalFrameClient {
       const network::ParsedPermissionsPolicy& permissions_policy_header,
       const blink::DocumentPolicyFeatureState& document_policy_header) override;
 
+  // Same-document navigations (pushState/replaceState/fragment). Replicates
+  // RenderFrameImpl::UpdateNavigationHistory's history-index bookkeeping so blink's
+  // session-history length is correct (history.length) and history.back() is unblocked.
+  void DidFinishSameDocumentNavigation(
+      blink::WebHistoryCommitType commit_type,
+      bool is_synchronously_committed,
+      blink::mojom::SameDocumentNavigationType,
+      bool is_client_redirect,
+      const std::optional<blink::SameDocNavigationScreenshotDestinationToken>&
+          screenshot_destination,
+      base::UnguessableToken same_document_metrics_token,
+      bool caused_by_ad) override;
+
   // Fires when the main frame's load finishes (the document's `load` event — all
   // subresources done). Pushes the signal to MbWebView so embedders can react to
   // real completion instead of polling / a fixed settle timer. Child frames ignored.
