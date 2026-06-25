@@ -13,6 +13,7 @@
 #include "miniblink_host/frame/mb_broadcast_channel.h"
 #include "miniblink_host/frame/mb_lock_manager.h"
 #include "miniblink_host/frame/mb_notification_service.h"
+#include "miniblink_host/frame/mb_websocket.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/runtime/mb_runtime.h"
 #include "miniblink_host/worker/mb_shared_worker.h"
@@ -481,6 +482,11 @@ class MbBrowserInterfaceBroker
     // Notification API — permission granted; new Notification() fires onshow.
     if (auto r = receiver.As<blink::mojom::blink::NotificationService>()) {
       BindNotificationService(std::move(r));
+      return;
+    }
+    // WebSocket — establishes the connection (onopen) + a loopback echo data plane.
+    if (auto r = receiver.As<blink::mojom::blink::WebSocketConnector>()) {
+      BindWebSocketConnector(std::move(r));
       return;
     }
     // Drop everything else (no browser process).

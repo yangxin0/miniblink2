@@ -1122,6 +1122,29 @@ int main() {
            "perm=[" + perm + "] show=[" + shown + "] requestPerm=[" + rp + "]");
   }
 
+  // 23k. WebSocket (broker #8): the in-process WebSocketConnector establishes the
+  // connection (onopen fires, readyState OPEN) and runs a loopback echo — a message the
+  // page sends comes straight back via onmessage. Proves the whole WebSocket mojo data
+  // plane (handshake + SendMessage framing over the writable pipe + OnDataFrame over the
+  // readable pipe) works in-process, offline. Then ws.close() drives onclose.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://ws.test/");
+    Eval(v,
+         "window.__ws='';window.__wsmsg='';window.__wsclose='';"
+         "var __s=new WebSocket('wss://echo.test/');"
+         "__s.onopen=function(){window.__ws='open:'+__s.readyState;"
+         "__s.send('hello-ws');};"
+         "__s.onmessage=function(e){window.__wsmsg=e.data;__s.close();};"
+         "__s.onclose=function(){window.__wsclose='closed';};");
+    mbWaitForFunction(v, "window.__wsclose!==''", 3000);
+    const std::string open = Eval(v, "window.__ws");
+    const std::string msg = Eval(v, "window.__wsmsg");
+    const std::string closed = Eval(v, "window.__wsclose");
+    Expect(open == "open:1" && msg == "hello-ws" && closed == "closed",
+           "WebSocket connects (onopen), echoes a message, and closes (onclose)",
+           "open=[" + open + "] msg=[" + msg + "] close=[" + closed + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

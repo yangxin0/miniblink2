@@ -395,8 +395,18 @@ is live + scriptable), keeping the listener alive by token for a later `OnClose`
 notifications + GetNotifications are accepted-but-empty stubs. The permission service also grants
 NOTIFICATIONS so `Notification.requestPermission()` resolves "granted". Verified (mb_smoke 23j):
 `Notification.permission`=="granted", `new Notification('hi')` fires onshow, requestPermission()
--> "granted". [REMAINING at the broker: IndexedDB / WebSocket — genuinely heavy backends; same
-frame-broker entry point, but each needs a real store / network connector.]
+-> "granted". [DONE: WebSocket — loopback echo] `frame/mb_websocket.{h,cc}` (`MbWebSocketConnector`/
+`MbWebSocket`, bound from the frame broker). The connector establishes the connection
+(`OnConnectionEstablished` with a fully-populated `WebSocketHandshakeResponse` — all
+non-nullable fields incl. `http_version`/`remote_endpoint` must be set or mojo FATALs) so
+`onopen` fires (readyState OPEN). The full data plane is wired: `MbWebSocket` reads the page's
+outgoing messages off the WRITABLE pipe (framed by each `SendMessage(type,len)` announcement)
+and echoes them straight back via `OnDataFrame` + the READABLE pipe (two `SimpleWatcher`s,
+backpressure-honest), and `StartClosingHandshake` -> `OnDropChannel` drives `onclose`. Verified
+(mb_smoke 23k + render 40): `new WebSocket('wss://…')` -> onopen (readyState 1), `send('hello-ws')`
+-> onmessage 'hello-ws', `close()` -> onclose. This is a LOOPBACK echo (proves the entire mojo
+data plane offline); a real network backend over libcurl's WebSocket support can replace the echo
+later with identical plumbing. [REMAINING heavy backend: IndexedDB — needs a real object store.]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
    Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —

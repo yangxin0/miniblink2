@@ -319,26 +319,28 @@ static void RunCases(mbView* v, int W, int H) {
            std::string("push=") + u1 + " replace=" + u2 + " state=" + state);
   }
 
-  // 40. WebSocket degrades gracefully. We have no network backend for the WS
-  // mojo connector, so the handshake can't complete — but it must FAIL with the
-  // spec's error/close events, not crash or hang the host. (A site's reconnect
-  // logic then works normally.) Construct on a real origin, capture the close,
-  // assert the socket reached a terminal state (CLOSING/CLOSED, readyState>=2)
-  // and the host is still scriptable. Common API; clean event-based failure is
-  // the strong invariant here.
+  // 40. WebSocket connects and round-trips. The in-process WebSocketConnector
+  // (frame/mb_websocket.cc) establishes the connection (onopen) and runs a loopback
+  // echo, so a sent message returns via onmessage; ws.close() then drives onclose.
+  // (mb_smoke 23k covers the same path against the library ABI; this is the render-
+  // suite guard that the WS API is live and the host stays scriptable.)
   mbLoadHTML(v, "<body>ws-guard</body>", "https://miniblink.test/");
   mbRunJS(v,
     "window.__ws='pending';"
     "try{var s=new WebSocket('wss://miniblink.test/x');"
+    "s.onopen=function(){s.send('ping-render');};"
+    "s.onmessage=function(e){window.__ws='msg:'+e.data;s.close();};"
     "s.onerror=function(){window.__ws='error';};"
-    "s.onclose=function(){window.__ws='closed';};"
     "}catch(e){window.__ws='threw:'+e.name;}");
-  mbWait(v, 300);
+  for (int i = 0; i < 80; ++i) {
+    mbWait(v, 25);
+    if (Eval(v, "String(window.__ws)") != "pending")
+      break;
+  }
   Expect(Eval(v, "1+1") == "2" &&
              Eval(v, "document.body.textContent") == "ws-guard" &&
-             (Eval(v, "String(window.__ws)") == "closed" ||
-              Eval(v, "String(window.__ws)") == "error"),
-         "WebSocket degrades gracefully (error/close event, no hang/crash)");
+             Eval(v, "String(window.__ws)") == "msg:ping-render",
+         "WebSocket connects + echoes (onopen/onmessage); host scriptable");
 
   // 41. Canvas 2D full round-trip + WebGL graceful-null. Canvas is core for a
   // renderer and the backbone of chart/image libraries, so verify the complete
