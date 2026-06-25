@@ -661,8 +661,16 @@ constraints, atomic abort, and compound keys — the whole object-store/index AP
    23aa) AND cookieStore change events — AddChangeListener now registers the observer in a
    process-wide per-origin registry and any cookie write (cookieStore.set/delete OR
    document.cookie) fans out an OnCookieChange (INSERTED→changed[], EXPLICIT→deleted[]);
-   mb_smoke 23aa2.] [REMAINING: window 'storage' event (localStorage change across same-origin
-   contexts); IndexedDB persistence (needs the IndexedDB broker, see #8).] 10. Blob-from-file
+   mb_smoke 23aa2.] [DONE: window 'storage' event + cross-context localStorage sharing — a real
+   in-process DOM Storage backend (frame/mb_dom_storage.{h,cc}, bound on the platform broker ->
+   service thread since StorageArea.GetAll is [Sync]). DomStorageProvider->DomStorage->StorageArea
+   over a process-wide per-origin key/value store; Put/Delete/DeleteAll broadcast KeyChanged/
+   KeyDeleted/AllDeleted to every observing context, so same-origin contexts SHARE localStorage and
+   the 'storage' event fires on the others (blink skips the writer via source id). Was previously
+   cache-only per context (no sharing, no event). Session storage left cache-only (receivers
+   dropped) to preserve its semantics. Verified mb_smoke 23au: parent writes, a same-origin srcdoc
+   iframe sees the value AND gets 'storage'; the writer stays silent.] [REMAINING: IndexedDB
+   persistence (needs the IndexedDB broker, see #8).] 10. Blob-from-file
 + ranged blob reads + DataPipeGetter uploads. 11. **GPU content path** (WebGL / accel-2d-canvas /
 `<video>` render blank) — the heaviest; needs a GL/media provider. Last.
 

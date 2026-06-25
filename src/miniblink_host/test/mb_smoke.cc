@@ -1920,6 +1920,35 @@ int main() {
            "nav=[" + r + "]");
   }
 
+  // 23au. localStorage cross-context sharing + the window 'storage' event. With a real DOM
+  // Storage backend, a same-origin (srcdoc) iframe observes a localStorage write made by the
+  // parent: the value is shared (its localStorage.getItem sees it) AND a 'storage' event fires
+  // in the iframe — but NOT in the writer (the parent must not receive its own event).
+  {
+    mbLoadHTML(v, "<body></body>", "https://lstore.test/");
+    Eval(v,
+         "window.__pse='';"  // parent storage event (must stay empty)
+         "addEventListener('storage',function(){window.__pse='PARENT_FIRED';});"
+         "var f=document.createElement('iframe');"
+         // The iframe touches localStorage (so its context observes) then records any event.
+         "f.srcdoc=\"<script>localStorage.getItem('k');window.__se='';"
+         "addEventListener('storage',function(e){window.__se=e.key+'='+e.newValue"
+         "+';old='+(e.oldValue===null?'null':e.oldValue);});<\\/script>\";"
+         "window.__f=f;document.body.appendChild(f);");
+    mbWaitForFunction(
+        v, "window.__f.contentWindow && window.__f.contentWindow.__se!==undefined", 3000);
+    Eval(v, "localStorage.setItem('k','v1');");
+    mbWaitForFunction(v, "window.__f.contentWindow.__se!==''", 3000);
+    const std::string r = Eval(
+        v,
+        "window.__f.contentWindow.__se"
+        "+',shared:'+(window.__f.contentWindow.localStorage.getItem('k')==='v1')"
+        "+',parent:'+(window.__pse===''?'silent':window.__pse)");
+    Expect(r == "k=v1;old=null,shared:true,parent:silent",
+           "localStorage shares across same-origin contexts + 'storage' event fires (not on writer)",
+           "se=[" + r + "]");
+  }
+
   // 23as. Common platform capabilities: sendBeacon (analytics) queues, navigator.connection /
   // deviceMemory / hardwareConcurrency present, reportError + scheduler.postTask available.
   {

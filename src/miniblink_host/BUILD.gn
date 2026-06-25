@@ -30,6 +30,8 @@ component("miniblink_host") {
     "frame/mb_cache_storage.h",
     "frame/mb_frame_broker.cc",
     "frame/mb_frame_broker.h",
+    "frame/mb_dom_storage.cc",
+    "frame/mb_dom_storage.h",
     "frame/mb_frame_client.cc",
     "frame/mb_frame_client.h",
     "frame/mb_indexeddb.cc",

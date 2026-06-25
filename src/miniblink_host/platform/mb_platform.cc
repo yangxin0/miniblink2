@@ -21,8 +21,10 @@
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "miniblink_host/blob/mb_blob_registry.h"
+#include "miniblink_host/frame/mb_dom_storage.h"
 #include "miniblink_host/worker/mb_dedicated_worker_host.h"
 #include "third_party/blink/public/mojom/blob/blob_registry.mojom-blink.h"
+#include "third_party/blink/public/mojom/dom_storage/dom_storage.mojom-blink.h"
 #include "third_party/blink/public/mojom/mime/mime_registry.mojom-blink.h"
 #include "third_party/blink/public/platform/web_data.h"
 #include "third_party/blink/public/platform/web_dedicated_worker_host_factory_client.h"
@@ -72,6 +74,12 @@ class MbEmptyBroker : public blink::ThreadSafeBrowserInterfaceBrokerProxy {
     // thread makes is answered off-thread (instead of dropped -> reads hang).
     if (auto r = receiver.As<blink::mojom::blink::BlobRegistry>()) {
       BindBlobRegistryOnServiceThread(std::move(r));
+      return;
+    }
+    // DOM Storage backend (localStorage): also off-thread (StorageArea.GetAll is
+    // [Sync]). Gives same-origin contexts a shared store + the `storage` event.
+    if (auto r = receiver.As<blink::mojom::blink::DomStorageProvider>()) {
+      BindDomStorageProviderOnServiceThread(std::move(r));
       return;
     }
     // Drop everything else.
