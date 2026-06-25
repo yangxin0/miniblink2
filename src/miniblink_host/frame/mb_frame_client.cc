@@ -156,6 +156,10 @@ void MbFrameClient::DoCommit(std::unique_ptr<blink::WebNavigationInfo> info) {
   blink::KURL url = info->url_request.Url();
   std::string body;  // CommitNavigation requires a body_loader (even for srcdoc)
   std::string mime = "text/html";
+  // Child-frame charset: default UTF-8 (srcdoc body is extracted as UTF-8; safe for the
+  // common case), but honor an explicit charset= from the fetched Content-Type so a
+  // non-UTF-8 iframe (Shift-JIS, GBK, ...) decodes correctly instead of mojibake.
+  std::string charset = "UTF-8";
   if (url.IsAboutSrcdocUrl()) {
     params->fallback_base_url = info->requestor_base_url;
     // The srcdoc text lives on the owner element, not in WebNavigationInfo.
@@ -205,12 +209,25 @@ void MbFrameClient::DoCommit(std::unique_ptr<blink::WebNavigationInfo> info) {
         m.pop_back();
       if (!m.empty())
         mime = m;
+      // Pull an explicit charset= off the Content-Type (authoritative). Absent ->
+      // keep UTF-8 (no regression for the existing UTF-8/data: iframe cases).
+      std::string lc = content_type;
+      for (char& c : lc)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      if (auto p = lc.find("charset="); p != std::string::npos) {
+        p += 8;
+        std::string::size_type end = content_type.find_first_of("; \t", p);
+        std::string cs = content_type.substr(
+            p, end == std::string::npos ? end : end - p);
+        if (!cs.empty())
+          charset = cs;
+      }
     }
   }
   // (about:blank / empty children commit an empty document — correct.)
   blink::WebNavigationParams::FillStaticResponse(
       params.get(), blink::WebString::FromUtf8(mime),
-      blink::WebString::FromUtf8("UTF-8"),
+      blink::WebString::FromUtf8(charset),
       base::span<const char>(body.data(), body.size()));
   // CommitNavigation requires a policy container for non-empty documents.
   MbPolicyContainerHost policy_host;

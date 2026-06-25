@@ -220,7 +220,18 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      NOT work here — no file-reading blob backend — which is why we read the bytes ourselves.
 
 **Tier 2 — web-platform fidelity (host infra; heavier):**
-7. Workers (dedicated worker thread+isolate; shared/service absent). 8. Broker binds cookies
+7. Workers (dedicated/shared/service). **SCOPED (2026-06):** `new Worker()` is deliberately
+   INERT, not broken — `MbPlatform::CreateDedicatedWorkerHostFactoryClient` returns a stub
+   whose `CreateWorkerHost` does nothing (the script-load callback never fires), so a
+   worker-using page degrades (worker silent) instead of the SIGSEGV the base null factory
+   would cause. Making workers RUN is a large big-bang (NOT incrementally verifiable):
+   the stub must drive `WebDedicatedWorker::OnWorkerHostCreated(...)` + `OnScriptLoadStarted(
+   null-params, ...)` (so the worker thread fetches its script itself), AND `MbFrameClient`
+   must override `CreateWorkerFetchContext` to return a real `WebWorkerFetchContext` (~20-method
+   interface) backed by `MbURLLoader` — plus the worker-host/broker mojo remotes can't be null
+   or the worker derefs them. Needs a dedicated multi-tick effort, not a single loop tick.
+   Flow map: dedicated_worker.cc ContinueStart→CreateWorkerHost→OnWorkerHostCreated→
+   OnScriptLoadStarted→ContinueStart (worker thread + script fetch). 8. Broker binds cookies
 only — IndexedDB / WebSocket / Permissions / geolocation / clipboard / notifications dropped.
 9. Storage/cookie persistence across runs + async CookieStore + change events. 10. Blob-from-file
 + ranged blob reads + DataPipeGetter uploads. 11. **GPU content path** (WebGL / accel-2d-canvas /
@@ -229,8 +240,11 @@ only — IndexedDB / WebSocket / Permissions / geolocation / clipboard / notific
 **Tier 3 — input & rendering refinements:**
 12. Input fidelity (modifier flags, right/middle-click, IME, native drag-drop, trusted touch/wheel).
 13. PDF options (page size / landscape / margins / scale / print-background — currently hardcoded
-US-Letter). 14. Child-frame charset hardcoded UTF-8 → mojibake on non-UTF-8 iframes
-(`mb_frame_client.cc:182`). 15. CSP/PolicyContainer leaks across navigations in a reused view.
+US-Letter). 14. [DONE] Child-frame charset was hardcoded UTF-8 → mojibake on non-UTF-8
+iframes; `DoCommit` now honors an explicit `charset=` from the fetched Content-Type
+(default still UTF-8, so UTF-8/srcdoc/data: cases are unchanged). Verified (mb_smoke_render
+78c): a `charset=shift_jis` iframe serving the Shift-JIS bytes for 日本 decodes to U+65E5
+U+672C, not U+FFFD. 15. CSP/PolicyContainer leaks across navigations in a reused view.
 
 ### Accepted, by-design (NOT tasks):
 - `<meta name=viewport>` ignored (mobile = narrow view + UA, works). Color emoji monochrome

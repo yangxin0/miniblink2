@@ -1354,6 +1354,29 @@ static void RunCases(mbView* v, int W, int H) {
                parent_read + "] inframe=[" + in_frame + "]");
   }
 
+  // 78c. Non-UTF-8 iframe charset (audit #14): a child frame whose response declares a
+  // non-UTF-8 charset must decode with THAT charset, not the old hardcoded UTF-8 (which
+  // turned the bytes into mojibake). Mock an iframe serving the Shift-JIS bytes for
+  // "日本" (0x93 0xFA 0x96 0x7B) with charset=shift_jis; the child must decode to the
+  // correct code points (U+65E5 U+672C), read host-privileged via mbEvalJSInFrame.
+  {
+    mbClearMocks();
+    mbMockResponse("sjis.test/p", "<body>\x93\xFA\x96\x7B</body>",
+                   "text/html; charset=shift_jis", 200);
+    mbLoadHTML(v,
+        "<body>p<iframe src='https://sjis.test/p' width='60' height='30'></iframe>"
+        "</body>", "https://parent.test/");
+    mbWait(v, 300);
+    char cc[64] = {0};
+    mbEvalJSInFrame(v, 0,
+        "''+document.body.textContent.charCodeAt(0)+','+"
+        "document.body.textContent.charCodeAt(1)", cc, sizeof(cc));
+    mbClearMocks();
+    Expect(std::string(cc) == "26085,26412",  // U+65E5 (日), U+672C (本)
+           "non-UTF-8 (Shift-JIS) iframe decodes by its declared charset, not mojibake",
+           std::string("codes=[") + cc + "]");
+  }
+
   // 79. <iframe sandbox> is enforced: the owner's FramePolicy sandbox flags
   // reach the committed child document (CreateChildFrame -> BeginNavigation
   // applies them). The cleanest origin-independent signal is script blocking:
