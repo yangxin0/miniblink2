@@ -448,8 +448,11 @@ on-device AI (LanguageModel/Summarizer/Writer/Rewriter/Proofreader/Classifier �
 Every CanCreate* reports kUnavailableServiceNotRunning so `X.availability()` resolves to 'unavailable'
 (headless has no model); create() rejects via the client's OnError; GetLanguageModelParams -> null. BUG
 fixed: the AIManager remote has no disconnect handler, so unbound an availability() probe HANGS (an
-unsettled ScriptPromiseResolver even crashes teardown). mb_smoke 23ap. (Translator/LanguageDetector use
-SEPARATE managers — still unbound, so their availability() still hangs; a follow-up can bind those.)
+unsettled ScriptPromiseResolver even crashes teardown). mb_smoke 23ap. Translator + LanguageDetector
+use SEPARATE managers — also bound now: `MbTranslationManager` (TranslationAvailable -> kNoServiceCrashed,
+CreateTranslator -> OnResult error) and `MbContentLanguageDetectionDriver` (GetLanguageDetectionModel-
+Status -> kNotAvailable; needs the //components/language_detection/content/common:common_blink GN dep).
+All four built-in AI surfaces' availability() now resolve 'unavailable'. mb_smoke 23ap covers all four.
 [DONE: getInstalledRelatedApps] `MbInstalledAppProvider` (blink.mojom.InstalledAppProvider, bound from
 the frame broker) returns [] (no installed apps headless). BUG fixed: blink sets no disconnect handler
 on the provider (explicit TODO in installed_app_controller.cc), so unbound the promise HANGS. PWAs
