@@ -1190,6 +1190,34 @@ int main() {
            "idb=[" + r + "]");
   }
 
+  // 23n. IndexedDB count/delete/clear (step 3): round out object-store CRUD. Put 3
+  // records; delete one (count drops 3->2); clear the store (count -> 0). Exercises
+  // IDBDatabase.Count / DeleteRange / Clear against the in-memory backend.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://idb.test/");
+    Eval(v,
+         "window.__idb2='';"
+         "var __q=indexedDB.open('mbdb3',1);"
+         "__q.onupgradeneeded=function(e){e.target.result.createObjectStore('it',{keyPath:'id'});};"
+         "__q.onsuccess=function(e){var db=e.target.result;"
+         "var t=db.transaction('it','readwrite');var s=t.objectStore('it');"
+         "s.put({id:1});s.put({id:2});s.put({id:3});"
+         "t.oncomplete=function(){"
+         "var t2=db.transaction('it','readwrite');t2.objectStore('it')['delete'](2);"
+         "t2.oncomplete=function(){"
+         "var c=db.transaction('it').objectStore('it').count();"
+         "c.onsuccess=function(){var n1=c.result;"
+         "var t3=db.transaction('it','readwrite');t3.objectStore('it').clear();"
+         "t3.oncomplete=function(){"
+         "var c2=db.transaction('it').objectStore('it').count();"
+         "c2.onsuccess=function(){window.__idb2='afterDelete:'+n1+',afterClear:'+c2.result;};};};};};};");
+    mbWaitForFunction(v, "window.__idb2!==''", 4000);
+    const std::string r = Eval(v, "window.__idb2");
+    Expect(r == "afterDelete:2,afterClear:0",
+           "IndexedDB: count reflects delete; clear empties the store",
+           "idb2=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

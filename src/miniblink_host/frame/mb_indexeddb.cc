@@ -144,12 +144,31 @@ class MbIDBDatabase : public m::IDBDatabase {
                   OpenCursorCallback callback) override {
     std::move(callback).Run(nullptr);
   }
-  void Count(int64_t, int64_t, int64_t, m::IDBKeyRangePtr,
+  // count(): a single-key range counts that key (0/1); an absent/unbounded range counts
+  // every record in the store.
+  void Count(int64_t, int64_t object_store_id, int64_t, m::IDBKeyRangePtr key_range,
              CountCallback callback) override {
-    std::move(callback).Run(/*success=*/false, 0);
+    auto it = backend_->data.find(object_store_id);
+    uint64_t n = 0;
+    if (it != backend_->data.end()) {
+      std::string ekey =
+          EncodeKey(key_range ? key_range->lower.get() : nullptr);
+      n = ekey.empty() ? it->second.size() : it->second.count(ekey);
+    }
+    std::move(callback).Run(/*success=*/true, n);
   }
-  void DeleteRange(int64_t, int64_t, m::IDBKeyRangePtr,
+  // delete(key): remove the single-key record; an unbounded range removes all.
+  void DeleteRange(int64_t, int64_t object_store_id, m::IDBKeyRangePtr key_range,
                    DeleteRangeCallback callback) override {
+    auto it = backend_->data.find(object_store_id);
+    if (it != backend_->data.end()) {
+      std::string ekey =
+          EncodeKey(key_range ? key_range->lower.get() : nullptr);
+      if (ekey.empty())
+        it->second.clear();
+      else
+        it->second.erase(ekey);
+    }
     std::move(callback).Run(/*success=*/true);
   }
   void GetKeyGeneratorCurrentNumber(
@@ -157,7 +176,11 @@ class MbIDBDatabase : public m::IDBDatabase {
       GetKeyGeneratorCurrentNumberCallback callback) override {
     std::move(callback).Run(0, nullptr);
   }
-  void Clear(int64_t, int64_t, ClearCallback callback) override {
+  void Clear(int64_t, int64_t object_store_id,
+             ClearCallback callback) override {
+    auto it = backend_->data.find(object_store_id);
+    if (it != backend_->data.end())
+      it->second.clear();
     std::move(callback).Run(/*success=*/true);
   }
   void CreateIndex(int64_t, int64_t,

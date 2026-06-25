@@ -424,9 +424,14 @@ the range's only-key and returns an `IDBReturnValue` (the bytes + primary key + 
 path — which MUST match or `idb_request.cc` DCHECKs). Keys are encoded to a comparable string
 (number/date/string/binary; arrays/none unsupported). Verified (mb_smoke 23m + render 39):
 open -> createObjectStore -> readwrite put({id:7,name:'widget',qty:3}) -> tx.oncomplete -> get(7)
-returns the structured-cloned object intact ("widgetx3"). NOT yet: cursors, indexes, key ranges
-beyond a single key, getAll, count, delete, autoincrement key generation — and persistence is
-in-memory only (per-process, by db name).]
+returns the structured-cloned object intact ("widgetx3"). STEP 3 (DONE): object-store CRUD rounded out
+— `IDBDatabase.Count` (single-key 0/1, else whole-store size), `DeleteRange` (single-key erase,
+unbounded = clear) and `Clear` operate on the backend record maps. Verified (mb_smoke 23n): put
+3 -> delete(2) -> count 2 -> clear -> count 0. NOT yet: cursors (the stateful IDBCursor
+interface), indexes, multi-key/bounded ranges, getAll, autoincrement key generation, transaction
+atomicity/rollback — and persistence is in-memory only (per-process, by db name). Cursors/getAll
+need proper IDB key ORDERING (the record map is keyed by an encoded string that doesn't sort in
+IDB key order), so they're the next, larger IDB step.]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
    Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —
