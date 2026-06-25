@@ -432,6 +432,12 @@ navigator.credentials.get({otp}) (SMS one-time-code autofill). Headless has no S
 Receive reports kBackendNotAvailable (get() rejects cleanly) and Abort is a no-op. BUG fixed: the
 WebOTPService remote has no disconnect handler, so unbound the OTP request HANGS during a login flow.
 mb_smoke 23am.
+[DONE: MediaCapabilities] `MbVideoDecodePerfHistory` + `MbWebrtcVideoPerfHistory` (media.mojom, bound
+from the frame broker) report smooth + power-efficient for navigator.mediaCapabilities.decodingInfo().
+BUG fixed: for a SUPPORTED video codec blink queries VideoDecodePerfHistory (no disconnect handler) ->
+decodingInfo() HANGS unbound. Video sites call it on load to pick a codec. Verified the build supports
+VP9/AV1 (libvpx/dav1d) but not H.264/VP8 — a vp9/av1 config triggered the hang; now resolves.
+mb_smoke 23an. (Aside: decodingInfo's supported flag confirms this build decodes VP9 + AV1.)
 [DONE: getInstalledRelatedApps] `MbInstalledAppProvider` (blink.mojom.InstalledAppProvider, bound from
 the frame broker) returns [] (no installed apps headless). BUG fixed: blink sets no disconnect handler
 on the provider (explicit TODO in installed_app_controller.cc), so unbound the promise HANGS. PWAs
