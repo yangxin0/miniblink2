@@ -440,17 +440,18 @@ bytes into a working buffer (a copy of the file when keep_existing_data); `Trunc
 commits the buffer to the node, `Abort` discards. `getFile()` -> `AsBlob` mints a BlobDataHandle
 serving the bytes via a new blob-registry helper `MbCreateInlineBlob` (self-owned in-process Blob).
 OPFS now round-trips create -> write -> close -> getFile().text(). Verified (mb_smoke 23ad: write
-'hello opfs', read back, size 10). `OpenAccessHandle` (Worker-only sync access handles) rejects
-cleanly. NOTE (attempted + reverted this session): the in-memory delegate IS implementable —
-`FileSystemAccessFileDelegateHost` with `Read`/`GetLength`/`SetLength` over the node bytes and a
-`[Sync] Write` drained by `mojo::BlockingCopyToString` (safe: blink feeds the pipe from another
-thread and closes it, per file_system_access_incognito_file_delegate.cc), returning the union's
-`incognito_file_delegate` + a no-op `FileSystemAccessAccessHandleHost`. BLOCKED ON VERIFICATION:
-createSyncAccessHandle is Worker-only, and we can't get a same-origin worker — a `data:` worker is
-opaque-origin (OPFS SecurityError) and a `blob:` worker (which would inherit the page origin)
-DOES NOT LOAD in this embedder (its script never runs). So the prerequisite is **blob-URL worker
-script loading**; once that works, the delegate lands with a passing worker test. Per-origin
-isolation also still deferred (single process-wide root).
+'hello opfs', read back, size 10). SLICE 3 (DONE): `OpenAccessHandle` (createSyncAccessHandle,
+Worker-only) — an in-memory `FileSystemAccessFileDelegateHost` (`Read` returns a BigBuffer slice;
+`GetLength`/`SetLength` report/resize; the `[Sync] Write` drains its pipe with
+`mojo::BlockingCopyToString` — safe because blink feeds the pipe from another thread and closes it,
+per file_system_access_incognito_file_delegate.cc — then splices at offset), returned as the union's
+`incognito_file_delegate` + a no-op `FileSystemAccessAccessHandleHost`. Verified (mb_smoke 23ah) via a
+mocked SAME-ORIGIN worker (a data: worker is opaque-origin -> OPFS SecurityError; see the MbFetchUrl
+mock support below). STILL DEFERRED: per-origin isolation (single process-wide root).
+[DONE: mockable worker scripts] `MbFetchUrl` now consults the response-mock table (MbFindMock) before
+any scheme fetch, matching the async loader. So worker scripts / iframes / top-level navs can be
+served by `mbMockResponse` — and a worker from a mocked https URL is SAME-ORIGIN with the page (a
+data: worker is opaque), the route used to test OPFS sync access handles. mb_smoke 23ag.
 [DONE: Storage Buckets] `frame/mb_storage_buckets.{h,cc}` (`MbBucketManagerHost` + `MbBucketHost`,
 bound from the frame broker). `navigator.storageBuckets.open/keys/delete` track bucket names; each
 bucket re-exposes the existing in-process backends — `GetIdbFactory`/`GetLockManager`/`GetCaches`
