@@ -427,6 +427,14 @@ load — `isUserVerifyingPlatformAuthenticatorAvailable()` / `isConditionalMedia
 resolve false, getClientCapabilities returns [], makeCredential/getCredential/report reject cleanly
 (NOT_ALLOWED_ERROR). BUG fixed: the Authenticator remote has NO disconnect handler, so unbound those
 statics HANG. mb_smoke 23aj.
+[DONE: getInstalledRelatedApps] `MbInstalledAppProvider` (blink.mojom.InstalledAppProvider, bound from
+the frame broker) returns [] (no installed apps headless). BUG fixed: blink sets no disconnect handler
+on the provider (explicit TODO in installed_app_controller.cc), so unbound the promise HANGS. PWAs
+probe it on load to detect a companion native app. mb_smoke 23ak.
+[KNOWN FLAKE] mb_smoke 23ae (Storage Buckets) intermittently reports an empty cache body
+(`bk=[inbox,inbox,]` instead of `...,hi-bucket]`) ~1 in 5 runs — a race reading a cached Response's
+blob body, NOT a regression (passes on re-run; same blob-backed path as other cache tests). Worth a
+future look at the Response-body-blob materialization/read timing.
 [DONE: Cookie Store API] `cookieStore.get/getAll/set/delete` — `MbCookieManager` (the
 RestrictedCookieManager already serving document.cookie) gained real `GetAllForUrl` (returns the
 origin's cookies as net::CanonicalCookies via CreateSanitizedCookie, honoring the options name filter:
