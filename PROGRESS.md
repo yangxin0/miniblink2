@@ -427,11 +427,18 @@ open -> createObjectStore -> readwrite put({id:7,name:'widget',qty:3}) -> tx.onc
 returns the structured-cloned object intact ("widgetx3"). STEP 3 (DONE): object-store CRUD rounded out
 — `IDBDatabase.Count` (single-key 0/1, else whole-store size), `DeleteRange` (single-key erase,
 unbounded = clear) and `Clear` operate on the backend record maps. Verified (mb_smoke 23n): put
-3 -> delete(2) -> count 2 -> clear -> count 0. NOT yet: cursors (the stateful IDBCursor
-interface), indexes, multi-key/bounded ranges, getAll, autoincrement key generation, transaction
-atomicity/rollback — and persistence is in-memory only (per-process, by db name). Cursors/getAll
-need proper IDB key ORDERING (the record map is keyed by an encoded string that doesn't sort in
-IDB key order), so they're the next, larger IDB step.]
+3 -> delete(2) -> count 2 -> clear -> count 0. STEP 4 (DONE): key ordering + getAll +
+ranges. Records are now keyed by an ORDER-PRESERVING encoding (a type-rank byte — number <
+date < string < binary — then big-endian sign-flipped doubles / raw string-or-binary bytes), so
+the `std::map` iterates them in IndexedDB key order. Each record also stores a clone of its
+primary key. `IDBDatabase.GetAll` emits records (Keys/Values/Records result types) in key order,
+honoring the key range (encoded-key `lower_bound`/`upper_bound` with open/closed ends), max_count,
+and Next/Prev direction — and `Count`/`DeleteRange` use the same encoding. Verified (mb_smoke
+23o): insert id 3,1,2 -> `getAll()` returns them ordered 1,2,3. (Values-only getAll must NOT carry
+record primary keys — blink CHECKs that.) NOT yet: the stateful IDBCursor interface
+(openCursor), indexes, autoincrement key generation, transaction atomicity/rollback — and
+persistence is in-memory only (per-process, by db name). Object-store CRUD + getAll/ranges is the
+common app surface; cursors are the main remaining IDB piece.]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
    Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —

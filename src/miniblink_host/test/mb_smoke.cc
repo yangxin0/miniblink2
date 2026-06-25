@@ -1218,6 +1218,29 @@ int main() {
            "idb2=[" + r + "]");
   }
 
+  // 23o. IndexedDB getAll + key ORDER (step 4): records are stored under an order-
+  // preserving key encoding, so getAll() returns values in IndexedDB key order regardless
+  // of insertion order. Insert id 3,1,2; getAll must return them ordered 1,2,3.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://idb.test/");
+    Eval(v,
+         "window.__idb3='';"
+         "var __o=indexedDB.open('mbdb4',1);"
+         "__o.onupgradeneeded=function(e){e.target.result.createObjectStore('o',{keyPath:'id'});};"
+         "__o.onsuccess=function(e){var db=e.target.result;"
+         "var t=db.transaction('o','readwrite');var s=t.objectStore('o');"
+         "s.put({id:3,n:'c'});s.put({id:1,n:'a'});s.put({id:2,n:'b'});"
+         "t.oncomplete=function(){"
+         "var g=db.transaction('o').objectStore('o').getAll();"
+         "g.onsuccess=function(){window.__idb3=g.result.map(function(r){return r.id+r.n;}).join(',');};"
+         "g.onerror=function(){window.__idb3='err';};};};");
+    mbWaitForFunction(v, "window.__idb3!==''", 4000);
+    const std::string r = Eval(v, "window.__idb3");
+    Expect(r == "1a,2b,3c",
+           "IndexedDB getAll returns records in IndexedDB key order",
+           "idb3=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

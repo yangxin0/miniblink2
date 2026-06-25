@@ -7,6 +7,7 @@
 #include <string>
 #include <utility>
 
+#include "base/bit_cast.h"
 #include "base/containers/span.h"
 #include "base/strings/string_number_conversions.h"
 #include "mojo/public/cpp/base/big_buffer.h"
@@ -29,32 +30,51 @@ using m::IDBDatabaseCallbacks;
 using m::IDBFactoryClient;
 using m::IDBTransaction;
 
+// One stored record: the primary key (kept so getAll/cursors can report it) + the
+// serialized value bytes.
+struct MbRecord {
+  std::unique_ptr<blink::IDBKey> key;
+  std::string bytes;
+};
+
 // In-memory backing store for one database name: its current version + schema (object
-// store metadata) + the records (per object store, encoded-key -> serialized value bytes).
+// store metadata) + the records. Records are keyed by an ORDER-PRESERVING encoding of the
+// IDBKey, so std::map iterates them in IndexedDB key order (needed for getAll/ranges).
 // Process-wide so reopen sees the same database.
 struct MbIDBBackend {
   blink::IDBDatabaseMetadata metadata;  // name/version/object_stores
-  std::map<int64_t, std::map<std::string, std::string>> data;  // store_id -> key -> bytes
+  std::map<int64_t, std::map<std::string, MbRecord>> data;  // store -> ekey -> record
   // The active connection's database callbacks (transaction completion is reported here).
   mojo::AssociatedRemote<IDBDatabaseCallbacks> db_callbacks;
 };
 
-// Encode an IDBKey to a comparable std::string for the record map. Numbers/dates/strings/
-// binary are supported (the overwhelmingly common keys); arrays/none are unsupported here
-// and yield an empty encoding (treated as an invalid key).
+// Big-endian, order-preserving encoding of a double: flip the sign bit for positives and
+// all bits for negatives, so lexicographic byte order matches numeric order.
+std::string EncodeDouble(double d) {
+  uint64_t u = base::bit_cast<uint64_t>(d);
+  u = (u & (uint64_t{1} << 63)) ? ~u : (u | (uint64_t{1} << 63));
+  char buf[8];
+  for (int i = 0; i < 8; ++i)
+    buf[i] = static_cast<char>((u >> (56 - 8 * i)) & 0xFF);
+  return std::string(buf, 8);
+}
+
+// Encode an IDBKey to a comparable std::string. A leading type-rank byte groups types in
+// IndexedDB order (number < date < string < binary); numbers/dates are order-preserving,
+// strings/binary compare bytewise. Arrays/none/invalid yield an empty encoding (unsupported).
 std::string EncodeKey(const blink::IDBKey* k) {
   if (!k)
     return std::string();
   switch (k->GetType()) {
     case blink::mojom::IDBKeyType::Number:
-      return "n:" + base::NumberToString(k->Number());
+      return std::string(1, '\x10') + EncodeDouble(k->Number());
     case blink::mojom::IDBKeyType::Date:
-      return "d:" + base::NumberToString(k->Date());
+      return std::string(1, '\x20') + EncodeDouble(k->Date());
     case blink::mojom::IDBKeyType::String:
-      return "s:" + k->GetString().Utf8();
+      return std::string(1, '\x30') + k->GetString().Utf8();
     case blink::mojom::IDBKeyType::Binary: {
       auto b = k->Binary();
-      return "b:" + std::string(b->data.data(), b->data.size());
+      return std::string(1, '\x40') + std::string(b->data.data(), b->data.size());
     }
     default:
       return std::string();
@@ -64,6 +84,24 @@ std::string EncodeKey(const blink::IDBKey* k) {
 std::string ValueBytes(const blink::IDBValue* v) {
   base::span<const uint8_t> d = v->Data();
   return std::string(reinterpret_cast<const char*>(d.data()), d.size());
+}
+
+blink::IDBKeyPath StoreKeyPath(MbIDBBackend* b, int64_t store_id) {
+  auto it = b->metadata.object_stores.find(store_id);
+  return it != b->metadata.object_stores.end() ? it->value->key_path
+                                               : blink::IDBKeyPath();
+}
+
+// Build the IDBReturnValue blink expects (value bytes + primary key + the store's key path
+// — the path MUST match the store's or idb_request.cc DCHECKs).
+m::IDBReturnValuePtr BuildReturnValue(const MbRecord& rec,
+                                      const blink::IDBKeyPath& key_path) {
+  auto rv = m::IDBReturnValue::New();
+  rv->value = std::make_unique<blink::IDBValue>();
+  rv->value->SetData(mojo_base::BigBuffer(base::as_byte_span(rec.bytes)));
+  rv->primary_key = blink::IDBKey::Clone(rec.key);
+  rv->key_path = key_path;
+  return rv;
 }
 
 std::map<std::string, std::unique_ptr<MbIDBBackend>>& Registry() {
@@ -117,27 +155,69 @@ class MbIDBDatabase : public m::IDBDatabase {
       std::move(callback).Run(m::IDBDatabaseGetResult::NewEmpty(true));
       return;
     }
+    const MbRecord& rec = store_it->second.at(ekey);
     if (key_only) {
       std::move(callback).Run(
-          m::IDBDatabaseGetResult::NewKey(blink::IDBKey::Clone(k)));
+          m::IDBDatabaseGetResult::NewKey(blink::IDBKey::Clone(rec.key)));
       return;
     }
-    auto value = std::make_unique<blink::IDBValue>();
-    value->SetData(mojo_base::BigBuffer(base::as_byte_span(store_it->second[ekey])));
-    auto rv = m::IDBReturnValue::New();
-    rv->value = std::move(value);
-    rv->primary_key = blink::IDBKey::Clone(k);
-    // The key path must match the object store's, or blink DCHECKs (it uses these to
-    // re-inject the key into the deserialized value for out-of-line-key stores).
-    auto os_it = backend_->metadata.object_stores.find(object_store_id);
-    if (os_it != backend_->metadata.object_stores.end())
-      rv->key_path = os_it->value->key_path;
-    std::move(callback).Run(m::IDBDatabaseGetResult::NewValue(std::move(rv)));
+    std::move(callback).Run(m::IDBDatabaseGetResult::NewValue(
+        BuildReturnValue(rec, StoreKeyPath(backend_, object_store_id))));
   }
-  void GetAll(int64_t, int64_t, int64_t, m::IDBKeyRangePtr,
-              m::IDBGetAllResultType, uint32_t, m::IDBCursorDirection,
+
+  // getAll()/getAllKeys()/getAllRecords(): emit records in IDB key order (the encoded-key
+  // map is sorted), honoring the key range, max_count, and direction.
+  void GetAll(int64_t, int64_t object_store_id, int64_t,
+              m::IDBKeyRangePtr key_range, m::IDBGetAllResultType result_type,
+              uint32_t max_count, m::IDBCursorDirection direction,
               GetAllCallback callback) override {
-    std::move(callback).Run({}, mojo::NullAssociatedReceiver());
+    blink::Vector<m::IDBRecordPtr> records;
+    auto store_it = backend_->data.find(object_store_id);
+    if (store_it != backend_->data.end()) {
+      const auto& store = store_it->second;
+      // Encoded-key bounds for the range (order-preserving encoding makes this exact).
+      std::string lo = key_range ? EncodeKey(key_range->lower.get()) : std::string();
+      std::string hi = key_range ? EncodeKey(key_range->upper.get()) : std::string();
+      const blink::IDBKeyPath kp = StoreKeyPath(backend_, object_store_id);
+      const bool keys_only = result_type == m::IDBGetAllResultType::Keys;
+      const bool reverse = direction == m::IDBCursorDirection::Prev ||
+                           direction == m::IDBCursorDirection::PrevNoDuplicate;
+      const uint32_t limit = max_count == 0 ? UINT32_MAX : max_count;
+
+      auto in_range = [&](const std::string& ek) {
+        if (!lo.empty()) {
+          if (ek < lo || (key_range->lower_open && ek == lo))
+            return false;
+        }
+        if (!hi.empty()) {
+          if (ek > hi || (key_range->upper_open && ek == hi))
+            return false;
+        }
+        return true;
+      };
+      auto emit = [&](const std::string& ek, const MbRecord& rec) {
+        auto record = m::IDBRecord::New();
+        // Values-only getAll() must NOT carry a primary key (blink CHECKs this); keys are
+        // set only for getAllKeys()/getAllRecords().
+        if (result_type != m::IDBGetAllResultType::Values)
+          record->primary_key = blink::IDBKey::Clone(rec.key);
+        if (!keys_only)
+          record->return_value = BuildReturnValue(rec, kp);
+        records.push_back(std::move(record));
+      };
+      if (reverse) {
+        for (auto it = store.rbegin();
+             it != store.rend() && records.size() < limit; ++it)
+          if (in_range(it->first))
+            emit(it->first, it->second);
+      } else {
+        for (auto it = store.begin();
+             it != store.end() && records.size() < limit; ++it)
+          if (in_range(it->first))
+            emit(it->first, it->second);
+      }
+    }
+    std::move(callback).Run(std::move(records), mojo::NullAssociatedReceiver());
   }
   void OpenCursor(int64_t, int64_t, int64_t, m::IDBKeyRangePtr,
                   m::IDBCursorDirection, bool, m::IDBTaskType,
@@ -243,7 +323,8 @@ class MbIDBTransactionImpl : public IDBTransaction {
                            blink::String("unsupported key type"))));
       return;
     }
-    backend_->data[object_store_id][ekey] = ValueBytes(value.get());
+    backend_->data[object_store_id][ekey] =
+        MbRecord{blink::IDBKey::Clone(key), ValueBytes(value.get())};
     std::move(callback).Run(
         m::IDBTransactionPutResult::NewKey(blink::IDBKey::Clone(key)));
   }
