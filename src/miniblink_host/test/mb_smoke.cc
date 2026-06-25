@@ -1831,13 +1831,14 @@ int main() {
     Eval(v,
          "window.__usb='';"
          "Promise.all([navigator.usb.getDevices(),navigator.hid.getDevices(),"
-         "navigator.serial.getPorts()])"
-         ".then(function(a){window.__usb='usb'+a[0].length+',hid'+a[1].length+',ser'+a[2].length;})"
+         "navigator.serial.getPorts(),navigator.bluetooth.getAvailability()])"
+         ".then(function(a){window.__usb='usb'+a[0].length+',hid'+a[1].length+',ser'+a[2].length"
+         "+',btAvail'+a[3];})"
          ".catch(function(e){window.__usb='err:'+e.name;});");
     mbWaitForFunction(v, "window.__usb!==''", 3000);
     const std::string r = Eval(v, "window.__usb");
-    Expect(r == "usb0,hid0,ser0",
-           "WebUSB/HID/Serial device enumeration resolves to [] (no hang)",
+    Expect(r == "usb0,hid0,ser0,btAvailfalse",
+           "WebUSB/HID/Serial/Bluetooth device enumeration resolves cleanly (no hang)",
            "usb=[" + r + "]");
   }
 

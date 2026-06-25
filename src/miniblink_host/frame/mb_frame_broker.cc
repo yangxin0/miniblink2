@@ -49,6 +49,7 @@
 #include "components/language_detection/content/common/language_detection.mojom-blink.h"
 #include "third_party/blink/public/mojom/ai/ai_writer.mojom-blink.h"
 #include "services/device/public/mojom/hid.mojom-blink.h"
+#include "third_party/blink/public/mojom/bluetooth/web_bluetooth.mojom-blink.h"
 #include "services/device/public/mojom/serial.mojom-blink.h"
 #include "services/device/public/mojom/usb_device.mojom-blink.h"
 #include "third_party/blink/public/mojom/hid/hid.mojom-blink.h"
@@ -852,6 +853,97 @@ class MbSerialService : public blink::mojom::blink::SerialService {
   }
 };
 
+// blink.mojom.WebBluetoothService for navigator.bluetooth. getAvailability()/getDevices() are
+// called on load; no disconnect handler -> unbound they HANG. Headless has no Bluetooth adapter,
+// so availability is false, device lists are empty, and every GATT op (only reachable after a
+// connect that never succeeds) reports NO_BLUETOOTH_ADAPTER.
+class MbWebBluetoothService : public blink::mojom::blink::WebBluetoothService {
+  using R = blink::mojom::blink::WebBluetoothResult;
+  using Quantity = blink::mojom::blink::WebBluetoothGATTQueryQuantity;
+
+ public:
+  void GetAvailability(GetAvailabilityCallback cb) override {
+    std::move(cb).Run(false);
+  }
+  void RequestDevice(blink::mojom::blink::WebBluetoothRequestDeviceOptionsPtr,
+                     RequestDeviceCallback cb) override {
+    std::move(cb).Run(R::NO_BLUETOOTH_ADAPTER, nullptr);
+  }
+  void GetDevices(GetDevicesCallback cb) override { std::move(cb).Run({}); }
+  void ForgetDevice(const blink::WebBluetoothDeviceId&,
+                    ForgetDeviceCallback cb) override {
+    std::move(cb).Run();
+  }
+  void RemoteServerConnect(
+      const blink::WebBluetoothDeviceId&,
+      mojo::PendingAssociatedRemote<blink::mojom::blink::WebBluetoothServerClient>,
+      RemoteServerConnectCallback cb) override {
+    std::move(cb).Run(R::NO_BLUETOOTH_ADAPTER);
+  }
+  void RemoteServerDisconnect(const blink::WebBluetoothDeviceId&) override {}
+  void RemoteServerGetPrimaryServices(
+      const blink::WebBluetoothDeviceId&, Quantity, const blink::String&,
+      RemoteServerGetPrimaryServicesCallback cb) override {
+    std::move(cb).Run(R::NO_BLUETOOTH_ADAPTER, std::nullopt);
+  }
+  void RemoteServiceGetCharacteristics(
+      const blink::String&, Quantity, const blink::String&,
+      RemoteServiceGetCharacteristicsCallback cb) override {
+    std::move(cb).Run(R::NO_BLUETOOTH_ADAPTER, std::nullopt);
+  }
+  void RemoteCharacteristicReadValue(
+      const blink::String&,
+      RemoteCharacteristicReadValueCallback cb) override {
+    std::move(cb).Run(R::NO_BLUETOOTH_ADAPTER, {});
+  }
+  void RemoteCharacteristicWriteValue(
+      const blink::String&, base::span<const uint8_t>,
+      blink::mojom::blink::WebBluetoothWriteType,
+      RemoteCharacteristicWriteValueCallback cb) override {
+    std::move(cb).Run(R::NO_BLUETOOTH_ADAPTER);
+  }
+  void RemoteCharacteristicStartNotifications(
+      const blink::String&,
+      mojo::PendingAssociatedRemote<
+          blink::mojom::blink::WebBluetoothCharacteristicClient>,
+      RemoteCharacteristicStartNotificationsCallback cb) override {
+    std::move(cb).Run(R::NO_BLUETOOTH_ADAPTER);
+  }
+  void RemoteCharacteristicStopNotifications(
+      const blink::String&,
+      RemoteCharacteristicStopNotificationsCallback cb) override {
+    std::move(cb).Run();
+  }
+  void RemoteCharacteristicGetDescriptors(
+      const blink::String&, Quantity, const blink::String&,
+      RemoteCharacteristicGetDescriptorsCallback cb) override {
+    std::move(cb).Run(R::NO_BLUETOOTH_ADAPTER, std::nullopt);
+  }
+  void RemoteDescriptorReadValue(
+      const blink::String&, RemoteDescriptorReadValueCallback cb) override {
+    std::move(cb).Run(R::NO_BLUETOOTH_ADAPTER, {});
+  }
+  void RemoteDescriptorWriteValue(
+      const blink::String&, base::span<const uint8_t>,
+      RemoteDescriptorWriteValueCallback cb) override {
+    std::move(cb).Run(R::NO_BLUETOOTH_ADAPTER);
+  }
+  void RequestScanningStart(
+      mojo::PendingAssociatedRemote<
+          blink::mojom::blink::WebBluetoothAdvertisementClient>,
+      blink::mojom::blink::WebBluetoothRequestLEScanOptionsPtr,
+      RequestScanningStartCallback cb) override {
+    std::move(cb).Run(R::NO_BLUETOOTH_ADAPTER);
+  }
+  void WatchAdvertisementsForDevice(
+      const blink::WebBluetoothDeviceId&,
+      mojo::PendingAssociatedRemote<
+          blink::mojom::blink::WebBluetoothAdvertisementClient>,
+      WatchAdvertisementsForDeviceCallback cb) override {
+    std::move(cb).Run(R::NO_BLUETOOTH_ADAPTER);
+  }
+};
+
 // language_detection.mojom ContentLanguageDetectionDriver for LanguageDetector.availability().
 // No on-device model: report the model not-available and hand back an invalid File.
 class MbContentLanguageDetectionDriver
@@ -1145,6 +1237,12 @@ class MbBrowserInterfaceBroker
     // navigator.serial.getPorts() — headless: no serial ports ([]).
     if (auto r = receiver.As<blink::mojom::blink::SerialService>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbSerialService>(),
+                                  std::move(r));
+      return;
+    }
+    // navigator.bluetooth — headless: no adapter (getAvailability -> false).
+    if (auto r = receiver.As<blink::mojom::blink::WebBluetoothService>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbWebBluetoothService>(),
                                   std::move(r));
       return;
     }
