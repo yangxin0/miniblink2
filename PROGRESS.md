@@ -414,6 +414,12 @@ SCREEN_WAKE_LOCK, so request('screen') resolves with a live sentinel (mb_smoke 2
 the frame broker) reports a static plugged-in/full battery (level 1, charging true, chargingTime 0).
 QueryNextStatus long-polls for changes, so the first call answers and later calls are held open forever
 (headless value never changes). mb_smoke 23z.
+[DONE: Cookie Store API] `cookieStore.get/getAll/set/delete` — `MbCookieManager` (the
+RestrictedCookieManager already serving document.cookie) gained real `GetAllForUrl` (returns the
+origin's cookies as net::CanonicalCookies via CreateSanitizedCookie, honoring the options name filter:
+EQUALS exact / STARTS_WITH prefix) and `SetCanonicalCookie` (writes name/value, past-expiry = delete,
+bridges to the HTTP jar). cookieStore shares document.cookie's in-memory jar, so the two stay
+consistent. mb_smoke 23aa (set 2, get 1 by name, getAll 2, document.cookie reflects them).
 [DONE: Cache Storage] `frame/mb_cache_storage.{h,cc}` (`MbCacheStorage` + `MbCacheStorageCache`,
 bound from the frame broker). `caches.open/has/delete/keys`, `caches.match`, `cache.put`/`delete`
 (via `Batch`), and `cache.match`. Stores Request URL -> FetchAPIResponse in a process-wide
