@@ -223,6 +223,36 @@ static void RunCases(mbView* v, int W, int H) {
            "reply=[" + r + "]");
   }
 
+  // 37h. SharedWorker SHARING: two SharedWorker handles to the SAME url share ONE worker
+  // (shared state), which is the entire point of the API. The worker keeps a per-instance
+  // counter incremented on each message; if the two handles hit the same instance, the
+  // second connection sees the first's increment (replies 1 then 2). A fresh-worker-per-
+  // connect impl would reply 1 and 1.
+  mbLoadHTML(v, "<body>shared-state</body>", "https://shared.test/");
+  mbRunJS(v,
+    "window.__a='';window.__b='';"
+    "var __u='data:text/javascript,'+encodeURIComponent("
+    "'var n=0;onconnect=function(e){var p=e.ports[0];p.onmessage=function(){p.postMessage(++n)};p.start&&p.start();}');"
+    "var __w1=new SharedWorker(__u);__w1.port.onmessage=function(ev){window.__a=String(ev.data)};"
+    "__w1.port.start&&__w1.port.start();__w1.port.postMessage(0);");
+  // Wait for the first reply, THEN open the second handle so ordering is deterministic.
+  for (int i = 0; i < 120; ++i) { mbWait(v, 25); if (!Eval(v,"window.__a").empty()) break; }
+  mbRunJS(v,
+    "var __w2=new SharedWorker(__u);__w2.port.onmessage=function(ev){window.__b=String(ev.data)};"
+    "__w2.port.start&&__w2.port.start();__w2.port.postMessage(0);");
+  {
+    std::string b;
+    for (int i = 0; i < 120; ++i) {
+      mbWait(v, 25);
+      b = Eval(v, "window.__b");
+      if (!b.empty())
+        break;
+    }
+    Expect(Eval(v, "window.__a") == "1" && b == "2",
+           "two SharedWorker handles to one url share state (counter 1 then 2)",
+           "a=[" + Eval(v, "window.__a") + "] b=[" + b + "]");
+  }
+
   // 38. ServiceWorker spawn must be crash-safe. (SharedWorker now runs — see 37g.)
   // navigator.serviceWorker.register() either rejects cleanly or, on a
   // real origin where we have no provider, is null-guarded (pending promise,

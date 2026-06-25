@@ -1,11 +1,13 @@
 #include "miniblink_host/worker/mb_shared_worker.h"
 
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "base/memory/scoped_refptr.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/unguessable_token.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
@@ -92,23 +94,28 @@ class MbSwPolicyContainerHost : public blink::mojom::blink::PolicyContainerHost 
       this};
 };
 
-// One connection's worth of state: owns the WebSharedWorker and the page client remote, and
-// IS the WebSharedWorkerClient. Self-deletes when the worker context is destroyed.
-class MbSharedWorkerConnection final : public blink::WebSharedWorkerClient {
- public:
-  void Start(blink::mojom::blink::SharedWorkerInfoPtr info,
-             mojo::PendingRemote<blink::mojom::blink::SharedWorkerClient> client,
-             blink::mojom::blink::SharedWorkerCreationContextType ctx_type,
-             blink::MessagePortDescriptor message_port) {
-    client_.Bind(std::move(client));
-    client_->OnCreated(ctx_type);
+class MbSharedWorkerInstance;
 
+// Process-wide registry of live shared workers, keyed by url|name|type. A SharedWorker is
+// shared across all documents that request the same key — the whole point of the API. All
+// access is on the main thread (the connector runs there), so no lock is needed.
+std::map<std::string, MbSharedWorkerInstance*>& SwRegistry() {
+  static auto* m = new std::map<std::string, MbSharedWorkerInstance*>();
+  return *m;
+}
+
+// One shared worker instance: owns the WebSharedWorker and IS its WebSharedWorkerClient.
+// Multiple page connections (each its own SharedWorkerClient remote + MessagePort) attach
+// to the single worker. Self-deletes (and deregisters) when the worker context is gone.
+class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
+ public:
+  explicit MbSharedWorkerInstance(std::string key) : key_(std::move(key)) {}
+
+  // Create + start the worker. Returns false on script-load failure.
+  bool Start(const blink::mojom::blink::SharedWorkerInfoPtr& info) {
     auto params = MakeWorkerMainScriptParams(info->url.GetString().Utf8());
-    if (!params) {
-      client_->OnScriptLoadFailed("shared worker script failed to load");
-      delete this;
-      return;
-    }
+    if (!params)
+      return false;
 
     blink::WebSecurityOrigin origin =
         blink::WebSecurityOrigin::Create(blink::WebURL(info->url));
@@ -143,18 +150,34 @@ class MbSharedWorkerConnection final : public blink::WebSharedWorkerClient {
         std::move(fetch_context), std::move(host), this, ukm::kInvalidSourceId,
         /*require_cross_site_request_for_cookies=*/false, mojo::NullReceiver(),
         mojo::NullReceiver(), /*is_cross_origin_isolated=*/false);
+    return true;
+  }
 
-    worker_->Connect(/*connection_request_id=*/0, std::move(message_port));
-    client_->OnConnected({});
+  // Attach one page connection: notify its client and deliver its MessagePort to the
+  // worker's `onconnect`. Each call is a distinct connect event to the SAME worker.
+  void AddClient(
+      mojo::PendingRemote<blink::mojom::blink::SharedWorkerClient> client,
+      blink::mojom::blink::SharedWorkerCreationContextType ctx_type,
+      blink::MessagePortDescriptor message_port) {
+    mojo::Remote<blink::mojom::blink::SharedWorkerClient> c(std::move(client));
+    c->OnCreated(ctx_type);
+    worker_->Connect(next_connection_id_++, std::move(message_port));
+    c->OnConnected({});
+    clients_.push_back(std::move(c));  // keep the page client alive
   }
 
   // blink::WebSharedWorkerClient:
-  void WorkerContextDestroyed() override { delete this; }
+  void WorkerContextDestroyed() override {
+    SwRegistry().erase(key_);
+    delete this;
+  }
 
  private:
+  std::string key_;
   MbSwPolicyContainerHost policy_host_;  // must outlive the worker (bound remote)
   std::unique_ptr<blink::WebSharedWorker> worker_;
-  mojo::Remote<blink::mojom::blink::SharedWorkerClient> client_;
+  std::vector<mojo::Remote<blink::mojom::blink::SharedWorkerClient>> clients_;
+  int next_connection_id_ = 0;
 };
 
 class MbSharedWorkerConnector
@@ -167,10 +190,28 @@ class MbSharedWorkerConnector
       blink::MessagePortDescriptor message_port,
       mojo::PendingRemote<blink::mojom::blink::BlobURLToken> /*blob_url_token*/)
       override {
-    // Self-managed: lives until its worker context is destroyed.
-    (new MbSharedWorkerConnection())
-        ->Start(std::move(info), std::move(client), creation_context_type,
-                std::move(message_port));
+    // The key identifies a SHARED worker: same url+name+type -> same instance.
+    const std::string key =
+        info->url.GetString().Utf8() + "\n" + info->options->name.Utf8() + "\n" +
+        base::NumberToString(static_cast<int>(info->options->type));
+    auto& reg = SwRegistry();
+    auto it = reg.find(key);
+    MbSharedWorkerInstance* inst;
+    if (it != reg.end()) {
+      inst = it->second;  // reuse the running worker
+    } else {
+      inst = new MbSharedWorkerInstance(key);
+      if (!inst->Start(info)) {
+        mojo::Remote<blink::mojom::blink::SharedWorkerClient> c(std::move(client));
+        c->OnCreated(creation_context_type);
+        c->OnScriptLoadFailed("shared worker script failed to load");
+        delete inst;
+        return;
+      }
+      reg[key] = inst;  // instance self-deregisters on WorkerContextDestroyed
+    }
+    inst->AddClient(std::move(client), creation_context_type,
+                    std::move(message_port));
   }
 };
 

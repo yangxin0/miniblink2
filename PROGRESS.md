@@ -326,8 +326,14 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      `MbSwPolicyContainerHost`); (2) the WorkerContentSettingsProxy `[Sync]` stub answers all-allow.
      Verified (mb_smoke_render 37g=87, stable): a SharedWorker from a non-opaque origin echoes
      through its connect MessagePort (page posts 7 → 14). The script-delivery helper was first
-     extracted to `worker/mb_worker_script.{h,cc}` (shared with dedicated). Not yet: true sharing
-     across multiple connects/documents (each Connect makes a fresh worker), module shared workers.
+     extracted to `worker/mb_worker_script.{h,cc}` (shared with dedicated).
+   - [DONE] **SharedWorker sharing** — a process-wide registry (keyed by url|name|type) makes
+     repeated `new SharedWorker(sameUrl)` attach to ONE running worker (the defining behavior of
+     the API). `MbSharedWorkerInstance` owns the worker + is its `WebSharedWorkerClient`; each
+     Connect either starts a new instance or `AddClient`s to the existing one (a fresh connect event
+     + MessagePort to the same `onconnect`); it self-deregisters on `WorkerContextDestroyed`. Verified
+     (mb_smoke_render 37h=88): two handles to one url share a worker-global counter (replies 1 then 2).
+     Not yet: module shared workers (untested), worker eviction when the last client disconnects.
    - [SUPERSEDED] (prior SharedWorker scoping) `new SharedWorker(url)` →
      `SharedWorkerClientHolder::Connect` → `mojom::SharedWorkerConnector.Connect` requested from the
      FRAME broker (mb_frame_broker.cc — bind it there). Implement `SharedWorkerConnector::Connect(info,
