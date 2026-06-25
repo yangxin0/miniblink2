@@ -3,6 +3,7 @@
 
 #include <limits>
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -227,11 +228,32 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
                         bool /*force_disable_third_party_cookies*/,
                         GetCookiesStringCallback callback) override {
     std::string out;
+    std::set<std::string> seen;  // names already emitted (store is authoritative)
     if (auto it = CookieStore().find(OriginKey(url)); it != CookieStore().end()) {
       for (const auto& [n, v] : it->second) {
         if (!out.empty()) out += "; ";
         out += n + "=" + v;
+        seen.insert(n);
       }
+    }
+    // Also surface the shared HTTP jar's non-HttpOnly cookies (server Set-Cookie and
+    // mbSetCookie-restored cookies never reach the in-memory store) so document.cookie
+    // reflects them like a real browser. Empty for non-http(s). Store names win.
+    const std::string jar = MbGetCookiesForUrl(url.GetString().Utf8());
+    for (size_t pos = 0; pos < jar.size();) {
+      const size_t semi = jar.find("; ", pos);
+      const std::string pair =
+          jar.substr(pos, semi == std::string::npos ? semi : semi - pos);
+      pos = semi == std::string::npos ? jar.size() : semi + 2;
+      const size_t eq = pair.find('=');
+      if (eq == std::string::npos)
+        continue;
+      const std::string name = pair.substr(0, eq);
+      if (name.empty() || seen.count(name))
+        continue;
+      if (!out.empty()) out += "; ";
+      out += pair;
+      seen.insert(name);
     }
     std::move(callback).Run(/*version=*/0u, base::ReadOnlySharedMemoryRegion(),
                             blink::String::FromUtf8(out));

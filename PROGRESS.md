@@ -539,6 +539,15 @@ origin's cookies as net::CanonicalCookies via CreateSanitizedCookie, honoring th
 EQUALS exact / STARTS_WITH prefix) and `SetCanonicalCookie` (writes name/value, past-expiry = delete,
 bridges to the HTTP jar). cookieStore shares document.cookie's in-memory jar, so the two stay
 consistent. mb_smoke 23aa (set 2, get 1 by name, getAll 2, document.cookie reflects them).
+[FIX: document.cookie now reflects the HTTP jar, not just JS-set cookies] GetCookiesString read ONLY
+the in-memory store (JS-set cookies), so a server Set-Cookie or an mbSetCookie-restored session — which
+live in the libcurl jar, never the store — was INVISIBLE to document.cookie (a real gap for http(s)
+pages / session restore). Now it UNIONs the store with MbGetCookiesForUrl(url) (the jar's non-HttpOnly,
+secure/host-scoped cookies): store names first (JS-authoritative), then jar-only names appended.
+Offline non-http JS cookies (store-only) still work; HttpOnly server cookies stay excluded (the jar
+reader drops #HttpOnly_). Verified mb_smoke_platform 87b: a cookie placed via mbSetCookie (jar only)
+appears in document.cookie alongside a JS-set one. [FOLLOW-UP: cookieStore.getAll (GetAllForUrl) still
+reads the store only — same jar-blindness; should union the jar too for consistency.]
 [DONE: MediaDevices] `navigator.mediaDevices.enumerateDevices()` — `MbMediaDevicesDispatcherHost`
 (blink.mojom.MediaDevicesDispatcherHost, bound from the frame broker) returns empty device lists
 (no cameras/mics/speakers headless), so enumerateDevices() resolves to []. BUG fixed: without the

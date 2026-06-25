@@ -35,6 +35,25 @@ static void RunCases(mbView* v, int W, int H) {
            "mbClearCookies empties the jar", cb2);
   }
 
+  // 87b. document.cookie reflects the HTTP jar, not just JS-set cookies. A cookie injected via
+  // mbSetCookie — exactly how a server Set-Cookie or a restored session enters the jar — must show
+  // up in document.cookie even though it was never set through JS, alongside a JS-set cookie.
+  // (Previously document.cookie read only the in-memory JS-set store, so server cookies were
+  // invisible to the page.) Offline: needs an http(s) origin for the jar.
+  {
+    const char* kurl = "https://jarread.test/";
+    mbClearCookies(v);
+    mbSetCookie(v, kurl, "srvonly=fromjar");
+    mbLoadHTML(v, "<body>x</body>", kurl);
+    mbRunJS(v, "document.cookie='jsset=1';");
+    const std::string c = Eval(v, "document.cookie");
+    Expect(c.find("srvonly=fromjar") != std::string::npos &&
+               c.find("jsset=1") != std::string::npos,
+           "document.cookie reflects jar cookies (server/mbSetCookie) + JS-set",
+           "ck=[" + c + "]");
+    mbClearCookies(v);
+  }
+
   // 88. mbSendKey("Enter") submits a form — a TRUSTED default action that a
   // JS-dispatched (untrusted) KeyboardEvent cannot trigger. Fill+focus the input,
   // press Enter; the form's submit handler runs.
