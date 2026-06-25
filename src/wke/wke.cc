@@ -26,6 +26,7 @@ struct _tagWkeWebView {
   int width = 0;
   int height = 0;
   bool last_was_http = false;  // success reporting: http uses the status code
+  bool did_load = false;       // a navigation has completed at least once (sync model)
   std::string url_cache;       // backs wkeGetURL's const utf8* return
   std::string title_cache;     // backs wkeGetTitle's const utf8* return
   std::string ua_cache;        // backs wkeGetUserAgent's const utf8* return
@@ -216,6 +217,7 @@ void ApplyEditable(wkeWebView wv) {
 void FireLoadCallbacks(wkeWebView wv) {
   if (!wv || !wv->view)
     return;
+  wv->did_load = true;  // a navigation has now completed (every load path lands here)
   ApplyZoom(wv);      // a non-default zoom persists across navigations
   ApplyEditable(wv);  // a set editable flag persists across navigations
   DrainConsoleToCallback(wv);
@@ -347,17 +349,28 @@ bool wkeGoForward(wkeWebView webView) {
 }
 
 bool wkeIsLoading(wkeWebView /*webView*/) {
-  // The load is synchronous here: by the time wkeLoadURL/wkeLoadHTML returns the
-  // document is committed, so nothing is ever still loading.
+  // The load is synchronous here: wkeLoadURL/wkeLoadHTML don't return until the
+  // document is committed, so a caller can never observe a load still in flight.
   return false;
 }
 
-bool wkeIsLoadingCompleted(wkeWebView /*webView*/) {
-  return true;
+bool wkeIsLoadingCompleted(wkeWebView webView) {
+  // True once a navigation has finished. False on a fresh view before any load
+  // (was hardcoded true) — distinguishes "never navigated" from "loaded".
+  return webView && webView->did_load;
 }
 
-bool wkeIsDocumentReady(wkeWebView /*webView*/) {
-  return true;
+bool wkeIsDocumentReady(wkeWebView webView) {
+  // Real document.readyState (was hardcoded true): 'interactive' (DOM parsed) or
+  // 'complete' (subresources done) — false if no frame yet or still parsing.
+  if (!webView || !webView->view)
+    return false;
+  char buf[8] = {0};
+  mbEvalJS(webView->view,
+           "(document.readyState==='complete'||document.readyState==="
+           "'interactive')?'1':'0'",
+           buf, sizeof(buf));
+  return buf[0] == '1';
 }
 
 bool wkeIsLoadingSucceeded(wkeWebView webView) {

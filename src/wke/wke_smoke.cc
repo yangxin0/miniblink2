@@ -73,6 +73,13 @@ int main() {
             wkeWidth(wv) == 200 && wkeHeight(wv) == 150,
         "wkeResize + wkeGetWidth/Height/wkeWidth/Height");
 
+  // Fresh view, before any navigation: a load has NOT completed yet (was hardcoded
+  // true). Proves wkeIsLoadingCompleted reflects real state — "never navigated" is
+  // distinct from "loaded". (The empty about:blank document is legitimately ready,
+  // so wkeIsDocumentReady is true here — that's correct, not the hardcode.)
+  check(!wkeIsLoading(wv) && !wkeIsLoadingCompleted(wv),
+        "fresh view: load not yet completed (distinct from a loaded view)");
+
   // A page with a title and a solid blue background (rgb(0,128,255)).
   wkeLoadHTML(wv,
               "<title>WkeTitle</title>"

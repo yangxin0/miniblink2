@@ -85,8 +85,14 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
 2. **Quick-win correctness bugs** (real defects; fast; each independently verifiable —
    NOTE several have *existing tests that assert the stubbed/fake behavior* and must be
    updated):
-   - `wkeIsLoading` hardcoded `false`, `wkeIsLoadingCompleted`/`wkeIsDocumentReady`
-     hardcoded `true` (`wke.cc:347–359`) — wire to the real load state.
+   - [DONE] `wkeIsLoadingCompleted`/`wkeIsDocumentReady` were hardcoded `true` → wired to
+     real state. `wkeIsLoadingCompleted` returns a new `did_load` flag (set on every load
+     path via FireLoadCallbacks) — false on a fresh view, distinguishing "never navigated"
+     from "loaded". `wkeIsDocumentReady` evals the real `document.readyState`
+     (interactive|complete) — false if no frame / still parsing. `wkeIsLoading` stays
+     `false` (correct: the synchronous load model never exposes an in-flight window;
+     comment clarified). Verified (wke_smoke +1=102): fresh view → not completed; post-load
+     → completed + ready.
    - [DONE] `wkePostURL` ignored `postLen` → truncated binary bodies at an embedded NUL.
      Fixed by threading the byte length end-to-end: new `mbPostURLData(url, body, len, ct)`
      (mbPostURL kept as the NUL-terminated text convenience), `MbWebView::PostURL` builds
