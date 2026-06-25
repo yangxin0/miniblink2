@@ -435,15 +435,23 @@ probe it on load to detect a companion native app. mb_smoke 23ak.
 ROOT CAUSE: it shared the process-wide cache name 'v1' with test 23v; a cached Response body is a blob
 tied to the PAGE that created it, so when 23v's page navigated away those bodies could become
 unreadable, and the shared cache exposed it. Fixed the test by giving the bucket its own cache name
-(0/8, was ~1/10). DEEPER PRODUCT ISSUE (investigated; fix attempted + reverted — needs more digging): Cache Storage
-cached bodies should SURVIVE the originating page's navigation. Findings: SMALL bodies (`Response('..')`)
-ride INLINE in the FetchAPIResponse (response->blob is NULL) and survive trivially. LARGE bodies (>256KB)
-deterministically read back EMPTY after navigation (verified: a 300KB body -> length 0 on the next page).
-A put-time fix that read `response->blob` via BlobDataHandle::ReadAll and re-minted a process-owned blob
-(MbCreateInlineBlob) did NOT work — the read returned 0 bytes, so the large-body content is NOT delivered
-through `response->blob` at Batch time the way assumed. NEXT: instrument how cache.put delivers a large
-body (a separate body data-pipe? side_data_blob? a BytesProvider on the blob that our ReadAll doesn't
-drain?) before re-attempting. Same concern likely applies to IndexedDB blob values.
+(0/8, was ~1/10). DEEPER ISSUE — actually a GENERAL LARGE-BLOB bug (instrumented thoroughly this session; root cause
+isolated, fix still open). Findings, all verified with stderr instrumentation:
+  - At cache.put Batch, `response->blob` IS set with the correct size for BOTH small and large bodies
+    (e.g. size=300000 for a 300KB body) — the earlier "small bodies are null" note was a stale-binary
+    artifact, now corrected.
+  - Reading the cached blob via `BlobDataHandle::ReadAll` returns the FULL bytes for SMALL bodies
+    (11/9/5 bytes ✓) but ZERO bytes for the LARGE (>256KB) body.
+  - Large bodies arrive as a `BytesProvider` DataElement (`b->data`), which MbBlob materializes. Both
+    `BytesProvider.RequestAsReply` AND `RequestAsStream` return 0 bytes — so by the time MbBlob
+    materializes, the provider's `data_` is already empty/consumed. (blink's BlobBytesProvider moves
+    `data_` out on the first Request*; something drains it before/instead of our materialize.)
+  - Net: ANY >256KB blob (not just cache — also fetch().blob() of a large response, FileReader on a
+    big Blob, large IndexedDB blob values) likely materializes EMPTY in this host.
+NEXT: figure out who consumes the BytesProvider before MbBlob does, OR why our Request* gets empty —
+likely a threading/ordering issue between the [Sync] Register reply and the provider's data move, or we
+need to drain the provider synchronously inside Register before returning. This is the blocking item
+for large-blob support; small blobs (the common case) work fully.
 [DONE: Cookie Store API] `cookieStore.get/getAll/set/delete` — `MbCookieManager` (the
 RestrictedCookieManager already serving document.cookie) gained real `GetAllForUrl` (returns the
 origin's cookies as net::CanonicalCookies via CreateSanitizedCookie, honoring the options name filter:
