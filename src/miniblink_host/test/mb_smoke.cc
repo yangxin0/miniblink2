@@ -1721,6 +1721,24 @@ int main() {
            "wa=[" + r + "]");
   }
 
+  // 23ak. getInstalledRelatedApps (broker InstalledAppProvider): PWAs probe this on load to
+  // detect a companion native app. blink sets no disconnect handler (explicit TODO), so unbound
+  // it hangs; bound, a headless host resolves to [] (no installed apps).
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://app.test/");
+    Eval(v,
+         "window.__ia='';"
+         "if(navigator.getInstalledRelatedApps){"
+         "navigator.getInstalledRelatedApps().then(function(a){window.__ia='ok:'+a.length;})"
+         ".catch(function(e){window.__ia='err:'+e.name;});}"
+         "else{window.__ia='no-api';}");
+    mbWaitForFunction(v, "window.__ia!==''", 3000);
+    const std::string r = Eval(v, "window.__ia");
+    Expect(r == "ok:0" || r == "no-api",
+           "getInstalledRelatedApps resolves to [] (no installed apps) instead of hanging",
+           "ia=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");
