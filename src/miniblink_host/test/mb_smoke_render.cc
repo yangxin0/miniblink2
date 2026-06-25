@@ -196,9 +196,35 @@ static void RunCases(mbView* v, int W, int H) {
            "reply=[" + r + "]");
   }
 
-  // 38. The rest of the Worker family must also be crash-safe. SharedWorker's
-  // Connect() is a fire-and-forget mojo call our empty broker drops (inert, no
-  // crash); navigator.serviceWorker.register() either rejects cleanly or, on a
+  // 37g. SharedWorker runs in-process. `new SharedWorker(url)` reaches the SharedWorker-
+  // Connector we bind in the frame broker (routed to the main thread); it synthesizes the
+  // browser-fetched script + drives WebSharedWorker::CreateAndStart, then delivers the
+  // page's MessagePort to the worker's `onconnect`. From a non-opaque page origin (opaque
+  // origins disallow SharedWorker). The worker echoes via the port: page posts 7 -> 14.
+  mbLoadHTML(v, "<body>shared-worker</body>", "https://shared.test/");
+  mbRunJS(v,
+    "window.__sreply='';"
+    "var __sw=new SharedWorker('data:text/javascript,'+encodeURIComponent("
+    "'onconnect=function(e){var p=e.ports[0];p.onmessage=function(ev){p.postMessage(ev.data*2)};p.start&&p.start();}'"
+    "));"
+    "__sw.port.onmessage=function(ev){window.__sreply=String(ev.data)};"
+    "__sw.port.start&&__sw.port.start();"
+    "__sw.port.postMessage(7);");
+  {
+    std::string r;
+    for (int i = 0; i < 120; ++i) {
+      mbWait(v, 25);
+      r = Eval(v, "window.__sreply");
+      if (!r.empty())
+        break;
+    }
+    Expect(r == "14",
+           "a SharedWorker runs and round-trips through its connect MessagePort",
+           "reply=[" + r + "]");
+  }
+
+  // 38. ServiceWorker spawn must be crash-safe. (SharedWorker now runs — see 37g.)
+  // navigator.serviceWorker.register() either rejects cleanly or, on a
   // real origin where we have no provider, is null-guarded (pending promise,
   // no crash). Neither must SIGSEGV — same hazard class as case 37. We assert
   // the host survives constructing both and stays scriptable afterward.

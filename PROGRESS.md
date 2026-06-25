@@ -313,7 +313,22 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      `MbWorkerFetchContext` with the same UA/headers/origin via `MbWorkerFetchContext::CloneContext`).
      Verified (mb_smoke_render 37f=86): an outer worker relays 10 to an inner worker that doubles to
      20; the page receives "inner:20".
-   - [NEXT] **SharedWorker** — SCOPED (2026-06, mapped against M150): `new SharedWorker(url)` →
+   - [DONE] **SharedWorker** runs in-process. `worker/mb_shared_worker.{h,cc}`: `MbSharedWorker-
+     Connector` (bound via the FRAME broker, mb_frame_broker.cc) implements `SharedWorkerConnector::
+     Connect` — binds the page's `SharedWorkerClient` remote (`OnCreated`/`OnConnected`), synthesizes
+     the script (shared `MakeWorkerMainScriptParams`), drives `WebSharedWorker::CreateAndStart`, then
+     `worker->Connect(0, message_port)` delivers the page's MessagePort to the worker's `onconnect`.
+     THREADING: the frame broker runs on the SERVICE thread but `CreateAndStart` is main-thread only,
+     so the broker now captures the main runner (in `MakeFrameInterfaceBroker`) and PostTasks the
+     connector receiver to the main thread (`BindSharedWorkerConnector`). Two crashes fixed during
+     bring-up: (1) needed a bound `PolicyContainerHost` associated remote — `SharedWorkerGlobalScope::
+     Initialize`→`UpdateReferrerPolicy` CHECKs an unbound remote (the connection owns an
+     `MbSwPolicyContainerHost`); (2) the WorkerContentSettingsProxy `[Sync]` stub answers all-allow.
+     Verified (mb_smoke_render 37g=87, stable): a SharedWorker from a non-opaque origin echoes
+     through its connect MessagePort (page posts 7 → 14). The script-delivery helper was first
+     extracted to `worker/mb_worker_script.{h,cc}` (shared with dedicated). Not yet: true sharing
+     across multiple connects/documents (each Connect makes a fresh worker), module shared workers.
+   - [SUPERSEDED] (prior SharedWorker scoping) `new SharedWorker(url)` →
      `SharedWorkerClientHolder::Connect` → `mojom::SharedWorkerConnector.Connect` requested from the
      FRAME broker (mb_frame_broker.cc — bind it there). Implement `SharedWorkerConnector::Connect(info,
      client_remote, ctx_type, message_port, blob_token)`: bind `client_remote` (`mojom::SharedWorker-

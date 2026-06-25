@@ -12,6 +12,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/runtime/mb_runtime.h"
+#include "miniblink_host/worker/mb_shared_worker.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/network/public/mojom/cookie_manager.mojom-blink.h"
@@ -420,7 +421,24 @@ class MbGeolocationService : public blink::mojom::blink::GeolocationService {
 class MbBrowserInterfaceBroker
     : public blink::mojom::blink::BrowserInterfaceBroker {
  public:
+  // `main_runner` is the renderer main-thread runner. This broker is bound on the SERVICE
+  // thread, so any interface that must run on the main thread (SharedWorkerConnector ->
+  // WebSharedWorker::CreateAndStart) is posted there.
+  explicit MbBrowserInterfaceBroker(
+      scoped_refptr<base::SingleThreadTaskRunner> main_runner)
+      : main_runner_(std::move(main_runner)) {}
+
   void GetInterface(mojo::GenericPendingReceiver receiver) override {
+    // new SharedWorker(): run the connector on the main thread (CreateAndStart is
+    // main-thread only); we're on the service thread here.
+    if (auto r = receiver.As<blink::mojom::blink::SharedWorkerConnector>()) {
+      if (main_runner_) {
+        main_runner_->PostTask(
+            FROM_HERE,
+            base::BindOnce(&BindSharedWorkerConnector, std::move(r)));
+      }
+      return;
+    }
     if (auto r =
             receiver.As<network::mojom::blink::RestrictedCookieManager>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbCookieManager>(),
@@ -447,6 +465,9 @@ class MbBrowserInterfaceBroker
     }
     // Drop everything else (no browser process).
   }
+
+ private:
+  scoped_refptr<base::SingleThreadTaskRunner> main_runner_;
 };
 
 }  // namespace
@@ -483,6 +504,10 @@ MakeFrameInterfaceBroker() {
   // sequence (PostTask + MakeSelfOwnedReceiver inside), not merely handed a
   // task runner from here, so its router is created on that sequence — see
   // BindBlobRegistryOnServiceThread.
+  // Captured on the MAIN thread (here) so the service-thread broker can post main-thread-
+  // only interfaces (SharedWorkerConnector) back.
+  scoped_refptr<base::SingleThreadTaskRunner> main_runner =
+      base::SingleThreadTaskRunner::GetCurrentDefault();
   scoped_refptr<base::SingleThreadTaskRunner> runner =
       MbRuntime::ServiceTaskRunner();
   if (runner) {
@@ -490,14 +515,17 @@ MakeFrameInterfaceBroker() {
         FROM_HERE,
         base::BindOnce(
             [](mojo::PendingReceiver<
-                blink::mojom::blink::BrowserInterfaceBroker> r) {
+                   blink::mojom::blink::BrowserInterfaceBroker> r,
+               scoped_refptr<base::SingleThreadTaskRunner> main) {
               mojo::MakeSelfOwnedReceiver(
-                  std::make_unique<MbBrowserInterfaceBroker>(), std::move(r));
+                  std::make_unique<MbBrowserInterfaceBroker>(std::move(main)),
+                  std::move(r));
             },
-            std::move(receiver)));
+            std::move(receiver), std::move(main_runner)));
   } else {
-    mojo::MakeSelfOwnedReceiver(std::make_unique<MbBrowserInterfaceBroker>(),
-                                std::move(receiver));
+    mojo::MakeSelfOwnedReceiver(
+        std::make_unique<MbBrowserInterfaceBroker>(std::move(main_runner)),
+        std::move(receiver));
   }
   return remote;
 }

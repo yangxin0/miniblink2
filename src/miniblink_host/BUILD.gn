@@ -42,6 +42,8 @@ component("miniblink_host") {
     "widget/mb_widget.h",
     "worker/mb_dedicated_worker_host.cc",
     "worker/mb_dedicated_worker_host.h",
+    "worker/mb_shared_worker.cc",
+    "worker/mb_shared_worker.h",
     "worker/mb_worker_fetch_context.cc",
     "worker/mb_worker_fetch_context.h",
     "worker/mb_worker_script.cc",
