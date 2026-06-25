@@ -870,6 +870,16 @@ int mbSavePdf(mbView* v, const char* path) {
   return v->impl->SavePdf(path) ? 1 : 0;
 }
 
+int mbSavePdfEx(mbView* v, const char* path, double width_pt, double height_pt,
+                int landscape, double scale, double margin_pt) {
+  if (!v || !v->impl || !path)
+    return 0;
+  return v->impl->SavePdfEx(path, width_pt, height_pt, landscape != 0, scale,
+                            margin_pt)
+             ? 1
+             : 0;
+}
+
 int mbSavePngRect(mbView* v, const char* path, int x, int y, int w, int h) {
   if (!v || !v->impl || !path)
     return 0;

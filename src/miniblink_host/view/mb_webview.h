@@ -390,6 +390,11 @@ class MbWebView {
   const std::vector<uint8_t>& EncodedData() const { return encoded_png_; }
   // Print the document to a multi-page PDF (US Letter) at `path` via Blink's print path.
   bool SavePdf(const char* path);
+  // Like SavePdf but with an explicit page geometry: page width/height in POINTS (72/in),
+  // landscape (swaps w/h), content `scale` (1.0 = 100%, clamped 0.1–5), and a uniform
+  // `margin_pt`. Zero/invalid sizes fall back to Letter; scale<=0 -> 1.0.
+  bool SavePdfEx(const char* path, double width_pt, double height_pt, bool landscape,
+                 double scale, double margin_pt);
   // Render just the logical rect (x,y,w,h) to a PNG (output is w*dsf x h*dsf px).
   bool SavePngRect(const char* path, int x, int y, int w, int h);
   // Screenshot just the first element matching `css_selector` (scroll into view +

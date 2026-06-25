@@ -685,6 +685,12 @@ MB_EXPORT int mbEncodePng(mbView*, int width, int height,
 
 // Print the document to a multi-page PDF (US Letter) at `path`. Returns 1 on success.
 MB_EXPORT int mbSavePdf(mbView*, const char* path);
+// Like mbSavePdf with an explicit page geometry. `width_pt`/`height_pt` are the page size
+// in POINTS (72/in) — e.g. Letter 612x792, A4 595x842; <=0 falls back to Letter. `landscape`
+// (nonzero) swaps width/height. `scale` is the content scale (1.0 = 100%, clamped 0.1–5;
+// <=0 -> 1.0). `margin_pt` is a uniform margin in points (0 = none). Returns 1 on success.
+MB_EXPORT int mbSavePdfEx(mbView*, const char* path, double width_pt, double height_pt,
+                          int landscape, double scale, double margin_pt);
 
 // Render just the logical rect (x,y,w,h) of the page to a PNG (e.g. an element
 // screenshot). The output image is (w*dsf x h*dsf) px. Returns 1 on success.

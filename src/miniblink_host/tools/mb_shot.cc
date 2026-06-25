@@ -89,6 +89,10 @@ int main(int argc, char** argv) {
   std::string eval_json;       // JS expression, printed JSON.stringify'd (structured)
   int eval_frame = -1;         // --frame N: run --eval/--eval-json in child frame N
                                // (0-based; -1 = main frame). Reads cross-origin iframes.
+  double pdf_w = 0, pdf_h = 0;  // --pdf-size: page size in points (0 = Letter)
+  bool pdf_landscape = false;   // --landscape: swap PDF page width/height
+  double pdf_scale = 1.0;       // --pdf-scale: PDF content scale (100% = 1.0)
+  double pdf_margin = 0;        // --pdf-margin: uniform PDF margin in points
   std::string value_selector;  // print this control's live .value to stdout
   std::string html_for_selector;  // print the first match's outerHTML to stdout
   std::string checked_selector;  // print this control's .checked (1/0) to stdout
@@ -165,6 +169,23 @@ int main(int argc, char** argv) {
       eval_json = argv[++i];
     } else if (a == "--frame" && i + 1 < argc) {
       eval_frame = std::atoi(argv[++i]);
+    } else if (a == "--pdf-size" && i + 1 < argc) {
+      // A named page or "WxH" in points (letter/a4/legal/a3/tabloid).
+      std::string s = argv[++i];
+      for (char& c : s) c = static_cast<char>(std::tolower((unsigned char)c));
+      if (s == "letter") { pdf_w = 612; pdf_h = 792; }
+      else if (s == "legal") { pdf_w = 612; pdf_h = 1008; }
+      else if (s == "a4") { pdf_w = 595; pdf_h = 842; }
+      else if (s == "a3") { pdf_w = 842; pdf_h = 1191; }
+      else if (s == "tabloid") { pdf_w = 792; pdf_h = 1224; }
+      else { double pw = 0, ph = 0;
+             if (std::sscanf(s.c_str(), "%lfx%lf", &pw, &ph) == 2) { pdf_w = pw; pdf_h = ph; } }
+    } else if (a == "--landscape") {
+      pdf_landscape = true;
+    } else if (a == "--pdf-scale" && i + 1 < argc) {
+      pdf_scale = std::atof(argv[++i]);
+    } else if (a == "--pdf-margin" && i + 1 < argc) {
+      pdf_margin = std::atof(argv[++i]);
     } else if (a == "--value" && i + 1 < argc) {
       value_selector = argv[++i];
     } else if (a == "--html-for" && i + 1 < argc) {
@@ -276,7 +297,8 @@ int main(int argc, char** argv) {
         "[--no-follow] [--block SUBSTR] [--mock URL FILE] [--rewrite FROM TO] "
         "[--set-cookie URL COOKIE] [--user-agent UA] "
         "[--require CSS] "
-        "<input.html|file://URL|http(s)://URL> <out.png> [width height]\n",
+        "[--pdf-size letter|a4|legal|a3|tabloid|WxH] [--landscape] [--pdf-scale N] [--pdf-margin PT] "
+        "<input.html|file://URL|http(s)://URL> <out.(png|pdf)> [width height]\n",
         argv[0]);
     return 2;
   }
@@ -941,7 +963,10 @@ int main(int argc, char** argv) {
                         out_s.compare(out_s.size() - 4, 4, ".pdf") == 0;
   int ok;
   if (want_pdf) {
-    ok = mbSavePdf(view, out);
+    // mbSavePdfEx with defaults (pdf_w/h=0 -> Letter, scale 1.0, no margin) matches the
+    // old mbSavePdf; --pdf-size/--landscape/--pdf-scale/--pdf-margin override the geometry.
+    ok = mbSavePdfEx(view, out, pdf_w, pdf_h, pdf_landscape ? 1 : 0, pdf_scale,
+                     pdf_margin);
     std::fprintf(stderr, "mb_shot: %s -> %s (PDF) %s\n", input.c_str(), out,
                  (ok && load_ok) ? "OK" : "FAILED");
   } else {

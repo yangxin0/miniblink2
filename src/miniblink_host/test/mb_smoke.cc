@@ -1381,6 +1381,31 @@ int main() {
            std::string(hdr) + " sz=" + std::to_string(sz));
   }
 
+  // 39b. mbSavePdfEx page geometry: an A4 page (595x842 pt) and its landscape (842x595)
+  // must set the PDF MediaBox accordingly — proves custom size + landscape reach output.
+  {
+    auto slurp = [](const char* p) -> std::string {
+      std::string s;
+      if (FILE* f = std::fopen(p, "rb")) {
+        char b[8192];
+        size_t n;
+        while ((n = std::fread(b, 1, sizeof(b), f)) > 0)
+          s.append(b, n);
+        std::fclose(f);
+      }
+      return s;
+    };
+    const bool a4 = mbSavePdfEx(v, "/tmp/mb_a4.pdf", 595, 842, 0, 1.0, 0) != 0;
+    const std::string p1 = slurp("/tmp/mb_a4.pdf");
+    const bool ls = mbSavePdfEx(v, "/tmp/mb_a4l.pdf", 595, 842, 1, 1.0, 0) != 0;
+    const std::string p2 = slurp("/tmp/mb_a4l.pdf");
+    const bool a4ok = p1.find("595 842") != std::string::npos;
+    const bool lsok = p2.find("842 595") != std::string::npos;
+    Expect(a4 && a4ok && ls && lsok,
+           "mbSavePdfEx sets the PDF MediaBox (A4 portrait + landscape)",
+           std::string("a4=") + std::to_string(a4ok) + " ls=" + std::to_string(lsok));
+  }
+
   // 107. Native function binding: a C function bound via mbJsBindFunction is
   // callable from JS synchronously — window[name](args) returns the C result
   // inline — receiving string args and the userdata pointer. Installed into each

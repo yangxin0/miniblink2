@@ -2090,22 +2090,49 @@ bool MbWebView::SavePngRect(const char* path, int x, int y, int w, int h) {
 }
 
 bool MbWebView::SavePdf(const char* path) {
-  // !path: defense-in-depth — base::FilePath(nullptr) would be UB. The C-ABI
-  // mbSavePdf already rejects null, so this guards direct host-side callers too,
-  // matching EncodeBitmapToPath / SaveElementPng.
+  // US Letter, portrait, 100%, no margin (back-compat default).
+  return SavePdfEx(path, /*width_pt=*/612.0, /*height_pt=*/792.0,
+                   /*landscape=*/false, /*scale=*/1.0, /*margin_pt=*/0.0);
+}
+
+bool MbWebView::SavePdfEx(const char* path, double width_pt, double height_pt,
+                          bool landscape, double scale, double margin_pt) {
+  // !path: defense-in-depth — base::FilePath(nullptr) would be UB. The C-ABI rejects
+  // null too; this guards direct host-side callers (matching EncodeBitmapToPath).
   if (!path || !main_frame_ || !widget_ || !widget_->widget())
     return false;
+  // Sanitize the geometry (points; PDF user space is 72/in). Default to Letter.
+  if (!(width_pt > 0))
+    width_pt = 612.0;
+  if (!(height_pt > 0))
+    height_pt = 792.0;
+  if (landscape)
+    std::swap(width_pt, height_pt);
+  if (!(scale > 0))
+    scale = 1.0;
+  scale = std::clamp(scale, 0.1, 5.0);
+  if (!(margin_pt >= 0))
+    margin_pt = 0.0;
+  // Keep a positive content area after margins.
+  margin_pt = std::min(margin_pt, std::min(width_pt, height_pt) / 2.0 - 1.0);
+  if (!(margin_pt >= 0))
+    margin_pt = 0.0;
+  const double content_w_pt = width_pt - 2.0 * margin_pt;
+  const double content_h_pt = height_pt - 2.0 * margin_pt;
+
   // Settle the document, then drive Blink's print path into a Skia PDF document.
   for (int round = 0; round < 5; ++round) {
     widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
     base::RunLoop().RunUntilIdle();
   }
-  // US Letter at 96 CSS dpi (816x1056 px); PDF user space is points (72/in).
-  constexpr float kCssW = 816.f, kCssH = 1056.f;
-  constexpr float kPtScale = 72.f / 96.f;  // CSS px -> points
+  // Content lays out in CSS px (96/in); paint scale CSS px -> points is (72/96)*scale.
+  // So the printable content area in CSS px is content_pt / paint_scale.
+  const float paint_scale = static_cast<float>(72.0 / 96.0 * scale);
+  const float css_w = static_cast<float>(content_w_pt) / paint_scale;
+  const float css_h = static_cast<float>(content_h_pt) / paint_scale;
   // This ctor sets printable area + page description AND print_scaling_option =
   // kSourceSize, which the paginated layout requires (a DCHECK enforces it).
-  blink::WebPrintParams params{gfx::SizeF(kCssW, kCssH)};
+  blink::WebPrintParams params{gfx::SizeF(css_w, css_h)};
   params.printer_dpi = 300;
 
   const uint32_t pages = main_frame_->PrintBegin(params, blink::WebNode());
@@ -2120,8 +2147,11 @@ bool MbWebView::SavePdf(const char* path) {
     return false;
   }
   for (uint32_t i = 0; i < pages; ++i) {
-    SkCanvas* canvas = doc->beginPage(kCssW * kPtScale, kCssH * kPtScale);
-    canvas->scale(kPtScale, kPtScale);  // paint CSS-px content into the points page
+    SkCanvas* canvas = doc->beginPage(static_cast<float>(width_pt),
+                                      static_cast<float>(height_pt));
+    canvas->translate(static_cast<float>(margin_pt),
+                      static_cast<float>(margin_pt));  // honor the margin
+    canvas->scale(paint_scale, paint_scale);  // CSS-px content -> points
     cc::SkiaPaintCanvas paint_canvas(canvas);
     main_frame_->PrintPage(i, &paint_canvas);
     doc->endPage();

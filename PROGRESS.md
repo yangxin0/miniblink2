@@ -239,8 +239,12 @@ only — IndexedDB / WebSocket / Permissions / geolocation / clipboard / notific
 
 **Tier 3 — input & rendering refinements:**
 12. Input fidelity (modifier flags, right/middle-click, IME, native drag-drop, trusted touch/wheel).
-13. PDF options (page size / landscape / margins / scale / print-background — currently hardcoded
-US-Letter). 14. [DONE] Child-frame charset was hardcoded UTF-8 → mojibake on non-UTF-8
+13. [DONE] PDF options. `mbSavePdfEx(path, width_pt, height_pt, landscape, scale, margin_pt)`
+(mbSavePdf kept = Letter default) + `mb_shot --pdf-size letter|a4|legal|a3|tabloid|WxH
+--landscape --pdf-scale N --pdf-margin PT`. Page size in points; landscape swaps w/h; content
+scale clamped 0.1–5; uniform margin. Verified (mb_smoke 39b): A4 → MediaBox [0 0 595 842],
+landscape → [0 0 842 595]; CLI `--pdf-size a4 --landscape` → [0 0 842 595].
+(print-background isn't a separate toggle — Blink's print path paints backgrounds already.) 14. [DONE] Child-frame charset was hardcoded UTF-8 → mojibake on non-UTF-8
 iframes; `DoCommit` now honors an explicit `charset=` from the fetched Content-Type
 (default still UTF-8, so UTF-8/srcdoc/data: cases are unchanged). Verified (mb_smoke_render
 78c): a `charset=shift_jis` iframe serving the Shift-JIS bytes for 日本 decodes to U+65E5
