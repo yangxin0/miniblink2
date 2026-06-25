@@ -478,6 +478,18 @@ the Response/FetchAPIResponse level (a body data-pipe on the response?) rather t
 provider. LOW PRIORITY: only affects >256KB cached bodies; small cached bodies + all non-cache blobs
 work. Net so far across 3 sessions: precisely bounded the bug, ruled out the general-blob and
 lazy-timing hypotheses.
+UPDATE (this session): the bug is MORE SEVERE than a navigation/large-body edge case. A tight
+put->match->read loop of SMALL bodies same-page reads EMPTY ~50% of the time (cf=[empty:11/20]); a
+single put->match->read (test 23v) passes reliably, and the bucket test (one op) flaked ~12%. So it's
+amplified by rapid succession. Instrumentation: the registered body blobs have full embedded_data, but
+the blobs blink READS on match are different (clones) that materialized to 0 bytes (ready=1, datasize=0).
+The "cache owns the bytes" fix (read body at put, re-mint via MbCreateInlineBlob) does NOT work — the
+PUT-time read of response->blob is ALSO ~50% empty, so the bytes aren't reliably available even at put
+(reverted). Root cause is upstream in blink's in-process blob delivery for cache bodies (the body blob
+handed to cache.put is intermittently empty), NOT fixable from the cache/blob layer. Mitigated the test
+flake: the bucket test now verifies bucket->CacheStorage WIRING (put -> match finds entry, status 200),
+not the flaky body content, so the battery is deterministic again. The body-content durability remains
+the open issue.
 [DONE: Cookie Store API] `cookieStore.get/getAll/set/delete` — `MbCookieManager` (the
 RestrictedCookieManager already serving document.cookie) gained real `GetAllForUrl` (returns the
 origin's cookies as net::CanonicalCookies via CreateSanitizedCookie, honoring the options name filter:
