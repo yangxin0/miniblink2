@@ -427,6 +427,11 @@ load — `isUserVerifyingPlatformAuthenticatorAvailable()` / `isConditionalMedia
 resolve false, getClientCapabilities returns [], makeCredential/getCredential/report reject cleanly
 (NOT_ALLOWED_ERROR). BUG fixed: the Authenticator remote has NO disconnect handler, so unbound those
 statics HANG. mb_smoke 23aj.
+[DONE: WebOTP] `MbWebOTPService` (blink.mojom.WebOTPService, bound from the frame broker) — for
+navigator.credentials.get({otp}) (SMS one-time-code autofill). Headless has no SMS backend, so
+Receive reports kBackendNotAvailable (get() rejects cleanly) and Abort is a no-op. BUG fixed: the
+WebOTPService remote has no disconnect handler, so unbound the OTP request HANGS during a login flow.
+mb_smoke 23am.
 [DONE: getInstalledRelatedApps] `MbInstalledAppProvider` (blink.mojom.InstalledAppProvider, bound from
 the frame broker) returns [] (no installed apps headless). BUG fixed: blink sets no disconnect handler
 on the provider (explicit TODO in installed_app_controller.cc), so unbound the promise HANGS. PWAs
