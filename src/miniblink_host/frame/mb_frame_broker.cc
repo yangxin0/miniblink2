@@ -11,6 +11,7 @@
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/task/single_thread_task_runner.h"
 #include "miniblink_host/frame/mb_broadcast_channel.h"
+#include "miniblink_host/frame/mb_indexeddb.h"
 #include "miniblink_host/frame/mb_lock_manager.h"
 #include "miniblink_host/frame/mb_notification_service.h"
 #include "miniblink_host/frame/mb_websocket.h"
@@ -509,6 +510,11 @@ class MbBrowserInterfaceBroker
     if (auto r = receiver.As<blink::mojom::blink::QuotaManagerHost>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbQuotaManagerHost>(),
                                   std::move(r));
+      return;
+    }
+    // IndexedDB — in-memory backend (open + object stores; reads/writes in step 2).
+    if (auto r = receiver.As<blink::mojom::blink::IDBFactory>()) {
+      BindIDBFactory(std::move(r));
       return;
     }
     // Drop everything else (no browser process).

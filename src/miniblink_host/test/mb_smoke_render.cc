@@ -277,25 +277,29 @@ static void RunCases(mbView* v, int W, int H) {
              Eval(v, "String(window.__done)") == "true",
          "SharedWorker + ServiceWorker spawn are crash-safe (host scriptable)");
 
-  // 39. IndexedDB fails GRACEFULLY (not a hang, not a crash). We bind no IDB
-  // backend, so the frame broker drops network::...IDBFactory; the receiver
-  // pipe closes, the remote disconnects, and Blink surfaces that to the open()
-  // request as a clean `onerror` — async, deterministic, host stays live. (Use
-  // a real http origin via the base URL: indexedDB is unavailable on the opaque
-  // about:blank origin.) Asserts the error fired and the host is still
-  // scriptable; corrects the old "open() hangs pending" note.
+  // 39. IndexedDB opens (the in-process IDBFactory backend, frame/mb_indexeddb.cc).
+  // open() fires onsuccess with a usable database; createObjectStore in onupgradeneeded
+  // is reflected in objectStoreNames. (mb_smoke 23m covers this against the library ABI;
+  // this is the render-suite guard.) Reads/writes are step 2. (Real http origin: IDB is
+  // unavailable on the opaque about:blank origin.)
   mbLoadHTML(v, "<body>idb-guard</body>", "https://miniblink.test/");
   mbRunJS(v,
     "window.__idb='pending';"
     "try{var r=indexedDB.open('mb-probe',1);"
+    "r.onupgradeneeded=function(e){e.target.result.createObjectStore('s');};"
     "r.onerror=function(){window.__idb='error';};"
-    "r.onsuccess=function(){window.__idb='success';};"
+    "r.onsuccess=function(e){var db=e.target.result;"
+    "window.__idb='v'+db.version+':'+Array.from(db.objectStoreNames).join(',');};"
     "}catch(e){window.__idb='threw:'+e.name;}");
-  mbWait(v, 200);
+  for (int i = 0; i < 80; ++i) {
+    mbWait(v, 25);
+    if (Eval(v, "String(window.__idb)") != "pending")
+      break;
+  }
   Expect(Eval(v, "1+1") == "2" &&
              Eval(v, "document.body.textContent") == "idb-guard" &&
-             Eval(v, "String(window.__idb)") == "error",
-         "IndexedDB open() fails gracefully via onerror (no hang/crash)");
+             Eval(v, "String(window.__idb)") == "v1:s",
+         "IndexedDB open() succeeds with a created object store (host scriptable)");
 
   // 39b. History API (SPA client-side routing). pushState/replaceState update
   // location + history.state, and — the part that matters to an embedder —

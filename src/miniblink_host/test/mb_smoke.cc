@@ -1162,6 +1162,28 @@ int main() {
            "q=[" + q + "]");
   }
 
+  // 23m. IndexedDB open + schema (broker #8, step 1): the in-process IDBFactory opens a
+  // database; open at a new version fires onupgradeneeded (where createObjectStore records
+  // the store), then the version-change transaction's commit fires onsuccess. Verifies the
+  // db opens (version 1) and the created object store is reflected in objectStoreNames.
+  // (Reads/writes are step 2.)
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://idb.test/");
+    Eval(v,
+         "window.__idb='';"
+         "var __rq=indexedDB.open('mbdb',1);"
+         "__rq.onupgradeneeded=function(e){"
+         "e.target.result.createObjectStore('items',{keyPath:'id'});};"
+         "__rq.onsuccess=function(e){var db=e.target.result;"
+         "window.__idb='v'+db.version+',stores:'+Array.from(db.objectStoreNames).join('|');};"
+         "__rq.onerror=function(e){window.__idb='err:'+(e.target.error&&e.target.error.name);};");
+    mbWaitForFunction(v, "window.__idb!==''", 3000);
+    const std::string r = Eval(v, "window.__idb");
+    Expect(r == "v1,stores:items",
+           "IndexedDB: open fires upgrade+success; createObjectStore is reflected",
+           "idb=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");
@@ -1248,14 +1270,7 @@ int main() {
     Expect(cbuf2[0] == '\0', "console buffer clears after drain");
   }
 
-  // PROBE: IndexedDB (PWAs use it; may need a backend like DOM storage did).
-  mbLoadHTML(v, "<body>x</body>", "about:blank");
-  mbRunJS(v, "window.__idb='pending';var r=indexedDB.open('mbdb',1);"
-             "r.onsuccess=function(){window.__idb='ok';};"
-             "r.onerror=function(){window.__idb='err';};"
-             "r.onblocked=function(){window.__idb='blocked';};");
-  mbWait(v, 150);
-  std::fprintf(stderr, "PROBE4 indexedDB=%s\n", Eval(v, "String(window.__idb)").c_str());
+  // (IndexedDB is now covered by case 23m — the open+schema step-1 backend.)
 
   // Network cases (31, 32) are OPT-IN via MB_NET_TESTS=1: a dead host costs ~45s
   // per load (connect-timeout x retries), which would make every default run crawl.

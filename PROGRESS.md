@@ -406,7 +406,20 @@ backpressure-honest), and `StartClosingHandshake` -> `OnDropChannel` drives `onc
 (mb_smoke 23k + render 40): `new WebSocket('wss://…')` -> onopen (readyState 1), `send('hello-ws')`
 -> onmessage 'hello-ws', `close()` -> onclose. This is a LOOPBACK echo (proves the entire mojo
 data plane offline); a real network backend over libcurl's WebSocket support can replace the echo
-later with identical plumbing. [REMAINING heavy backend: IndexedDB — needs a real object store.]
+later with identical plumbing. [IN PROGRESS: IndexedDB — step 1 DONE] `frame/mb_indexeddb.{h,cc}` (`MbIDBFactory`, bound from
+the frame broker) — an in-memory IDB backend. STEP 1 (open + schema): `indexedDB.open(name,ver)`
+opens a database keyed by name in a process-wide registry; a new version fires the OPEN handshake
+— `IDBFactoryClient.UpgradeNeeded` (carrying the IDBDatabase handle + current `blink::IDBDatabase-
+Metadata`) so `onupgradeneeded` runs, the page's `createObjectStore` is recorded into the metadata
+via the version-change `IDBTransaction.CreateObjectStore`, and the vc transaction's `Commit` fires
+`IDBDatabaseCallbacks.Complete` + `IDBFactoryClient.OpenSuccess` -> `onsuccess`. Reopen at the same
+version succeeds immediately. Verified (mb_smoke 23m + render 39): `open('mbdb',1)` ->
+onupgradeneeded createObjectStore('items') -> onsuccess with `db.version==1` and
+`objectStoreNames==['items']`. STEP 2 (TODO): `IDBTransaction.Put` + `IDBDatabase.Get`/cursors —
+the value/key plane (`blink::IDBValue` bytes keyed by `blink::IDBKey`), currently stubbed (Put
+returns an error, Get returns empty). The mojo interfaces (IDBFactory/Database/Transaction +
+FactoryClient/DatabaseCallbacks remotes) and the open handshake are all wired; step 2 fills the
+data ops.]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
    Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —
