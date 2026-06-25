@@ -420,6 +420,12 @@ origin's cookies as net::CanonicalCookies via CreateSanitizedCookie, honoring th
 EQUALS exact / STARTS_WITH prefix) and `SetCanonicalCookie` (writes name/value, past-expiry = delete,
 bridges to the HTTP jar). cookieStore shares document.cookie's in-memory jar, so the two stay
 consistent. mb_smoke 23aa (set 2, get 1 by name, getAll 2, document.cookie reflects them).
+[DONE: MediaDevices] `navigator.mediaDevices.enumerateDevices()` — `MbMediaDevicesDispatcherHost`
+(blink.mojom.MediaDevicesDispatcherHost, bound from the frame broker) returns empty device lists
+(no cameras/mics/speakers headless), so enumerateDevices() resolves to []. BUG fixed: without the
+host bound, blink's disconnect handler REJECTED the promise with AbortError, breaking feature probes.
+The outer list carries kNumMediaDeviceTypes empty per-type lists (a blink DCHECK); capability getters
+return empty; output-selection methods are unreached headless. mb_smoke 23ab.
 [DONE: Cache Storage] `frame/mb_cache_storage.{h,cc}` (`MbCacheStorage` + `MbCacheStorageCache`,
 bound from the frame broker). `caches.open/has/delete/keys`, `caches.match`, `cache.put`/`delete`
 (via `Batch`), and `cache.match`. Stores Request URL -> FetchAPIResponse in a process-wide
