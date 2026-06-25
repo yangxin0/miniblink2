@@ -1481,6 +1481,24 @@ int main() {
            "idbCK=[" + r + "]");
   }
 
+  // 23z. Battery Status API (navigator.getBattery, broker BatteryMonitor): the in-process
+  // monitor reports a static "plugged in, fully charged" battery, so getBattery() resolves a
+  // BatteryManager with level 1, charging true, chargingTime 0.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://bat.test/");
+    Eval(v,
+         "window.__bat='';"
+         "if(navigator.getBattery){navigator.getBattery().then(function(b){"
+         "window.__bat=b.level+','+b.charging+','+b.chargingTime;})"
+         ".catch(function(e){window.__bat='err:'+e.name;});}"
+         "else{window.__bat='no-api';}");
+    mbWaitForFunction(v, "window.__bat!==''", 3000);
+    const std::string r = Eval(v, "window.__bat");
+    Expect(r == "1,true,0",
+           "Battery Status API: getBattery resolves a full, charging BatteryManager",
+           "bat=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

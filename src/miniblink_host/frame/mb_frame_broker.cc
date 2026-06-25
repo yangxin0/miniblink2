@@ -1,6 +1,7 @@
 // mb_frame_broker.cc — in-process BrowserInterfaceBroker + RestrictedCookieManager.
 #include "miniblink_host/frame/mb_frame_broker.h"
 
+#include <limits>
 #include <map>
 #include <string>
 #include <utility>
@@ -26,6 +27,8 @@
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
 #include "mojo/public/cpp/base/big_buffer.h"
+#include "services/device/public/mojom/battery_monitor.mojom-blink.h"
+#include "services/device/public/mojom/battery_status.mojom-blink.h"
 #include "services/device/public/mojom/geolocation.mojom-blink.h"
 #include "third_party/blink/public/mojom/clipboard/clipboard.mojom-blink.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -410,6 +413,31 @@ class MbWakeLockService : public blink::mojom::blink::WakeLockService {
   }
 };
 
+// device.mojom.BatteryMonitor for navigator.getBattery(). Headless: reports a static
+// "plugged in, fully charged" battery. The spec long-polls via QueryNextStatus (each call
+// resolves only when the status changes), so we answer the first call with the fixed status
+// and hold every later call open forever — the value never changes in a headless host.
+class MbBatteryMonitor : public device::mojom::blink::BatteryMonitor {
+ public:
+  void QueryNextStatus(QueryNextStatusCallback callback) override {
+    if (answered_) {
+      held_ = std::move(callback);  // no further changes; keep the long-poll pending
+      return;
+    }
+    answered_ = true;
+    auto status = device::mojom::blink::BatteryStatus::New();
+    status->charging = true;
+    status->charging_time = 0.0;  // fully charged
+    status->discharging_time = std::numeric_limits<double>::infinity();
+    status->level = 1.0;
+    std::move(callback).Run(std::move(status));
+  }
+
+ private:
+  bool answered_ = false;
+  QueryNextStatusCallback held_;
+};
+
 // Process-wide configured geolocation fix (set via mbSetGeolocation). Read on the
 // broker's service thread, written from the main thread, so guard with a lock. When
 // unset, geolocation stays denied (the headless default — getCurrentPosition errors).
@@ -562,6 +590,12 @@ class MbBrowserInterfaceBroker
     // caches (Cache Storage) — in-process Request/Response cache.
     if (auto r = receiver.As<blink::mojom::blink::CacheStorage>()) {
       BindCacheStorage(std::move(r));
+      return;
+    }
+    // navigator.getBattery() — headless static "full, charging" battery.
+    if (auto r = receiver.As<device::mojom::blink::BatteryMonitor>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbBatteryMonitor>(),
+                                  std::move(r));
       return;
     }
     // Drop everything else (no browser process).
