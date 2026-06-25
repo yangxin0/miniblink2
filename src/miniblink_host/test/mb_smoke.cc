@@ -1499,6 +1499,28 @@ int main() {
            "bat=[" + r + "]");
   }
 
+  // 23aa. Cookie Store API (cookieStore.set/get/getAll): the async cookie API shares the same
+  // in-process jar as document.cookie. set two cookies, get one back by name, getAll returns
+  // both, and document.cookie reflects them — verifying GetAllForUrl/SetCanonicalCookie.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://cookie.test/");
+    Eval(v,
+         "window.__cks='';"
+         "if(window.cookieStore){"
+         "cookieStore.set('foo','bar')"
+         ".then(function(){return cookieStore.set('baz','qux');})"
+         ".then(function(){return cookieStore.get('foo');})"
+         ".then(function(c){return cookieStore.getAll().then(function(all){"
+         "window.__cks=(c?c.value:'null')+',all:'+all.length+',doc:'+(document.cookie.indexOf('foo=bar')>=0);});})"
+         ".catch(function(e){window.__cks='err:'+e.name;});}"
+         "else{window.__cks='no-api';}");
+    mbWaitForFunction(v, "window.__cks!==''", 3000);
+    const std::string r = Eval(v, "window.__cks");
+    Expect(r == "bar,all:2,doc:true",
+           "Cookie Store API: set/get/getAll share the document.cookie jar",
+           "cks=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

@@ -22,8 +22,12 @@
 #include "miniblink_host/worker/mb_shared_worker.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
+#include "net/cookies/canonical_cookie.h"
+#include "net/cookies/cookie_constants.h"
+#include "net/cookies/cookie_inclusion_status.h"
 #include "services/network/public/mojom/cookie_manager.mojom-blink.h"
 #include "services/network/public/mojom/restricted_cookie_manager.mojom-blink.h"
+#include "url/gurl.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
 #include "mojo/public/cpp/base/big_buffer.h"
@@ -149,28 +153,79 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
     std::move(callback).Run(true);
   }
 
-  void GetAllForUrl(const blink::KURL&,
+  // cookieStore.get()/getAll(): return the origin's cookies as CanonicalCookies, applying the
+  // options filter (EQUALS = exact name, STARTS_WITH = name prefix; the empty-prefix form
+  // getAll() uses matches every cookie). Shares the same jar as document.cookie.
+  void GetAllForUrl(const blink::KURL& url,
                     const net::SiteForCookies&,
                     const scoped_refptr<const blink::SecurityOrigin>&,
                     net::StorageAccessApiStatus,
-                    network::mojom::blink::CookieManagerGetOptionsPtr,
+                    network::mojom::blink::CookieManagerGetOptionsPtr options,
                     bool /*is_ad_tagged*/,
                     bool /*apply_devtools_overrides*/,
                     bool /*force_disable_third_party_cookies*/,
                     GetAllForUrlCallback callback) override {
-    // document.cookie doesn't use this path; return nothing.
-    std::move(callback).Run({});
+    blink::Vector<network::mojom::blink::CookieWithAccessResultPtr> out;
+    GURL gurl(url.GetString().Utf8());
+    const std::string filter = options ? options->name.Utf8() : std::string();
+    const bool exact =
+        options &&
+        options->match_type == network::mojom::blink::CookieMatchType::EQUALS;
+    if (auto it = CookieStore().find(OriginKey(url)); it != CookieStore().end()) {
+      for (const auto& [n, v] : it->second) {
+        if (exact ? (n != filter) : (n.rfind(filter, 0) != 0))
+          continue;  // name doesn't match the requested filter
+        net::CookieInclusionStatus status;
+        std::unique_ptr<net::CanonicalCookie> cc =
+            net::CanonicalCookie::CreateSanitizedCookie(
+                gurl, n, v, /*domain=*/std::string(), /*path=*/"/",
+                base::Time::Now(), /*expiration=*/base::Time(),
+                base::Time::Now(), /*secure=*/false, /*http_only=*/false,
+                net::CookieSameSite::UNSPECIFIED,
+                net::COOKIE_PRIORITY_DEFAULT, /*partition_key=*/std::nullopt,
+                &status);
+        if (!cc)
+          continue;
+        out.push_back(network::mojom::blink::CookieWithAccessResult::New(
+            *cc, network::mojom::blink::CookieAccessResult::New()));
+      }
+    }
+    std::move(callback).Run(std::move(out));
   }
 
+  // cookieStore.set()/delete(): write into the shared jar (and bridge to the HTTP jar). An
+  // empty value with an expiry in the past (how CookieStore::Delete is encoded) removes it.
   void SetCanonicalCookie(
-      network::mojom::blink::RestrictedCanonicalCookieParamsPtr,
-      const blink::KURL&,
+      network::mojom::blink::RestrictedCanonicalCookieParamsPtr params,
+      const blink::KURL& url,
       const net::SiteForCookies&,
       const scoped_refptr<const blink::SecurityOrigin>&,
       net::StorageAccessApiStatus,
       bool /*is_ad_tagged*/,
       bool /*apply_devtools_overrides*/,
       SetCanonicalCookieCallback callback) override {
+    if (params && !params->name.empty()) {
+      std::string name = params->name.Utf8();
+      std::string value = params->value.Utf8();
+      const bool deleting =
+          !params->expires.is_null() && params->expires <= base::Time::Now();
+      CookieList& jar = CookieStore()[OriginKey(url)];
+      bool found = false;
+      for (auto it = jar.begin(); it != jar.end(); ++it) {
+        if (it->first == name) {
+          if (deleting)
+            jar.erase(it);
+          else
+            it->second = value;
+          found = true;
+          break;
+        }
+      }
+      if (!found && !deleting)
+        jar.emplace_back(name, value);
+      MbAddCookieToJar(url.GetString().Utf8(),
+                       deleting ? (name + "=; max-age=0") : (name + "=" + value));
+    }
     std::move(callback).Run(true);
   }
 
