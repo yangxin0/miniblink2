@@ -253,6 +253,51 @@ void MbWebView::LoadHTML(const char* utf8_html, const char* base_url) {
   CommitHtml(html, std::strlen(html), base_url);
 }
 
+namespace {
+// Decide whether a fetched top-level response is a DOWNLOAD (save) rather than a page to
+// render: a Content-Disposition: attachment is the explicit signal; otherwise a MIME the
+// engine doesn't render inline (not text/* / image/* / the structured app types). Also
+// extracts a suggested filename (Content-Disposition filename=, else the URL basename).
+bool IsDownloadResponse(const std::string& url, const std::string& mime,
+                        const std::string& headers, std::string* filename) {
+  std::string lc_headers = headers;
+  for (char& c : lc_headers)
+    c = static_cast<char>(std::tolower((unsigned char)c));
+  bool is_download = lc_headers.find("content-disposition: attachment") !=
+                     std::string::npos;
+  std::string m = mime;
+  for (char& c : m)
+    c = static_cast<char>(std::tolower((unsigned char)c));
+  if (!is_download && !m.empty()) {
+    const bool renderable =
+        m.rfind("text/", 0) == 0 || m.rfind("image/", 0) == 0 ||
+        m == "application/json" || m == "application/xml" ||
+        m == "application/xhtml+xml" || m == "application/javascript" ||
+        m == "application/ecmascript";
+    is_download = !renderable;
+  }
+  if (is_download && filename) {
+    // Content-Disposition filename="..." wins; else the URL's last path segment.
+    std::string::size_type fp = lc_headers.find("filename=");
+    if (fp != std::string::npos) {
+      std::string fn = headers.substr(fp + 9);
+      if (!fn.empty() && fn.front() == '"')
+        fn = fn.substr(1, fn.find('"', 1) - 1);
+      else
+        fn = fn.substr(0, fn.find_first_of("\r\n;"));
+      *filename = fn;
+    }
+    if (filename->empty()) {
+      std::string::size_type slash = url.find_last_of('/');
+      std::string base = slash == std::string::npos ? url : url.substr(slash + 1);
+      base = base.substr(0, base.find_first_of("?#"));
+      *filename = base.empty() ? "download" : base;
+    }
+  }
+  return is_download;
+}
+}  // namespace
+
 void MbWebView::LoadURL(const char* utf8_url) {
   std::string url(utf8_url ? utf8_url : "");
   http_status_ = 0;  // reset; only an http(s) load sets a real status
@@ -268,9 +313,9 @@ void MbWebView::LoadURL(const char* utf8_url) {
     }
     return;
   }
-  if (url.rfind("http", 0) == 0) {
-    // Top-level http(s): fetch via libcurl, commit with base = the URL so relative
-    // subresources resolve and load through MbURLLoader.
+  if (url.rfind("http", 0) == 0 || url.rfind("data:", 0) == 0) {
+    // Top-level http(s) (or a data: URI): fetch via the loader, commit with base = the
+    // URL so relative subresources resolve and load through MbURLLoader.
     std::string body, content_type, final_url;
     const bool ok = MbFetchUrl(
         url, &body, &content_type,
@@ -285,6 +330,18 @@ void MbWebView::LoadURL(const char* utf8_url) {
     if (std::getenv("MB_VERBOSE")) {
       std::fprintf(stderr, "[mb_webview] main-doc %s ok=%d bytes=%zu ct='%s'\n",
                    url.c_str(), ok, body.size(), content_type.c_str());
+    }
+    // A download (Content-Disposition: attachment / non-renderable MIME) is handed to
+    // the embedder via the download callback INSTEAD of committed as a document — but
+    // only if a callback is registered, so default behavior is unchanged.
+    std::string mime = content_type.substr(0, content_type.find(';'));
+    while (!mime.empty() && mime.back() == ' ')
+      mime.pop_back();
+    std::string dl_name;
+    if (ok && on_download_ &&
+        IsDownloadResponse(doc_url, mime, response_headers_, &dl_name)) {
+      on_download_(doc_url, mime, dl_name, body);
+      return;
     }
     if (ok) {
       // Pass the server's charset (authoritative) when present; else empty so the
@@ -1272,6 +1329,10 @@ void MbWebView::SetNavigationCallback(NavigationFn cb) {
 
 void MbWebView::SetUrlChangedCallback(UrlChangedFn cb) {
   on_url_changed_ = std::move(cb);
+}
+
+void MbWebView::SetDownloadCallback(DownloadFn cb) {
+  on_download_ = std::move(cb);
 }
 
 void MbWebView::OnCreateNewWindow(const std::string& url,

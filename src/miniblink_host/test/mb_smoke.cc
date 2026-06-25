@@ -356,6 +356,28 @@ int main() {
     mbOnUrlChanged(v, nullptr, nullptr);
   }
 
+  // 0m. Download diversion (#6): a top-level navigation to a non-renderable response (a
+  // data: URL with application/octet-stream) is handed to mbOnDownload (mime + bytes)
+  // instead of committed — so the current page stays and a download link saves a file.
+  {
+    static std::string* dl = new std::string();  // -Wexit-time-destructors
+    dl->clear();
+    mbLoadHTML(v, "<body>PAGE</body>", "about:blank");  // a real page first
+    mbOnDownload(
+        v,
+        [](mbView*, void*, const char* /*url*/, const char* mime,
+           const char* /*fn*/, const char* data, int len) {
+          *dl = std::string("mime=") + mime + " body=" + std::string(data, len);
+        },
+        nullptr);
+    mbLoadURL(v, "data:application/octet-stream,DLBYTES");
+    const std::string body = Eval(v, "document.body.textContent");
+    Expect(*dl == "mime=application/octet-stream body=DLBYTES" && body == "PAGE",
+           "mbOnDownload diverts a non-renderable navigation to the callback",
+           "dl=[" + *dl + "] body=[" + body + "]");
+    mbOnDownload(v, nullptr, nullptr);
+  }
+
   // 0j. CSP does NOT leak across navigations in a reused view (#15). Load a page whose
   // strict <meta> CSP (script-src 'none') blocks its own inline script, then load a
   // normal page in the SAME view: the second page's script MUST run — each commit now

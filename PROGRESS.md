@@ -218,8 +218,14 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      http(s), the view's UA + extra/per-URL headers + cookies + proxy. Works for http(s),
      file:// and data:. Verified (mb_smoke 0e, offline): a data: URL decodes to the file
      (DL-DATA-7); a mocked URL downloads with NO network and the response hook rewrites the
-     bytes (REWRITTEN). (Browser-style "navigation that turns into a download" — detecting
-     Content-Disposition mid-commit — is NOT done; this is the explicit host-driven form.)
+     bytes (REWRITTEN).
+   - [DONE] **download diversion** (browser-style "a navigation becomes a download"):
+     `mbOnDownload(view, cb)` — a top-level mbLoadURL to a response that is a DOWNLOAD
+     (Content-Disposition: attachment, or a non-renderable MIME) is handed to the callback
+     (url, mime, suggested filename, body bytes) INSTEAD of rendered, ONLY if a callback is
+     set (else rendered as before — no regression). Also added data: URLs to mbLoadURL's
+     fetch path. Verified (mb_smoke 0m): mbLoadURL("data:application/octet-stream,DLBYTES")
+     → callback gets mime+bytes, the prior page stays (not committed).
    - [DONE] **`mbSetFileForSelector(css_selector, paths_newline)`**: the privileged host op a
      page's own script is forbidden to do. Reaches the core `HTMLInputElement`, reads each
      path's bytes into an **in-memory `BlobData` registered with our BlobRegistry** (via

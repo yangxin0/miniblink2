@@ -342,6 +342,15 @@ class MbWebView {
   // / reload) with the new URL — the "URL changed" notification. {} clears it.
   using UrlChangedFn = std::function<void(const std::string& url)>;
   void SetUrlChangedCallback(UrlChangedFn cb);
+  // Register a callback for a top-level navigation that is a DOWNLOAD (Content-Disposition
+  // attachment / non-renderable MIME) — it receives the URL, MIME, suggested filename and
+  // body bytes INSTEAD of the response being rendered as a document. {} clears (default:
+  // such a response is committed as a document, as before).
+  using DownloadFn = std::function<void(const std::string& url,
+                                        const std::string& mime,
+                                        const std::string& filename,
+                                        const std::string& body)>;
+  void SetDownloadCallback(DownloadFn cb);
   // Called by MbFrameClient when the page requests a new window (window.open /
   // target=_blank). A notification only — the popup itself is denied (returns null).
   void OnCreateNewWindow(const std::string& url, const std::string& name);
@@ -473,6 +482,7 @@ class MbWebView {
   ConsoleFn on_console_;  // optional live console-message callback
   NavigationFn on_navigation_;  // optional page-initiated navigation policy callback
   UrlChangedFn on_url_changed_;  // optional per-commit URL-changed notification
+  DownloadFn on_download_;  // optional top-level-download diversion callback
   NewWindowFn on_new_window_;   // optional window.open / target=_blank notification
 
   std::vector<uint8_t> encoded_png_;  // retained bytes from the last EncodePng

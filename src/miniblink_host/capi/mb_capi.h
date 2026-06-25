@@ -116,6 +116,16 @@ MB_EXPORT void mbOnNavigation(mbView*, mbNavigationCallback, void* userdata);
 typedef void (*mbUrlChangedCallback)(mbView*, void* userdata, const char* url);
 MB_EXPORT void mbOnUrlChanged(mbView*, mbUrlChangedCallback, void* userdata);
 
+// Download diversion: when a top-level navigation (mbLoadURL to an http(s)/data: URL)
+// returns a DOWNLOAD — Content-Disposition: attachment, or a non-renderable MIME — and a
+// callback is registered, the response is handed to it (url, mime, suggested filename, and
+// the body bytes — NOT NUL-safe, use `len`) INSTEAD of being rendered, so a download link
+// saves a file rather than committing garbage. NULL clears it (default: render as before).
+typedef void (*mbDownloadCallback)(mbView*, void* userdata, const char* url,
+                                   const char* mime, const char* filename,
+                                   const char* data, int len);
+MB_EXPORT void mbOnDownload(mbView*, mbDownloadCallback, void* userdata);
+
 // New-window notification: the callback fires when the page requests a new window
 // (window.open() or a target=_blank activation), with the requested `url` and window
 // `name`. It is a notification only — the popup is not auto-created (window.open returns

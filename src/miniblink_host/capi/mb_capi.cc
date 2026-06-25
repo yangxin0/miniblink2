@@ -159,6 +159,20 @@ void mbOnUrlChanged(mbView* v, mbUrlChangedCallback cb, void* userdata) {
     v->impl->SetUrlChangedCallback({});
 }
 
+void mbOnDownload(mbView* v, mbDownloadCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetDownloadCallback(
+        [v, cb, userdata](const std::string& url, const std::string& mime,
+                          const std::string& filename, const std::string& body) {
+          cb(v, userdata, url.c_str(), mime.c_str(), filename.c_str(),
+             body.data(), static_cast<int>(body.size()));
+        });
+  else
+    v->impl->SetDownloadCallback({});
+}
+
 void mbOnNewWindow(mbView* v, mbNewWindowCallback cb, void* userdata) {
   if (!v || !v->impl)
     return;
