@@ -65,7 +65,7 @@ mb_shot \
   [--css STYLES] [--auto-scroll] [--scroll-to Y] [--scroll-to-selector CSS] \
   # extract (to stdout)
   [--title] [--url] [--cookies URL] [--local-storage KEY] [--session-storage KEY] \
-  [--text] [--html] [--html-for CSS] [--eval JS] [--eval-json JS] [--value CSS] [--checked CSS] [--count CSS] [--visible CSS] \
+  [--text] [--html] [--html-for CSS] [--eval JS] [--eval-json JS] [--frame N] [--value CSS] [--checked CSS] [--count CSS] [--visible CSS] \
   [--rect CSS] [--style CSS PROP] [--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] \
   [--requests] [--console] [--headers] \
   # capture
@@ -167,7 +167,11 @@ interact first, then extract. `--eval-json JS` is the structured-scraping varian
 `JSON.stringify`s the expression, so an object or array comes back as real JSON instead
 of `[object Object]` or a lossy comma-join; e.g.
 `mb_shot --eval-json "[...document.querySelectorAll('.item')].map(e=>({t:e.textContent,href:e.querySelector('a').href}))"`
-yields a JSON array of records ready to pipe into `jq`.
+yields a JSON array of records ready to pipe into `jq`. `--frame N` makes `--eval` /
+`--eval-json` run inside the N-th child frame (iframe; 0-based, document order) instead
+of the main frame — host-privileged, so it scrapes even a cross-origin iframe whose
+content the page itself can't read; e.g. `mb_shot page.html out.png --frame 0 --eval
+"document.body.textContent"`.
 
 `--no-images` disables network image loading (faster text/HTML scraping; inline `data:`
 images are unaffected). `--dark` emulates `prefers-color-scheme: dark` so pages render their

@@ -99,8 +99,11 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      CROSS-ORIGIN iframe the parent's `iframe.contentDocument` can't (single-process =
      all iframes are local `WebLocalFrame`s). mb_smoke_render 78b: data: iframe under an
      https parent -> parent read NULLDOC, `mbEvalJSInFrame(0,...)` reads XFRAME-SECRET.
+   - [DONE] **`mb_shot --frame N`** — routes `--eval`/`--eval-json` into child frame N
+     (host-privileged), so the CLI scrapes iframe content the page can't. mb_shot_smoke:
+     parent body=`parent`, `--frame 0 --eval document.body.textContent`=`CHILD-77`.
    - [NEXT] per-frame selector ops (click/fill/text-by-selector in a frame) via the same
-     child-frame mechanism + an `mb_shot --frame N` prefix + wke `wkeRunJsByFrame` peer.
+     child-frame mechanism + a wke `wkeRunJsByFrame` peer.
 4. **Push callback model** — replace poll-only readiness: host `DidFinishLoad`/
    `DidMeaningfulLayout` signals (`mb_frame_client.h:122` TODO — fixes partial-capture
    races), navigation policy (`wkeOnNavigation`), new-window (`wkeOnCreateView`), downloads.

@@ -87,6 +87,8 @@ int main(int argc, char** argv) {
   std::string press_key;       // named key to press after interacting (--press KEY)
   std::string eval_js;         // JS to run after load; result printed to stdout
   std::string eval_json;       // JS expression, printed JSON.stringify'd (structured)
+  int eval_frame = -1;         // --frame N: run --eval/--eval-json in child frame N
+                               // (0-based; -1 = main frame). Reads cross-origin iframes.
   std::string value_selector;  // print this control's live .value to stdout
   std::string html_for_selector;  // print the first match's outerHTML to stdout
   std::string checked_selector;  // print this control's .checked (1/0) to stdout
@@ -161,6 +163,8 @@ int main(int argc, char** argv) {
       eval_js = argv[++i];
     } else if (a == "--eval-json" && i + 1 < argc) {
       eval_json = argv[++i];
+    } else if (a == "--frame" && i + 1 < argc) {
+      eval_frame = std::atoi(argv[++i]);
     } else if (a == "--value" && i + 1 < argc) {
       value_selector = argv[++i];
     } else if (a == "--html-for" && i + 1 < argc) {
@@ -258,7 +262,7 @@ int main(int argc, char** argv) {
         stderr,
         "usage: %s [--full] [--scale N] [--mobile] [--clip x,y,w,h] [--selector CSS] "
         "[--transparent] [--title] [--url] [--cookies URL] "
-        "[--local-storage KEY] [--session-storage KEY] [--text] [--html] [--html-for CSS] [--requests] [--eval JS] [--eval-json JS] [--value CSS] "
+        "[--local-storage KEY] [--session-storage KEY] [--text] [--html] [--html-for CSS] [--requests] [--eval JS] [--eval-json JS] [--frame N] [--value CSS] "
         "[--checked CSS] [--count CSS] [--visible CSS] [--rect CSS] [--style CSS PROP] "
         "[--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] "
         "[--fill CSS TEXT] "
@@ -699,9 +703,18 @@ int main(int argc, char** argv) {
   // to stdout. Exposes the whole scripting/scraping surface from the CLI — element
   // counts (document.querySelectorAll('.x').length), computed styles, attribute
   // reads, any page state — without needing a dedicated flag per query.
+  // --frame N (with --eval/--eval-json) targets the Nth child frame instead of the
+  // main frame, running host-privileged in that frame's own world — so it scrapes
+  // even a cross-origin iframe whose content the page itself can't read.
+  auto eval_into = [&](const char* js, char* out, int cap) {
+    if (eval_frame >= 0)
+      mbEvalJSInFrame(view, eval_frame, js, out, cap);
+    else
+      mbEvalJS(view, js, out, cap);
+  };
   if (!eval_js.empty()) {
     std::vector<char> ebuf(1 << 20, 0);  // 1 MiB
-    mbEvalJS(view, eval_js.c_str(), ebuf.data(), static_cast<int>(ebuf.size()));
+    eval_into(eval_js.c_str(), ebuf.data(), static_cast<int>(ebuf.size()));
     std::fwrite(ebuf.data(), 1, std::strlen(ebuf.data()), stdout);
     std::fputc('\n', stdout);
   }
@@ -713,7 +726,7 @@ int main(int argc, char** argv) {
   if (!eval_json.empty()) {
     std::vector<char> jbuf(1 << 20, 0);  // 1 MiB
     const std::string wrapped = "JSON.stringify((" + eval_json + "))";
-    mbEvalJS(view, wrapped.c_str(), jbuf.data(), static_cast<int>(jbuf.size()));
+    eval_into(wrapped.c_str(), jbuf.data(), static_cast<int>(jbuf.size()));
     std::fwrite(jbuf.data(), 1, std::strlen(jbuf.data()), stdout);
     std::fputc('\n', stdout);
   }

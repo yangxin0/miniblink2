@@ -321,6 +321,18 @@ run 40 "file://$TMP/fetch2.html" "$PNG" --rewrite "orig.test" "api.test" \
     --eval "document.getElementById('r').textContent"
 check "--rewrite redirects a fetch() onto a mock" "GOT:42" "$(cat "$TMP/out")"
 
+# --frame N: run --eval inside the Nth child frame (iframe) instead of the main
+# frame — host-privileged, so it reads iframe content the page may not (cross-origin).
+# The parent body is just "parent" (the iframe's text lives in a separate document);
+# --frame 0 reads the iframe's own body. Proves --frame retargets the eval context.
+cat > "$TMP/frame.html" <<'HTML'
+<body>parent<iframe src="data:text/html,<body>CHILD-77</body>" width="60" height="30"></iframe></body>
+HTML
+run 40 "file://$TMP/frame.html" "$PNG" --wait-ms 200 --eval "document.body.textContent"
+check "main-frame --eval reads the parent body" "parent" "$(cat "$TMP/out")"
+run 40 "file://$TMP/frame.html" "$PNG" --wait-ms 200 --frame 0 --eval "document.body.textContent"
+check "--frame 0 --eval reads the child iframe's body" "CHILD-77" "$(cat "$TMP/out")"
+
 # bad-size guard: a non-numeric width positional must fail fast (exit 2), not crash
 run 40 "$URL" --out "$PNG"; check "bad-size guard exit code" "2" "$RC"
 checkc "bad-size guard message" "must be positive" "$(cat "$TMP/err")"
