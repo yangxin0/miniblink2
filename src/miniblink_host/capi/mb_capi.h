@@ -208,6 +208,14 @@ MB_EXPORT int mbGetViewSize(mbView*, int* w, int* h);
 // success, 0 if nothing matches. Pair with mbWaitForSelector for dynamic forms.
 MB_EXPORT int mbFillSelector(mbView*, const char* css_selector, const char* utf8_text);
 
+// Set an <input type=file>'s selected files from disk PATHS (newline-separated for a
+// `multiple` input) — the privileged op a page's own script is forbidden to do, enabling
+// file-upload automation. The bytes are read into an in-memory blob (so .size, FileReader
+// and form submit work) and the change event fires. Returns 1 on success, 0 if
+// `css_selector` doesn't match a file input or no valid path was given.
+MB_EXPORT int mbSetFileForSelector(mbView*, const char* css_selector,
+                                   const char* paths_newline);
+
 // Select the option of the <select> matching `css_selector` whose value OR
 // visible text equals `value`, firing input+change (Puppeteer page.select).
 // Returns 1 on success, 0 if no <select> or no matching option.

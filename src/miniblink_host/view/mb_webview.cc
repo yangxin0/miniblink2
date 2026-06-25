@@ -55,6 +55,9 @@
 #include "third_party/blink/renderer/core/css/media_value_change.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
+#include "third_party/blink/renderer/core/fileapi/file.h"
+#include "third_party/blink/renderer/core/fileapi/file_list.h"
+#include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -70,6 +73,7 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkStream.h"
 #include "third_party/skia/include/docs/SkPDFDocument.h"
+#include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
@@ -629,6 +633,68 @@ bool MbWebView::FillSelector(const char* css_selector, const char* text) {
       "e.dispatchEvent(new Event('input',{bubbles:true}));"
       "e.dispatchEvent(new Event('change',{bubbles:true}));return '1';})()";
   return EvalToString(js.c_str()) == "1";
+}
+
+bool MbWebView::SetFileForSelector(const char* css_selector,
+                                   const char* paths_newline) {
+  if (!css_selector || !main_frame_)
+    return false;
+  // A page CANNOT set an <input type=file>.files from script (security); only a
+  // privileged host can. Reach the core HTMLInputElement and set its FileList.
+  auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
+  blink::LocalFrame* frame = impl ? impl->GetFrame() : nullptr;
+  if (!frame || !frame->GetDocument())
+    return false;
+  blink::Element* el =
+      frame->GetDocument()->QuerySelector(blink::AtomicString(css_selector));
+  auto* input = blink::DynamicTo<blink::HTMLInputElement>(el);
+  if (!input ||
+      input->FormControlType() != blink::mojom::blink::FormControlType::kInputFile)
+    return false;
+  // Build the FileList from newline-separated paths (a `multiple` input takes several).
+  // Each file's bytes are read from disk and wrapped in an in-memory blob registered
+  // with our BlobRegistry (the same path `new Blob([bytes])` uses, verified readable) —
+  // a plain path-backed File would need a file-reading blob backend we don't have, so
+  // its size/reads would be empty. This way .size, FileReader and form upload all work.
+  blink::FileList* list = blink::MakeGarbageCollected<blink::FileList>();
+  const std::string buf(paths_newline ? paths_newline : "");
+  std::string::size_type start = 0;
+  while (start <= buf.size()) {
+    std::string::size_type nl = buf.find('\n', start);
+    std::string one = buf.substr(
+        start, nl == std::string::npos ? std::string::npos : nl - start);
+    if (!one.empty() && one.back() == '\r')
+      one.pop_back();
+    if (!one.empty()) {
+      std::string bytes;
+      if (base::ReadFileToString(base::FilePath(one), &bytes)) {
+        const std::string::size_type slash = one.find_last_of('/');
+        const std::string base_name =
+            slash == std::string::npos ? one : one.substr(slash + 1);
+        auto blob_data = std::make_unique<blink::BlobData>();
+        blob_data->AppendBytes(base::as_byte_span(bytes));
+        blob_data->SetContentType("application/octet-stream");
+        scoped_refptr<blink::BlobDataHandle> handle =
+            blink::BlobDataHandle::Create(std::move(blob_data), bytes.size());
+        list->Append(blink::MakeGarbageCollected<blink::File>(
+            blink::String::FromUtf8(base_name), /*modification_time=*/std::nullopt,
+            std::move(handle)));
+      }
+    }
+    if (nl == std::string::npos)
+      break;
+    start = nl + 1;
+  }
+  if (list->length() == 0u)
+    return false;
+  input->setFiles(list);
+  // setFiles updates .files but doesn't fire change (that's the chooser's job); fire it
+  // so a page's change handler runs, matching a real file selection.
+  EvalToString((std::string("(function(){var e=document.querySelector(\"") +
+                JsEscape(css_selector) +
+                "\");if(e)e.dispatchEvent(new Event('change',{bubbles:true}));})()")
+                   .c_str());
+  return true;
 }
 
 void MbWebView::SendMouseMove(int x, int y) {

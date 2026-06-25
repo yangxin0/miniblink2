@@ -174,18 +174,20 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
 5. **JS dialogs** — alert/confirm/prompt are unhandled (`wke.h:462` even warns about it).
    Note the reverted `mbSetJsDialogPolicy` FATAL'd in `thread_collision_warner` — solve the
    `ScopedPagePauser` threading first.
-6. **File download (to disk) + file upload (`input[type=file]`)** — both absent; downloads
-   currently commit as documents; `mbFillSelector` can't set a file input.
-   - INVESTIGATED & deferred (2026-06): a `mbSetFileForSelector` was prototyped two ways —
-     (a) core `HTMLInputElement::SetFilesFromPaths`, (b) building the `FileList` from Files
-     backed by a *readable in-memory blob* (new `MbMakeReadableBlob`, MbBlob on the service
-     thread). The input is set + change fires + name resolves, BUT in BOTH the File reports
-     `size 0` and a `FileReader` read hangs/returns empty — this host has no file-reading
-     blob backend, and `setFiles` appears to re-wrap the FileList as path-backed Files,
-     discarding the in-memory blob. So the file is "selected" but its BYTES don't flow
-     (no real upload). Reverted (doesn't verify). REAL fix needs a wired file-blob backend
-     (or a `FileBackedBlobFactory` / `setFiles` path that preserves a host-supplied blob) —
-     a Tier-2-sized piece, same family as the worker/IndexedDB broker gaps.
+6. **File upload (`input[type=file]`)** — [DONE]. **File download (to disk)** — still absent
+   (downloads commit as documents).
+   - [DONE] **`mbSetFileForSelector(css_selector, paths_newline)`**: the privileged host op a
+     page's own script is forbidden to do. Reaches the core `HTMLInputElement`, reads each
+     path's bytes into an **in-memory `BlobData` registered with our BlobRegistry** (via
+     `BlobDataHandle::Create(BlobData, size)` — the SAME path `new Blob([bytes])` takes, so
+     the bytes are genuinely readable), builds a `FileList` of `File(name, time, handle)`,
+     `setFiles()` (which stores the list verbatim — no re-wrap), then fires `change`. Verified
+     (mb_smoke_render 62-file): set a 17-byte file → `files[0].name`=mb_upload.txt, `.size`=17,
+     **FileReader reads the real bytes** "UPLOAD-CONTENT-42" (the form-submit byte path),
+     change fires once; a text input and a non-match return 0.
+     NOTE: the earlier dead-end was a manual MbBlob+PostTask handle (size 0 / read hung); the
+     `BlobData`+registry path is what actually works. `SetFilesFromPaths` (path-backed) does
+     NOT work here — no file-reading blob backend — which is why we read the bytes ourselves.
 
 **Tier 2 — web-platform fidelity (host infra; heavier):**
 7. Workers (dedicated worker thread+isolate; shared/service absent). 8. Broker binds cookies

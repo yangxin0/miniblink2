@@ -133,6 +133,12 @@ class MbWebView {
   // like React observe it), and fires input+change. Playwright-style fill().
   // Returns false if the selector matches nothing.
   bool FillSelector(const char* css_selector, const char* text);
+  // Set an <input type=file>'s selected files from disk paths (newline-separated for a
+  // `multiple` input) — the privileged host op a page's script can't do — and fire
+  // change, so a form submit then uploads the file(s). The bytes are read from disk into
+  // an in-memory blob so size/FileReader/upload work. False if the selector doesn't match
+  // a file input or no valid path was given.
+  bool SetFileForSelector(const char* css_selector, const char* paths_newline);
   // Select a <select> option by value or visible text, firing input+change.
   bool SelectOption(const char* css_selector, const char* value);
   void SendMouseMove(int x, int y);

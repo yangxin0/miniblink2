@@ -679,6 +679,44 @@ static void RunCases(mbView* v, int W, int H) {
            "mbFillSelector: sets value + fires input event; 0 when no match");
   }
 
+  // 62-file. mbSetFileForSelector sets an <input type=file>'s files from a disk PATH —
+  // the privileged op a page's own script is forbidden to do (file-upload automation).
+  // The real proof is byte access: write a known file, set it, then read it back via
+  // FileReader (the same byte path a form submit uses). A text input + a non-match
+  // must be rejected (return 0).
+  {
+    const char* path = "/tmp/mb_upload.txt";
+    const char* content = "UPLOAD-CONTENT-42";  // 17 bytes
+    if (FILE* f = std::fopen(path, "wb")) {
+      std::fwrite(content, 1, std::strlen(content), f);
+      std::fclose(f);
+    }
+    mbLoadHTML(v,
+      "<body><input type='file' id='up'><input type='text' id='txt'>"
+      "<script>window.__chg=0;document.getElementById('up')"
+      ".addEventListener('change',function(){window.__chg++;});</script></body>",
+      "about:blank");
+    const int set_ok = mbSetFileForSelector(v, "#up", path);
+    const int wrong_type = mbSetFileForSelector(v, "#txt", path);  // not a file input
+    const int no_match = mbSetFileForSelector(v, "#nope", path);   // no element
+    const std::string n =
+        Eval(v, "document.getElementById('up').files.length?"
+                "document.getElementById('up').files[0].name:''");
+    const std::string sz =
+        Eval(v, "''+document.getElementById('up').files[0].size");
+    const std::string chg = Eval(v, "''+window.__chg");
+    Eval(v, "(function(){var fr=new FileReader();fr.onload=function(){window.__fc="
+            "fr.result;};fr.onerror=function(){window.__fc='ERR';};"
+            "fr.readAsText(document.getElementById('up').files[0]);})()");
+    mbWaitForFunction(v, "window.__fc!==undefined", 2000);
+    const std::string fc = Eval(v, "window.__fc===undefined?'TIMEOUT':window.__fc");
+    Expect(set_ok == 1 && wrong_type == 0 && no_match == 0 && n == "mb_upload.txt" &&
+               sz == "17" && chg == "1" && fc == "UPLOAD-CONTENT-42",
+           "mbSetFileForSelector sets a file input (name+size+readable bytes) + change",
+           "set=" + std::to_string(set_ok) + " wrong=" + std::to_string(wrong_type) +
+               " n=[" + n + "] size=" + sz + " chg=" + chg + " bytes=[" + fc + "]");
+  }
+
   // 62-sep. JsEscape robustness: a value containing the JS line terminators
   // U+2028 / U+2029 must round-trip intact through the eval-based fill. These are
   // legal in ES2019+ string literals (V8's JSON-superset) but would terminate a
