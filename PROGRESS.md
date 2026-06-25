@@ -873,6 +873,16 @@ process-wide state confirmed two real cross-origin data-isolation gaps, both ins
     name -> isolated) + 23h (same-origin delivery) + 23i (window<->worker bridge). RESIDUAL: worker<->worker
     and opaque-origin ("null") channels not isolated (niche). The frame_key->origin map is now available to
     fix IDB the same way once the broker carries frame_key (the remaining, heavier half).
+    [WORKER-SCOPING ATTEMPTED + REVERTED] Tried to scope worker channels too (thread frame_key through the
+    broker, publish the worker's origin, key the worker BroadcastChannelProvider). It broke 23i and was
+    reverted. KEY FINDING for the future fix: a dedicated worker's origin is its PARENT document's origin
+    (inherited), NOT WebSecurityOrigin::Create(script_url) — a data:/blob: worker script is opaque-by-URL
+    ("null") but the worker is same-origin as its creator. So publishing the script-URL origin made the
+    worker mismatch its parent window and dropped window<->worker messages. Scoping workers correctly needs
+    the PARENT frame's frame_key/origin threaded to the worker host (the worker factory client is created by
+    the parent MbFrameClient, so the parent origin IS reachable there — but it's an extra hop). The SAME
+    inheritance gotcha applies to the IDB worker path: a worker's IDB is the parent origin's, so naive
+    script-origin keying would un-share window<->worker IDB. Both worker paths need parent-origin threading.
 ROOT CAUSE: the mojom for both (IDBFactory.Open, BroadcastChannelProvider.ConnectToChannel) carries NO
 origin — the real browser binds these interfaces PER-ORIGIN (per storage bucket), so the origin is implicit
 in which factory/provider instance. Our broker (MakeFrameInterfaceBroker) is a single per-frame instance,
