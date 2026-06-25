@@ -102,6 +102,14 @@ typedef void (*mbLoadFinishCallback)(mbView*, void* userdata);
 MB_EXPORT void mbOnLoadFinish(mbView*, mbLoadFinishCallback, void* userdata);
 MB_EXPORT int  mbIsLoadFinished(mbView*);
 
+// Navigation policy/notification: the callback fires for each PAGE-initiated main-frame
+// navigation (link click, location= assignment, form submit, JS redirect) with its
+// target `url`, BEFORE it commits. Return 1 to allow, 0 to BLOCK it — so you can stop
+// popups / redirects / the page navigating away, or just observe navigations. Host-
+// driven mbLoadURL does NOT route through here (it is your own action). NULL clears it.
+typedef int (*mbNavigationCallback)(mbView*, void* userdata, const char* url);
+MB_EXPORT void mbOnNavigation(mbView*, mbNavigationCallback, void* userdata);
+
 // Host-driven POST navigation: POST `body` to an http(s) `url` with `content_type`
 // (NULL/empty -> application/x-www-form-urlencoded) and commit the response as the
 // document. `body` is NUL-terminated (text bodies — form-encoded or JSON). After

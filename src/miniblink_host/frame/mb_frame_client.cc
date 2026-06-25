@@ -122,6 +122,12 @@ void MbFrameClient::BeginNavigation(
   blink::KURL url = info->url_request.Url();
   if (url.IsEmpty() || url.ProtocolIsAbout())
     return;
+  // Navigation policy: let the host veto a page-initiated navigation (link click,
+  // location= assignment, form submit, JS redirect) before it commits — block
+  // popups/redirects/leaving the page. Host-driven loads (MbWebView::LoadURL) don't
+  // come through here, so they are never vetoed by this.
+  if (owner_ && !owner_->OnBeginNavigation(url.GetString().Utf8()))
+    return;
   web_frame_->GetTaskRunner(blink::TaskType::kInternalLoading)
       ->PostTask(FROM_HERE,
                  base::BindOnce(&MbFrameClient::DoCommit,
@@ -167,9 +173,18 @@ void MbFrameClient::DoCommit(std::unique_ptr<blink::WebNavigationInfo> info) {
       }
       post_ct = info->url_request.HttpContentType().Utf8();
     }
-    if (MbFetchUrl(url.GetString().Utf8(), &body, &content_type, user_agent_,
-                   extra_headers_, post_body, post_ct) &&
-        !content_type.empty()) {
+    // Honor a registered mock (mbMockResponse) for a page navigation too — consistent
+    // with subresource/fetch interception — so a navigation can be served offline.
+    std::string mock_body, mock_ct;
+    int mock_status = 0;
+    if (MbFindMock(url.GetString().Utf8(), &mock_body, &mock_ct, &mock_status)) {
+      body = std::move(mock_body);
+      content_type = mock_ct;
+    } else {
+      MbFetchUrl(url.GetString().Utf8(), &body, &content_type, user_agent_,
+                 extra_headers_, post_body, post_ct);
+    }
+    if (!content_type.empty()) {
       std::string m = content_type.substr(0, content_type.find(';'));
       while (!m.empty() && m.back() == ' ')
         m.pop_back();

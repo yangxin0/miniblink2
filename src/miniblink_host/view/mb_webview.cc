@@ -1216,6 +1216,14 @@ void MbWebView::SetLoadFinishCallback(std::function<void()> cb) {
   on_load_finish_ = std::move(cb);
 }
 
+bool MbWebView::OnBeginNavigation(const std::string& url) {
+  return on_navigation_ ? on_navigation_(url) != 0 : true;
+}
+
+void MbWebView::SetNavigationCallback(NavigationFn cb) {
+  on_navigation_ = std::move(cb);
+}
+
 bool MbWebView::GoBack() {
   if (!CanGoBack())
     return false;

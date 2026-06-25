@@ -314,6 +314,14 @@ class MbWebView {
   void OnDidFinishLoad();
   // Register a callback fired on each main-frame load finish. Pass {} to clear.
   void SetLoadFinishCallback(std::function<void()> cb);
+  // Called by MbFrameClient for a PAGE-initiated main-frame navigation (link click,
+  // location=, form submit, JS redirect) BEFORE it commits. Returns true to allow,
+  // false to veto. Host-driven LoadURL does not route through here.
+  bool OnBeginNavigation(const std::string& url);
+  // Register a navigation policy/notification callback: it receives each page-initiated
+  // navigation's target URL and returns 1 to allow, 0 to block. {} clears it (allow all).
+  using NavigationFn = std::function<int(const std::string& url)>;
+  void SetNavigationCallback(NavigationFn cb);
   // True once the current navigation's load has finished; reset when a new load
   // is started (see ResetLoadFinished). Lets the load primitives wait for the real
   // finish instead of a fixed delay.
@@ -430,6 +438,7 @@ class MbWebView {
 
   bool load_finished_ = false;        // main-frame load event has fired (DidFinishLoad)
   std::function<void()> on_load_finish_;  // optional embedder finish callback
+  NavigationFn on_navigation_;  // optional page-initiated navigation policy callback
 
   std::vector<uint8_t> encoded_png_;  // retained bytes from the last EncodePng
   int http_status_ = 0;  // HTTP status of the last http(s) load; 0 if none/failed

@@ -168,9 +168,15 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      Verified (mb_smoke +1=62): a counting callback fires once per load (fin=2 over 2
      loads), flag set. This is the signal that lets a caller wait on real completion
      rather than a fixed settle — addresses the partial-capture race.
-   - [NEXT] `DidFailLoad` → fire with a failed flag; wire the load primitives to wait on
-     `load_finished()` instead of fixed mbWait; navigation policy (`wkeOnNavigation`),
-     new-window (`wkeOnCreateView`), downloads.
+   - [DONE] **navigation policy** — `mbOnNavigation(view, cb, userdata)`: the callback fires
+     for each PAGE-initiated main-frame navigation (link/location=/form/JS-redirect) with the
+     target URL, BEFORE commit, in `MbFrameClient::BeginNavigation`; returns 1=allow / 0=block
+     (stop popups/redirects/leaving the page) — host-driven LoadURL bypasses it. Also made
+     `DoCommit` honor mocks so a page navigation is served from the interception layer too.
+     Verified (mb_smoke 0g, offline): a callback lets nav.test/ok commit (mock → GOOD) and
+     vetoes nav.test/blocked (stays GOOD); the log shows both URLs.
+   - [NEXT] new-window (`wkeOnCreateView` / CreateView), `DidFailLoad` failed-flag, and
+     wiring the load primitives to wait on `load_finished()` instead of fixed mbWait.
 5. **JS dialogs** — [DONE]. `mbSetJsDialogCallback(view, cb, userdata)`: the callback is
    invoked per dialog (type 0/1/2 = alert/confirm/prompt) with the message + prompt default;
    returns accept(1)/dismiss(0) and writes prompt text. No callback → headless-safe defaults

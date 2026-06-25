@@ -138,6 +138,16 @@ int mbIsLoadFinished(mbView* v) {
   return (v && v->impl && v->impl->load_finished()) ? 1 : 0;
 }
 
+void mbOnNavigation(mbView* v, mbNavigationCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetNavigationCallback(
+        [v, cb, userdata](const std::string& url) { return cb(v, userdata, url.c_str()); });
+  else
+    v->impl->SetNavigationCallback({});
+}
+
 void mbPostURL(mbView* v, const char* utf8_url, const char* utf8_body,
                const char* content_type) {
   if (v && v->impl)

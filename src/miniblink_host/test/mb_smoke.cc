@@ -214,6 +214,40 @@ int main() {
            "JS dialog default (no callback): confirm=false, prompt=null");
   }
 
+  // 0g. Navigation policy: mbOnNavigation fires for each PAGE-initiated navigation and
+  // can BLOCK it. A callback denies URLs containing "blocked", allows others. A
+  // location.href to an allowed data: URL commits (body becomes GOOD); a later one to a
+  // "blocked" URL is vetoed (body stays GOOD). The log proves the callback saw both.
+  {
+    static std::string* navlog = new std::string();  // -Wexit-time-destructors
+    navlog->clear();
+    mbOnNavigation(
+        v,
+        [](mbView*, void*, const char* url) -> int {
+          *navlog += std::string(url ? url : "") + ";";
+          return (url && std::strstr(url, "blocked")) ? 0 : 1;  // veto "blocked"
+        },
+        nullptr);
+    // Mock the navigation targets so they commit offline (top-level data:/file: nav is
+    // browser-blocked, so use http URLs served from the interception layer).
+    mbMockResponse("nav.test/ok", "<body>GOOD</body>", "text/html", 200);
+    mbMockResponse("nav.test/blocked", "<body>SHOULD-NOT-SHOW</body>", "text/html", 200);
+    mbLoadHTML(v, "<body>START</body>", "https://nav.test/");
+    Eval(v, "location.href='https://nav.test/ok'");  // allowed -> commits the mock
+    mbWait(v, 300);
+    const std::string a = Eval(v, "document.body.textContent");
+    Eval(v, "location.href='https://nav.test/blocked'");  // vetoed -> stays
+    mbWait(v, 300);
+    const std::string b = Eval(v, "document.body.textContent");
+    Expect(a == "GOOD" && b == "GOOD" &&
+               navlog->find("nav.test/ok") != std::string::npos &&
+               navlog->find("nav.test/blocked") != std::string::npos,
+           "mbOnNavigation allows + blocks page-initiated navigations",
+           "a=[" + a + "] b=[" + b + "] log=[" + *navlog + "]");
+    mbOnNavigation(v, nullptr, nullptr);
+    mbClearMocks();
+  }
+
   // 1. HTML parse + DOM.
   mbLoadHTML(v, "<body><div id='x'>hello</div></body>", "about:blank");
   Expect(Eval(v, "document.getElementById('x').textContent") == "hello",
