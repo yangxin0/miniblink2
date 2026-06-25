@@ -7,6 +7,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -105,6 +106,32 @@ std::string EncodeKey(const blink::IDBKey* k) {
   }
 }
 
+double DecodeDouble(const std::string& s) {
+  uint64_t u = 0;
+  for (size_t i = 0; i < 8 && i < s.size(); ++i)
+    u = (u << 8) | static_cast<uint8_t>(s[i]);
+  u = (u & (uint64_t{1} << 63)) ? (u & ~(uint64_t{1} << 63)) : ~u;
+  return base::bit_cast<double>(u);
+}
+
+// Inverse of EncodeKey, to reconstruct an index key for an index cursor's `key`.
+std::unique_ptr<blink::IDBKey> DecodeKey(const std::string& e) {
+  if (e.empty())
+    return blink::IDBKey::CreateNone();
+  std::string rest = e.substr(1);
+  switch (e[0]) {
+    case '\x10':
+      return blink::IDBKey::CreateNumber(DecodeDouble(rest));
+    case '\x20':
+      return blink::IDBKey::CreateDate(DecodeDouble(rest));
+    case '\x30':
+      return blink::IDBKey::CreateString(
+          blink::String::FromUtf8(std::string_view(rest)));
+    default:
+      return blink::IDBKey::CreateNone();
+  }
+}
+
 std::string ValueBytes(const blink::IDBValue* v) {
   base::span<const uint8_t> d = v->Data();
   return std::string(reinterpret_cast<const char*>(d.data()), d.size());
@@ -190,14 +217,18 @@ class MbIDBTransactionImpl;  // defined below
 // already delivered keys_[0], so pos_ starts at 1). Self-deletes when its pipe disconnects.
 class MbIDBCursor : public m::IDBCursor {
  public:
+  // entries: (cursor-key, primary-key) encoded pairs in iteration order. For an object-store
+  // cursor the two are equal; for an index cursor the cursor key is the index key.
   MbIDBCursor(MbIDBBackend* backend,
               int64_t store_id,
               bool key_only,
-              std::vector<std::string> keys)
+              bool is_index,
+              std::vector<std::pair<std::string, std::string>> entries)
       : backend_(backend),
         store_id_(store_id),
         key_only_(key_only),
-        keys_(std::move(keys)) {}
+        is_index_(is_index),
+        entries_(std::move(entries)) {}
 
   void Advance(uint32_t count, AdvanceCallback callback) override {
     if (count > 1)
@@ -208,8 +239,8 @@ class MbIDBCursor : public m::IDBCursor {
                 std::unique_ptr<blink::IDBKey> /*primary_key*/,
                 ContinueCallback callback) override {
     if (key && key->IsValid()) {
-      std::string target = EncodeKey(key.get());  // snapshot already in direction order
-      while (pos_ < keys_.size() && keys_[pos_] < target)
+      std::string target = EncodeKey(key.get());  // compared against the cursor key
+      while (pos_ < entries_.size() && entries_[pos_].first < target)
         ++pos_;
     }
     std::move(callback).Run(TakeOne());
@@ -217,7 +248,7 @@ class MbIDBCursor : public m::IDBCursor {
   void Prefetch(int32_t count, PrefetchCallback callback) override {
     auto cv = m::IDBCursorValue::New();
     int32_t n = 0;
-    for (; n < count && pos_ < keys_.size(); ++n)
+    for (; n < count && pos_ < entries_.size(); ++n)
       if (!AppendCurrent(cv.get()))
         break;
     last_prefetch_ = n;
@@ -239,14 +270,17 @@ class MbIDBCursor : public m::IDBCursor {
     auto it = backend_->data.find(store_id_);
     return it == backend_->data.end() ? nullptr : &it->second;
   }
-  // Append keys_[pos_] (advancing pos_) into a cursor value; false if it's gone.
+  // Append entries_[pos_] (advancing pos_) into a cursor value; false if its record is gone.
   bool AppendCurrent(m::IDBCursorValue* cv) {
     const auto* store = StoreMap();
-    while (pos_ < keys_.size()) {
-      auto it = store ? store->find(keys_[pos_]) : decltype(store->end())();
+    while (pos_ < entries_.size()) {
+      const auto& entry = entries_[pos_];
+      auto it = store ? store->find(entry.second) : decltype(store->end())();
+      std::string cursor_key_enc = entry.first;
       ++pos_;
       if (store && it != store->end()) {
-        cv->keys.push_back(blink::IDBKey::Clone(it->second.key));
+        cv->keys.push_back(is_index_ ? DecodeKey(cursor_key_enc)
+                                     : blink::IDBKey::Clone(it->second.key));
         cv->primary_keys.push_back(blink::IDBKey::Clone(it->second.key));
         if (!key_only_)
           cv->values.push_back(MakeValue(it->second.bytes));
@@ -265,7 +299,8 @@ class MbIDBCursor : public m::IDBCursor {
   MbIDBBackend* backend_;
   int64_t store_id_;
   bool key_only_;
-  std::vector<std::string> keys_;  // in-range keys, in iteration order
+  bool is_index_;
+  std::vector<std::pair<std::string, std::string>> entries_;  // (cursor-key, primary-key)
   size_t pos_ = 0;
   int32_t last_prefetch_ = 0;
 };
@@ -383,7 +418,7 @@ class MbIDBDatabase : public m::IDBDatabase {
   }
   // openCursor()/openKeyCursor(): snapshot the in-range keys in iteration order, hand back a
   // cursor + the first record (or empty).
-  void OpenCursor(int64_t, int64_t object_store_id, int64_t,
+  void OpenCursor(int64_t, int64_t object_store_id, int64_t index_id,
                   m::IDBKeyRangePtr key_range, m::IDBCursorDirection direction,
                   bool key_only, m::IDBTaskType,
                   OpenCursorCallback callback) override {
@@ -394,30 +429,44 @@ class MbIDBDatabase : public m::IDBDatabase {
     bool hi_open = key_range && key_range->upper_open;
     bool reverse = direction == m::IDBCursorDirection::Prev ||
                    direction == m::IDBCursorDirection::PrevNoDuplicate;
+    const bool is_index = index_id != blink::IDBIndexMetadata::kInvalidId;
 
-    std::vector<std::string> keys;
+    // (cursor-key, primary-key) pairs, in cursor-key order; the range applies to the
+    // cursor key (primary key for a store cursor, index key for an index cursor).
+    std::vector<std::pair<std::string, std::string>> entries;
     if (store_it != backend_->data.end()) {
-      for (const auto& entry : store_it->second)
-        if (InRange(entry.first, lo, lo_open, hi, hi_open))
-          keys.push_back(entry.first);
+      if (is_index) {
+        auto si = backend_->index_data.find(object_store_id);
+        if (si != backend_->index_data.end() && si->second.count(index_id)) {
+          for (const auto& ik : si->second.at(index_id))  // index key -> primary keys
+            if (InRange(ik.first, lo, lo_open, hi, hi_open))
+              for (const std::string& pk : ik.second)  // sorted primary keys
+                entries.emplace_back(ik.first, pk);
+        }
+      } else {
+        for (const auto& entry : store_it->second)
+          if (InRange(entry.first, lo, lo_open, hi, hi_open))
+            entries.emplace_back(entry.first, entry.first);
+      }
       if (reverse)
-        std::reverse(keys.begin(), keys.end());
+        std::reverse(entries.begin(), entries.end());
     }
-    if (keys.empty()) {
+    if (entries.empty()) {
       std::move(callback).Run(m::IDBDatabaseOpenCursorResult::NewEmpty(true));
       return;
     }
 
-    const MbRecord& first = store_it->second.at(keys.front());
+    const MbRecord& first = store_it->second.at(entries.front().second);
     auto val = m::IDBDatabaseOpenCursorValue::New();
-    val->key = blink::IDBKey::Clone(first.key);
+    val->key = is_index ? DecodeKey(entries.front().first)
+                        : blink::IDBKey::Clone(first.key);
     val->primary_key = blink::IDBKey::Clone(first.key);
     if (!key_only)
       val->value = MakeValue(first.bytes);
 
-    auto cursor =
-        std::make_unique<MbIDBCursor>(backend_, object_store_id, key_only, std::move(keys));
-    cursor->set_pos(1);  // keys[0] is delivered in this open result
+    auto cursor = std::make_unique<MbIDBCursor>(
+        backend_, object_store_id, key_only, is_index, std::move(entries));
+    cursor->set_pos(1);  // entries[0] is delivered in this open result
     mojo::PendingAssociatedRemote<m::IDBCursor> cursor_remote;
     auto cursor_receiver = cursor_remote.InitWithNewEndpointAndPassReceiver();
     mojo::MakeSelfOwnedAssociatedReceiver(std::move(cursor),

@@ -1314,6 +1314,32 @@ int main() {
            "idb6=[" + r + "]");
   }
 
+  // 23s. IndexedDB index cursor (step 8): openCursor on an index walks records in INDEX
+  // key order (not primary key order). Books inserted by isbn C,A,B with authors carl,
+  // alice,bob; an index cursor on 'author' visits them alice,bob,carl.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://idb.test/");
+    Eval(v,
+         "window.__idb7='';"
+         "var __x=indexedDB.open('mbdb8',1);"
+         "__x.onupgradeneeded=function(e){var os=e.target.result.createObjectStore('b',{keyPath:'isbn'});"
+         "os.createIndex('by_author','author');};"
+         "__x.onsuccess=function(e){var db=e.target.result;"
+         "var t=db.transaction('b','readwrite');var s=t.objectStore('b');"
+         "s.put({isbn:'C',author:'carl'});s.put({isbn:'A',author:'alice'});s.put({isbn:'B',author:'bob'});"
+         "t.oncomplete=function(){var out=[];"
+         "var cr=db.transaction('b').objectStore('b').index('by_author').openCursor();"
+         "cr.onsuccess=function(ev){var c=ev.target.result;"
+         "if(c){out.push(c.key+'/'+c.value.isbn);c.continue();}"
+         "else{window.__idb7=out.join(',');}};"
+         "cr.onerror=function(){window.__idb7='err';};};};");
+    mbWaitForFunction(v, "window.__idb7!==''", 4000);
+    const std::string r = Eval(v, "window.__idb7");
+    Expect(r == "alice/A,bob/B,carl/C",
+           "IndexedDB index cursor walks records in index key order",
+           "idb7=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");
