@@ -122,7 +122,15 @@ void mbLoadURL(mbView* v, const char* utf8_url) {
 void mbPostURL(mbView* v, const char* utf8_url, const char* utf8_body,
                const char* content_type) {
   if (v && v->impl)
-    v->impl->PostURL(utf8_url, utf8_body, content_type);
+    v->impl->PostURL(utf8_url, utf8_body,
+                     utf8_body ? std::strlen(utf8_body) : 0, content_type);
+}
+
+void mbPostURLData(mbView* v, const char* utf8_url, const char* body, int body_len,
+                   const char* content_type) {
+  if (v && v->impl)
+    v->impl->PostURL(utf8_url, body,
+                     body_len > 0 ? static_cast<size_t>(body_len) : 0, content_type);
 }
 
 void mbRunJS(mbView* v, const char* utf8_script) {

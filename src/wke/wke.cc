@@ -313,11 +313,13 @@ void wkeReload(wkeWebView webView) {
 }
 
 void wkePostURL(wkeWebView webView, const utf8* url, const char* postData,
-                int /*postLen*/) {
+                int postLen) {
   if (!webView || !webView->view)
     return;
   webView->last_was_http = true;
-  mbPostURL(webView->view, url, postData, /*content_type=*/nullptr);
+  // Honor postLen — binary bodies (multipart/protobuf) may contain NUL bytes, so
+  // the length-aware path posts them whole instead of truncating at the first NUL.
+  mbPostURLData(webView->view, url, postData, postLen, /*content_type=*/nullptr);
   mbWait(webView->view, 60);  // settle the synchronous load (as wkeLoadURL does)
   FireLoadCallbacks(webView);
 }

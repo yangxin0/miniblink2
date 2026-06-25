@@ -295,13 +295,15 @@ void MbWebView::LoadURL(const char* utf8_url) {
 }
 
 void MbWebView::PostURL(const char* utf8_url, const char* utf8_body,
-                        const char* content_type) {
+                        size_t body_len, const char* content_type) {
   std::string url(utf8_url ? utf8_url : "");
   http_status_ = 0;
   response_headers_.clear();
   if (url.rfind("http", 0) != 0)
     return;  // POST navigation is only meaningful for http(s)
-  std::string post_body(utf8_body ? utf8_body : "");
+  // Construct from (ptr, len) — NOT NUL-terminated — so binary bodies with embedded
+  // NULs (protobuf, multipart, raw bytes) post whole; the loader uses post_body.size().
+  std::string post_body(utf8_body ? std::string(utf8_body, body_len) : std::string());
   std::string post_ct(content_type ? content_type : "");
   std::string body, resp_ct, final_url;
   const bool ok = MbFetchUrl(

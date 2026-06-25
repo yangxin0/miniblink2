@@ -1757,6 +1757,23 @@ int main() {
       std::printf("  [SKIP] wkePostURL (host unreachable)\n");
     }
 
+    // The postLen fix: a binary body with an embedded NUL posts WHOLE. Pre-fix
+    // wkePostURL ignored postLen and built the body from a NUL-terminated string,
+    // truncating "AB\0CD" (5 bytes) to "AB" (2). httpbin echoes the request's
+    // Content-Length header into the JSON — it must be 5, not 2.
+    {
+      const char nul_body[] = {'A', 'B', '\0', 'C', 'D'};  // 5 bytes, NUL at idx 2
+      wkePostURL(wv, "http://httpbin.org/post", nul_body, 5);
+      const char* nb =
+          jsToTempString(es, wkeRunJS(wv, "document.body?document.body.innerText:''"));
+      if (wkeIsLoadingSucceeded(wv)) {
+        check(std::strstr(nb, "\"Content-Length\": \"5\"") != nullptr,
+              "wkePostURL honors postLen (embedded-NUL body posts whole, not truncated)");
+      } else {
+        std::printf("  [SKIP] wkePostURL NUL-body (host unreachable)\n");
+      }
+    }
+
     // Cookie round-trip: httpbin sets a cookie, then wkeGetCookie reads it back
     // from the jar for the (now httpbin) current URL; the clear command drops it.
     wkeLoadURL(wv, "http://httpbin.org/cookies/set?wkeck=ok42");

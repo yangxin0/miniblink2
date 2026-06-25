@@ -48,7 +48,9 @@ class MbWebView {
   void LoadURL(const char* utf8_url);                          // via libcurl factory
   // POST `body` (with `content_type`, default form-urlencoded) to an http(s) URL
   // and commit the response as the document — host-driven POST navigation.
-  void PostURL(const char* utf8_url, const char* utf8_body,
+  // `body_len` is the exact byte length, so binary bodies with embedded NULs post
+  // intact (don't strlen-truncate utf8_body).
+  void PostURL(const char* utf8_url, const char* utf8_body, size_t body_len,
                const char* content_type);
   void RunJS(const char* utf8_script);  // execute JS in the main frame
   // Set a script to run on every new document BEFORE its own scripts (init/inject).

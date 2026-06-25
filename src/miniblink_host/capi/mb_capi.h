@@ -87,6 +87,11 @@ MB_EXPORT void mbLoadURL(mbView*, const char* utf8_url);
 // it returns, mbGetHttpStatus / mbGetResponseHeaders / mbGetURL reflect the POST.
 MB_EXPORT void mbPostURL(mbView*, const char* url, const char* body,
                          const char* content_type);
+// Like mbPostURL but takes an explicit `body_len`, so binary bodies with embedded
+// NUL bytes (protobuf, multipart, raw uploads) post intact instead of truncating
+// at the first NUL. `content_type` may be null (defaults to form-urlencoded).
+MB_EXPORT void mbPostURLData(mbView*, const char* url, const char* body,
+                             int body_len, const char* content_type);
 
 // Execute JavaScript in the page's main frame (host-driven scripting).
 MB_EXPORT void mbRunJS(mbView*, const char* utf8_script);

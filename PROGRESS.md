@@ -87,7 +87,13 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
    updated):
    - `wkeIsLoading` hardcoded `false`, `wkeIsLoadingCompleted`/`wkeIsDocumentReady`
      hardcoded `true` (`wke.cc:347–359`) — wire to the real load state.
-   - `wkePostURL` ignores `postLen` → truncates binary bodies at an embedded NUL — use the length.
+   - [DONE] `wkePostURL` ignored `postLen` → truncated binary bodies at an embedded NUL.
+     Fixed by threading the byte length end-to-end: new `mbPostURLData(url, body, len, ct)`
+     (mbPostURL kept as the NUL-terminated text convenience), `MbWebView::PostURL` builds
+     the body from (ptr, len), and `wkePostURL` passes `postLen`. The libcurl loader already
+     used `POSTFIELDSIZE`/`COPYPOSTFIELDS(.size())`, so binary bodies now post whole.
+     Verified (wke_smoke +1 net): POST "AB\0CD" (5 bytes) → httpbin echoes Content-Length 5
+     (pre-fix would truncate to "AB" = 2).
    - `wkeFireKeyUpEvent` is a no-op — implement it.
    - `mbShutdown` leaks on repeated init (`runtime/mb_runtime.cc:203`).
    - Delete the dead commented-out `widget/mb_sw_frame_sink.{h,cc}` scaffolding.
