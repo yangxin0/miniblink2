@@ -451,6 +451,54 @@ void mbSetRequestCallback(mbRequestCallback cb, void* userdata) {
   mb::MbSetRequestHook(reinterpret_cast<mb::MbRequestHookFn>(cb), userdata);
 }
 
+// The opaque mbResponse handle is a transient view of the loader's per-response state
+// (URL + status + mutable body), valid only for the duration of one callback.
+struct mbResponse {
+  const std::string& url;
+  int status;
+  std::string* body;
+};
+
+namespace {
+mbResponseCallback g_response_cb = nullptr;
+void* g_response_ud = nullptr;
+}  // namespace
+
+void mbSetResponseCallback(mbResponseCallback cb, void* userdata) {
+  g_response_cb = cb;
+  g_response_ud = userdata;
+  if (cb) {
+    mb::MbSetResponseHook(
+        [](const std::string& url, int status, std::string* body) {
+          mbResponse r{url, status, body};
+          if (g_response_cb)
+            g_response_cb(&r, g_response_ud);
+        });
+  } else {
+    mb::MbSetResponseHook({});
+  }
+}
+
+const char* mbResponseURL(mbResponse* r) {
+  return r ? r->url.c_str() : "";
+}
+
+int mbResponseStatus(mbResponse* r) {
+  return r ? r->status : 0;
+}
+
+const char* mbResponseBody(mbResponse* r, int* out_len) {
+  const std::string* b = (r && r->body) ? r->body : nullptr;
+  if (out_len)
+    *out_len = b ? static_cast<int>(b->size()) : 0;
+  return b ? b->data() : "";
+}
+
+void mbResponseSetBody(mbResponse* r, const char* body, int len) {
+  if (r && r->body && body && len >= 0)
+    r->body->assign(body, static_cast<size_t>(len));
+}
+
 void mbMockResponse(const char* url_substring, const char* body,
                     const char* content_type, int status) {
   if (url_substring)

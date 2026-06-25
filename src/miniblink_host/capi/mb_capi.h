@@ -383,6 +383,21 @@ MB_EXPORT void mbClearUrlBlocks(void);
 typedef int (*mbRequestCallback)(const char* url, void* userdata);
 MB_EXPORT void mbSetRequestCallback(mbRequestCallback cb, void* userdata);
 
+// Response hook: a process-wide callback invoked after a successful load (fetch / mock /
+// file / data) with an opaque mbResponse handle, BEFORE the body reaches the page — so
+// you can inspect or REPLACE the response bytes (inject a script, strip content, rewrite
+// a JSON payload). The handle is valid only for the duration of the callback; query it
+// with mbResponseURL/Status/Body and replace the body with mbResponseSetBody (which
+// updates the delivered length). Runs on the main thread inside the load. NULL clears it.
+typedef struct mbResponse mbResponse;
+typedef void (*mbResponseCallback)(mbResponse*, void* userdata);
+MB_EXPORT void mbSetResponseCallback(mbResponseCallback cb, void* userdata);
+MB_EXPORT const char* mbResponseURL(mbResponse*);
+MB_EXPORT int mbResponseStatus(mbResponse*);
+// Returns the body bytes (NOT NUL-terminated; may contain NULs). *out_len gets the length.
+MB_EXPORT const char* mbResponseBody(mbResponse*, int* out_len);
+MB_EXPORT void mbResponseSetBody(mbResponse*, const char* body, int len);
+
 // Response mocking — the signature interception feature. Any request whose URL
 // CONTAINS `url_substring` is served `body` WITHOUT a real network fetch: run a
 // page fully offline, or substitute an API/XHR/fetch response in tests/automation.

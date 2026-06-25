@@ -105,6 +105,39 @@ int main() {
     mbClearMocks();
   }
 
+  // 0d. Response hook: mbSetResponseCallback sees every response BEFORE the page and can
+  // REPLACE the body. A mock serves {"v":1}; the hook inspects it (records the original)
+  // and rewrites it to {"v":99}; the page's fetch() must observe the rewritten 99, and
+  // the new (shorter/longer) length must be delivered. Fully offline.
+  {
+    static std::string* orig = new std::string();  // heap-owned (-Wexit-time-destructors)
+    orig->clear();
+    mbMockResponse("api.test/v", "{\"v\":1}", "application/json", 200);
+    mbSetResponseCallback(
+        [](mbResponse* r, void*) {
+          int n = 0;
+          const char* b = mbResponseBody(r, &n);
+          if (std::strstr(mbResponseURL(r), "api.test/v")) {
+            orig->assign(b, n);  // inspect: capture what the server/mock returned
+            const char* rep = "{\"v\":99}";
+            mbResponseSetBody(r, rep, static_cast<int>(std::strlen(rep)));  // modify
+          }
+        },
+        nullptr);
+    mbLoadHTML(v,
+               "<body><div id='r'>?</div><script>"
+               "fetch('https://api.test/v').then(r=>r.json()).then(j=>{"
+               "document.getElementById('r').textContent='v='+j.v;});</script></body>",
+               "https://api.test/");
+    mbWaitForFunction(v, "document.getElementById('r').textContent!=='?'", 2000);
+    const std::string r = Eval(v, "document.getElementById('r').textContent");
+    Expect(r == "v=99" && *orig == "{\"v\":1}",
+           "mbSetResponseCallback inspects + rewrites the response body before the page",
+           std::string("page=[") + r + "] orig=[" + *orig + "]");
+    mbSetResponseCallback(nullptr, nullptr);
+    mbClearMocks();
+  }
+
   // 1. HTML parse + DOM.
   mbLoadHTML(v, "<body><div id='x'>hello</div></body>", "about:blank");
   Expect(Eval(v, "document.getElementById('x').textContent") == "hello",

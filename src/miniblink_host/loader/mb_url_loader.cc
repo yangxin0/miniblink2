@@ -671,6 +671,23 @@ bool MbRequestHookBlocks(const std::string& url) {
   return h.fn && h.fn(url.c_str(), h.userdata) != 0;
 }
 
+// --- Response hook -----------------------------------------------------------
+namespace {
+MbResponseHook& ResponseHook() {
+  static MbResponseHook* h = new MbResponseHook();
+  return *h;
+}
+}  // namespace
+
+void MbSetResponseHook(MbResponseHook hook) {
+  ResponseHook() = std::move(hook);
+}
+
+void MbInvokeResponseHook(const std::string& url, int status, std::string* body) {
+  if (ResponseHook())
+    ResponseHook()(url, status, body);
+}
+
 // --- Response mocking --------------------------------------------------------
 // Serve a canned body for any request whose URL contains a registered substring,
 // WITHOUT a real fetch — run a page offline or substitute an API response. The
@@ -938,6 +955,11 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
         0, 0);
     return;
   }
+
+  // Response hook: let an embedder inspect or rewrite the body before delivery (given
+  // the page's original URL + status). Any replacement flows into the mime/header/
+  // content-length build below — SetExpectedContentLength uses contents.size().
+  MbInvokeResponseHook(url.spec(), http_status, &contents);
 
   // Response mime: from the server's Content-Type (http), else the file extension.
   std::string mime_str;

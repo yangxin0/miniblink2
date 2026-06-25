@@ -86,8 +86,16 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      side `MbSetRequestHook`/`MbRequestHookBlocks` (main-thread, inside the load). Verified
      (mb_smoke +1=63, offline): two same-origin fetch()es — the hook records both (seen=2),
      allows the mocked one (ok:7), vetoes the "blockme" one (blocked).
-   - [NEXT] request HEADER rewrite (add/override before fetch); response-side callback
-     (inspect/modify the body); wke peers (`wkeOnLoadUrlBegin`/`wkeNetOnResponse`).
+   - [DONE] **response-side callback** — `mbSetResponseCallback(cb, userdata)`: a
+     process-wide hook invoked in `Deliver` after a successful load (fetch/mock/file/data)
+     with an opaque `mbResponse` handle, BEFORE the body reaches the page. Accessors
+     `mbResponseURL/Status/Body` (inspect) + `mbResponseSetBody` (replace — inject a
+     script, strip content, rewrite a payload; the new length is delivered). Loader side
+     `MbSetResponseHook`/`MbInvokeResponseHook` (std::function so the capi binds a lambda).
+     Verified (mb_smoke +1=64, offline): a mock serves {"v":1}; the hook records it and
+     rewrites to {"v":99}; the page's fetch() observes v=99.
+   - [NEXT] request HEADER rewrite (add/override before fetch); wke peers
+     (`wkeOnLoadUrlBegin` onto the request hook, `wkeNetOnResponse` onto the response hook).
 
 2. **Quick-win correctness bugs** (real defects; fast; each independently verifiable —
    NOTE several have *existing tests that assert the stubbed/fake behavior* and must be

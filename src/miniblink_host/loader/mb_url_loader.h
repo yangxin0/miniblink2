@@ -14,6 +14,7 @@
 #define MINIBLINK_HOST_LOADER_MB_URL_LOADER_H_
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -87,6 +88,16 @@ bool MbIsUrlBlocked(const std::string& url);
 typedef int (*MbRequestHookFn)(const char* url, void* userdata);
 void MbSetRequestHook(MbRequestHookFn fn, void* userdata);
 bool MbRequestHookBlocks(const std::string& url);
+
+// Response hook: a process-wide callback invoked after a successful fetch/mock/file/data
+// load with the request URL, HTTP status, and a MUTABLE body pointer — so an embedder can
+// inspect or REPLACE the response bytes before they reach the page (inject a script, strip
+// content, rewrite a JSON payload). Runs on the main thread inside the load; replacing the
+// body updates the delivered Content-Length. MbInvokeResponseHook is the loader's call.
+using MbResponseHook =
+    std::function<void(const std::string& url, int status, std::string* body)>;
+void MbSetResponseHook(MbResponseHook hook);
+void MbInvokeResponseHook(const std::string& url, int status, std::string* body);
 
 // Response mocking: serve a canned body for any request whose URL contains
 // `substring`, WITHOUT a real fetch (run offline, substitute an API response).
