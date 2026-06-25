@@ -1541,6 +1541,25 @@ int main() {
            "md=[" + r + "]");
   }
 
+  // 23ac. OPFS navigator.storage.getDirectory() (broker FileSystemAccessManager): a real
+  // in-memory OPFS is deferred, but the manager must be bound so getDirectory() REJECTS cleanly
+  // instead of hanging (blink sets no disconnect handler, so an unbound pipe stalls the promise
+  // forever). This verifies the promise settles (rejects) rather than hanging.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://opfs.test/");
+    Eval(v,
+         "window.__opfs='';"
+         "if(navigator.storage&&navigator.storage.getDirectory){"
+         "navigator.storage.getDirectory().then(function(d){window.__opfs='resolved';})"
+         ".catch(function(e){window.__opfs='rejected';});}"
+         "else{window.__opfs='no-api';}");
+    mbWaitForFunction(v, "window.__opfs!==''", 3000);
+    const std::string r = Eval(v, "window.__opfs");
+    Expect(r == "rejected" || r == "no-api",
+           "OPFS getDirectory() settles (rejects cleanly) instead of hanging",
+           "opfs=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");
