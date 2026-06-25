@@ -382,6 +382,13 @@ void MbFrameClient::GoToHistoryOffset(int offset, bool has_user_gesture) {
   }
 }
 
+void MbFrameClient::DidReceiveTitle(const blink::WebString& title) {
+  // Main frame only — push the new document title to the host's title callback.
+  if (self_owned_ || !owner_)
+    return;
+  owner_->OnTitleChanged(title.Utf8());
+}
+
 void MbFrameClient::DidFinishLoad() {
   // Main frame only — child/iframe load-finishes don't signal the page's completion.
   if (self_owned_ || !owner_)

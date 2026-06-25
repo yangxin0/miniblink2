@@ -352,6 +352,12 @@ class MbWebView {
   // / reload) with the new URL — the "URL changed" notification. {} clears it.
   using UrlChangedFn = std::function<void(const std::string& url)>;
   void SetUrlChangedCallback(UrlChangedFn cb);
+  // Register a callback fired whenever the main frame's document title changes
+  // (initial <title> and dynamic document.title writes) with the new title. {} clears it.
+  using TitleChangedFn = std::function<void(const std::string& title)>;
+  void SetTitleChangedCallback(TitleChangedFn cb);
+  // Called by MbFrameClient when the main frame reports a new document title.
+  void OnTitleChanged(const std::string& title);
   // Register a callback for a top-level navigation that is a DOWNLOAD (Content-Disposition
   // attachment / non-renderable MIME) — it receives the URL, MIME, suggested filename and
   // body bytes INSTEAD of the response being rendered as a document. {} clears (default:
@@ -492,6 +498,7 @@ class MbWebView {
   ConsoleFn on_console_;  // optional live console-message callback
   NavigationFn on_navigation_;  // optional page-initiated navigation policy callback
   UrlChangedFn on_url_changed_;  // optional per-commit URL-changed notification
+  TitleChangedFn on_title_changed_;  // optional title-changed notification
   DownloadFn on_download_;  // optional top-level-download diversion callback
   NewWindowFn on_new_window_;   // optional window.open / target=_blank notification
 

@@ -356,6 +356,27 @@ int main() {
     mbOnUrlChanged(v, nullptr, nullptr);
   }
 
+  // 0l2. Title-changed: mbOnTitleChanged fires with the initial <title> and on every dynamic
+  // document.title write — track tab titles / progress from automation.
+  {
+    static std::string* titles = new std::string();  // -Wexit-time-destructors
+    titles->clear();
+    mbOnTitleChanged(
+        v, [](mbView*, void*, const char* t) { *titles += std::string(t) + ";"; },
+        nullptr);
+    mbLoadHTML(v, "<title>First</title><body>x</body>", "https://t.test/");
+    mbRunJS(v, "document.title='Second';");
+    mbWait(v, 30);
+    mbRunJS(v, "document.title='Third';");
+    mbWait(v, 30);
+    Expect(titles->find("First;") != std::string::npos &&
+               titles->find("Second;") != std::string::npos &&
+               titles->find("Third;") != std::string::npos,
+           "mbOnTitleChanged fires with initial <title> + dynamic document.title writes",
+           "titles=[" + *titles + "]");
+    mbOnTitleChanged(v, nullptr, nullptr);
+  }
+
   // 0m. Download diversion (#6): a top-level navigation to a non-renderable response (a
   // data: URL with application/octet-stream) is handed to mbOnDownload (mime + bytes)
   // instead of committed — so the current page stays and a download link saves a file.

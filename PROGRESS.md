@@ -186,6 +186,11 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      commit (host load / page nav / redirect / reload) with the new URL, from
      `OnDidCommitMainFrame`; + wke peer `wkeOnURLChanged`. Verified (mb_smoke 0l=79, wke_smoke
      +1=106): two loads → callback logs both URLs.
+   - [DONE] **Title-changed notification** — `mbOnTitleChanged(view, cb)` fires with the initial
+     <title> and every dynamic document.title write. Wired via MbFrameClient::DidReceiveTitle
+     (the main-thread WebLocalFrameClient hook Document::DispatchDidReceiveTitle calls alongside
+     LocalFrameHost.UpdateTitle) -> MbWebView::OnTitleChanged. Verified (mb_smoke 0l2): initial
+     "First" + JS-set "Second"/"Third" all delivered.
    - [DONE] **new-window notification** — `mbOnNewWindow(view, cb, userdata)`: fires when the
      page calls `window.open()` / activates `target=_blank`, with the requested URL + window
      name, via `MbFrameClient::CreateNewWindow` (which still returns null = popup denied, the

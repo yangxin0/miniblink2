@@ -116,6 +116,12 @@ MB_EXPORT void mbOnNavigation(mbView*, mbNavigationCallback, void* userdata);
 typedef void (*mbUrlChangedCallback)(mbView*, void* userdata, const char* url);
 MB_EXPORT void mbOnUrlChanged(mbView*, mbUrlChangedCallback, void* userdata);
 
+// Title-changed notification: fires whenever the main document's title changes — the
+// initial <title> and every dynamic document.title write — with the new `title` (UTF-8).
+// Lets automation track tab titles / progress indicators. NULL clears it.
+typedef void (*mbTitleChangedCallback)(mbView*, void* userdata, const char* title);
+MB_EXPORT void mbOnTitleChanged(mbView*, mbTitleChangedCallback, void* userdata);
+
 // Download diversion: when a top-level navigation (mbLoadURL to an http(s)/data: URL)
 // returns a DOWNLOAD — Content-Disposition: attachment, or a non-renderable MIME — and a
 // callback is registered, the response is handed to it (url, mime, suggested filename, and

@@ -132,6 +132,10 @@ class MbFrameClient : public blink::WebLocalFrameClient {
       base::UnguessableToken same_document_metrics_token,
       bool caused_by_ad) override;
 
+  // Fires when the document title changes (initial <title> + dynamic document.title
+  // writes). For the main frame, pushes the new title to MbWebView's title callback.
+  void DidReceiveTitle(const blink::WebString& title) override;
+
   // Fires when the main frame's load finishes (the document's `load` event — all
   // subresources done). Pushes the signal to MbWebView so embedders can react to
   // real completion instead of polling / a fixed settle timer. Child frames ignored.

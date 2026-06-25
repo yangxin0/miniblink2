@@ -1369,6 +1369,15 @@ void MbWebView::SetUrlChangedCallback(UrlChangedFn cb) {
   on_url_changed_ = std::move(cb);
 }
 
+void MbWebView::SetTitleChangedCallback(TitleChangedFn cb) {
+  on_title_changed_ = std::move(cb);
+}
+
+void MbWebView::OnTitleChanged(const std::string& title) {
+  if (on_title_changed_)
+    on_title_changed_(title);
+}
+
 void MbWebView::SetDownloadCallback(DownloadFn cb) {
   on_download_ = std::move(cb);
 }

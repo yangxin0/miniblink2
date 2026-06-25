@@ -159,6 +159,17 @@ void mbOnUrlChanged(mbView* v, mbUrlChangedCallback cb, void* userdata) {
     v->impl->SetUrlChangedCallback({});
 }
 
+void mbOnTitleChanged(mbView* v, mbTitleChangedCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetTitleChangedCallback([v, cb, userdata](const std::string& title) {
+      cb(v, userdata, title.c_str());
+    });
+  else
+    v->impl->SetTitleChangedCallback({});
+}
+
 void mbOnDownload(mbView* v, mbDownloadCallback cb, void* userdata) {
   if (!v || !v->impl)
     return;
