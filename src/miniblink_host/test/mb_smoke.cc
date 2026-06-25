@@ -1363,6 +1363,23 @@ int main() {
            "idb8=[" + r + "]");
   }
 
+  // 23u. Screen Wake Lock (navigator.wakeLock, broker #8): the in-process WakeLockService
+  // + granted SCREEN_WAKE_LOCK permission let request('screen') resolve with a live
+  // WakeLockSentinel (released === false) instead of being unavailable. (Headless: no real
+  // screen is kept awake, but the API is live + scriptable.)
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://wl.test/");
+    Eval(v,
+         "window.__wl='';"
+         "navigator.wakeLock.request('screen').then(function(s){"
+         "window.__wl='ok:'+s.released;},function(e){window.__wl='err:'+e.name;});");
+    mbWaitForFunction(v, "window.__wl!==''", 2000);
+    const std::string r = Eval(v, "window.__wl");
+    Expect(r == "ok:false",
+           "navigator.wakeLock.request('screen') resolves with a live sentinel",
+           "wl=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

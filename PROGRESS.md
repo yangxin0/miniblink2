@@ -406,7 +406,20 @@ backpressure-honest), and `StartClosingHandshake` -> `OnDropChannel` drives `onc
 (mb_smoke 23k + render 40): `new WebSocket('wss://…')` -> onopen (readyState 1), `send('hello-ws')`
 -> onmessage 'hello-ws', `close()` -> onclose. This is a LOOPBACK echo (proves the entire mojo
 data plane offline); a real network backend over libcurl's WebSocket support can replace the echo
-later with identical plumbing. [IN PROGRESS: IndexedDB — step 1 DONE] `frame/mb_indexeddb.{h,cc}` (`MbIDBFactory`, bound from
+later with identical plumbing.
+[DONE: Wake Lock] `navigator.wakeLock.request('screen')` — `MbWakeLockService.GetWakeLock` binds a
+no-op `device::mojom::WakeLock` (headless: no real screen) and the permission service grants
+SCREEN_WAKE_LOCK, so request('screen') resolves with a live sentinel (mb_smoke 23u: released==false).
+[NEXT BIG: Cache Storage — SCOPED] `caches.*` is requested from the FRAME broker
+(`cache_storage.cc:788` GetInterface<mojom::blink::CacheStorage>). Implement `CacheStorage`
+(Has/Delete/Keys/Match/Open — note `Open`/`Match` use `base::expected<Success,CacheStorageError>`
+callbacks) + `CacheStorageCache` (Match/MatchAll/Keys/Batch). `Batch([{kPut,FetchAPIRequest,
+FetchAPIResponse}])` is put; `Match(FetchAPIRequest)` returns the response. CRUX: `FetchAPIResponse`
+carries its body as `SerializedBlob? blob` (a `mojo::PendingRemote<Blob>`); to replay across
+multiple matches, bind the put's blob to a persistent `mojo::Remote<Blob>` and `Blob.Clone()` a
+fresh remote per Match (or read the bytes once and re-register via MbBlobRegistry). Key the cache by
+`request->url`. Genuinely multi-tick + blob-plumbing-heavy (DCHECK-prone like IDB) — start fresh.
+[IN PROGRESS: IndexedDB — step 1 DONE] `frame/mb_indexeddb.{h,cc}` (`MbIDBFactory`, bound from
 the frame broker) — an in-memory IDB backend. STEP 1 (open + schema): `indexedDB.open(name,ver)`
 opens a database keyed by name in a process-wide registry; a new version fires the OPEN handshake
 — `IDBFactoryClient.UpgradeNeeded` (carrying the IDBDatabase handle + current `blink::IDBDatabase-

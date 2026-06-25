@@ -31,8 +31,10 @@
 #include "services/device/public/mojom/geoposition.mojom-blink.h"
 #include "third_party/blink/public/mojom/geolocation/geolocation_service.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions/permission.mojom-blink.h"
+#include "services/device/public/mojom/wake_lock.mojom-blink.h"
 #include "third_party/blink/public/mojom/quota/quota_manager_host.mojom-blink.h"
 #include "third_party/blink/public/mojom/quota/quota_types.mojom-blink.h"
+#include "third_party/blink/public/mojom/wake_lock/wake_lock.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom-blink.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
@@ -243,7 +245,8 @@ class MbPermissionService : public blink::mojom::blink::PermissionService {
     const bool grant =
         d && (d->name == blink::mojom::blink::PermissionName::CLIPBOARD_READ ||
               d->name == blink::mojom::blink::PermissionName::CLIPBOARD_WRITE ||
-              d->name == blink::mojom::blink::PermissionName::NOTIFICATIONS);
+              d->name == blink::mojom::blink::PermissionName::NOTIFICATIONS ||
+              d->name == blink::mojom::blink::PermissionName::SCREEN_WAKE_LOCK);
     return blink::mojom::blink::PermissionStatusWithDetails::New(
         grant ? blink::mojom::blink::PermissionStatus::GRANTED
               : blink::mojom::blink::PermissionStatus::DENIED,
@@ -371,6 +374,38 @@ class MbQuotaManagerHost : public blink::mojom::blink::QuotaManagerHost {
                             /*current_usage=*/0,
                             /*current_quota=*/int64_t{2} * 1024 * 1024 * 1024,
                             blink::mojom::blink::UsageBreakdown::New());
+  }
+};
+
+// navigator.wakeLock — a headless no-op device WakeLock (no real screen to keep awake), so
+// request('screen') resolves with a live sentinel instead of being unavailable.
+class MbWakeLock : public device::mojom::blink::WakeLock {
+ public:
+  void RequestWakeLock() override {}
+  void CancelWakeLock() override {}
+  void AddClient(
+      mojo::PendingReceiver<device::mojom::blink::WakeLock> receiver) override {
+    mojo::MakeSelfOwnedReceiver(std::make_unique<MbWakeLock>(),
+                                std::move(receiver));
+  }
+  void ChangeType(device::mojom::blink::WakeLockType,
+                  ChangeTypeCallback callback) override {
+    std::move(callback).Run(true);
+  }
+  void HasWakeLockForTests(HasWakeLockForTestsCallback callback) override {
+    std::move(callback).Run(false);
+  }
+};
+
+class MbWakeLockService : public blink::mojom::blink::WakeLockService {
+ public:
+  void GetWakeLock(
+      device::mojom::blink::WakeLockType,
+      device::mojom::blink::WakeLockReason,
+      const blink::String&,
+      mojo::PendingReceiver<device::mojom::blink::WakeLock> receiver) override {
+    mojo::MakeSelfOwnedReceiver(std::make_unique<MbWakeLock>(),
+                                std::move(receiver));
   }
 };
 
@@ -515,6 +550,12 @@ class MbBrowserInterfaceBroker
     // IndexedDB — in-memory backend (open + object stores; reads/writes in step 2).
     if (auto r = receiver.As<blink::mojom::blink::IDBFactory>()) {
       BindIDBFactory(std::move(r));
+      return;
+    }
+    // navigator.wakeLock — headless no-op (permission granted below).
+    if (auto r = receiver.As<blink::mojom::blink::WakeLockService>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbWakeLockService>(),
+                                  std::move(r));
       return;
     }
     // Drop everything else (no browser process).
