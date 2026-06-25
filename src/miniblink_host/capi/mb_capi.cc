@@ -659,6 +659,18 @@ int mbDrainConsole(mbView* v, char* out, int out_cap) {
   return static_cast<int>(result.size());
 }
 
+void mbOnConsoleMessage(mbView* v, mbConsoleCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetConsoleCallback(
+        [v, cb, userdata](const std::string& level, const std::string& message) {
+          cb(v, userdata, level.c_str(), message.c_str());
+        });
+  else
+    v->impl->SetConsoleCallback({});
+}
+
 int mbGetURL(mbView* v, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;

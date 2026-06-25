@@ -162,6 +162,10 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
    - [NEXT] per-frame selector ops (click/fill/text-by-selector in a frame) via the same
      child-frame mechanism + a wke `wkeRunJsByFrame` peer.
 4. **Push callback model** — replace poll-only readiness with real engine signals.
+   - [DONE] **live console push** — `mbOnConsoleMessage(view, cb, userdata)`: cb fires for each
+     page console message (console.log/warn/error) with level + text as it happens (vs polling
+     mbDrainConsole) — the mb_capi peer of wke's wkeOnConsole. Verified (mb_smoke 0k): a page's
+     console.log('hi')+console.error('boom') → callback logs "log:hi;error:boom;".
    - [DONE] **load-finished push** — `MbFrameClient::DidFinishLoad()` (main frame) →
      `MbWebView::OnDidFinishLoad()` sets a `load_finished_` flag (reset in CommitHtml on
      every navigation) + invokes a registered callback. C ABI: `mbOnLoadFinish(view, cb,

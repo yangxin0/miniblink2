@@ -318,6 +318,27 @@ int main() {
                Eval(v, "''+window.__ce"));
   }
 
+  // 0k. Console push: mbOnConsoleMessage fires LIVE for each console message (vs polling
+  // DrainConsole), with its level + text — react to errors/logs during a long script.
+  {
+    static std::string* clog = new std::string();  // -Wexit-time-destructors
+    clog->clear();
+    mbOnConsoleMessage(
+        v,
+        [](mbView*, void*, const char* level, const char* msg) {
+          *clog += std::string(level ? level : "") + ":" + (msg ? msg : "") + ";";
+        },
+        nullptr);
+    mbLoadHTML(v,
+               "<body><script>console.log('hi');console.error('boom');</script></body>",
+               "about:blank");
+    Expect(clog->find("log:hi;") != std::string::npos &&
+               clog->find("error:boom;") != std::string::npos,
+           "mbOnConsoleMessage: live push of console.log/error with level+text",
+           "log=[" + *clog + "]");
+    mbOnConsoleMessage(v, nullptr, nullptr);
+  }
+
   // 0j. CSP does NOT leak across navigations in a reused view (#15). Load a page whose
   // strict <meta> CSP (script-src 'none') blocks its own inline script, then load a
   // normal page in the SAME view: the second page's script MUST run — each commit now

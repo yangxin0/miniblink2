@@ -670,6 +670,14 @@ MB_EXPORT int mbGoForward(mbView*);
 // clear the buffer. Returns the full output length in bytes.
 MB_EXPORT int mbDrainConsole(mbView*, char* out, int out_cap);
 
+// Live console push: the callback fires for EACH page console message as it happens
+// (console.log/warn/error) with its `level` ("log"/"warn"/"error"/"verbose") and `message`
+// text — react to errors/logs during a long-running script instead of polling
+// mbDrainConsole afterward. NULL clears it. (Messages are still buffered for DrainConsole.)
+typedef void (*mbConsoleCallback)(mbView*, void* userdata, const char* level,
+                                  const char* message);
+MB_EXPORT void mbOnConsoleMessage(mbView*, mbConsoleCallback cb, void* userdata);
+
 // Evaluate JS and write its result (coerced to string) into `out` (NUL-terminated,
 // up to out_cap bytes). Returns the full result length in bytes (may exceed out_cap-1,
 // indicating truncation). Lets the host read data back from the page (e.g. document.title).

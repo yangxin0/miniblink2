@@ -288,6 +288,8 @@ void MbFrameClient::DidAddMessageToConsole(const blink::WebConsoleMessage& msg,
     case blink::mojom::ConsoleMessageLevel::kError: level = "error"; break;
   }
   console_.push_back(std::string(level) + ": " + msg.text.Utf8());
+  if (owner_)
+    owner_->OnConsoleMessage(level, msg.text.Utf8());  // live push (vs. DrainConsole poll)
 }
 
 std::string MbFrameClient::DrainConsole() {

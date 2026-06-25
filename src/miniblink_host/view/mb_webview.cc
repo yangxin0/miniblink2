@@ -1248,6 +1248,16 @@ void MbWebView::SetLoadFinishCallback(std::function<void()> cb) {
   on_load_finish_ = std::move(cb);
 }
 
+void MbWebView::OnConsoleMessage(const std::string& level,
+                                 const std::string& message) {
+  if (on_console_)
+    on_console_(level, message);
+}
+
+void MbWebView::SetConsoleCallback(ConsoleFn cb) {
+  on_console_ = std::move(cb);
+}
+
 bool MbWebView::OnBeginNavigation(const std::string& url) {
   return on_navigation_ ? on_navigation_(url) != 0 : true;
 }
