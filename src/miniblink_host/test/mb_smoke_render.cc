@@ -1204,6 +1204,30 @@ static void RunCases(mbView* v, int W, int H) {
     }
   }
 
+  // 78b. Storage partitioning across views: two views are independent top-level browsing
+  // contexts, so their sessionStorage is ISOLATED (each view mints a unique session-namespace
+  // id), while localStorage is per-ORIGIN and therefore SHARED process-wide. Same origin in both.
+  {
+    mbView* v2 = mbCreateView(W, H);
+    if (v2) {
+      mbLoadHTML(v, "<body>x</body>", "https://ssview.test/");
+      mbLoadHTML(v2, "<body>x</body>", "https://ssview.test/");
+      mbRunJS(v, "sessionStorage.setItem('sk','viewA');"
+                 "localStorage.setItem('lk','shared');");
+      mbWait(v, 20);
+      mbWait(v2, 20);
+      const std::string sa = Eval(v, "sessionStorage.getItem('sk')");
+      const std::string sb =
+          Eval(v2, "sessionStorage.getItem('sk')===null?'null':sessionStorage.getItem('sk')");
+      const std::string lb = Eval(v2, "localStorage.getItem('lk')");
+      const std::string r = sa + "," + sb + "," + lb;
+      Expect(r == "viewA,null,shared",
+             "cross-view: sessionStorage isolated per view, localStorage shared per origin",
+             "ssview=[" + r + "]");
+      mbDestroyView(v2);
+    }
+  }
+
   // 74. Stability across many sequential loads (a long-running scraper does
   // thousands). Load varied documents repeatedly on one view, evaluating and
   // painting each, and confirm every load renders correctly — no state leak or

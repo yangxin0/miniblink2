@@ -68,7 +68,13 @@ std::string KeyForStorageKey(const blink::BlinkStorageKey& storage_key) {
 // observer, so a write in any instance fans out to all the others.
 class MbStorageArea : public blink::mojom::blink::StorageArea {
  public:
-  explicit MbStorageArea(std::string key) : key_(std::move(key)) {}
+  // `broadcast` fans changes out to other contexts via KeyChanged/KeyDeleted/
+  // AllDeleted (localStorage). Session storage must NOT broadcast: blink dispatches
+  // its 'storage' events internally over the shared per-namespace cache and DCHECKs
+  // (!IsSessionStorage()) if it ever receives a mojo KeyChanged — so session areas
+  // store + serve GetAll only.
+  MbStorageArea(std::string key, bool broadcast)
+      : key_(std::move(key)), broadcast_(broadcast) {}
 
   void AddObserver(
       mojo::PendingRemote<StorageAreaObserver> observer) override {
@@ -92,10 +98,11 @@ class MbStorageArea : public blink::mojom::blink::StorageArea {
     // Tell every observing context (incl. the originator, which blink dedups via
     // its pending-mutation bookkeeping and skips firing a `storage` event on
     // itself); other contexts apply the change and fire the event.
-    ForEachObserver(s, [&](StorageAreaObserver* o) {
-      o->KeyChanged(key, value, old_value,
-                    source ? source.Clone() : nullptr);
-    });
+    if (broadcast_) {
+      ForEachObserver(s, [&](StorageAreaObserver* o) {
+        o->KeyChanged(key, value, old_value, source ? source.Clone() : nullptr);
+      });
+    }
   }
 
   void Delete(const Bytes& key,
@@ -109,9 +116,11 @@ class MbStorageArea : public blink::mojom::blink::StorageArea {
       s.entries.erase(s.entries.begin() + i);
     }
     std::move(callback).Run();
-    ForEachObserver(s, [&](StorageAreaObserver* o) {
-      o->KeyDeleted(key, old_value, source ? source.Clone() : nullptr);
-    });
+    if (broadcast_) {
+      ForEachObserver(s, [&](StorageAreaObserver* o) {
+        o->KeyDeleted(key, old_value, source ? source.Clone() : nullptr);
+      });
+    }
   }
 
   void DeleteAll(blink::mojom::blink::StorageAreaSourcePtr source,
@@ -123,9 +132,11 @@ class MbStorageArea : public blink::mojom::blink::StorageArea {
     if (new_observer)
       s.observers.emplace_back(std::move(new_observer));
     std::move(callback).Run();
-    ForEachObserver(s, [&](StorageAreaObserver* o) {
-      o->AllDeleted(was_nonempty, source ? source.Clone() : nullptr);
-    });
+    if (broadcast_) {
+      ForEachObserver(s, [&](StorageAreaObserver* o) {
+        o->AllDeleted(was_nonempty, source ? source.Clone() : nullptr);
+      });
+    }
   }
 
   void GetAll(mojo::PendingRemote<StorageAreaObserver> new_observer,
@@ -155,6 +166,7 @@ class MbStorageArea : public blink::mojom::blink::StorageArea {
   }
 
   std::string key_;
+  bool broadcast_;
 };
 
 class MbSessionStorageNamespace
@@ -170,7 +182,8 @@ class MbDomStorage : public blink::mojom::blink::DomStorage {
       const blink::LocalFrameToken& /*local_frame_token*/,
       mojo::PendingReceiver<blink::mojom::blink::StorageArea> area) override {
     mojo::MakeSelfOwnedReceiver(
-        std::make_unique<MbStorageArea>(KeyForStorageKey(storage_key)),
+        std::make_unique<MbStorageArea>(KeyForStorageKey(storage_key),
+                                        /*broadcast=*/true),
         std::move(area));
   }
 
@@ -183,13 +196,20 @@ class MbDomStorage : public blink::mojom::blink::DomStorage {
   }
 
   void BindSessionStorageArea(
-      const blink::BlinkStorageKey& /*storage_key*/,
+      const blink::BlinkStorageKey& storage_key,
       const blink::LocalFrameToken& /*local_frame_token*/,
-      const blink::String& /*namespace_id*/,
-      mojo::PendingReceiver<blink::mojom::blink::StorageArea> /*session_area*/)
+      const blink::String& namespace_id,
+      mojo::PendingReceiver<blink::mojom::blink::StorageArea> session_area)
       override {
-    // Drop: session storage stays cache-only (its prior behavior — the provider
-    // used to be unbound). Not sharing across contexts avoids any regression.
+    // Session storage is partitioned per top-level browsing context: key the store
+    // by (namespace_id, origin). Each view has a UNIQUE namespace id (minted at
+    // view creation), so same-view same-origin frames SHARE sessionStorage (incl.
+    // the 'storage' event) while different views stay isolated.
+    const std::string key =
+        "ss:" + namespace_id.Utf8() + ":" + KeyForStorageKey(storage_key);
+    mojo::MakeSelfOwnedReceiver(
+        std::make_unique<MbStorageArea>(key, /*broadcast=*/false),
+        std::move(session_area));
   }
 };
 

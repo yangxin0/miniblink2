@@ -196,12 +196,18 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
 
   // 4. Attach a session-storage namespace to the page so window.sessionStorage
   //    resolves (without it StorageNamespace::From(page) is null -> TypeError).
-  //    The id is normally a browser-assigned 36-char token; any non-empty one of
-  //    that length works for our single in-process page. localStorage needs no
-  //    such namespace (it goes through the StorageController directly).
+  //    The id is normally a browser-assigned 36-char token; we mint a UNIQUE one
+  //    per view so each view's sessionStorage is isolated (the DOM Storage backend
+  //    keys session areas by this id), while same-view frames share it. localStorage
+  //    needs no namespace (it goes through the StorageController directly).
   if (blink::Page* page = v->web_view_->GetPage()) {
-    blink::StorageNamespace::ProvideSessionStorageNamespaceTo(
-        *page, std::string(blink::kSessionStorageNamespaceIdLength, 'm'));
+    static uint64_t session_ns_counter = 0;
+    char id[blink::kSessionStorageNamespaceIdLength + 1];
+    snprintf(id, sizeof(id), "%0*llu",
+             static_cast<int>(blink::kSessionStorageNamespaceIdLength),
+             static_cast<unsigned long long>(++session_ns_counter));
+    blink::StorageNamespace::ProvideSessionStorageNamespaceTo(*page,
+                                                              std::string(id));
   }
 
   return v;
