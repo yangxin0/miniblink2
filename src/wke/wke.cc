@@ -48,6 +48,8 @@ struct _tagWkeWebView {
   void* confirm_param = nullptr;
   wkePromptBoxCallback on_prompt = nullptr;
   void* prompt_param = nullptr;
+  wkeNavigationCallback on_navigation = nullptr;
+  void* navigation_param = nullptr;
   std::string user_init_script;  // wkeSetInitScript; combined with the bridge bootstrap
   std::string bridge_channel_cache;  // backs the callback's channel arg
   std::string bridge_message_cache;  // backs the callback's message arg
@@ -613,6 +615,30 @@ void wkeOnPromptBox(wkeWebView webView, wkePromptBoxCallback callback,
   webView->on_prompt = callback;
   webView->prompt_param = param;
   EnsureDialogRouter(webView);
+}
+
+namespace {
+// Routes the host navigation policy callback (mbOnNavigation) to the per-view wke
+// callback. Returns allow(1)/cancel(0). userdata is the wkeWebView.
+int WkeNavRouter(mbView* /*view*/, void* userdata, const char* url) {
+  auto* wv = static_cast<wkeWebView>(userdata);
+  if (!wv || !wv->on_navigation)
+    return 1;  // allow
+  _tagWkeString u{url ? std::string(url) : std::string()};
+  return wv->on_navigation(wv, wv->navigation_param,
+                           WKE_NAVIGATION_TYPE_OTHER, &u)
+             ? 1
+             : 0;
+}
+}  // namespace
+
+void wkeOnNavigation(wkeWebView webView, wkeNavigationCallback callback,
+                     void* param) {
+  if (!webView || !webView->view)
+    return;
+  webView->on_navigation = callback;
+  webView->navigation_param = param;
+  mbOnNavigation(webView->view, callback ? &WkeNavRouter : nullptr, webView);
 }
 
 bool wkeSavePdf(wkeWebView webView, const utf8* path) {

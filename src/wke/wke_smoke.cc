@@ -273,6 +273,28 @@ int main() {
     wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore
   }
 
+  // wkeOnNavigation: fires before a page-initiated navigation with the target URL and can
+  // cancel it (the allow/block semantics themselves are covered by mb_smoke 0g; here we
+  // verify the wke peer forwards). The callback cancels the nav, so the page stays.
+  {
+    static std::string* navlog = new std::string();
+    navlog->clear();
+    wkeOnNavigation(wv, [](wkeWebView, void*, wkeNavigationType,
+                          const wkeString url) -> bool {
+      *navlog += std::string(wkeGetString(url)) + ";";
+      return false;  // cancel every page-initiated navigation
+    }, nullptr);
+    wkeLoadHtmlWithBaseUrl(wv, "<body>START</body>", "https://nav.test/");
+    wkeRunJS(wv, "location.href='https://nav.test/go'");  // page-initiated nav -> cancelled
+    const bool stayed = std::strcmp(
+        jsToTempString(es, wkeRunJS(wv, "document.body.textContent")), "START") == 0;
+    const bool saw = navlog->find("nav.test/go") != std::string::npos;
+    check(saw && stayed,
+          "wkeOnNavigation fires for a page-initiated navigation and can cancel it");
+    wkeOnNavigation(wv, nullptr, nullptr);
+    wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore
+  }
+
   // Multiple concurrent webViews are independent (real multi-view apps): each has
   // its own document, title, and JS globals, and destroying one leaves the other
   // fully usable.

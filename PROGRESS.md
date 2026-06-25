@@ -180,7 +180,8 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      (stop popups/redirects/leaving the page) — host-driven LoadURL bypasses it. Also made
      `DoCommit` honor mocks so a page navigation is served from the interception layer too.
      Verified (mb_smoke 0g, offline): a callback lets nav.test/ok commit (mock → GOOD) and
-     vetoes nav.test/blocked (stays GOOD); the log shows both URLs.
+     vetoes nav.test/blocked (stays GOOD); the log shows both URLs. [DONE: wke peer]
+     `wkeOnNavigation` routes to it (verified wke_smoke +1=105: cancels a location.href nav).
    - [DONE] **new-window notification** — `mbOnNewWindow(view, cb, userdata)`: fires when the
      page calls `window.open()` / activates `target=_blank`, with the requested URL + window
      name, via `MbFrameClient::CreateNewWindow` (which still returns null = popup denied, the

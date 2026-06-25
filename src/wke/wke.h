@@ -614,6 +614,24 @@ typedef bool (*wkePromptBoxCallback)(wkeWebView webView, void* param,
 WKE_API void wkeOnPromptBox(wkeWebView webView, wkePromptBoxCallback callback,
                             void* callbackParam);
 
+// Navigation policy: the callback fires before a PAGE-initiated navigation (link click,
+// location=, form submit, JS redirect) with the target `url`; return true to ALLOW it,
+// false to CANCEL. Host-driven wkeLoadURL is not routed through here. (The host doesn't
+// distinguish the navigation kind, so `navigationType` is reported as OTHER.)
+typedef enum _wkeNavigationType {
+  WKE_NAVIGATION_TYPE_LINKCLICK,
+  WKE_NAVIGATION_TYPE_FORMSUBMITTE,
+  WKE_NAVIGATION_TYPE_BACKFORWARD,
+  WKE_NAVIGATION_TYPE_RELOAD,
+  WKE_NAVIGATION_TYPE_FORMRESUBMITT,
+  WKE_NAVIGATION_TYPE_OTHER
+} wkeNavigationType;
+typedef bool (*wkeNavigationCallback)(wkeWebView webView, void* param,
+                                      wkeNavigationType navigationType,
+                                      const wkeString url);
+WKE_API void wkeOnNavigation(wkeWebView webView, wkeNavigationCallback callback,
+                             void* param);
+
 typedef enum _wkeLoadingResult {
   WKE_LOADING_SUCCEEDED,
   WKE_LOADING_FAILED,
