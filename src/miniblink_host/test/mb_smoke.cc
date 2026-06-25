@@ -1680,6 +1680,26 @@ int main() {
            "opfsw=[" + r + "]");
   }
 
+  // 23ai. Credential Management (navigator.credentials.get, broker CredentialManager): a
+  // headless host has no credential store, so get({password:true}) must RESOLVE to null (no
+  // credential) rather than hang. blink's basic CredentialManager remote has no disconnect
+  // handler, so without the binding the promise would never settle — this verifies it does.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://login.test/");
+    Eval(v,
+         "window.__cred='';"
+         "if(navigator.credentials&&navigator.credentials.get){"
+         "navigator.credentials.get({password:true}).then(function(c){"
+         "window.__cred=(c===null?'null':'cred');})"
+         ".catch(function(e){window.__cred='err:'+e.name;});}"
+         "else{window.__cred='no-api';}");
+    mbWaitForFunction(v, "window.__cred!==''", 3000);
+    const std::string r = Eval(v, "window.__cred");
+    Expect(r == "null" || r == "no-api",
+           "Credential Management: get() resolves to null (no store) instead of hanging",
+           "cred=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

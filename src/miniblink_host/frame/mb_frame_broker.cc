@@ -36,6 +36,7 @@
 #include "services/device/public/mojom/geolocation.mojom-blink.h"
 #include "base/files/file.h"
 #include "third_party/blink/public/mojom/clipboard/clipboard.mojom-blink.h"
+#include "third_party/blink/public/mojom/credentialmanagement/credential_manager.mojom-blink.h"
 #include "miniblink_host/frame/mb_opfs.h"
 #include "miniblink_host/frame/mb_storage_buckets.h"
 #include "third_party/blink/public/mojom/buckets/bucket_manager_host.mojom-blink.h"
@@ -500,6 +501,34 @@ class MbBatteryMonitor : public device::mojom::blink::BatteryMonitor {
   QueryNextStatusCallback held_;
 };
 
+// blink.mojom.CredentialManager for navigator.credentials.get/store (password + federated). A
+// headless host has no credential store, so Get returns SUCCESS + no credential (get() resolves
+// to null) and Store/PreventSilentAccess just ack. This MUST be bound: the basic
+// CredentialManager remote has NO disconnect handler in blink, so an unbound pipe leaves
+// navigator.credentials.get()'s promise pending forever — a hang on login pages that probe for
+// stored credentials at load.
+class MbCredentialManager : public blink::mojom::blink::CredentialManager {
+ public:
+  void Store(blink::mojom::blink::CredentialInfoPtr,
+             StoreCallback callback) override {
+    std::move(callback).Run();
+  }
+  void PreventSilentAccess(PreventSilentAccessCallback callback) override {
+    std::move(callback).Run();
+  }
+  void Get(blink::mojom::blink::CredentialMediationRequirement,
+           bool,
+           const blink::Vector<blink::KURL>&,
+           GetCallback callback) override {
+    // SUCCESS requires a non-null CredentialInfo (blink DCHECKs); an EMPTY-type one converts
+    // to a null Credential, so get() resolves to null ("no stored credential").
+    auto info = blink::mojom::blink::CredentialInfo::New();
+    info->type = blink::mojom::blink::CredentialType::EMPTY;
+    std::move(callback).Run(blink::mojom::blink::CredentialManagerError::SUCCESS,
+                            std::move(info));
+  }
+};
+
 // blink.mojom.MediaDevicesDispatcherHost for navigator.mediaDevices. Headless has no cameras,
 // mics, or speakers, so every query returns an EMPTY list. This must be bound: if the pipe is
 // left unbound, blink's disconnect handler REJECTS enumerateDevices() with an AbortError
@@ -711,6 +740,12 @@ class MbBrowserInterfaceBroker
     // navigator.getBattery() — headless static "full, charging" battery.
     if (auto r = receiver.As<device::mojom::blink::BatteryMonitor>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbBatteryMonitor>(),
+                                  std::move(r));
+      return;
+    }
+    // navigator.credentials.get/store — headless: no credential store (get() -> null).
+    if (auto r = receiver.As<blink::mojom::blink::CredentialManager>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbCredentialManager>(),
                                   std::move(r));
       return;
     }
