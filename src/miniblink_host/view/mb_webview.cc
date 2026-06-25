@@ -873,6 +873,24 @@ void MbWebView::SetDarkMode(bool dark) {
   }
 }
 
+void MbWebView::EmulateMedia(const char* feature, const char* value) {
+  // Generic media-feature emulation (the DevTools Emulation.setEmulatedMedia
+  // path): override any media feature — prefers-reduced-motion, prefers-contrast,
+  // forced-colors, color-gamut, prefers-reduced-data, etc. — so matchMedia() and
+  // @media rules evaluate to the requested value live (Page::SetMediaFeatureOverride
+  // re-runs the media queries). An empty `feature` clears ALL overrides; a set
+  // `feature` with an empty `value` clears just that one.
+  if (!web_view_ || !web_view_->GetPage())
+    return;
+  blink::Page* page = web_view_->GetPage();
+  if (!feature || !*feature) {
+    page->ClearMediaFeatureOverrides();
+    return;
+  }
+  page->SetMediaFeatureOverride(blink::AtomicString(feature),
+                                blink::String(value ? value : ""));
+}
+
 std::string MbWebView::DrainConsole() {
   return frame_client_ ? frame_client_->DrainConsole() : std::string();
 }

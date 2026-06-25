@@ -326,6 +326,15 @@ MB_EXPORT void mbSetLoadImages(mbView*, int enabled);
 // so pages render their dark theme. Call before mbLoadURL/mbLoadHTML.
 MB_EXPORT void mbSetDarkMode(mbView*, int dark);
 
+// Override any CSS media feature so matchMedia() and @media rules evaluate to the
+// requested value LIVE (re-runs the page's media queries). Examples:
+//   mbEmulateMedia(v, "prefers-reduced-motion", "reduce");
+//   mbEmulateMedia(v, "prefers-contrast", "more");
+//   mbEmulateMedia(v, "forced-colors", "active");
+// Pass an empty/NULL `value` to clear that feature; an empty/NULL `feature` clears
+// all overrides. (A general form of mbSetDarkMode for accessibility/theme testing.)
+MB_EXPORT void mbEmulateMedia(mbView*, const char* feature, const char* value);
+
 // Set the view's window-focus state: focused (1, the default) or blurred (0).
 // Clearing it makes document.hasFocus() false and blurs the active element, as
 // if the window lost focus; setting it restores focus. For simulating focus/blur.

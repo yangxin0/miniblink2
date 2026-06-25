@@ -675,6 +675,12 @@ constraints, atomic abort, and compound keys — the whole object-store/index AP
 `<video>` render blank) — the heaviest; needs a GL/media provider. Last.
 
 **Tier 3 — input & rendering refinements:**
+[DONE: media-feature emulation] `mbEmulateMedia(view, feature, value)` -> MbWebView::EmulateMedia
+-> Page::SetMediaFeatureOverride (the DevTools Emulation.setEmulatedMedia path) — overrides ANY CSS
+media feature LIVE (re-runs the page's media queries): prefers-reduced-motion, prefers-contrast,
+forced-colors, color-gamut, prefers-reduced-data, etc. Empty value clears a feature; empty feature
+clears all. A general form of mbSetDarkMode for accessibility/theme testing + screenshots. Verified
+mb_smoke 36b (reduced-motion + contrast flip matchMedia live, then clear reverts).
 [DONE: online/offline] `mbSetOnline(online)` -> MbSetOnline -> blink::GetNetworkStateNotifier()
 .SetOnLine, flipping navigator.onLine and firing the window online/offline events on every frame
 (process-global). The online state is initialized to true at view creation so the first toggle to

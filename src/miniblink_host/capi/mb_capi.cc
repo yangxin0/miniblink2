@@ -395,6 +395,11 @@ void mbSetDarkMode(mbView* v, int dark) {
     v->impl->SetDarkMode(dark != 0);
 }
 
+void mbEmulateMedia(mbView* v, const char* feature, const char* value) {
+  if (v && v->impl)
+    v->impl->EmulateMedia(feature, value);
+}
+
 void mbSetFocus(mbView* v, int focused) {
   if (v && v->impl)
     v->impl->SetFocus(focused != 0);

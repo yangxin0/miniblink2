@@ -2507,6 +2507,33 @@ int main() {
     mbSetDarkMode(v, 0);  // restore light for any later case
   }
 
+  // 36b. mbEmulateMedia: generic media-feature override (DevTools setEmulatedMedia path).
+  // Override prefers-reduced-motion + prefers-contrast LIVE on a loaded page (matchMedia
+  // flips without reload), and clearing a feature reverts it. A general dark-mode for any
+  // media feature (accessibility/theme testing).
+  {
+    mbLoadHTML(v, "<body>x</body>", "about:blank");
+    const std::string m0 =
+        Eval(v, "String(matchMedia('(prefers-reduced-motion: reduce)').matches)");
+    mbEmulateMedia(v, "prefers-reduced-motion", "reduce");
+    mbWait(v, 20);
+    const std::string m1 =
+        Eval(v, "String(matchMedia('(prefers-reduced-motion: reduce)').matches)");
+    mbEmulateMedia(v, "prefers-contrast", "more");
+    mbWait(v, 20);
+    const std::string c1 =
+        Eval(v, "String(matchMedia('(prefers-contrast: more)').matches)");
+    mbEmulateMedia(v, "prefers-reduced-motion", "");  // clear just this one
+    mbWait(v, 20);
+    const std::string m2 =
+        Eval(v, "String(matchMedia('(prefers-reduced-motion: reduce)').matches)");
+    const std::string r = m0 + "," + m1 + "," + c1 + "," + m2;
+    Expect(r == "false,true,true,false",
+           "mbEmulateMedia overrides media features live (reduced-motion, contrast) + clears",
+           "em=[" + r + "]");
+    mbEmulateMedia(v, "", "");  // clear all overrides for later cases
+  }
+
   // 37. Locale: navigator.language / navigator.languages reflect the set value.
   mbSetLocale(v, "fr-FR,fr,en");
   mbLoadHTML(v, "<body>x</body>", "about:blank");

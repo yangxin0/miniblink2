@@ -196,6 +196,10 @@ class MbWebView {
   // Simulate tab backgrounding: drives document.visibilityState / document.hidden
   // and fires the visibilitychange event so pages can pause work when hidden.
   void SetVisible(bool visible);
+  // Override any CSS media feature (prefers-reduced-motion, prefers-contrast,
+  // forced-colors, color-gamut, …) so matchMedia()/@media evaluate to `value`
+  // live. Empty `feature` clears all overrides; empty `value` clears that one.
+  void EmulateMedia(const char* feature, const char* value);
   // Return captured console output ("level: text" per line) and clear the buffer.
   std::string DrainConsole();
   // Return the HTTP cookie jar's cookies for `url` ("name=value; ..."), for session export.
