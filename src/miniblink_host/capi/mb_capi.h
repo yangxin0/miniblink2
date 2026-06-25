@@ -331,6 +331,11 @@ MB_EXPORT void mbSetDarkMode(mbView*, int dark);
 // if the window lost focus; setting it restores focus. For simulating focus/blur.
 MB_EXPORT void mbSetFocus(mbView*, int focused);
 
+// Set the page's visibility: visible (1, the default) or hidden (0). Drives
+// document.visibilityState / document.hidden and fires the visibilitychange
+// event, so a page pauses timers/video/polling when the embedder backgrounds it.
+MB_EXPORT void mbSetVisibility(mbView*, int visible);
+
 // Bind a native C function callable from JS as window[name](...). JS arguments
 // are coerced to UTF-8 strings (argc/argv); argtypes[i] reports each arg's JS
 // type (0=string,1=number,2=boolean,3=null,4=undefined,5=object,6=array,

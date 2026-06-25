@@ -400,6 +400,11 @@ void mbSetFocus(mbView* v, int focused) {
     v->impl->SetFocus(focused != 0);
 }
 
+void mbSetVisibility(mbView* v, int visible) {
+  if (v && v->impl)
+    v->impl->SetVisible(visible != 0);
+}
+
 void mbJsBindFunction(mbView* v, const char* name, mbJsNativeFn fn,
                       void* userdata) {
   if (v && v->impl)

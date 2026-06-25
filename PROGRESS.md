@@ -675,6 +675,11 @@ constraints, atomic abort, and compound keys — the whole object-store/index AP
 `<video>` render blank) — the heaviest; needs a GL/media provider. Last.
 
 **Tier 3 — input & rendering refinements:**
+[DONE: page visibility] `mbSetVisibility(view, visible)` -> MbWebView::SetVisible ->
+WebView::SetVisibilityState(kVisible/kHidden, is_initial_state=false), so a host can simulate
+tab backgrounding: document.visibilityState / document.hidden flip and the visibilitychange event
+fires, letting pages pause timers/video/polling/rAF when hidden. Verified mb_smoke_platform 89b
+(visible -> hidden,true (+event) -> visible,false (+event)).
 12. Input fidelity. [DONE: button + modifier clicks] `mbSendMouseClickEx(x, y, button, modifiers)`
     — button 0=left/1=middle/2=right, modifiers bitmask 1=ctrl 2=shift 4=alt 8=meta — so the
     page sees e.button + e.ctrlKey/shiftKey/altKey/metaKey (left→click, middle→auxclick,

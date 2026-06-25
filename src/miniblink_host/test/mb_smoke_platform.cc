@@ -67,6 +67,29 @@ static void RunCases(mbView* v, int W, int H) {
                (autofocused ? "1" : "0") + " tab=" + (tab_advanced ? "1" : "0"));
   }
 
+  // 89b. mbSetVisibility drives page visibility: the page starts 'visible'; backgrounding it
+  // makes document.visibilityState 'hidden' + document.hidden true and fires visibilitychange;
+  // foregrounding restores 'visible' and fires it again. Lets a host pause work when hidden.
+  {
+    mbLoadHTML(v, "<body>x</body>", "about:blank");
+    Eval(v,
+         "window.__vc=[];"
+         "document.addEventListener('visibilitychange',function(){"
+         "window.__vc.push(document.visibilityState+(document.hidden?'/h':'/s'));});");
+    const std::string start = Eval(v, "document.visibilityState");
+    mbSetVisibility(v, 0);
+    mbWait(v, 30);
+    const std::string hidden = Eval(v, "document.visibilityState+','+document.hidden");
+    mbSetVisibility(v, 1);
+    mbWait(v, 30);
+    const std::string back = Eval(v, "document.visibilityState+','+document.hidden");
+    const std::string events = Eval(v, "window.__vc.join(',')");
+    const std::string r = start + "|" + hidden + "|" + back + "|" + events;
+    Expect(r == "visible|hidden,true|visible,false|hidden/h,visible/s",
+           "mbSetVisibility toggles document.visibilityState/hidden + fires visibilitychange",
+           "vis=[" + r + "]");
+  }
+
   // 90. mbGetElementRect + element screenshot: get a colored div's box, paint
   // exactly that rect, and verify the captured center pixel is the div's color.
   {

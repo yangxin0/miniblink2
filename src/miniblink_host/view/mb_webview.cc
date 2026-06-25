@@ -49,6 +49,7 @@
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/web/web_script_source.h"
 #include "third_party/blink/public/web/web_settings.h"
+#include "third_party/blink/public/mojom/page/page_visibility_state.mojom-shared.h"
 #include "third_party/blink/public/web/web_view.h"
 #include "third_party/icu/source/common/unicode/unistr.h"
 #include "third_party/icu/source/common/unicode/uscript.h"
@@ -1536,6 +1537,20 @@ void MbWebView::SetFocus(bool focused) {
   if (web_view_) {
     web_view_->SetIsActive(focused);
     web_view_->SetPageFocus(focused);
+  }
+}
+
+void MbWebView::SetVisible(bool visible) {
+  // Drive the page's visibility so an app can simulate tab backgrounding:
+  // toggles document.visibilityState / document.hidden and fires the
+  // visibilitychange event, which lets pages pause timers, video, polling, rAF,
+  // etc. is_initial_state=false so blink dispatches the event (true would set the
+  // state silently, for the very first commit).
+  if (web_view_) {
+    web_view_->SetVisibilityState(
+        visible ? blink::mojom::PageVisibilityState::kVisible
+                : blink::mojom::PageVisibilityState::kHidden,
+        /*is_initial_state=*/false);
   }
 }
 

@@ -193,6 +193,9 @@ class MbWebView {
   // focused; clearing it makes document.hasFocus() false and blurs the active
   // element, like a real window losing focus.
   void SetFocus(bool focused);
+  // Simulate tab backgrounding: drives document.visibilityState / document.hidden
+  // and fires the visibilitychange event so pages can pause work when hidden.
+  void SetVisible(bool visible);
   // Return captured console output ("level: text" per line) and clear the buffer.
   std::string DrainConsole();
   // Return the HTTP cookie jar's cookies for `url` ("name=value; ..."), for session export.
