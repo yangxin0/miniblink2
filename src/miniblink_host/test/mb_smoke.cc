@@ -1608,6 +1608,28 @@ int main() {
            "bk=[" + r + "]");
   }
 
+  // 23af. Cache Storage query options (ignoreSearch): cache.match(url,{ignoreSearch:true})
+  // matches a stored entry regardless of its query string, while a plain match with a different
+  // query misses. Store '/data?v=1', miss on '/data?v=2', then hit with ignoreSearch.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://cache.test/");
+    Eval(v,
+         "window.__cis='';"
+         "(async function(){try{"
+         "var c=await caches.open('s1');"
+         "await c.put('/data?v=1',new Response('body1'));"
+         "var exact=await c.match('/data?v=2');"
+         "var loose=await c.match('/data?v=2',{ignoreSearch:true});"
+         "var lt=loose?await loose.text():'none';"
+         "window.__cis=(exact?'hit':'miss')+','+lt;"
+         "}catch(e){window.__cis='err:'+e.name;}})();");
+    mbWaitForFunction(v, "window.__cis!==''", 3000);
+    const std::string r = Eval(v, "window.__cis");
+    Expect(r == "miss,body1",
+           "Cache Storage ignoreSearch: match ignores the query string",
+           "cis=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

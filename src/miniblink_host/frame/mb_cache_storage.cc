@@ -54,30 +54,54 @@ m::FetchAPIRequestPtr MakeRequest(const std::string& url) {
   return req;
 }
 
+// Drop the query (?...) and fragment (#...) so {ignoreSearch:true} matches a URL regardless of
+// its query string.
+std::string StripSearch(std::string url) {
+  if (auto h = url.find('#'); h != std::string::npos)
+    url.resize(h);
+  if (auto q = url.find('?'); q != std::string::npos)
+    url.resize(q);
+  return url;
+}
+
+// Does a stored entry's URL match the query URL under the request's options? Method and Vary
+// are always ignored here (we don't store either), so only ignoreSearch changes the result.
+bool KeyMatches(const std::string& stored,
+                const std::string& target,
+                bool ignore_search) {
+  return ignore_search ? StripSearch(stored) == StripSearch(target)
+                       : stored == target;
+}
+
 class MbCacheStorageCache : public m::CacheStorageCache {
  public:
   explicit MbCacheStorageCache(MbCacheData* data) : data_(data) {}
 
-  void Match(m::FetchAPIRequestPtr request, m::CacheQueryOptionsPtr, bool, bool,
-             int64_t, MatchCallback callback) override {
-    auto it = data_->entries.find(UrlKey(request));
-    if (it == data_->entries.end()) {
-      std::move(callback).Run(base::unexpected(m::CacheStorageError::kErrorNotFound));
-      return;
+  void Match(m::FetchAPIRequestPtr request, m::CacheQueryOptionsPtr options,
+             bool, bool, int64_t, MatchCallback callback) override {
+    const bool ignore_search = options && options->ignore_search;
+    const std::string target = UrlKey(request);
+    for (auto& e : data_->entries) {
+      if (KeyMatches(e.first, target, ignore_search)) {
+        std::move(callback).Run(
+            m::MatchResponse::NewResponse(CloneStored(e.second)));
+        return;
+      }
     }
-    std::move(callback).Run(
-        m::MatchResponse::NewResponse(CloneStored(it->second)));
+    std::move(callback).Run(base::unexpected(m::CacheStorageError::kErrorNotFound));
   }
 
-  // matchAll(request?): with a request, the matching response (0/1 by URL); without one,
-  // every cached response, in URL order.
-  void MatchAll(m::FetchAPIRequestPtr request, m::CacheQueryOptionsPtr, int64_t,
-                MatchAllCallback callback) override {
+  // matchAll(request?): with a request, every response whose URL matches (honoring
+  // ignoreSearch); without one, every cached response, in URL order.
+  void MatchAll(m::FetchAPIRequestPtr request, m::CacheQueryOptionsPtr options,
+                int64_t, MatchAllCallback callback) override {
     blink::Vector<m::FetchAPIResponsePtr> out;
     if (request) {
-      auto it = data_->entries.find(UrlKey(request));
-      if (it != data_->entries.end())
-        out.push_back(CloneStored(it->second));
+      const bool ignore_search = options && options->ignore_search;
+      const std::string target = UrlKey(request);
+      for (auto& e : data_->entries)
+        if (KeyMatches(e.first, target, ignore_search))
+          out.push_back(CloneStored(e.second));
     } else {
       for (auto& e : data_->entries)
         out.push_back(CloneStored(e.second));
@@ -89,14 +113,16 @@ class MbCacheStorageCache : public m::CacheStorageCache {
                             GetAllMatchedEntriesCallback callback) override {
     std::move(callback).Run(blink::Vector<m::CacheEntryPtr>());
   }
-  // keys(request?): the cached requests (filtered to one by URL if given).
-  void Keys(m::FetchAPIRequestPtr request, m::CacheQueryOptionsPtr, int64_t,
-            KeysCallback callback) override {
+  // keys(request?): the cached requests (filtered by URL, honoring ignoreSearch, if given).
+  void Keys(m::FetchAPIRequestPtr request, m::CacheQueryOptionsPtr options,
+            int64_t, KeysCallback callback) override {
     blink::Vector<m::FetchAPIRequestPtr> out;
     if (request) {
-      auto it = data_->entries.find(UrlKey(request));
-      if (it != data_->entries.end())
-        out.push_back(MakeRequest(it->first));
+      const bool ignore_search = options && options->ignore_search;
+      const std::string target = UrlKey(request);
+      for (auto& e : data_->entries)
+        if (KeyMatches(e.first, target, ignore_search))
+          out.push_back(MakeRequest(e.first));
     } else {
       for (auto& e : data_->entries)
         out.push_back(MakeRequest(e.first));
@@ -109,7 +135,15 @@ class MbCacheStorageCache : public m::CacheStorageCache {
     for (auto& op : batch_operations) {
       std::string key = UrlKey(op->request);
       if (op->operation_type == m::OperationType::kDelete) {
-        data_->entries.erase(key);
+        // delete(request, {ignoreSearch}) removes every matching entry.
+        const bool ignore_search =
+            op->match_options && op->match_options->ignore_search;
+        for (auto it = data_->entries.begin(); it != data_->entries.end();) {
+          if (KeyMatches(it->first, key, ignore_search))
+            it = data_->entries.erase(it);
+          else
+            ++it;
+        }
         continue;
       }
       if (op->operation_type != m::OperationType::kPut || !op->response)
@@ -150,15 +184,26 @@ class MbCacheStorage : public m::CacheStorage {
       names.push_back(blink::String::FromUtf8(std::string_view(cache.first)));
     std::move(callback).Run(names);
   }
-  void Match(m::FetchAPIRequestPtr request, m::MultiCacheQueryOptionsPtr, bool,
-             bool, int64_t, MatchCallback callback) override {
-    std::string key = UrlKey(request);
+  // caches.match(request, options): search every cache (or just options.cache_name) for the
+  // first matching entry, honoring ignoreSearch.
+  void Match(m::FetchAPIRequestPtr request, m::MultiCacheQueryOptionsPtr options,
+             bool, bool, int64_t, MatchCallback callback) override {
+    const std::string target = UrlKey(request);
+    const bool ignore_search =
+        options && options->query_options &&
+        options->query_options->ignore_search;
+    const std::string only_cache =
+        options && !options->cache_name.IsNull() ? options->cache_name.Utf8()
+                                                 : std::string();
     for (auto& cache : CacheRegistry()) {
-      auto it = cache.second->entries.find(key);
-      if (it != cache.second->entries.end()) {
-        std::move(callback).Run(
-            m::MatchResponse::NewResponse(CloneStored(it->second)));
-        return;
+      if (!only_cache.empty() && cache.first != only_cache)
+        continue;
+      for (auto& e : cache.second->entries) {
+        if (KeyMatches(e.first, target, ignore_search)) {
+          std::move(callback).Run(
+              m::MatchResponse::NewResponse(CloneStored(e.second)));
+          return;
+        }
       }
     }
     std::move(callback).Run(base::unexpected(m::CacheStorageError::kErrorNotFound));
