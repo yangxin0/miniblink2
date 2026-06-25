@@ -192,8 +192,12 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      safe default). The embedder can react (e.g. load the URL in this/a new view). Verified
      (mb_smoke 0h, offline): `window.open('https://popup.test/p','winname')` → callback logs
      `popup.test/p|winname` and window.open returns null.
-   - [NEXT] `DidFailLoad` failed-flag on the load-finish signal, and wiring the load
-     primitives to wait on `load_finished()` instead of a fixed mbWait.
+   - [DONE] **failed-load finish** — a top-level load that never commits (file:// read
+     failure or http(s) fetch failure) now still signals completion: `MbWebView::LoadURL`
+     calls `NotifyLoadFailed()` on both no-commit paths (sets `load_finished_=true`, fires
+     `on_load_finish_`), so a caller awaiting completion isn't stuck on a 404/missing file.
+     Verified (mb_smoke 0n=81): load a real page, register the finish cb, load a missing
+     file:// URL → callback fires + `mbIsLoadFinished` reads true.
 
    **→ Tier-1 push-callback model (#4) is now functionally complete: load-finish push,
    navigation policy, AND new-window notification.**
