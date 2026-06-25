@@ -38,6 +38,8 @@
 #include "third_party/blink/public/mojom/clipboard/clipboard.mojom-blink.h"
 #include "third_party/blink/public/mojom/credentialmanagement/credential_manager.mojom-blink.h"
 #include "third_party/blink/public/mojom/installedapp/installed_app_provider.mojom-blink.h"
+#include "media/mojo/mojom/video_decode_perf_history.mojom-blink.h"
+#include "media/mojo/mojom/webrtc_video_perf.mojom-blink.h"
 #include "third_party/blink/public/mojom/sms/webotp_service.mojom-blink.h"
 #include "third_party/blink/public/mojom/installedapp/related_application.mojom-blink.h"
 #include "third_party/blink/public/mojom/webauthn/authenticator.mojom-blink.h"
@@ -604,6 +606,31 @@ class MbWebOTPService : public blink::mojom::blink::WebOTPService {
   void Abort() override {}
 };
 
+// media.mojom.VideoDecodePerfHistory for navigator.mediaCapabilities.decodingInfo(). Video sites
+// call decodingInfo on load to pick a codec; for a SUPPORTED video codec blink queries the perf
+// history for the smooth/powerEfficient hints. That remote has no disconnect handler, so unbound
+// the decodingInfo() promise HANGS (verified: a vp8/vp9/av1 config — codecs this build supports —
+// triggers the query). Report smooth + power-efficient (the optimistic headless default).
+class MbVideoDecodePerfHistory
+    : public media::mojom::blink::VideoDecodePerfHistory {
+ public:
+  void GetPerfInfo(media::mojom::blink::PredictionFeaturesPtr,
+                   GetPerfInfoCallback callback) override {
+    std::move(callback).Run(/*is_smooth=*/true, /*is_power_efficient=*/true);
+  }
+};
+
+// media.mojom.WebrtcVideoPerfHistory — the same, for decodingInfo({type:'webrtc'}).
+class MbWebrtcVideoPerfHistory
+    : public media::mojom::blink::WebrtcVideoPerfHistory {
+ public:
+  void GetPerfInfo(media::mojom::blink::WebrtcPredictionFeaturesPtr,
+                   int32_t,
+                   GetPerfInfoCallback callback) override {
+    std::move(callback).Run(/*is_smooth=*/true);
+  }
+};
+
 // blink.mojom.MediaDevicesDispatcherHost for navigator.mediaDevices. Headless has no cameras,
 // mics, or speakers, so every query returns an EMPTY list. This must be bound: if the pipe is
 // left unbound, blink's disconnect handler REJECTS enumerateDevices() with an AbortError
@@ -839,6 +866,17 @@ class MbBrowserInterfaceBroker
     // navigator.credentials.get({otp}) (WebOTP/SMS) — headless: no SMS backend.
     if (auto r = receiver.As<blink::mojom::blink::WebOTPService>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbWebOTPService>(),
+                                  std::move(r));
+      return;
+    }
+    // navigator.mediaCapabilities.decodingInfo() perf hints — smooth + power-efficient.
+    if (auto r = receiver.As<media::mojom::blink::VideoDecodePerfHistory>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbVideoDecodePerfHistory>(),
+                                  std::move(r));
+      return;
+    }
+    if (auto r = receiver.As<media::mojom::blink::WebrtcVideoPerfHistory>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbWebrtcVideoPerfHistory>(),
                                   std::move(r));
       return;
     }

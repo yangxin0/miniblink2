@@ -1757,6 +1757,27 @@ int main() {
            "otp=[" + r + "]");
   }
 
+  // 23an. MediaCapabilities.decodingInfo() (broker VideoDecodePerfHistory): video sites call
+  // this on load to pick a codec; a supported video config queries the perf-history service,
+  // which has no disconnect handler -> hang if unbound. Verify it settles to an object.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://video.test/");
+    Eval(v,
+         "window.__mc='';"
+         "var __codecs=['avc1.42E01E','vp8','vp09.00.10.08','av01.0.04M.08','vp9'];"
+         "var __vid=__codecs.map(function(c){return {contentType:'video/mp4; codecs=\"'+c+'\"',"
+         "width:1280,height:720,bitrate:1000000,framerate:30};});"
+         "Promise.all(__codecs.map(function(c,i){return navigator.mediaCapabilities.decodingInfo("
+         "{type:'media-source',video:__vid[i]}).then(function(r){return c+':'+r.supported;});}))"
+         ".then(function(a){window.__mc=a.join(' ');})"
+         ".catch(function(e){window.__mc='err:'+e.name;});");
+    mbWaitForFunction(v, "window.__mc!==''", 4000);
+    const std::string r = Eval(v, "window.__mc");
+    Expect(r.find(':') != std::string::npos,
+           "MediaCapabilities.decodingInfo settles (codec support probe)",
+           "mc=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");
