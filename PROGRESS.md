@@ -102,9 +102,11 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      the top-level navigation (MbFetchUrl) and subresources/fetch (Deliver). Verified
      (mb_smoke 32b, MB_NET_TESTS vs httpbin /headers): the header registered for "/headers"
      is echoed; one for a non-matching host is not.
-   - [NEXT] wke peers — wire the host hooks into the wke layer (`wkeOnLoadUrlBegin` onto the
-     request hook, `wkeNetOnResponse` onto the response hook). Friction: wke's job-based API
-     + per-view vs our process-wide hooks; needs a pragmatic mapping.
+   - [DONE] **wke peers** — `wkeNetOnRequest(cb)` (return true to BLOCK) + `wkeNetOnResponse(cb)`
+     (inspect URL+body) forward to the host request/response hooks. Port-pragmatic (process-wide
+     under the hood, last registration wins; simpler than miniblink49's job-based wkeOnLoadUrlBegin).
+     Verified (wke_smoke +1=103, offline): a file:// CSS subresource — the request cb logs its URL,
+     the response cb gets its bytes, the CSS applies; blocking the CSS via the request cb stops it.
 
    **→ Network interception (#1) is now comprehensive: static block/mock/URL-rewrite +
    per-URL header inject + dynamic request hook + response hook + CLI (--mock/--rewrite).**

@@ -1990,6 +1990,59 @@ void wkeOnLoadingFinish(wkeWebView webView, wkeLoadingFinishCallback callback,
   webView->loading_param = param;
 }
 
+// Process-wide forwarding state for the network-interception peers (the host hooks are
+// process-wide). POD: no exit-time destructor.
+namespace {
+struct WkeNetReqHook {
+  wkeWebView wv;
+  wkeNetRequestCallback cb;
+  void* param;
+};
+WkeNetReqHook g_wke_net_req{nullptr, nullptr, nullptr};
+struct WkeNetRespHook {
+  wkeWebView wv;
+  wkeNetResponseCallback cb;
+  void* param;
+};
+WkeNetRespHook g_wke_net_resp{nullptr, nullptr, nullptr};
+}  // namespace
+
+void wkeNetOnRequest(wkeWebView webView, wkeNetRequestCallback callback,
+                     void* param) {
+  g_wke_net_req = {webView, callback, param};
+  if (callback) {
+    mbSetRequestCallback(
+        [](const char* url, void*) -> int {
+          return (g_wke_net_req.cb &&
+                  g_wke_net_req.cb(g_wke_net_req.wv, g_wke_net_req.param, url))
+                     ? 1
+                     : 0;
+        },
+        nullptr);
+  } else {
+    mbSetRequestCallback(nullptr, nullptr);
+  }
+}
+
+void wkeNetOnResponse(wkeWebView webView, wkeNetResponseCallback callback,
+                      void* param) {
+  g_wke_net_resp = {webView, callback, param};
+  if (callback) {
+    mbSetResponseCallback(
+        [](mbResponse* r, void*) {
+          if (!g_wke_net_resp.cb)
+            return;
+          int len = 0;
+          const char* body = mbResponseBody(r, &len);
+          g_wke_net_resp.cb(g_wke_net_resp.wv, g_wke_net_resp.param,
+                            mbResponseURL(r), body, len);
+        },
+        nullptr);
+  } else {
+    mbSetResponseCallback(nullptr, nullptr);
+  }
+}
+
 void wkeOnConsole(wkeWebView webView, wkeConsoleCallback callback, void* param) {
   if (!webView)
     return;

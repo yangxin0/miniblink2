@@ -187,6 +187,58 @@ int main() {
     wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore for later cases
   }
 
+  // Network interception peers (wkeNetOnRequest / wkeNetOnResponse). A page with a
+  // file:// CSS subresource routes that request through the loader, where the hooks
+  // fire: the request callback sees the CSS URL, the response callback gets its bytes.
+  // Then a request callback that BLOCKS the CSS prevents the rule from applying.
+  {
+    if (FILE* f = std::fopen("/tmp/wke_net.css", "wb")) {
+      const char* css = "body{color:rgb(1,2,3)}";
+      std::fwrite(css, 1, std::strlen(css), f);
+      std::fclose(f);
+    }
+    static std::string* reqlog = new std::string();   // statics: lambda stays a fn ptr
+    static std::string* respbody = new std::string();
+    reqlog->clear();
+    respbody->clear();
+    wkeNetOnRequest(wv, [](wkeWebView, void*, const utf8* url) -> bool {
+      *reqlog += std::string(url) + ";";
+      return false;  // allow all (first pass)
+    }, nullptr);
+    wkeNetOnResponse(wv, [](wkeWebView, void*, const utf8* url, const char* body,
+                           int len) {
+      if (std::strstr(url, "wke_net.css"))
+        respbody->assign(body, static_cast<size_t>(len));
+    }, nullptr);
+    wkeLoadHtmlWithBaseUrl(
+        wv,
+        "<link rel='stylesheet' href='file:///tmp/wke_net.css'><body>x</body>",
+        "file:///tmp/wke_net_page.html");
+    const bool saw_req = reqlog->find("wke_net.css") != std::string::npos;
+    const bool got_resp = *respbody == "body{color:rgb(1,2,3)}";
+    const bool applied =
+        std::strcmp(jsToTempString(
+                        es, wkeRunJS(wv, "getComputedStyle(document.body).color")),
+                    "rgb(1, 2, 3)") == 0;
+    // Second pass: block the CSS — its rule must NOT apply.
+    wkeNetOnRequest(wv, [](wkeWebView, void*, const utf8* url) -> bool {
+      return std::strstr(url, "wke_net.css") != nullptr;  // block it
+    }, nullptr);
+    wkeLoadHtmlWithBaseUrl(
+        wv,
+        "<link rel='stylesheet' href='file:///tmp/wke_net.css'><body>x</body>",
+        "file:///tmp/wke_net_page2.html");
+    const bool blocked =
+        std::strcmp(jsToTempString(
+                        es, wkeRunJS(wv, "getComputedStyle(document.body).color")),
+                    "rgb(1, 2, 3)") != 0;  // CSS blocked -> default color
+    wkeNetOnRequest(wv, nullptr, nullptr);
+    wkeNetOnResponse(wv, nullptr, nullptr);
+    check(saw_req && got_resp && applied && blocked,
+          "wkeNetOnRequest/Response see + block loader requests");
+    wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore (later case reads title)
+  }
+
   // Multiple concurrent webViews are independent (real multi-view apps): each has
   // its own document, title, and JS globals, and destroying one leaves the other
   // fully usable.

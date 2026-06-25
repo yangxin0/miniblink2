@@ -649,4 +649,24 @@ typedef void (*wkeJsBridgeCallback)(wkeWebView webView, void* param,
 WKE_API void wkeOnJsBridge(wkeWebView webView, wkeJsBridgeCallback callback,
                            void* param);
 
+// Network interception (port-pragmatic peers of the host request/response hooks —
+// simpler than miniblink49's job-based wkeOnLoadUrlBegin). Both are PROCESS-WIDE under
+// the hood (the loader hook has no per-view scope); the last registration wins, which
+// is what a single-view embedder needs.
+//
+// wkeNetOnRequest: `callback` is consulted for EVERY request URL the loader handles
+// (the page navigation + each subresource + fetch/XHR); return true to BLOCK it
+// (fails ERR_BLOCKED_BY_CLIENT), false to allow. NULL callback clears it.
+typedef bool (*wkeNetRequestCallback)(wkeWebView webView, void* param,
+                                      const utf8* url);
+WKE_API void wkeNetOnRequest(wkeWebView webView, wkeNetRequestCallback callback,
+                             void* param);
+// wkeNetOnResponse: `callback` fires after each successful response with the URL and
+// the response body bytes (`body`, `len`) — inspection/logging (no modify here; use the
+// mb_capi response hook to rewrite). NULL clears it.
+typedef void (*wkeNetResponseCallback)(wkeWebView webView, void* param,
+                                       const utf8* url, const char* body, int len);
+WKE_API void wkeNetOnResponse(wkeWebView webView, wkeNetResponseCallback callback,
+                              void* param);
+
 #endif  // MINIBLINK_WKE_WKE_H_
