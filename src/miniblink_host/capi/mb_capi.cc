@@ -614,6 +614,19 @@ void mbClearStorage(mbView* v) {
     v->impl->ClearStorage();
 }
 
+int mbSaveLocalStorage(mbView* v, char* out, int out_cap) {
+  if (!v || !v->impl)
+    return 0;
+  std::string result = v->impl->SaveLocalStorage();
+  CopyToBuffer(result, out, out_cap);
+  return static_cast<int>(result.size());
+}
+
+void mbLoadLocalStorage(mbView* v, const char* json) {
+  if (v && v->impl)
+    v->impl->LoadLocalStorage(json);
+}
+
 int mbDrainConsole(mbView* v, char* out, int out_cap) {
   if (!v || !v->impl)
     return 0;

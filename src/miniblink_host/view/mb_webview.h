@@ -261,6 +261,11 @@ class MbWebView {
   // Empty both Web Storage areas (localStorage + sessionStorage) for the
   // document's origin — reset state between scrapes / a logout. Best-effort.
   void ClearStorage();
+  // Snapshot / restore the WHOLE localStorage for the document's origin as a JSON
+  // object string — persist a session across process runs (save to disk, reload next
+  // run). LoadLocalStorage merges the snapshot into the current store.
+  std::string SaveLocalStorage();
+  void LoadLocalStorage(const char* json);
   // The first match's LIVE .value property (what an <input>/<textarea>/<select>
   // currently holds after typing or selection) — distinct from GetAttribute,
   // which reads the static "value" HTML attribute (the initial value). Returns

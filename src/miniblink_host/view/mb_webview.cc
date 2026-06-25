@@ -1083,6 +1083,30 @@ void MbWebView::ClearStorage() {
       "try{sessionStorage.clear();}catch(e){}})()");
 }
 
+std::string MbWebView::SaveLocalStorage() {
+  // Snapshot the WHOLE localStorage for the document's origin as a JSON object
+  // {key:value,...} — the embedder writes it to disk and reloads it next run, so a
+  // session (auth token, app state) survives a process restart (the cookie-jar peer is
+  // mbSaveCookies). "{}" on an opaque origin / no storage.
+  std::string s = EvalToString(
+      "(function(){try{var o={};for(var i=0;i<localStorage.length;i++){"
+      "var k=localStorage.key(i);o[k]=localStorage.getItem(k);}"
+      "return JSON.stringify(o);}catch(e){return '{}';}})()");
+  return s.empty() ? std::string("{}") : s;
+}
+
+void MbWebView::LoadLocalStorage(const char* json) {
+  // Restore a SaveLocalStorage() snapshot: JSON.parse it (passed as a JS string literal
+  // so arbitrary content is safe) and setItem each key. Merges into the current store.
+  if (!json || !*json)
+    return;
+  std::string js =
+      "(function(){try{var o=JSON.parse(\"" + JsEscape(json) +
+      "\");for(var k in o){if(Object.prototype.hasOwnProperty.call(o,k))"
+      "localStorage.setItem(k,String(o[k]));}}catch(e){}})()";
+  EvalToString(js.c_str());
+}
+
 bool MbWebView::SetAttribute(const char* css_selector, const char* attr,
                              const char* value) {
   if (!css_selector || !attr)

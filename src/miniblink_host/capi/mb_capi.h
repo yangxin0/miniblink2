@@ -495,6 +495,15 @@ MB_EXPORT int mbSetSessionStorage(mbView*, const char* key, const char* value);
 // login session.
 MB_EXPORT void mbClearStorage(mbView*);
 
+// Persist localStorage across process runs: mbSaveLocalStorage snapshots the WHOLE
+// localStorage for the current document's origin into `out` as a JSON object string
+// (NUL-terminated; size first with out=NULL), returning its length. mbLoadLocalStorage
+// restores such a snapshot (merging into the current store). Save to disk after a login,
+// reload it next run to resume the session — the localStorage peer of mbSaveCookies.
+// Needs a real (http/https) origin, like the other storage calls.
+MB_EXPORT int mbSaveLocalStorage(mbView*, char* out, int out_cap);
+MB_EXPORT void mbLoadLocalStorage(mbView*, const char* json);
+
 // Write the committed main document's URL (the final URL after any redirects)
 // into `out` (NUL-terminated, up to out_cap). Returns the full length in bytes.
 MB_EXPORT int mbGetURL(mbView*, char* out, int out_cap);

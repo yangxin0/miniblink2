@@ -834,6 +834,26 @@ int main() {
            "DOM sessionStorage round-trip",
            Eval(v, "(function(){try{sessionStorage.setItem('s','s7');"
                    "return sessionStorage.getItem('s');}catch(e){return 'THROW:'+e.name;}})()"));
+
+    // 23b. localStorage persistence across runs (#9): snapshot the whole store, clear it
+    // (simulating a fresh process with empty localStorage), then restore — the keys come
+    // back, incl. one with characters needing JSON/JS escaping. The embedder writes the
+    // snapshot to disk after login and reloads it next run (the cookie-jar peer).
+    mbSetLocalStorage(v, "tok", "abc\"123");  // value with a quote (escaping)
+    mbSetLocalStorage(v, "u", "ada");
+    char snap[1024] = {0};
+    const int n = mbSaveLocalStorage(v, snap, sizeof(snap));
+    mbClearStorage(v);  // fresh-run: localStorage now empty
+    const int gone = mbGetLocalStorage(v, "tok", nullptr, 0);  // -1 absent
+    mbLoadLocalStorage(v, snap);  // restore the saved session
+    char t[64] = {0}, u[64] = {0};
+    mbGetLocalStorage(v, "tok", t, sizeof(t));
+    mbGetLocalStorage(v, "u", u, sizeof(u));
+    Expect(n > 2 && gone == -1 && std::string(t) == "abc\"123" &&
+               std::string(u) == "ada",
+           "localStorage snapshot survives clear + restore (cross-run persistence)",
+           std::string("n=") + std::to_string(n) + " gone=" + std::to_string(gone) +
+               " tok=[" + t + "] u=[" + u + "]");
   }
 
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services

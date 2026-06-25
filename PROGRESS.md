@@ -233,7 +233,13 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
    Flow map: dedicated_worker.cc ContinueStart→CreateWorkerHost→OnWorkerHostCreated→
    OnScriptLoadStarted→ContinueStart (worker thread + script fetch). 8. Broker binds cookies
 only — IndexedDB / WebSocket / Permissions / geolocation / clipboard / notifications dropped.
-9. Storage/cookie persistence across runs + async CookieStore + change events. 10. Blob-from-file
+9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
+   Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
+   localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —
+   save to disk after login, reload next run (the localStorage peer of the cookie jar).
+   Verified (mb_smoke 23b): set keys (incl. a quote needing escaping) → snapshot → clear
+   (fresh run) → restore → keys back. [REMAINING: async CookieStore API + storage change
+   events; IndexedDB persistence (needs the IndexedDB broker, see #8).] 10. Blob-from-file
 + ranged blob reads + DataPipeGetter uploads. 11. **GPU content path** (WebGL / accel-2d-canvas /
 `<video>` render blank) — the heaviest; needs a GL/media provider. Last.
 
