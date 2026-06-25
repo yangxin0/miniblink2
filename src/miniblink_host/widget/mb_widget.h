@@ -50,6 +50,10 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   // handlers fire on release. Pairs with SendKey for callers that drive down/up
   // separately (e.g. wke's wkeFireKeyUpEvent).
   void SendKeyUp(int windows_key_code);
+  // Drive the focused editable through an IME sequence: `composing` shows the in-progress
+  // reading (compositionstart/update), `committed` inserts the final text + fires
+  // compositionend + input. Either may be empty/null.
+  void SendIme(const char* composing, const char* committed);
 
   blink::WebFrameWidget* widget() { return widget_; }
 

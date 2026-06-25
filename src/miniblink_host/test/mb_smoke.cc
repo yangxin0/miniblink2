@@ -297,6 +297,27 @@ int main() {
            "c=[" + c + "] a=[" + a + "] x=[" + x + "]");
   }
 
+  // 0i2. IME composition (#12 input): mbSendIme drives the focused input through a
+  // composition preview + commit — the committed text lands and the composition events
+  // fire (CJK / accented input via an input method).
+  {
+    mbLoadHTML(v,
+        "<body><input id='ime'><script>window.__cs=0;window.__ce=0;"
+        "var e=document.getElementById('ime');"
+        "e.addEventListener('compositionstart',function(){window.__cs++;});"
+        "e.addEventListener('compositionend',function(){window.__ce++;});"
+        "</script></body>",
+        "about:blank");
+    mbFocusSelector(v, "#ime");
+    mbSendIme(v, "\xE3\x81\xAB\xE3\x81\xBB", "\xE6\x97\xA5\xE6\x9C\xAC");  // "にほ" -> "日本"
+    const std::string val = Eval(v, "document.getElementById('ime').value");
+    Expect(val == "\xE6\x97\xA5\xE6\x9C\xAC" && Eval(v, "''+window.__cs") == "1" &&
+               Eval(v, "''+window.__ce") == "1",
+           "mbSendIme: IME compose+commit lands text + fires composition events",
+           "val=[" + val + "] cs=" + Eval(v, "''+window.__cs") + " ce=" +
+               Eval(v, "''+window.__ce"));
+  }
+
   // 0j. CSP does NOT leak across navigations in a reused view (#15). Load a page whose
   // strict <meta> CSP (script-src 'none') blocks its own inline script, then load a
   // normal page in the SAME view: the second page's script MUST run — each commit now

@@ -1333,6 +1333,11 @@ void MbWebView::SendKeyUp(int windows_key_code) {
     widget_->SendKeyUp(windows_key_code);
 }
 
+void MbWebView::SendIme(const char* composing, const char* committed) {
+  if (widget_)
+    widget_->SendIme(composing, committed);
+}
+
 void MbWebView::SendText(const char* utf8) {
   if (widget_)
     widget_->SendText(utf8);

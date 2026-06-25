@@ -19,8 +19,10 @@
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
+#include "ui/base/ime/ime_text_span.h"
 #include "ui/events/keycodes/dom/dom_key.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/gfx/range/range.h"
 #include "ui/latency/latency_info.h"
 
 namespace mb {
@@ -350,6 +352,29 @@ void MbWidget::SendKeyUp(int windows_key_code) {
   auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
   impl->HandleInputEvent(
       blink::WebCoalescedInputEvent(e, ui::LatencyInfo()));
+}
+
+void MbWidget::SendIme(const char* composing, const char* committed) {
+  if (!widget_)
+    return;
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  // Drive the focused editable through an IME sequence: SetComposition shows the
+  // in-progress reading (compositionstart/compositionupdate, no value commit yet), then
+  // CommitText inserts the final text and fires compositionend + input — i.e. text typed
+  // via an input method (CJK, accents). Requires a focused editable (focus first).
+  if (composing && *composing) {
+    const blink::String c = blink::String::FromUtf8(composing);
+    impl->SetComposition(c, blink::Vector<ui::ImeTextSpan>(),
+                         gfx::Range::InvalidRange(),
+                         static_cast<int>(c.length()),
+                         static_cast<int>(c.length()),
+                         blink::mojom::blink::ImeState::kNone);
+  }
+  if (committed && *committed) {
+    impl->CommitText(blink::String::FromUtf8(committed),
+                     blink::Vector<ui::ImeTextSpan>(),
+                     gfx::Range::InvalidRange(), /*relative_cursor_pos=*/1);
+  }
 }
 
 }  // namespace mb

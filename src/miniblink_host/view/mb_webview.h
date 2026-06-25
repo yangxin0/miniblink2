@@ -169,6 +169,8 @@ class MbWebView {
   void SendText(const char* utf8);
   void SendKey(const char* key_name);  // press a named non-text key (Enter, Tab, ...)
   void SendKeyUp(int windows_key_code);  // standalone key release (fires `keyup`)
+  // IME composition into the focused editable: `composing` previews, `committed` inserts.
+  void SendIme(const char* composing, const char* committed);
   // Set the device pixel ratio (HiDPI). The page lays out in CSS px but reports
   // window.devicePixelRatio == scale and rasterizes at `scale`x in PaintInto, so
   // captures are retina-crisp. Caller sizes the output bitmap to logical*scale.

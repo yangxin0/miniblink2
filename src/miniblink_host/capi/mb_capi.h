@@ -357,6 +357,12 @@ MB_EXPORT void mbSendKey(mbView*, const char* key_name);
 // separately rather than as one press (mbSendKey already includes the release).
 MB_EXPORT void mbSendKeyUp(mbView*, int windows_key_code);
 
+// Type text via an input method (IME) into the FOCUSED editable: `composing` previews
+// the in-progress reading (fires compositionstart/compositionupdate), `committed`
+// inserts the final text (fires compositionend + input) — for testing CJK / accented
+// input. Either may be NULL/empty. Focus an input first (e.g. mbFocusSelector).
+MB_EXPORT void mbSendIme(mbView*, const char* composing, const char* committed);
+
 // Synthesize a gesture scroll at (x,y) by (dx,dy) pixels. Positive dy scrolls
 // the page downward (toward larger window.scrollY), matching natural intent.
 MB_EXPORT void mbSendScroll(mbView*, int x, int y, int dx, int dy);

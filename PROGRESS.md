@@ -233,7 +233,20 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
    interface) backed by `MbURLLoader` — plus the worker-host/broker mojo remotes can't be null
    or the worker derefs them. Needs a dedicated multi-tick effort, not a single loop tick.
    Flow map: dedicated_worker.cc ContinueStart→CreateWorkerHost→OnWorkerHostCreated→
-   OnScriptLoadStarted→ContinueStart (worker thread + script fetch). 8. Broker binds cookies
+   OnScriptLoadStarted→ContinueStart (worker thread + script fetch).
+   DEEPER SCOPE (investigated 2026-06): the factory-client stub must call, on the stored
+   `blink::WebDedicatedWorker*`: (a) `OnWorkerHostCreated(broker_remote, dedicated_worker_host
+   _remote, origin)` — needs a bound BrowserInterfaceBroker remote (reuse MakeFrameInterface-
+   Broker) AND a bound DedicatedWorkerHost remote (a new mojom stub); (b) `OnScriptLoadStarted(
+   nullptr load_params, bfcache_host_remote, coep/dip observer receivers, …)` so the worker
+   fetches its own script — but those remotes/receivers are non-optional, so each needs a
+   stub. THEN `MbFrameClient::CreateWorkerFetchContext` must return a real `WebWorkerFetchContext`
+   (21 virtuals; the load-bearing `GetURLLoaderFactory()` must hand back a blink::URLLoaderFactory
+   that creates MbURLLoaders). No minimal fake exists in the donor to model. RISK: null/wrong
+   remotes crash on deref, and the worker thread brings its own isolate+cppgc heap setup that may
+   hit further CHECKs — i.e. intermediate states likely crash, so it does NOT fit the
+   verify-each-tick loop. Needs a dedicated, focused multi-hour session, not 5-min ticks.
+   8. Broker binds cookies
 only [+ Permissions, this tick]. [DONE: Permissions] `MbPermissionService` in the FRAME
 broker (mb_frame_broker.cc — the one navigator.* uses, not the platform thread broker)
 answers navigator.permissions.query/.request as DENIED, so the promise resolves instead
@@ -266,7 +279,12 @@ notifications — IndexedDB+WebSocket are genuinely heavy; same frame-broker pat
     page sees e.button + e.ctrlKey/shiftKey/altKey/metaKey (left→click, middle→auxclick,
     right→contextmenu). Verified (mb_smoke 0i): shift+alt left → "0,true,true", middle →
     auxclick button 1, right → contextmenu. (NB ctrl+click = macOS secondary click.)
-    [REMAINING: IME composition, native HTML5 drag-drop, trusted touch/wheel.]
+    [DONE: IME] `mbSendIme(composing, committed)` drives the focused editable through the
+    widget's SetComposition (compositionstart/update preview) + CommitText (compositionend +
+    input, inserts) — CJK/accented input via an input method. Verified (mb_smoke 0i2): focus
+    input, mbSendIme("にほ","日本") → value 日本, compositionstart+end each fired once.
+    [REMAINING: native HTML5 drag-drop (hard — drag controller + DataTransfer), trusted
+    touch/wheel.]
 13. [DONE] PDF options. `mbSavePdfEx(path, width_pt, height_pt, landscape, scale, margin_pt)`
 (mbSavePdf kept = Letter default) + `mb_shot --pdf-size letter|a4|legal|a3|tabloid|WxH
 --landscape --pdf-scale N --pdf-margin PT`. Page size in points; landscape swaps w/h; content
