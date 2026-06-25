@@ -311,6 +311,25 @@ int main() {
     wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore
   }
 
+  // wkeOnDownload: a top-level navigation that is a download (non-renderable MIME) fires
+  // the callback with the URL and is NOT rendered (the prior page stays).
+  {
+    static std::string* dl = new std::string();
+    dl->clear();
+    wkeOnDownload(wv, [](wkeWebView, void*, const char* url) -> bool {
+      *dl = url ? url : "";
+      return true;
+    }, nullptr);
+    wkeLoadHTML(wv, "<body>PAGE</body>");
+    wkeLoadURL(wv, "data:application/octet-stream,X");  // download nav
+    const bool stayed = std::strcmp(
+        jsToTempString(es, wkeRunJS(wv, "document.body.textContent")), "PAGE") == 0;
+    check(dl->find("application/octet-stream") != std::string::npos && stayed,
+          "wkeOnDownload fires for a download navigation; the page is not replaced");
+    wkeOnDownload(wv, nullptr, nullptr);
+    wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore
+  }
+
   // Multiple concurrent webViews are independent (real multi-view apps): each has
   // its own document, title, and JS globals, and destroying one leaves the other
   // fully usable.

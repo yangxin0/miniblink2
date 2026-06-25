@@ -52,6 +52,8 @@ struct _tagWkeWebView {
   void* navigation_param = nullptr;
   wkeURLChangedCallback on_url_changed = nullptr;
   void* url_changed_param = nullptr;
+  wkeDownloadCallback on_download = nullptr;
+  void* download_param = nullptr;
   std::string user_init_script;  // wkeSetInitScript; combined with the bridge bootstrap
   std::string bridge_channel_cache;  // backs the callback's channel arg
   std::string bridge_message_cache;  // backs the callback's message arg
@@ -661,6 +663,28 @@ void wkeOnURLChanged(wkeWebView webView, wkeURLChangedCallback callback,
   webView->on_url_changed = callback;
   webView->url_changed_param = param;
   mbOnUrlChanged(webView->view, callback ? &WkeUrlChangedRouter : nullptr, webView);
+}
+
+namespace {
+// Routes the host download diversion (mbOnDownload) to the per-view wke callback, which
+// (per the miniblink signature) gets the URL only — the bytes are available via the
+// richer mb_capi mbOnDownload for embedders that need them. The wke callback's return is
+// advisory; this host has already diverted the response (not rendered it).
+void WkeDownloadRouter(mbView* /*view*/, void* userdata, const char* url,
+                       const char* /*mime*/, const char* /*filename*/,
+                       const char* /*data*/, int /*len*/) {
+  auto* wv = static_cast<wkeWebView>(userdata);
+  if (wv && wv->on_download)
+    wv->on_download(wv, wv->download_param, url ? url : "");
+}
+}  // namespace
+
+void wkeOnDownload(wkeWebView webView, wkeDownloadCallback callback, void* param) {
+  if (!webView || !webView->view)
+    return;
+  webView->on_download = callback;
+  webView->download_param = param;
+  mbOnDownload(webView->view, callback ? &WkeDownloadRouter : nullptr, webView);
 }
 
 bool wkeSavePdf(wkeWebView webView, const utf8* path) {

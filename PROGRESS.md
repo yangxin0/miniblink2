@@ -225,7 +225,9 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      (url, mime, suggested filename, body bytes) INSTEAD of rendered, ONLY if a callback is
      set (else rendered as before — no regression). Also added data: URLs to mbLoadURL's
      fetch path. Verified (mb_smoke 0m): mbLoadURL("data:application/octet-stream,DLBYTES")
-     → callback gets mime+bytes, the prior page stays (not committed).
+     → callback gets mime+bytes, the prior page stays (not committed). [DONE: wke peer]
+     `wkeOnDownload` (URL-only per the miniblink signature; bytes via mbOnDownload) routes
+     through it — verified (wke_smoke +1=107).
    - [DONE] **`mbSetFileForSelector(css_selector, paths_newline)`**: the privileged host op a
      page's own script is forbidden to do. Reaches the core `HTMLInputElement`, reads each
      path's bytes into an **in-memory `BlobData` registered with our BlobRegistry** (via

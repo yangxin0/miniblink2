@@ -639,6 +639,14 @@ typedef void (*wkeURLChangedCallback)(wkeWebView webView, void* param,
 WKE_API void wkeOnURLChanged(wkeWebView webView, wkeURLChangedCallback callback,
                              void* callbackParam);
 
+// Download: fires when a top-level navigation is a download (Content-Disposition
+// attachment / non-renderable MIME) with the `url`; the response is NOT rendered. (The
+// bytes are available through the richer mb_capi mbOnDownload.) Notification.
+typedef bool (*wkeDownloadCallback)(wkeWebView webView, void* param,
+                                    const char* url);
+WKE_API void wkeOnDownload(wkeWebView webView, wkeDownloadCallback callback,
+                           void* param);
+
 typedef enum _wkeLoadingResult {
   WKE_LOADING_SUCCEEDED,
   WKE_LOADING_FAILED,
