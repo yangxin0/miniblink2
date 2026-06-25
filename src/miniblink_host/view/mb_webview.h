@@ -47,6 +47,11 @@ class MbWebView {
   void Resize(int width, int height);
   void LoadHTML(const char* utf8_html, const char* base_url);  // no network
   void LoadURL(const char* utf8_url);                          // via libcurl factory
+  // Fetch `url` through the engine network stack and write the body to `dest_path`
+  // (a real download — not committed as a document). Honors the interception layer
+  // (rewrite / block / mock / request+response hooks) and, for http(s), the view's
+  // UA + headers + cookies + proxy. Returns false on fetch failure or a write error.
+  bool DownloadURL(const char* url, const char* dest_path);
   // POST `body` (with `content_type`, default form-urlencoded) to an http(s) URL
   // and commit the response as the document — host-driven POST navigation.
   // `body_len` is the exact byte length, so binary bodies with embedded NULs post

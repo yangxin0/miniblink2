@@ -299,6 +299,40 @@ void MbWebView::LoadURL(const char* utf8_url) {
   }
 }
 
+bool MbWebView::DownloadURL(const char* url_in, const char* dest_path) {
+  if (!url_in || !dest_path)
+    return false;
+  // Fetch a URL through the engine's network stack and write the body to disk WITHOUT
+  // committing it as a document — a real download. Honors the same interception layer
+  // as page loads: rewrite the URL, let a block rule / the request hook veto it, serve
+  // a mock with no fetch, and let the response hook inspect/rewrite the bytes. http(s)
+  // also carries the view's UA + extra headers + per-URL headers + cookies + proxy.
+  const std::string orig(url_in);
+  const std::string url = MbApplyUrlRewrites(orig);
+  if (MbIsUrlBlocked(url) || MbRequestHookBlocks(orig))
+    return false;
+  std::string body, content_type, final_url, headers;
+  int status = 0;
+  bool ok = false;
+  std::string mock_body, mock_ct;
+  int mock_status = 0;
+  if (MbFindMock(url, &mock_body, &mock_ct, &mock_status)) {
+    body = std::move(mock_body);
+    status = mock_status > 0 ? mock_status : 200;
+    ok = true;
+  } else {
+    ok = MbFetchUrl(url, &body, &content_type,
+                    frame_client_ ? frame_client_->user_agent() : std::string(),
+                    frame_client_ ? frame_client_->extra_headers() : std::string(),
+                    /*post_body=*/std::string(), /*post_content_type=*/std::string(),
+                    /*http_method=*/std::string(), &final_url, &status, &headers);
+  }
+  if (!ok)
+    return false;
+  MbInvokeResponseHook(orig, status, &body);  // inspect/rewrite before writing
+  return base::WriteFile(base::FilePath(dest_path), body);
+}
+
 void MbWebView::PostURL(const char* utf8_url, const char* utf8_body,
                         size_t body_len, const char* content_type) {
   std::string url(utf8_url ? utf8_url : "");

@@ -119,6 +119,12 @@ void mbLoadURL(mbView* v, const char* utf8_url) {
     v->impl->LoadURL(utf8_url);
 }
 
+int mbDownloadURL(mbView* v, const char* url, const char* dest_path) {
+  if (!v || !v->impl || !url || !dest_path)
+    return 0;
+  return v->impl->DownloadURL(url, dest_path) ? 1 : 0;
+}
+
 void mbOnLoadFinish(mbView* v, mbLoadFinishCallback cb, void* userdata) {
   if (!v || !v->impl)
     return;

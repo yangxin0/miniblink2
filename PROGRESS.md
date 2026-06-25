@@ -174,8 +174,15 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
 5. **JS dialogs** — alert/confirm/prompt are unhandled (`wke.h:462` even warns about it).
    Note the reverted `mbSetJsDialogPolicy` FATAL'd in `thread_collision_warner` — solve the
    `ScopedPagePauser` threading first.
-6. **File upload (`input[type=file]`)** — [DONE]. **File download (to disk)** — still absent
-   (downloads commit as documents).
+6. **File upload + download** — [DONE] (both).
+   - [DONE] **`mbDownloadURL(url, dest_path)`**: fetch a URL through the engine network stack
+     (MbFetchUrl) and write the body to disk WITHOUT rendering it as a document. Honors the
+     full interception layer (rewrite / block / mock / request+response hooks) and, for
+     http(s), the view's UA + extra/per-URL headers + cookies + proxy. Works for http(s),
+     file:// and data:. Verified (mb_smoke 0e, offline): a data: URL decodes to the file
+     (DL-DATA-7); a mocked URL downloads with NO network and the response hook rewrites the
+     bytes (REWRITTEN). (Browser-style "navigation that turns into a download" — detecting
+     Content-Disposition mid-commit — is NOT done; this is the explicit host-driven form.)
    - [DONE] **`mbSetFileForSelector(css_selector, paths_newline)`**: the privileged host op a
      page's own script is forbidden to do. Reaches the core `HTMLInputElement`, reads each
      path's bytes into an **in-memory `BlobData` registered with our BlobRegistry** (via

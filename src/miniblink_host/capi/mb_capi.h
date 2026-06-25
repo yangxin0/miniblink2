@@ -85,6 +85,13 @@ MB_EXPORT void    mbResize(mbView*, int width, int height);
 MB_EXPORT void mbLoadHTML(mbView*, const char* utf8_html, const char* base_url);
 MB_EXPORT void mbLoadURL(mbView*, const char* utf8_url);
 
+// Download `url` to `dest_path`: fetch through the engine network stack and write the
+// body to disk WITHOUT rendering it as a document. Honors the interception layer
+// (mbRewriteUrl / mbBlockUrl / mbMockResponse / mbSetRequestCallback / mbSetResponseCallback)
+// and, for http(s), the view's user-agent, extra + per-URL headers, cookies and proxy.
+// Works for http(s), file:// and data: URLs. Returns 1 on success, 0 on fetch/write failure.
+MB_EXPORT int mbDownloadURL(mbView*, const char* url, const char* dest_path);
+
 // Push notification of load completion — the real Blink DidFinishLoad signal (the
 // main document's `load` event, all subresources done), not a poll or a fixed timer.
 // Register a callback with mbOnLoadFinish (pass NULL to clear); it fires during the

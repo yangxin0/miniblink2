@@ -138,6 +138,42 @@ int main() {
     mbClearMocks();
   }
 
+  // 0e. mbDownloadURL fetches a URL through the engine and writes the body to disk
+  // WITHOUT rendering it. (a) a data: URL decodes to the file; (b) a mocked URL is
+  // served from the interception layer (no network) AND the response hook can rewrite
+  // the downloaded bytes — proving downloads honor the same interception as page loads.
+  {
+    auto slurp = [](const char* p) -> std::string {
+      std::string s;
+      if (FILE* f = std::fopen(p, "rb")) {
+        char b[4096];
+        size_t n;
+        while ((n = std::fread(b, 1, sizeof(b), f)) > 0)
+          s.append(b, n);
+        std::fclose(f);
+      }
+      return s;
+    };
+    const int d1 = mbDownloadURL(v, "data:text/plain,DL-DATA-7", "/tmp/mb_dl1.bin");
+    const std::string f1 = slurp("/tmp/mb_dl1.bin");
+    mbMockResponse("dl.test/file", "MOCKED-BODY", "application/octet-stream", 200);
+    mbSetResponseCallback(
+        [](mbResponse* r, void*) {
+          if (std::strstr(mbResponseURL(r), "dl.test/file"))
+            mbResponseSetBody(r, "REWRITTEN", 9);
+        },
+        nullptr);
+    const int d2 =
+        mbDownloadURL(v, "https://dl.test/file", "/tmp/mb_dl2.bin");
+    const std::string f2 = slurp("/tmp/mb_dl2.bin");
+    mbSetResponseCallback(nullptr, nullptr);
+    mbClearMocks();
+    Expect(d1 == 1 && f1 == "DL-DATA-7" && d2 == 1 && f2 == "REWRITTEN",
+           "mbDownloadURL writes to disk; honors mock + response-hook rewrite",
+           std::string("d1=") + std::to_string(d1) + " f1=[" + f1 + "] d2=" +
+               std::to_string(d2) + " f2=[" + f2 + "]");
+  }
+
   // 1. HTML parse + DOM.
   mbLoadHTML(v, "<body><div id='x'>hello</div></body>", "about:blank");
   Expect(Eval(v, "document.getElementById('x').textContent") == "hello",
