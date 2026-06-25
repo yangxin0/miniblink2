@@ -338,6 +338,10 @@ class MbWebView {
   // navigation's target URL and returns 1 to allow, 0 to block. {} clears it (allow all).
   using NavigationFn = std::function<int(const std::string& url)>;
   void SetNavigationCallback(NavigationFn cb);
+  // Register a callback fired on every main-frame commit (host load / page nav / redirect
+  // / reload) with the new URL — the "URL changed" notification. {} clears it.
+  using UrlChangedFn = std::function<void(const std::string& url)>;
+  void SetUrlChangedCallback(UrlChangedFn cb);
   // Called by MbFrameClient when the page requests a new window (window.open /
   // target=_blank). A notification only — the popup itself is denied (returns null).
   void OnCreateNewWindow(const std::string& url, const std::string& name);
@@ -468,6 +472,7 @@ class MbWebView {
   std::function<void()> on_load_finish_;  // optional embedder finish callback
   ConsoleFn on_console_;  // optional live console-message callback
   NavigationFn on_navigation_;  // optional page-initiated navigation policy callback
+  UrlChangedFn on_url_changed_;  // optional per-commit URL-changed notification
   NewWindowFn on_new_window_;   // optional window.open / target=_blank notification
 
   std::vector<uint8_t> encoded_png_;  // retained bytes from the last EncodePng

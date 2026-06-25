@@ -339,6 +339,23 @@ int main() {
     mbOnConsoleMessage(v, nullptr, nullptr);
   }
 
+  // 0l. URL-changed: mbOnUrlChanged fires on every main-frame commit with the new URL —
+  // track where the view is (host loads, navigations, redirects).
+  {
+    static std::string* urls = new std::string();  // -Wexit-time-destructors
+    urls->clear();
+    mbOnUrlChanged(
+        v, [](mbView*, void*, const char* url) { *urls += std::string(url) + ";"; },
+        nullptr);
+    mbLoadHTML(v, "<body>a</body>", "https://u.test/a");
+    mbLoadHTML(v, "<body>b</body>", "https://u.test/b");
+    Expect(urls->find("u.test/a") != std::string::npos &&
+               urls->find("u.test/b") != std::string::npos,
+           "mbOnUrlChanged fires per main-frame commit with the new URL",
+           "urls=[" + *urls + "]");
+    mbOnUrlChanged(v, nullptr, nullptr);
+  }
+
   // 0j. CSP does NOT leak across navigations in a reused view (#15). Load a page whose
   // strict <meta> CSP (script-src 'none') blocks its own inline script, then load a
   // normal page in the SAME view: the second page's script MUST run — each commit now

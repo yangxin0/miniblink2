@@ -632,6 +632,13 @@ typedef bool (*wkeNavigationCallback)(wkeWebView webView, void* param,
 WKE_API void wkeOnNavigation(wkeWebView webView, wkeNavigationCallback callback,
                              void* param);
 
+// URL changed: fires on EVERY main-frame commit (host load, page navigation, redirect,
+// reload) with the new `url` — track where the view currently is. Notification only.
+typedef void (*wkeURLChangedCallback)(wkeWebView webView, void* param,
+                                      const wkeString url);
+WKE_API void wkeOnURLChanged(wkeWebView webView, wkeURLChangedCallback callback,
+                             void* callbackParam);
+
 typedef enum _wkeLoadingResult {
   WKE_LOADING_SUCCEEDED,
   WKE_LOADING_FAILED,

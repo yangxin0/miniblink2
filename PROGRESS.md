@@ -182,6 +182,10 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      Verified (mb_smoke 0g, offline): a callback lets nav.test/ok commit (mock → GOOD) and
      vetoes nav.test/blocked (stays GOOD); the log shows both URLs. [DONE: wke peer]
      `wkeOnNavigation` routes to it (verified wke_smoke +1=105: cancels a location.href nav).
+   - [DONE] **URL-changed notification** — `mbOnUrlChanged(view, cb)` fires on EVERY main-frame
+     commit (host load / page nav / redirect / reload) with the new URL, from
+     `OnDidCommitMainFrame`; + wke peer `wkeOnURLChanged`. Verified (mb_smoke 0l=79, wke_smoke
+     +1=106): two loads → callback logs both URLs.
    - [DONE] **new-window notification** — `mbOnNewWindow(view, cb, userdata)`: fires when the
      page calls `window.open()` / activates `target=_blank`, with the requested URL + window
      name, via `MbFrameClient::CreateNewWindow` (which still returns null = popup denied, the

@@ -110,6 +110,12 @@ MB_EXPORT int  mbIsLoadFinished(mbView*);
 typedef int (*mbNavigationCallback)(mbView*, void* userdata, const char* url);
 MB_EXPORT void mbOnNavigation(mbView*, mbNavigationCallback, void* userdata);
 
+// URL-changed notification: fires on EVERY main-frame commit (host load, page-initiated
+// navigation, server redirect, reload) with the new `url` — track where the view is
+// (redirects, SPA-style location changes, form-submit landings). NULL clears it.
+typedef void (*mbUrlChangedCallback)(mbView*, void* userdata, const char* url);
+MB_EXPORT void mbOnUrlChanged(mbView*, mbUrlChangedCallback, void* userdata);
+
 // New-window notification: the callback fires when the page requests a new window
 // (window.open() or a target=_blank activation), with the requested `url` and window
 // `name`. It is a notification only — the popup is not auto-created (window.open returns

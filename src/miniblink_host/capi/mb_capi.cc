@@ -149,6 +149,16 @@ void mbOnNavigation(mbView* v, mbNavigationCallback cb, void* userdata) {
     v->impl->SetNavigationCallback({});
 }
 
+void mbOnUrlChanged(mbView* v, mbUrlChangedCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetUrlChangedCallback(
+        [v, cb, userdata](const std::string& url) { cb(v, userdata, url.c_str()); });
+  else
+    v->impl->SetUrlChangedCallback({});
+}
+
 void mbOnNewWindow(mbView* v, mbNewWindowCallback cb, void* userdata) {
   if (!v || !v->impl)
     return;

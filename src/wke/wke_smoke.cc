@@ -295,6 +295,22 @@ int main() {
     wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore
   }
 
+  // wkeOnURLChanged: fires on every main-frame commit with the new URL.
+  {
+    static std::string* urls = new std::string();
+    urls->clear();
+    wkeOnURLChanged(wv, [](wkeWebView, void*, const wkeString url) {
+      *urls += std::string(wkeGetString(url)) + ";";
+    }, nullptr);
+    wkeLoadHtmlWithBaseUrl(wv, "<body>a</body>", "https://wu.test/a");
+    wkeLoadHtmlWithBaseUrl(wv, "<body>b</body>", "https://wu.test/b");
+    check(urls->find("wu.test/a") != std::string::npos &&
+              urls->find("wu.test/b") != std::string::npos,
+          "wkeOnURLChanged fires per main-frame commit with the new URL");
+    wkeOnURLChanged(wv, nullptr, nullptr);
+    wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore
+  }
+
   // Multiple concurrent webViews are independent (real multi-view apps): each has
   // its own document, title, and JS globals, and destroying one leaves the other
   // fully usable.

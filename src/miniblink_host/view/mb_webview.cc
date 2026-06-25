@@ -1218,6 +1218,10 @@ void MbWebView::Reload() {
 }
 
 void MbWebView::OnDidCommitMainFrame(const std::string& url, bool standard) {
+  // Notify on every main-frame commit (host load, page navigation, redirect, reload) —
+  // the "URL changed" signal, before the history bookkeeping below.
+  if (on_url_changed_ && !url.empty())
+    on_url_changed_(url);
   // Maintain the back/forward stack. Only standard commits append; reloads and
   // the initial empty document (inert commits) do not. A Go{Back,Forward}
   // re-navigates via LoadURL (also a standard commit) — the in_history_nav_ flag
@@ -1264,6 +1268,10 @@ bool MbWebView::OnBeginNavigation(const std::string& url) {
 
 void MbWebView::SetNavigationCallback(NavigationFn cb) {
   on_navigation_ = std::move(cb);
+}
+
+void MbWebView::SetUrlChangedCallback(UrlChangedFn cb) {
+  on_url_changed_ = std::move(cb);
 }
 
 void MbWebView::OnCreateNewWindow(const std::string& url,

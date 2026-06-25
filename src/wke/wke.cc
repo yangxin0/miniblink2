@@ -50,6 +50,8 @@ struct _tagWkeWebView {
   void* prompt_param = nullptr;
   wkeNavigationCallback on_navigation = nullptr;
   void* navigation_param = nullptr;
+  wkeURLChangedCallback on_url_changed = nullptr;
+  void* url_changed_param = nullptr;
   std::string user_init_script;  // wkeSetInitScript; combined with the bridge bootstrap
   std::string bridge_channel_cache;  // backs the callback's channel arg
   std::string bridge_message_cache;  // backs the callback's message arg
@@ -639,6 +641,26 @@ void wkeOnNavigation(wkeWebView webView, wkeNavigationCallback callback,
   webView->on_navigation = callback;
   webView->navigation_param = param;
   mbOnNavigation(webView->view, callback ? &WkeNavRouter : nullptr, webView);
+}
+
+namespace {
+// Routes the host URL-changed notification (mbOnUrlChanged) to the per-view wke callback.
+void WkeUrlChangedRouter(mbView* /*view*/, void* userdata, const char* url) {
+  auto* wv = static_cast<wkeWebView>(userdata);
+  if (!wv || !wv->on_url_changed)
+    return;
+  _tagWkeString u{url ? std::string(url) : std::string()};
+  wv->on_url_changed(wv, wv->url_changed_param, &u);
+}
+}  // namespace
+
+void wkeOnURLChanged(wkeWebView webView, wkeURLChangedCallback callback,
+                     void* param) {
+  if (!webView || !webView->view)
+    return;
+  webView->on_url_changed = callback;
+  webView->url_changed_param = param;
+  mbOnUrlChanged(webView->view, callback ? &WkeUrlChangedRouter : nullptr, webView);
 }
 
 bool wkeSavePdf(wkeWebView webView, const utf8* path) {
