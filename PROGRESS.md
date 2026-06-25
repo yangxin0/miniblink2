@@ -364,8 +364,17 @@ formats empty) + PermissionService now GRANTS clipboard-read/write → `navigato
 writeText/readText work (secure origin + document.hasFocus()==true, which the host reports).
 Host shares the store via `mbSetClipboard(text)` / `mbGetClipboard(out)`. Verified (mb_smoke
 23e): page writeText 'copied-from-page' → mbGetClipboard reads it; mbSetClipboard 'set-by-
-host' → page readText returns it. [REMAINING at the broker: IndexedDB / WebSocket /
-notifications — IndexedDB+WebSocket are genuinely heavy; same frame-broker pattern.]
+host' → page readText returns it. [DONE: Web Locks] `frame/mb_lock_manager.{h,cc}` (`MbLock-
+Manager`, bound from the frame broker) implements `navigator.locks` with REAL serialization:
+`RequestLock` grants exclusive/shared with per-name conflict checks, queues WAIT requests,
+fails NO_WAIT (`{ifAvailable:true}`) requests, and PREEMPT-steals; a held lock releases when
+its `LockHandle` pipe closes (posted, never deleting the receiver inside its own disconnect
+handler), then the queue is reprocessed. The `LockHandle` sent to `Granted` is left an
+UNassociated pending endpoint so it associates with the `LockRequest` pipe (a dedicated one
+DCHECKs). Verified (mb_smoke 23f/23g): two exclusive requests on one name serialize ("AaB" —
+2nd waits for 1st's async release), and `{ifAvailable:true}` on a held lock yields null.
+[REMAINING at the broker: IndexedDB / WebSocket / notifications — genuinely heavy backends;
+same frame-broker entry point, but each needs a real store/network/connector.]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
    Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —

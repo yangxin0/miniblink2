@@ -1019,6 +1019,45 @@ int main() {
            "w=[" + w + "] host=[" + std::string(hb) + "] r=[" + r + "]");
   }
 
+  // 23f. Web Locks (navigator.locks, broker #8): the in-process LockManager grants with
+  // real EXCLUSIVE serialization. Two requests for the same name: the first holds the lock
+  // across an async (timer) callback; the second must WAIT until the first's promise
+  // settles (releasing the lock). Logging A on acquire, a on release, B on the second
+  // acquire yields "AaB" iff the lock serialized them (concurrent grants would give "AB").
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://locks.test/");
+    Eval(v,
+         "window.__lg='';"
+         "navigator.locks.request('res',function(){window.__lg+='A';"
+         "return new Promise(function(res){setTimeout(function(){window.__lg+='a';"
+         "res();},50);});});"
+         "navigator.locks.request('res',function(){window.__lg+='B';"
+         "return Promise.resolve();});");
+    mbWaitForFunction(v, "window.__lg.length>=3", 3000);
+    const std::string lg = Eval(v, "window.__lg");
+    Expect(lg == "AaB",
+           "navigator.locks serializes an exclusive lock (2nd waits for 1st release)",
+           "log=[" + lg + "]");
+  }
+
+  // 23g. Web Locks ifAvailable: a second request with {ifAvailable:true} for a held name
+  // is rejected immediately (callback gets null) rather than queued — exercises NO_WAIT.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://locks2.test/");
+    Eval(v,
+         "window.__av='';"
+         "navigator.locks.request('r2',function(){"
+         "return new Promise(function(res){window.__rel=res;});});"  // held open
+         "navigator.locks.request('r2',{ifAvailable:true},function(lock){"
+         "window.__av=(lock===null)?'null':'got';});");
+    mbWaitForFunction(v, "window.__av!==''", 3000);
+    const std::string av = Eval(v, "window.__av");
+    Eval(v, "window.__rel&&window.__rel()");  // release the held lock
+    Expect(av == "null",
+           "navigator.locks ifAvailable returns null when the lock is held (NO_WAIT)",
+           "av=[" + av + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

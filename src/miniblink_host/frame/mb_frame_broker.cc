@@ -10,6 +10,7 @@
 #include "base/location.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/task/single_thread_task_runner.h"
+#include "miniblink_host/frame/mb_lock_manager.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/runtime/mb_runtime.h"
 #include "miniblink_host/worker/mb_shared_worker.h"
@@ -461,6 +462,11 @@ class MbBrowserInterfaceBroker
     if (auto r = receiver.As<blink::mojom::blink::ClipboardHost>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbClipboardHost>(),
                                   std::move(r));
+      return;
+    }
+    // navigator.locks — real exclusive/shared lock serialization.
+    if (auto r = receiver.As<blink::mojom::blink::LockManager>()) {
+      BindLockManager(std::move(r));
       return;
     }
     // Drop everything else (no browser process).
