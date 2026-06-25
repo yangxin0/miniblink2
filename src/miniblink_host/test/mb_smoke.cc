@@ -1842,6 +1842,27 @@ int main() {
            "usb=[" + r + "]");
   }
 
+  // 23ar. History pushState + sessionStorage (SPA primitives): pushState updates location +
+  // history.state; sessionStorage round-trips. (NOTE: history.back()/forward() are NOT wired —
+  // NavigateBackForward short-circuits on a zero HistoryBackListCount, and GoToEntryAtOffset
+  // routes to the absent browser; tracked in PROGRESS. So this verifies the synchronous SPA
+  // primitives that DO work, not back/forward traversal.)
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://spa.test/start");
+    Eval(v,
+         "window.__sp='';"
+         "try{"
+         "sessionStorage.setItem('k','v1');var ss=sessionStorage.getItem('k');"
+         "history.pushState({n:1},'','/a');history.replaceState({n:2},'','/b');"
+         "window.__sp='ss:'+ss+',path:'+location.pathname+',st:'+(history.state?history.state.n:'-');"
+         "}catch(e){window.__sp='throw:'+e.name;}");
+    mbWait(v, 30);
+    const std::string sp = Eval(v, "window.__sp");
+    Expect(sp == "ss:v1,path:/b,st:2",
+           "History pushState/replaceState (location + state) + sessionStorage round-trip",
+           "sp=[" + sp + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");
