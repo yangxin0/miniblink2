@@ -10,6 +10,7 @@
 #include "base/location.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/task/single_thread_task_runner.h"
+#include "miniblink_host/frame/mb_broadcast_channel.h"
 #include "miniblink_host/frame/mb_lock_manager.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/runtime/mb_runtime.h"
@@ -467,6 +468,12 @@ class MbBrowserInterfaceBroker
     // navigator.locks — real exclusive/shared lock serialization.
     if (auto r = receiver.As<blink::mojom::blink::LockManager>()) {
       BindLockManager(std::move(r));
+      return;
+    }
+    // Worker BroadcastChannel (the worker path asks its broker; windows use the
+    // nav-associated provider instead). Same process-wide registry as windows.
+    if (auto r = receiver.As<blink::mojom::blink::BroadcastChannelProvider>()) {
+      BindBroadcastChannelProviderPipe(std::move(r));
       return;
     }
     // Drop everything else (no browser process).

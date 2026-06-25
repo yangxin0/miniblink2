@@ -1079,6 +1079,28 @@ int main() {
            "b=[" + b + "] a=[" + a + "]");
   }
 
+  // 23i. BroadcastChannel across a window AND a Worker: the worker's channel uses the
+  // broker path (its own thread) while the window's uses the nav-associated path; both bind
+  // into ONE process-wide registry on the service thread, so they interoperate. A dedicated
+  // worker posts on 'xch'; the window's same-name channel receives it. The worker reposts on
+  // an interval so the window channel is certainly registered first (no buffering in BC).
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://bcw.test/");
+    Eval(v,
+         "window.__xw='';"
+         "var __xc=new BroadcastChannel('xch');"
+         "__xc.onmessage=function(e){window.__xw=e.data;};"
+         "window.__xworker=new Worker('data:text/javascript,'+encodeURIComponent("
+         "'var c=new BroadcastChannel(\"xch\");var n=0;"
+         "var t=setInterval(function(){c.postMessage(\"from-worker\");"
+         "if(++n>40)clearInterval(t);},20);'));");
+    mbWaitForFunction(v, "window.__xw!==''", 4000);
+    const std::string xw = Eval(v, "window.__xw");
+    Expect(xw == "from-worker",
+           "BroadcastChannel bridges a Worker and the window (shared registry)",
+           "xw=[" + xw + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");

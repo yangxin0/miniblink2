@@ -382,8 +382,11 @@ in a process-wide name→channels map; a page's `postMessage` (the channel's `co
 fans out to every OTHER same-name channel's `client` remote (sender excluded). The blink-variant
 `OnMessage` carries a move-only `BlinkCloneableMessage`, shallow-cloned field-wise per recipient
 (the SerializedScriptValue is immutable+refcounted). Verified (mb_smoke 23h): two channels named
-'ch' in one window — `a.postMessage('ping')` → `b` receives 'ping', `a` does NOT. Scope: window
-(same-thread) channels; worker BroadcastChannels (broker path, worker thread) not yet wired.
+'ch' in one window — `a.postMessage('ping')` → `b` receives 'ping', `a` does NOT. WORKER channels
+are also wired: a worker's BroadcastChannel asks its broker (the frame broker, service thread),
+where `BindBroadcastChannelProviderPipe` binds the SAME provider into the SAME registry — so
+window and worker channels of one name interoperate. Verified (mb_smoke 23i): a dedicated worker
+posts on 'xch' and the window's same-name channel receives "from-worker" (cross-thread delivery).
 [REMAINING at the broker: IndexedDB / WebSocket / notifications — genuinely heavy backends;
 same frame-broker entry point, but each needs a real store/network/connector.]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,

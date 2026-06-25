@@ -14,6 +14,7 @@
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/self_owned_associated_receiver.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "third_party/blink/public/mojom/broadcastchannel/broadcast_channel.mojom-blink.h"
 #include "third_party/blink/renderer/core/messaging/blink_cloneable_message.h"
@@ -121,6 +122,12 @@ void BindBroadcastChannelProvider(mojo::ScopedInterfaceEndpointHandle handle) {
       std::make_unique<MbBroadcastChannelProvider>(),
       mojo::PendingAssociatedReceiver<BroadcastChannelProvider>(
           std::move(handle)));
+}
+
+void BindBroadcastChannelProviderPipe(
+    mojo::PendingReceiver<BroadcastChannelProvider> receiver) {
+  mojo::MakeSelfOwnedReceiver(std::make_unique<MbBroadcastChannelProvider>(),
+                              std::move(receiver));
 }
 
 }  // namespace mb
