@@ -35,6 +35,8 @@
 #include "services/device/public/mojom/battery_status.mojom-blink.h"
 #include "services/device/public/mojom/geolocation.mojom-blink.h"
 #include "third_party/blink/public/mojom/clipboard/clipboard.mojom-blink.h"
+#include "third_party/blink/public/common/mediastream/media_devices.h"
+#include "third_party/blink/public/mojom/mediastream/media_devices.mojom-blink.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "services/device/public/mojom/geoposition.mojom-blink.h"
 #include "third_party/blink/public/mojom/geolocation/geolocation_service.mojom-blink.h"
@@ -493,6 +495,59 @@ class MbBatteryMonitor : public device::mojom::blink::BatteryMonitor {
   QueryNextStatusCallback held_;
 };
 
+// blink.mojom.MediaDevicesDispatcherHost for navigator.mediaDevices. Headless has no cameras,
+// mics, or speakers, so every query returns an EMPTY list. This must be bound: if the pipe is
+// left unbound, blink's disconnect handler REJECTS enumerateDevices() with an AbortError
+// instead of resolving to [] — so a page's feature probe breaks. The capability getters return
+// empty; the rarely-used output-selection methods are never reached in a headless host.
+class MbMediaDevicesDispatcherHost
+    : public blink::mojom::blink::MediaDevicesDispatcherHost {
+ public:
+  void EnumerateDevices(bool, bool, bool, bool, bool,
+                        EnumerateDevicesCallback callback) override {
+    // blink DCHECKs the outer list has exactly kNumMediaDeviceTypes entries (audio input,
+    // video input, audio output) — each an empty per-type list in a headless host.
+    blink::Vector<blink::Vector<blink::WebMediaDeviceInfo>> devices;
+    devices.resize(static_cast<blink::wtf_size_t>(
+        blink::mojom::blink::MediaDeviceType::kNumMediaDeviceTypes));
+    std::move(callback).Run(devices, {}, {});
+  }
+  void GetVideoInputCapabilities(
+      GetVideoInputCapabilitiesCallback callback) override {
+    std::move(callback).Run({});
+  }
+  void GetAllVideoInputDeviceFormats(
+      const blink::String&,
+      GetAllVideoInputDeviceFormatsCallback callback) override {
+    std::move(callback).Run({});
+  }
+  void GetAvailableVideoInputDeviceFormats(
+      const blink::String&,
+      GetAvailableVideoInputDeviceFormatsCallback callback) override {
+    std::move(callback).Run({});
+  }
+  void GetAudioInputCapabilities(
+      GetAudioInputCapabilitiesCallback callback) override {
+    std::move(callback).Run({});
+  }
+  void AddMediaDevicesListener(
+      bool, bool, bool,
+      mojo::PendingRemote<blink::mojom::blink::MediaDevicesListener>) override {}
+  void SetCaptureHandleConfig(
+      blink::mojom::blink::CaptureHandleConfigPtr) override {}
+  void CloseFocusWindowOfOpportunity(const blink::String&) override {}
+  void ProduceSubCaptureTargetId(
+      media::mojom::blink::SubCaptureTargetType,
+      ProduceSubCaptureTargetIdCallback callback) override {
+    std::move(callback).Run(blink::String());
+  }
+  // Output-device selection needs a real device to answer; never reached headless.
+  void SetPreferredSinkId(const blink::String&,
+                          SetPreferredSinkIdCallback) override {}
+  void SelectAudioOutput(const blink::String&,
+                         SelectAudioOutputCallback) override {}
+};
+
 // Process-wide configured geolocation fix (set via mbSetGeolocation). Read on the
 // broker's service thread, written from the main thread, so guard with a lock. When
 // unset, geolocation stays denied (the headless default — getCurrentPosition errors).
@@ -650,6 +705,13 @@ class MbBrowserInterfaceBroker
     // navigator.getBattery() — headless static "full, charging" battery.
     if (auto r = receiver.As<device::mojom::blink::BatteryMonitor>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbBatteryMonitor>(),
+                                  std::move(r));
+      return;
+    }
+    // navigator.mediaDevices — headless: no devices (enumerateDevices() -> []).
+    if (auto r =
+            receiver.As<blink::mojom::blink::MediaDevicesDispatcherHost>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbMediaDevicesDispatcherHost>(),
                                   std::move(r));
       return;
     }

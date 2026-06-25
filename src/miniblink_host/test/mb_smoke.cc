@@ -1521,6 +1521,26 @@ int main() {
            "cks=[" + r + "]");
   }
 
+  // 23ab. MediaDevices.enumerateDevices() (broker MediaDevicesDispatcherHost): headless has no
+  // cameras/mics/speakers, so it must RESOLVE to an empty list. Before the host was bound, the
+  // unbound pipe disconnected and blink rejected the promise with AbortError — this verifies it
+  // now resolves cleanly to [].
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://media.test/");
+    Eval(v,
+         "window.__md='';"
+         "if(navigator.mediaDevices&&navigator.mediaDevices.enumerateDevices){"
+         "navigator.mediaDevices.enumerateDevices().then(function(list){"
+         "window.__md='ok:'+list.length;})"
+         ".catch(function(e){window.__md='err:'+e.name;});}"
+         "else{window.__md='no-api';}");
+    mbWaitForFunction(v, "window.__md!==''", 3000);
+    const std::string r = Eval(v, "window.__md");
+    Expect(r == "ok:0",
+           "MediaDevices.enumerateDevices resolves to an empty list (no devices)",
+           "md=[" + r + "]");
+  }
+
   // 25. requestAnimationFrame must fire (no compositor drives it; the host services
   // the page animator). Register a rAF that mutates the DOM, pump, verify it ran.
   mbLoadHTML(v, "<body><b id='r'>0</b></body>", "about:blank");
