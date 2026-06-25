@@ -239,6 +239,40 @@ int main() {
     wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore (later case reads title)
   }
 
+  // JS dialogs via wke: alert is captured, confirm is driven to accept, prompt returns a
+  // value written through the out-param wkeString (wkeSetString). Without a callback the
+  // headless defaults apply (covered by mb_smoke); here we drive all three.
+  {
+    static std::string* alog = new std::string();
+    alog->clear();
+    wkeOnAlertBox(wv, [](wkeWebView, void*, const wkeString msg) {
+      *alog += std::string(wkeGetString(msg)) + ";";
+    }, nullptr);
+    wkeOnConfirmBox(wv, [](wkeWebView, void*, const wkeString) -> bool {
+      return true;  // accept
+    }, nullptr);
+    wkeOnPromptBox(wv, [](wkeWebView, void*, const wkeString, const wkeString,
+                         wkeString result) -> bool {
+      wkeSetString(result, "REPLY", 5);
+      return true;
+    }, nullptr);
+    wkeLoadHTML(wv,
+                "<body><script>window.__a=(alert('hi'),'ok');"
+                "window.__c=confirm('go?');window.__p=prompt('n?','d');"
+                "</script></body>");
+    const bool ok =
+        std::strcmp(jsToTempString(es, wkeRunJS(wv, "window.__a")), "ok") == 0 &&
+        std::strcmp(jsToTempString(es, wkeRunJS(wv, "''+window.__c")), "true") == 0 &&
+        std::strcmp(jsToTempString(es, wkeRunJS(wv, "window.__p")), "REPLY") == 0 &&
+        alog->find("hi;") != std::string::npos;
+    check(ok,
+          "wkeOnAlertBox/ConfirmBox/PromptBox handle dialogs (capture + accept + text)");
+    wkeOnAlertBox(wv, nullptr, nullptr);
+    wkeOnConfirmBox(wv, nullptr, nullptr);
+    wkeOnPromptBox(wv, nullptr, nullptr);
+    wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore
+  }
+
   // Multiple concurrent webViews are independent (real multi-view apps): each has
   // its own document, title, and JS globals, and destroying one leaves the other
   // fully usable.

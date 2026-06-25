@@ -202,7 +202,10 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
    (in RunDocumentStartScript) that routes to an internal `__mbDlg` native binding → the
    view's handler — synchronous, main-thread, no browser/modal/mojo. Verified (mb_smoke 0f):
    callback captures "0:hi;1:go?;2:name?;", confirm→true, prompt→"REPLY"; no-callback →
-   confirm=false, prompt=null.
+   confirm=false, prompt=null. [DONE: wke peers] `wkeOnAlertBox`/`wkeOnConfirmBox`/
+   `wkeOnPromptBox` (+ `wkeSetString` for the prompt out-param) route through the host dialog
+   handler — the miniblink49 dialog API. Verified (wke_smoke +1=104): alert captured, confirm
+   accepted, prompt returns "REPLY".
 6. **File upload + download** — [DONE] (both).
    - [DONE] **`mbDownloadURL(url, dest_path)`**: fetch a URL through the engine network stack
      (MbFetchUrl) and write the body to disk WITHOUT rendering it as a document. Honors the

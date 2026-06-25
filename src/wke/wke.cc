@@ -42,6 +42,12 @@ struct _tagWkeWebView {
   void* document_ready_param = nullptr;
   wkeJsBridgeCallback on_js_bridge = nullptr;  // page->host window.mbBridge channel
   void* js_bridge_param = nullptr;
+  wkeAlertBoxCallback on_alert = nullptr;
+  void* alert_param = nullptr;
+  wkeConfirmBoxCallback on_confirm = nullptr;
+  void* confirm_param = nullptr;
+  wkePromptBoxCallback on_prompt = nullptr;
+  void* prompt_param = nullptr;
   std::string user_init_script;  // wkeSetInitScript; combined with the bridge bootstrap
   std::string bridge_channel_cache;  // backs the callback's channel arg
   std::string bridge_message_cache;  // backs the callback's message arg
@@ -534,6 +540,79 @@ void wkeOnJsBridge(wkeWebView webView, wkeJsBridgeCallback callback,
   webView->on_js_bridge = callback;
   webView->js_bridge_param = param;
   ApplyInitScript(webView);  // (de)install the window.mbBridge bootstrap
+}
+
+void wkeSetString(wkeString string, const utf8* str, size_t len) {
+  if (!string)
+    return;
+  if (!str)
+    string->s.clear();
+  else if (len == static_cast<size_t>(-1))
+    string->s.assign(str);
+  else
+    string->s.assign(str, len);
+}
+
+namespace {
+// Routes the host JS-dialog callback (mbSetJsDialogCallback) to the per-view wke
+// alert/confirm/prompt callbacks. userdata is the wkeWebView. type: 0 alert, 1 confirm,
+// 2 prompt; returns accept(1)/dismiss(0); for an accepted prompt writes the text to `out`.
+int WkeDialogRouter(int type, const char* message, const char* default_value,
+                    char* out, int out_cap, void* userdata) {
+  auto* wv = static_cast<wkeWebView>(userdata);
+  if (!wv)
+    return type == 0 ? 1 : 0;
+  _tagWkeString msg{message ? std::string(message) : std::string()};
+  if (type == 0) {  // alert
+    if (wv->on_alert)
+      wv->on_alert(wv, wv->alert_param, &msg);
+    return 1;
+  }
+  if (type == 1) {  // confirm
+    return (wv->on_confirm && wv->on_confirm(wv, wv->confirm_param, &msg)) ? 1 : 0;
+  }
+  // prompt
+  if (!wv->on_prompt)
+    return 0;
+  _tagWkeString def{default_value ? std::string(default_value) : std::string()};
+  _tagWkeString result{std::string()};
+  const bool accept =
+      wv->on_prompt(wv, wv->prompt_param, &msg, &def, &result);
+  if (accept && out && out_cap > 0)
+    std::snprintf(out, static_cast<size_t>(out_cap), "%s", result.s.c_str());
+  return accept ? 1 : 0;
+}
+// Install the host router on the view (idempotent) whenever any wke dialog cb is set.
+void EnsureDialogRouter(wkeWebView wv) {
+  if (wv && wv->view)
+    mbSetJsDialogCallback(wv->view, &WkeDialogRouter, wv);
+}
+}  // namespace
+
+void wkeOnAlertBox(wkeWebView webView, wkeAlertBoxCallback callback, void* param) {
+  if (!webView)
+    return;
+  webView->on_alert = callback;
+  webView->alert_param = param;
+  EnsureDialogRouter(webView);
+}
+
+void wkeOnConfirmBox(wkeWebView webView, wkeConfirmBoxCallback callback,
+                     void* param) {
+  if (!webView)
+    return;
+  webView->on_confirm = callback;
+  webView->confirm_param = param;
+  EnsureDialogRouter(webView);
+}
+
+void wkeOnPromptBox(wkeWebView webView, wkePromptBoxCallback callback,
+                    void* param) {
+  if (!webView)
+    return;
+  webView->on_prompt = callback;
+  webView->prompt_param = param;
+  EnsureDialogRouter(webView);
 }
 
 bool wkeSavePdf(wkeWebView webView, const utf8* path) {

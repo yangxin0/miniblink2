@@ -18,9 +18,11 @@
 
 #if defined(__cplusplus)
 #include <cstdbool>
+#include <cstddef>  // size_t
 #define WKE_EXTERN_C extern "C"
 #else
 #include <stdbool.h>
+#include <stddef.h>  // size_t
 #define WKE_EXTERN_C
 #endif
 
@@ -589,6 +591,28 @@ WKE_API bool wkePaintRect(wkeWebView webView, void* bits, int x, int y, int w,
 // Read the text of a wkeString passed to a callback (owned by the library, valid
 // for the duration of the callback).
 WKE_API const utf8* wkeGetString(const wkeString string);
+// Write a wkeString — used by a callback to return a value through an out-param wkeString
+// (e.g. the prompt-box result). `len` bytes of UTF-8 from `str` (len<0 = strlen).
+WKE_API void wkeSetString(wkeString string, const utf8* str, size_t len);
+
+// JavaScript dialogs: alert/confirm/prompt. Register a callback to handle each; without
+// one the headless default applies (alert no-op, confirm=false, prompt=null). alert is a
+// notification; confirm returns true to accept; prompt returns true to accept and writes
+// the entered text into `result` (via wkeSetString).
+typedef void (*wkeAlertBoxCallback)(wkeWebView webView, void* param,
+                                    const wkeString msg);
+WKE_API void wkeOnAlertBox(wkeWebView webView, wkeAlertBoxCallback callback,
+                           void* callbackParam);
+typedef bool (*wkeConfirmBoxCallback)(wkeWebView webView, void* param,
+                                      const wkeString msg);
+WKE_API void wkeOnConfirmBox(wkeWebView webView, wkeConfirmBoxCallback callback,
+                             void* callbackParam);
+typedef bool (*wkePromptBoxCallback)(wkeWebView webView, void* param,
+                                     const wkeString msg,
+                                     const wkeString defaultResult,
+                                     wkeString result);
+WKE_API void wkeOnPromptBox(wkeWebView webView, wkePromptBoxCallback callback,
+                            void* callbackParam);
 
 typedef enum _wkeLoadingResult {
   WKE_LOADING_SUCCEEDED,
