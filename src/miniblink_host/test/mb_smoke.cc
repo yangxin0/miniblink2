@@ -1843,10 +1843,8 @@ int main() {
   }
 
   // 23ar. History pushState + sessionStorage (SPA primitives): pushState updates location +
-  // history.state; sessionStorage round-trips. (NOTE: history.back()/forward() are NOT wired —
-  // NavigateBackForward short-circuits on a zero HistoryBackListCount, and GoToEntryAtOffset
-  // routes to the absent browser; tracked in PROGRESS. So this verifies the synchronous SPA
-  // primitives that DO work, not back/forward traversal.)
+  // history.state; sessionStorage round-trips; history.length grows on pushState and not on
+  // replaceState. (Back/forward TRAVERSAL is verified separately in 23at.)
   {
     mbLoadHTML(v, "<body>x</body>", "https://spa.test/start");
     Eval(v,
@@ -1856,14 +1854,44 @@ int main() {
          "var l0=history.length;"
          "history.pushState({n:1},'','/a');history.pushState({n:2},'','/b');"
          "var l2=history.length;history.replaceState({n:3},'','/c');"
+         // history.length grows by 2 (two pushStates), clamped at the 50-entry
+         // session-history cap (matches blink's kMaxSessionHistoryEntries).
          "window.__sp='ss:'+ss+',path:'+location.pathname+',st:'+(history.state?history.state.n:'-')"
-         "+',grew:'+(l2===l0+2)+',rs:'+(history.length===l2);"
+         "+',grew:'+(l2===Math.min(l0+2,50))+',rs:'+(history.length===l2);"
          "}catch(e){window.__sp='throw:'+e.name;}");
     mbWait(v, 30);
     const std::string sp = Eval(v, "window.__sp");
     Expect(sp == "ss:v1,path:/c,st:3,grew:true,rs:true",
            "History pushState grows history.length; replaceState doesn't; state/location update",
            "sp=[" + sp + "]");
+  }
+
+  // 23at. History back/forward TRAVERSAL (page-driven). blink routes history.back()/
+  // forward()/go() through LocalFrameHost.GoToEntryAtOffset; we now bind that host and
+  // replay same-document entries via CommitSameDocumentNavigation — restoring history.state
+  // and firing popstate. Build [/start(null), /a{1}, /b{2}] via pushState, then traverse
+  // back, back, forward and confirm location + popstate event.state at each step.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://nav.test/start");
+    Eval(v,
+         "window.__pop=[];"
+         "addEventListener('popstate',function(e){"
+         "  window.__pop.push(location.pathname+':'+(e.state?e.state.n:'null'));});"
+         "history.pushState({n:1},'','/a');"
+         "history.pushState({n:2},'','/b');");
+    // back() -> /a{1}
+    Eval(v, "history.back();");
+    mbWaitForFunction(v, "window.__pop.length>=1", 3000);
+    // back() -> /start(null)
+    Eval(v, "history.back();");
+    mbWaitForFunction(v, "window.__pop.length>=2", 3000);
+    // forward() -> /a{1}
+    Eval(v, "history.forward();");
+    mbWaitForFunction(v, "window.__pop.length>=3", 3000);
+    const std::string r = Eval(v, "window.__pop.join(',')+'|now:'+location.pathname");
+    Expect(r == "/a:1,/start:null,/a:1|now:/a",
+           "history.back()/forward() traverse same-document entries + fire popstate w/ state",
+           "nav=[" + r + "]");
   }
 
   // 23as. Common platform capabilities: sendBeacon (analytics) queues, navigator.connection /

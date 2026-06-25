@@ -13,6 +13,7 @@
 #include "base/unguessable_token.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "miniblink_host/blob/mb_blob_registry.h"
+#include "miniblink_host/frame/mb_local_frame_host.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/view/mb_webview.h"
 #include "miniblink_host/worker/mb_worker_fetch_context.h"
@@ -32,8 +33,15 @@
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_view.h"
 #include "third_party/blink/public/web/web_navigation_params.h"
+#include "third_party/blink/public/web/web_frame_load_type.h"
+#include "third_party/blink/public/mojom/commit_result/commit_result.mojom-shared.h"
+#include "third_party/blink/public/mojom/frame/triggering_event_info.mojom-blink.h"
+#include "third_party/blink/renderer/core/frame/frame_types.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+#include "third_party/blink/renderer/core/loader/document_loader.h"
+#include "third_party/blink/renderer/core/loader/frame_loader.h"
+#include "third_party/blink/renderer/core/loader/history_item.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -43,7 +51,22 @@ namespace mb {
 
 MbFrameClient::MbFrameClient(MbWebView* owner) : owner_(owner) {}
 MbFrameClient::~MbFrameClient() {
+  // If we registered the main frame's history-traversal sink, clear it so a
+  // stray GoToEntryAtOffset doesn't post to a freed client.
+  if (!self_owned_)
+    MbClearHistoryGoToHandler();
   delete nav_assoc_interfaces_;
+}
+
+void MbFrameClient::SetFrame(blink::WebLocalFrame* frame) {
+  web_frame_ = frame;
+  // Main frame only: route page-driven history.back()/forward()/go() (which
+  // blink sends to LocalFrameHost.GoToEntryAtOffset) back to this client on the
+  // current (main/blink) thread, where GoToHistoryOffset replays the entry.
+  MbSetHistoryGoToHandler(
+      base::SingleThreadTaskRunner::GetCurrentDefault(),
+      base::BindRepeating(&MbFrameClient::GoToHistoryOffset,
+                          weak_factory_.GetWeakPtr()));
 }
 
 blink::AssociatedInterfaceProvider*
@@ -241,6 +264,11 @@ void MbFrameClient::DidCommitNavigation(
   owner_->OnDidCommitMainFrame(
       web_frame_->GetDocument().Url().GetString().Utf8(),
       commit_type == blink::kWebStandardCommit);
+  // Capture this (cross-document) entry for page-driven history traversal.
+  if (commit_type == blink::kWebStandardCommit)
+    RecordHistoryCommit(/*is_standard=*/true);
+  else if (commit_type == blink::kWebHistoryInertCommit)
+    RecordHistoryCommit(/*is_standard=*/false);
 }
 
 void MbFrameClient::DidFinishSameDocumentNavigation(
@@ -258,8 +286,99 @@ void MbFrameClient::DidFinishSameDocumentNavigation(
   if (self_owned_ || !web_frame_)
     return;
   if (commit_type == blink::kWebStandardCommit) {
-    if (blink::WebView* view = web_frame_->View())
-      view->IncreaseHistoryListFromNavigation();
+    // pushState: a new session-history entry. RecordHistoryCommit appends and
+    // restates blink's index+length (history.length, back/forward gating).
+    RecordHistoryCommit(/*is_standard=*/true);
+  } else if (commit_type == blink::kWebHistoryInertCommit) {
+    // replaceState: overwrite the current entry without growing the list.
+    RecordHistoryCommit(/*is_standard=*/false);
+  }
+  // kWebBackForwardCommit (our own traversal): index already updated; no record.
+}
+
+void MbFrameClient::RecordHistoryCommit(bool is_standard) {
+  if (self_owned_ || !web_frame_)
+    return;
+  auto* impl = blink::To<blink::WebLocalFrameImpl>(web_frame_);
+  blink::LocalFrame* frame = impl ? impl->GetFrame() : nullptr;
+  if (!frame || !frame->Loader().GetDocumentLoader())
+    return;
+  blink::HistoryItem* item =
+      frame->Loader().GetDocumentLoader()->GetHistoryItem();
+  if (!item)
+    return;
+  if (history_items_.empty()) {
+    history_items_.emplace_back(item);
+    history_index_ = 0;
+  } else if (is_standard) {
+    // A new entry supersedes any forward history, then is appended as current.
+    history_items_.resize(history_index_ + 1);
+    history_items_.emplace_back(item);
+    history_index_ = static_cast<int>(history_items_.size()) - 1;
+  } else if (history_index_ >= 0 &&
+             history_index_ < static_cast<int>(history_items_.size())) {
+    // replaceState / reload: overwrite the current entry in place.
+    history_items_[history_index_] = item;
+  }
+  // Cap the session history like blink (kMaxSessionHistoryEntries == 50): drop
+  // the oldest entries, shifting the current index down. blink's WebView CHECKs
+  // history_length <= 50, so our list must not exceed it either.
+  constexpr int kMaxHistoryEntries = 50;
+  while (static_cast<int>(history_items_.size()) > kMaxHistoryEntries) {
+    history_items_.erase(history_items_.begin());
+    if (history_index_ > 0)
+      --history_index_;
+  }
+  SyncBlinkHistoryCursor();
+}
+
+void MbFrameClient::SyncBlinkHistoryCursor() {
+  // Our history_items_ is the source of truth for the page's session history.
+  // blink's WebView keeps its own index/length (used to gate NavigateBackForward
+  // and to answer history.length), but our cross-document commits reset it to 0,
+  // so we restate it from our list after every change. Without this the two
+  // desync and back/forward get wrongly short-circuited.
+  if (blink::WebView* view = web_frame_ ? web_frame_->View() : nullptr) {
+    view->SetHistoryListFromNavigation(
+        history_index_, static_cast<int>(history_items_.size()));
+  }
+}
+
+void MbFrameClient::GoToHistoryOffset(int offset, bool has_user_gesture) {
+  if (self_owned_ || !web_frame_ || offset == 0)
+    return;
+  const int target = history_index_ + offset;
+  if (target < 0 || target >= static_cast<int>(history_items_.size()))
+    return;
+  blink::HistoryItem* item = history_items_[target].Get();
+  if (!item)
+    return;
+  auto* impl = blink::To<blink::WebLocalFrameImpl>(web_frame_);
+  blink::LocalFrame* frame = impl ? impl->GetFrame() : nullptr;
+  if (!frame || !frame->Loader().GetDocumentLoader())
+    return;
+  // Try a same-document traversal first: this restores the entry's state object
+  // and fires popstate (the whole point of page-driven back/forward in an SPA).
+  // blink returns Ok if the target really is same-document; otherwise it signals
+  // a cross-document restart and we re-navigate to the entry's URL.
+  blink::mojom::CommitResult result =
+      frame->Loader().GetDocumentLoader()->CommitSameDocumentNavigation(
+          item->Url(), blink::WebFrameLoadType::kBackForward, item,
+          blink::ClientRedirectPolicy::kNotClientRedirect, has_user_gesture,
+          /*initiator_origin=*/nullptr, /*is_synchronously_committed=*/false,
+          /*source_element=*/nullptr,
+          blink::mojom::blink::TriggeringEventInfo::kNotFromEvent,
+          /*is_browser_initiated=*/true, /*has_ua_visual_transition=*/false,
+          /*task_state_id=*/std::nullopt, /*should_skip_screenshot=*/false);
+  history_index_ = target;
+  if (result == blink::mojom::CommitResult::Ok) {
+    // Keep blink's session-history cursor in step with the traversal so the
+    // opposite direction isn't short-circuited (HistoryForwardListCount /
+    // HistoryBackListCount both derive from this index + length).
+    SyncBlinkHistoryCursor();
+  } else if (owner_) {
+    // Cross-document target: re-navigate to the entry's URL (full reload).
+    owner_->LoadURL(item->Url().GetString().Utf8().c_str());
   }
 }
 

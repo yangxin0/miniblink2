@@ -21,11 +21,16 @@
 #include "base/memory/weak_ptr.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-shared.h"
 #include "third_party/blink/public/mojom/frame/policy_container.mojom-blink.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_console_message.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
+
+namespace blink {
+class HistoryItem;
+}  // namespace blink
 
 namespace mb {
 
@@ -138,7 +143,7 @@ class MbFrameClient : public blink::WebLocalFrameClient {
 
   // Associate this client with its frame. SetFrame: main frame (MbWebView-owned).
   // Bind: child frame (takes ownership of itself, freed on FrameDetached).
-  void SetFrame(blink::WebLocalFrame* frame) { web_frame_ = frame; }
+  void SetFrame(blink::WebLocalFrame* frame);
   void Bind(blink::WebLocalFrame* frame,
             std::unique_ptr<MbFrameClient> self_owned) {
     web_frame_ = frame;
@@ -186,6 +191,24 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // child frames and via a posted task for the main frame (see BeginNavigation).
   void DoCommit(std::unique_ptr<blink::WebNavigationInfo> info);
 
+  // Record the main frame's just-committed HistoryItem into our session-history
+  // list. `is_standard` appends a new entry (truncating any forward entries);
+  // otherwise it replaces the current entry (replaceState / reload / initial).
+  void RecordHistoryCommit(bool is_standard);
+
+  // Restate blink's WebView session-history cursor (index + length) from our
+  // history_items_ list — the source of truth. Called after every change so
+  // history.length and back/forward gating stay correct (our cross-document
+  // commits otherwise reset blink's counters to 0).
+  void SyncBlinkHistoryCursor();
+
+  // Perform a page-driven history.back()/forward()/go(delta) traversal: blink
+  // routed it through LocalFrameHost.GoToEntryAtOffset -> MbLocalFrameHost ->
+  // here (on the main thread). Same-document targets commit via
+  // CommitSameDocumentNavigation (restoring state + firing popstate); cross-
+  // document targets fall back to the host's re-navigation.
+  void GoToHistoryOffset(int offset, bool has_user_gesture);
+
   [[maybe_unused]] MbWebView* owner_;  // not owned (used once handshake bodies land)
   std::string user_agent_;  // empty -> MbDefaultUserAgent() (resolved at use)
   std::string extra_headers_;  // newline-separated "Name: Value" request headers
@@ -198,6 +221,13 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // Lazily-created navigation-associated-interface provider (owns the BlobURLStore
   // binding). Owned here; freed in the destructor.
   blink::AssociatedInterfaceProvider* nav_assoc_interfaces_ = nullptr;
+
+  // Main-frame session history: one Persistent<HistoryItem> per back/forward
+  // entry, in order, with history_index_ pointing at the current one. Captured at
+  // each main-frame commit (RecordHistoryCommit) so a page-driven history.go()
+  // can replay the target entry. Empty / -1 for child frames.
+  std::vector<blink::Persistent<blink::HistoryItem>> history_items_;
+  int history_index_ = -1;
 
   // Guards posted main-frame commits: if the client is torn down before the
   // task runs, it no-ops. Must be the last member.

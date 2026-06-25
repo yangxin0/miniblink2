@@ -18,6 +18,7 @@
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
 #include "miniblink_host/frame/mb_broadcast_channel.h"
+#include "miniblink_host/frame/mb_local_frame_host.h"
 #include "miniblink_host/runtime/mb_runtime.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
@@ -574,6 +575,13 @@ class MbNavAssociatedInterfaceProvider
     // navigator BroadcastChannel (window path): in-process same-name fan-out.
     if (name == blink::mojom::blink::BroadcastChannelProvider::Name_) {
       BindBroadcastChannelProvider(receiver.PassHandle());
+      return;
+    }
+    // The frame's host channel. We bind a (mostly no-op) LocalFrameHost so that
+    // page-driven history.back()/forward()/go() — sent as GoToEntryAtOffset — is
+    // serviced (replayed onto the main frame) instead of dropped into the void.
+    if (name == blink::mojom::blink::LocalFrameHost::Name_) {
+      MbBindLocalFrameHost(receiver.PassHandle());
       return;
     }
     // Other associated interfaces are not provided here (dropped).
