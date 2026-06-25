@@ -2034,6 +2034,39 @@ int main() {
            "nav=[fwd:" + fwd + "|back:" + back + "]");
   }
 
+  // 23au0. Modern web platform, functional end-to-end (regression coverage for major features
+  // that the renderer ships): Web Components (custom element upgrade + shadow DOM render),
+  // URLPattern (named-group routing — the Navigation API's matcher), and the Compression Streams
+  // gzip round-trip (zlib). All exercise real engine paths, not just `typeof` existence.
+  {
+    mbLoadHTML(v, "<body><my-el></my-el></body>", "https://probe.test/");
+    Eval(v,
+         "window.__pr='';"
+         "customElements.define('my-el',class extends HTMLElement{"
+         "connectedCallback(){this.attachShadow({mode:'open'}).innerHTML='<b>shadow</b>';}});"
+         "var ce=document.querySelector('my-el');"
+         "var ceOk=!!(ce.shadowRoot&&ce.shadowRoot.textContent==='shadow');"
+         "var up=new URLPattern({pathname:'/books/:id'});"
+         "var m=up.exec('https://probe.test/books/42');"
+         "var upOk=!!(m&&m.pathname.groups.id==='42');"
+         "(async function(){"
+         "  var enc=new TextEncoder().encode('hello world hello world');"
+         "  var cs=new CompressionStream('gzip');"
+         "  var w=cs.writable.getWriter();w.write(enc);w.close();"
+         "  var cbuf=new Uint8Array(await new Response(cs.readable).arrayBuffer());"
+         "  var ds=new DecompressionStream('gzip');var w2=ds.writable.getWriter();"
+         "  w2.write(cbuf);w2.close();"
+         "  var dtxt=await new Response(ds.readable).text();"
+         "  var gzOk=(dtxt==='hello world hello world')&&(cbuf.length>0);"
+         "  window.__pr='ce:'+ceOk+',url:'+upOk+',gzip:'+gzOk;"
+         "})().catch(function(e){window.__pr='err:'+e.name;});");
+    mbWaitForFunction(v, "window.__pr!==''", 3000);
+    const std::string r = Eval(v, "window.__pr");
+    Expect(r == "ce:true,url:true,gzip:true",
+           "modern platform: Web Components + URLPattern + Compression Streams (gzip) work",
+           "mw=[" + r + "]");
+  }
+
   // 23au. localStorage cross-context sharing + the window 'storage' event. With a real DOM
   // Storage backend, a same-origin (srcdoc) iframe observes a localStorage write made by the
   // parent: the value is shared (its localStorage.getItem sees it) AND a 'storage' event fires
