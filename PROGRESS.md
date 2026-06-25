@@ -492,11 +492,15 @@ atomicity/rollback — a lazy per-transaction snapshot (deep-cloned data + key g
 indexes, captured on the first `Put`/`DeleteRange`/`Clear`, keyed by txn id) lets
 `IDBDatabase.Abort` restore pre-transaction state and fire `IDBDatabaseCallbacks.Abort(kAbortError)`
 -> `onabort`; `Commit` discards it. Read-your-writes preserved (writes go live). Verified
-(mb_smoke 23x: abort undoes a modify + an insert). NOT yet: persistence is in-memory
-(per-process, by db name); compound/array primary keys unsupported by the key encoder.
+(mb_smoke 23x: abort undoes a modify + an insert). STEP 12 (DONE): compound (array) keys —
+the key encoder rejected Array keys (DataError), so a store with keyPath ['a','b'] was unusable.
+Added an order-preserving array encoding (each element escaped 0x00->0x00 0x01 + terminated
+0x00 0x00; array type-rank 0x50 sorts after scalars; element-wise compare, shorter prefix first)
++ the DecodeKey inverse for compound index-cursor keys. Verified (mb_smoke 23y: get([1,2]) +
+ordered getAll). NOT yet: persistence is in-memory (per-process, by db name).
 IndexedDB now covers open/schema, put/get, count/delete/clear, getAll/ranges, object-store +
 index cursors, autoincrement, index lookups (incl. multiEntry + index getAll), unique
-constraints, and atomic abort — effectively the whole object-store/index API real apps use.]
+constraints, atomic abort, and compound keys — the whole object-store/index API real apps use.]
 9. Storage/cookie persistence across runs — cookies already persist (mbSaveCookies/Load,
    Netscape jar). [DONE: localStorage] `mbSaveLocalStorage(out)` snapshots the whole
    localStorage for the origin as a JSON string + `mbLoadLocalStorage(json)` restores it —
