@@ -443,6 +443,13 @@ empty topics list, so `document.browsingTopics()` (Privacy Sandbox, called by ad
 resolves to []. BUG fixed: the service remote has no disconnect handler, so unbound the promise HANGS
 (verified bt=[] timeout). The GetBrowsingTopics `result<>` typemaps to base::expected; empty success
 Vector = no topics. mb_smoke 23ao.
+[DONE: Built-in AI] `MbAIManager` (blink.mojom.AIManager, bound from the frame broker) for Chrome's
+on-device AI (LanguageModel/Summarizer/Writer/Rewriter/Proofreader/Classifier — exposed globals).
+Every CanCreate* reports kUnavailableServiceNotRunning so `X.availability()` resolves to 'unavailable'
+(headless has no model); create() rejects via the client's OnError; GetLanguageModelParams -> null. BUG
+fixed: the AIManager remote has no disconnect handler, so unbound an availability() probe HANGS (an
+unsettled ScriptPromiseResolver even crashes teardown). mb_smoke 23ap. (Translator/LanguageDetector use
+SEPARATE managers — still unbound, so their availability() still hangs; a follow-up can bind those.)
 [DONE: getInstalledRelatedApps] `MbInstalledAppProvider` (blink.mojom.InstalledAppProvider, bound from
 the frame broker) returns [] (no installed apps headless). BUG fixed: blink sets no disconnect handler
 on the provider (explicit TODO in installed_app_controller.cc), so unbound the promise HANGS. PWAs
