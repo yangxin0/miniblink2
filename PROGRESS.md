@@ -176,6 +176,16 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
    `ScopedPagePauser` threading first.
 6. **File download (to disk) + file upload (`input[type=file]`)** — both absent; downloads
    currently commit as documents; `mbFillSelector` can't set a file input.
+   - INVESTIGATED & deferred (2026-06): a `mbSetFileForSelector` was prototyped two ways —
+     (a) core `HTMLInputElement::SetFilesFromPaths`, (b) building the `FileList` from Files
+     backed by a *readable in-memory blob* (new `MbMakeReadableBlob`, MbBlob on the service
+     thread). The input is set + change fires + name resolves, BUT in BOTH the File reports
+     `size 0` and a `FileReader` read hangs/returns empty — this host has no file-reading
+     blob backend, and `setFiles` appears to re-wrap the FileList as path-backed Files,
+     discarding the in-memory blob. So the file is "selected" but its BYTES don't flow
+     (no real upload). Reverted (doesn't verify). REAL fix needs a wired file-blob backend
+     (or a `FileBackedBlobFactory` / `setFiles` path that preserves a host-supplied blob) —
+     a Tier-2-sized piece, same family as the worker/IndexedDB broker gaps.
 
 **Tier 2 — web-platform fidelity (host infra; heavier):**
 7. Workers (dedicated worker thread+isolate; shared/service absent). 8. Broker binds cookies
