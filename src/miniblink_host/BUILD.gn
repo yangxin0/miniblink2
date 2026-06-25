@@ -94,6 +94,14 @@ executable("mb_smoke") {
   deps = [ ":miniblink_host" ]
 }
 
+# mb_smoke_platform: split from the mb_smoke monolith (cookies/screenshots/scraping/
+# storage/history/blob/forms), sharing test/mb_smoke_harness.h. Its own process.
+executable("mb_smoke_platform") {
+  sources = [ "test/mb_smoke_platform.cc" ]
+  include_dirs = [ "//third_party/blink/renderer" ]
+  deps = [ ":miniblink_host" ]
+}
+
 # mb_shot: headless HTML -> PNG renderer CLI (the deliverable tool).
 executable("mb_shot") {
   sources = [ "tools/mb_shot.cc" ]

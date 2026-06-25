@@ -29,12 +29,13 @@ step is available and nothing is broken, **say so and stop** — do not invent c
 `test/mb_smoke.cc` is a 3660-line / 180-case monolith. Splitting it into small themed
 smoke programs (engine / scrape / input / net / platform), each its own executable.
 - [DONE] `test/mb_smoke_harness.h` — shared header-only helpers (`Eval`/`EvalIso`/
-  `Expect`/counters) + `MB_SMOKE_MAIN(SUITE)`. mb_smoke.cc now uses it (still 180/180).
-- [NEXT] Move contiguous case ranges into `mb_smoke_<theme>.cc` files, each `#include`s
-  the harness + defines `RunCases` + `MB_SMOKE_MAIN(...)`. Add the executables to
-  BUILD.gn; verify each builds/runs and the case total stays 180; update build.sh to run
-  them. Watch for shared main()-scope state across a cut (most cases are self-contained
-  `{}` blocks; the binding test uses file-scope `SmokeEcho`/`SmokeJson`).
+  `Expect`/counters) + `MB_SMOKE_MAIN(SUITE)`.
+- [DONE] `mb_smoke_platform.cc` — extracted cases 87–106 (cookies/screenshots/scraping/
+  storage/history/blob/forms/validation/PNG-encode), 43 assertions, its own executable.
+  Now: `mb_smoke` 137 + `mb_smoke_platform` 43 = 180. Both in BUILD.gn + build.sh.
+- [NEXT] Keep peeling contiguous ranges off `mb_smoke.cc` into themed programs
+  (e.g. net/loader, input, scrape, engine) until it's a handful of focused files. The
+  cut is verified by: both build, and the per-program counts still sum to 180.
 
 ## Current State (complete)
 - **Engine:** modern M150 Blink renders HTML→pixels in-process. V8/JS, modern + cutting-edge
