@@ -48,8 +48,12 @@
 #include "third_party/blink/public/mojom/ai/ai_summarizer.mojom-blink.h"
 #include "components/language_detection/content/common/language_detection.mojom-blink.h"
 #include "third_party/blink/public/mojom/ai/ai_writer.mojom-blink.h"
+#include "services/device/public/mojom/hid.mojom-blink.h"
+#include "services/device/public/mojom/serial.mojom-blink.h"
 #include "services/device/public/mojom/usb_device.mojom-blink.h"
+#include "third_party/blink/public/mojom/hid/hid.mojom-blink.h"
 #include "third_party/blink/public/mojom/on_device_translation/translation_manager.mojom-blink.h"
+#include "third_party/blink/public/mojom/serial/serial.mojom-blink.h"
 #include "third_party/blink/public/mojom/usb/web_usb_service.mojom-blink.h"
 #include "third_party/blink/public/mojom/browsing_topics/browsing_topics.mojom-blink.h"
 #include "media/mojo/mojom/webrtc_video_perf.mojom-blink.h"
@@ -801,6 +805,53 @@ class MbWebUsbService : public blink::mojom::blink::WebUsbService {
                  device::mojom::blink::UsbDeviceManagerClient>) override {}
 };
 
+// blink.mojom.HidService for navigator.hid. getDevices() (list permitted devices) is called on
+// load; no disconnect handler -> unbound it HANGS. Headless: no HID devices.
+class MbHidService : public blink::mojom::blink::HidService {
+ public:
+  void RegisterClient(mojo::PendingAssociatedRemote<
+                      device::mojom::blink::HidManagerClient>) override {}
+  void GetDevices(GetDevicesCallback cb) override { std::move(cb).Run({}); }
+  void RequestDevice(blink::Vector<blink::mojom::blink::HidDeviceFilterPtr>,
+                     blink::Vector<blink::mojom::blink::HidDeviceFilterPtr>,
+                     RequestDeviceCallback cb) override {
+    std::move(cb).Run({});  // no device chosen -> requestDevice() resolves []
+  }
+  void Connect(const blink::String&,
+               mojo::PendingRemote<device::mojom::blink::HidConnectionClient>,
+               ConnectCallback cb) override {
+    std::move(cb).Run(mojo::NullRemote());  // no connection
+  }
+  void Forget(device::mojom::blink::HidDeviceInfoPtr,
+              ForgetCallback cb) override {
+    std::move(cb).Run();
+  }
+};
+
+// blink.mojom.SerialService for navigator.serial. getPorts() is called on load; same hang.
+class MbSerialService : public blink::mojom::blink::SerialService {
+ public:
+  void SetClient(mojo::PendingRemote<blink::mojom::blink::SerialServiceClient>)
+      override {}
+  void GetPorts(GetPortsCallback cb) override { std::move(cb).Run({}); }
+  void RequestPort(blink::Vector<blink::mojom::blink::SerialPortFilterPtr>,
+                   const blink::Vector<blink::String>&,
+                   RequestPortCallback cb) override {
+    std::move(cb).Run(nullptr);  // no port chosen -> requestPort() rejects
+  }
+  void OpenPort(
+      const base::UnguessableToken&,
+      device::mojom::blink::SerialConnectionOptionsPtr,
+      mojo::PendingRemote<device::mojom::blink::SerialPortClient>,
+      OpenPortCallback cb) override {
+    std::move(cb).Run(mojo::NullRemote());
+  }
+  void ForgetPort(const base::UnguessableToken&,
+                  ForgetPortCallback cb) override {
+    std::move(cb).Run();
+  }
+};
+
 // language_detection.mojom ContentLanguageDetectionDriver for LanguageDetector.availability().
 // No on-device model: report the model not-available and hand back an invalid File.
 class MbContentLanguageDetectionDriver
@@ -1082,6 +1133,18 @@ class MbBrowserInterfaceBroker
     // navigator.usb.getDevices() — headless: no permitted USB devices ([]).
     if (auto r = receiver.As<blink::mojom::blink::WebUsbService>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbWebUsbService>(),
+                                  std::move(r));
+      return;
+    }
+    // navigator.hid.getDevices() — headless: no HID devices ([]).
+    if (auto r = receiver.As<blink::mojom::blink::HidService>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbHidService>(),
+                                  std::move(r));
+      return;
+    }
+    // navigator.serial.getPorts() — headless: no serial ports ([]).
+    if (auto r = receiver.As<blink::mojom::blink::SerialService>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbSerialService>(),
                                   std::move(r));
       return;
     }

@@ -1822,21 +1822,22 @@ int main() {
            "ai=[" + r + "]");
   }
 
-  // 23aq. WebUSB navigator.usb.getDevices() (broker WebUsbService): device dashboards call it on
-  // load to list permitted devices. The service remote has no disconnect handler, so unbound the
-  // promise HANGS (it left an unsettled resolver, crashing teardown); bound, it resolves to [].
+  // 23aq. WebUSB/WebHID/WebSerial device enumeration (broker WebUsbService/HidService/Serial-
+  // Service): device dashboards call usb.getDevices()/hid.getDevices()/serial.getPorts() on load
+  // to list permitted devices. These service remotes have no disconnect handler, so unbound their
+  // promises HANG (an unsettled resolver crashes teardown); bound, each resolves to [].
   {
     mbLoadHTML(v, "<body>x</body>", "https://usb.test/");
     Eval(v,
          "window.__usb='';"
-         "if(navigator.usb&&navigator.usb.getDevices){"
-         "navigator.usb.getDevices().then(function(d){window.__usb='ok:'+d.length;})"
-         ".catch(function(e){window.__usb='err:'+e.name;});}"
-         "else{window.__usb='no-api';}");
+         "Promise.all([navigator.usb.getDevices(),navigator.hid.getDevices(),"
+         "navigator.serial.getPorts()])"
+         ".then(function(a){window.__usb='usb'+a[0].length+',hid'+a[1].length+',ser'+a[2].length;})"
+         ".catch(function(e){window.__usb='err:'+e.name;});");
     mbWaitForFunction(v, "window.__usb!==''", 3000);
     const std::string r = Eval(v, "window.__usb");
-    Expect(r == "ok:0" || r == "no-api",
-           "WebUSB navigator.usb.getDevices() resolves to [] (no hang)",
+    Expect(r == "usb0,hid0,ser0",
+           "WebUSB/HID/Serial device enumeration resolves to [] (no hang)",
            "usb=[" + r + "]");
   }
 
