@@ -66,6 +66,8 @@ void MbFrameClient::SetFrame(blink::WebLocalFrame* frame) {
   MbSetHistoryGoToHandler(
       base::SingleThreadTaskRunner::GetCurrentDefault(),
       base::BindRepeating(&MbFrameClient::GoToHistoryOffset,
+                          weak_factory_.GetWeakPtr()),
+      base::BindRepeating(&MbFrameClient::GoToHistoryKey,
                           weak_factory_.GetWeakPtr()));
 }
 
@@ -345,10 +347,28 @@ void MbFrameClient::SyncBlinkHistoryCursor() {
 }
 
 void MbFrameClient::GoToHistoryOffset(int offset, bool has_user_gesture) {
-  if (self_owned_ || !web_frame_ || offset == 0)
+  if (offset == 0)
     return;
-  const int target = history_index_ + offset;
-  if (target < 0 || target >= static_cast<int>(history_items_.size()))
+  GoToHistoryTarget(history_index_ + offset, has_user_gesture);
+}
+
+void MbFrameClient::GoToHistoryKey(const std::string& key,
+                                  bool has_user_gesture) {
+  // The Navigation API identifies the target entry by its key. Map it back to a
+  // position in our session-history list, then traverse like history.go().
+  for (size_t i = 0; i < history_items_.size(); ++i) {
+    if (history_items_[i] && history_items_[i]->GetNavigationApiKey().Utf8() == key) {
+      GoToHistoryTarget(static_cast<int>(i), has_user_gesture);
+      return;
+    }
+  }
+}
+
+void MbFrameClient::GoToHistoryTarget(int target, bool has_user_gesture) {
+  if (self_owned_ || !web_frame_)
+    return;
+  if (target < 0 || target >= static_cast<int>(history_items_.size()) ||
+      target == history_index_)
     return;
   blink::HistoryItem* item = history_items_[target].Get();
   if (!item)

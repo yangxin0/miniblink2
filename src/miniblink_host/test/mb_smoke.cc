@@ -2009,6 +2009,31 @@ int main() {
            "nav=[" + r + "]");
   }
 
+  // 23at2. Navigation API (modern SPA routing): a navigate handler that intercept()s keeps
+  // navigation same-document. navigation.navigate('/a'),('/b') push entries (canGoBack); then
+  // navigation.back() TRAVERSES to /a — blink routes it via LocalFrameHost.NavigateToNavigationApiKey,
+  // which we now service by mapping the entry key to a history position and replaying it.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://navapi.test/start");
+    Eval(v,
+         "window.__log=[];"
+         "navigation.addEventListener('navigate',function(e){"
+         "  if(e.canIntercept){e.intercept({handler:function(){return Promise.resolve();}});}"
+         "  window.__log.push(new URL(e.destination.url).pathname);});");
+    Eval(v, "navigation.navigate('/a');");
+    mbWaitForFunction(v, "location.pathname==='/a'", 3000);
+    Eval(v, "navigation.navigate('/b');");
+    mbWaitForFunction(v, "location.pathname==='/b'", 3000);
+    const std::string fwd = Eval(
+        v, "location.pathname+',n:'+navigation.entries().length+',back:'+navigation.canGoBack");
+    Eval(v, "navigation.back();");
+    mbWaitForFunction(v, "location.pathname==='/a'", 3000);
+    const std::string back = Eval(v, "location.pathname+',fwd:'+navigation.canGoForward");
+    Expect(fwd == "/b,n:3,back:true" && back == "/a,fwd:true",
+           "Navigation API: navigate()+intercept() routes SPA; navigation.back() traverses",
+           "nav=[fwd:" + fwd + "|back:" + back + "]");
+  }
+
   // 23au. localStorage cross-context sharing + the window 'storage' event. With a real DOM
   // Storage backend, a same-origin (srcdoc) iframe observes a localStorage write made by the
   // parent: the value is shared (its localStorage.getItem sees it) AND a 'storage' event fires

@@ -808,6 +808,13 @@ GoBack/GoForward (C ABI, re-loads URLs) is separate and unaffected.
 - Slice 1: history.length / back-list count were wrong (always 1 / 0), short-circuiting history.back().
 - Slice 2: history.back()/forward()/go(delta) now actually traverse same-document entries, restoring
   history.state and firing popstate.
+- Slice 3 (Navigation API): navigation.navigate()+intercept() already worked (modern SPA routing —
+  cross-doc without intercept, same-doc with it). navigation.back()/forward()/traverseTo() did NOT
+  traverse — blink routes them through LocalFrameHost.NavigateToNavigationApiKey(key) (was a no-op).
+  Now serviced: MbLocalFrameHost routes the key to MbFrameClient::GoToHistoryKey, which maps it to a
+  position via HistoryItem::GetNavigationApiKey() and replays it through the shared GoToHistoryTarget
+  (same CommitSameDocumentNavigation path as history.go). Verified mb_smoke 23at2: navigate /a,/b then
+  navigation.back() -> /a (canGoForward true).
 Implementation:
   * `frame/mb_local_frame_host.{h,cc}` — MbLocalFrameHost, a real blink::mojom::blink::LocalFrameHost.
     The ~70 no-op method bodies are copied from blink's FakeLocalFrameHost (that one is testonly and

@@ -213,6 +213,14 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // document targets fall back to the host's re-navigation.
   void GoToHistoryOffset(int offset, bool has_user_gesture);
 
+  // The Navigation API peer of GoToHistoryOffset: navigation.back()/forward()/
+  // traverseTo() arrive keyed by the target entry's navigation-api key.
+  void GoToHistoryKey(const std::string& key, bool has_user_gesture);
+
+  // Shared traversal: commit the session-history entry at `target` (same-document
+  // via CommitSameDocumentNavigation, else a cross-document re-navigation).
+  void GoToHistoryTarget(int target, bool has_user_gesture);
+
   [[maybe_unused]] MbWebView* owner_;  // not owned (used once handshake bodies land)
   std::string user_agent_;  // empty -> MbDefaultUserAgent() (resolved at use)
   std::string extra_headers_;  // newline-separated "Name: Value" request headers

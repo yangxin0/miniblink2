@@ -14,6 +14,7 @@
 #define MINIBLINK_HOST_FRAME_MB_LOCAL_FRAME_HOST_H_
 
 #include <optional>
+#include <string>
 
 #include "base/functional/callback.h"
 #include "base/memory/scoped_refptr.h"
@@ -34,13 +35,16 @@
 
 namespace mb {
 
-// Register the MAIN frame's history-traversal sink. `handler` is invoked (posted
-// to `runner`, the main/blink thread) with (offset, has_user_gesture) when the
-// page calls history.back()/forward()/go(). Single-slot (last writer wins): this
-// embedder has one main frame whose page-driven history we service. Thread-safe.
+// Register the MAIN frame's history-traversal sinks, invoked (posted to `runner`,
+// the main/blink thread) when the page traverses history: `handler(offset, gesture)`
+// for history.back()/forward()/go(), and `key_handler(key, gesture)` for the
+// Navigation API's navigation.back()/forward()/traverseTo() (keyed by entry key).
+// Single-slot (last writer wins): one main frame per process. Thread-safe.
 void MbSetHistoryGoToHandler(
     scoped_refptr<base::SingleThreadTaskRunner> runner,
-    base::RepeatingCallback<void(int offset, bool has_user_gesture)> handler);
+    base::RepeatingCallback<void(int offset, bool has_user_gesture)> handler,
+    base::RepeatingCallback<void(const std::string& key, bool has_user_gesture)>
+        key_handler);
 void MbClearHistoryGoToHandler();
 
 // Bind a self-owned MbLocalFrameHost to `handle` (called from the frame's
@@ -106,7 +110,7 @@ class MbLocalFrameHost : public blink::mojom::blink::LocalFrameHost {
       const blink::String& key,
       bool has_user_gesture,
       base::TimeTicks actual_navigation_start,
-      std::optional<blink::scheduler::TaskAttributionId> task_id) override {}
+      std::optional<blink::scheduler::TaskAttributionId> task_id) override;
   void NavigateEventHandlerPresenceChanged(bool present) override {}
   void UpdateTitle(const blink::String& title) override;
   void UpdateApplicationTitle(const blink::String& application_title) override;

@@ -23,11 +23,14 @@
 namespace mb {
 namespace {
 
-// Single-slot, lock-protected route to the main frame's history-traversal sink.
+// Single-slot, lock-protected route to the main frame's history-traversal sinks:
+// `handler` for offset-based traversal (history.go), `key_handler` for the
+// Navigation API's key-based traversal (navigation.back/forward/traverseTo).
 struct HistoryGoToSink {
   base::Lock lock;
   scoped_refptr<base::SingleThreadTaskRunner> runner;
   base::RepeatingCallback<void(int, bool)> handler;
+  base::RepeatingCallback<void(const std::string&, bool)> key_handler;
 };
 
 HistoryGoToSink& Sink() {
@@ -39,11 +42,13 @@ HistoryGoToSink& Sink() {
 
 void MbSetHistoryGoToHandler(
     scoped_refptr<base::SingleThreadTaskRunner> runner,
-    base::RepeatingCallback<void(int, bool)> handler) {
+    base::RepeatingCallback<void(int, bool)> handler,
+    base::RepeatingCallback<void(const std::string&, bool)> key_handler) {
   HistoryGoToSink& s = Sink();
   base::AutoLock guard(s.lock);
   s.runner = std::move(runner);
   s.handler = std::move(handler);
+  s.key_handler = std::move(key_handler);
 }
 
 void MbClearHistoryGoToHandler() {
@@ -51,6 +56,7 @@ void MbClearHistoryGoToHandler() {
   base::AutoLock guard(s.lock);
   s.runner = nullptr;
   s.handler.Reset();
+  s.key_handler.Reset();
 }
 
 void MbBindLocalFrameHost(mojo::ScopedInterfaceEndpointHandle handle) {
@@ -78,6 +84,26 @@ void MbLocalFrameHost::GoToEntryAtOffset(
   if (runner && handler) {
     runner->PostTask(FROM_HERE,
                      base::BindOnce(handler, offset, has_user_gesture));
+  }
+}
+
+void MbLocalFrameHost::NavigateToNavigationApiKey(
+    const blink::String& key,
+    bool has_user_gesture,
+    base::TimeTicks /*actual_navigation_start*/,
+    std::optional<blink::scheduler::TaskAttributionId>) {
+  // The Navigation API's navigation.back()/forward()/traverseTo(key) routes here.
+  HistoryGoToSink& s = Sink();
+  scoped_refptr<base::SingleThreadTaskRunner> runner;
+  base::RepeatingCallback<void(const std::string&, bool)> handler;
+  {
+    base::AutoLock guard(s.lock);
+    runner = s.runner;
+    handler = s.key_handler;
+  }
+  if (runner && handler) {
+    runner->PostTask(
+        FROM_HERE, base::BindOnce(handler, key.Utf8(), has_user_gesture));
   }
 }
 
