@@ -1063,10 +1063,21 @@ PIECES:
  - library BUILD.gn gains the GPU deps; mb_smoke_render 41 split (2D round-trip) + new 41z
    (WebGL renders).
 NOTE: the in-process GPU singleton is intentionally never torn down (a process-lifetime
-GPU thread); the test processes still exit cleanly (exit 0, no leak). WebGL 2 / accelerated
-2D-canvas compositing into page paint are possible follow-ons (the provider's null raster/
-image-decode hooks would need filling for accelerated 2D), but WebGL 1 — the headline gap —
-is DONE. This GPU foundation also unblocks device emulation + accelerated video later.
+GPU thread); the test processes still exit cleanly (exit 0, no leak). This GPU foundation
+also unblocks device emulation + accelerated video later.
+[DONE — WEBGL 2]. getContext('webgl2') now returns an ES3-backed context too. WebGL 2
+needs an OpenGL ES 3 context, but GLInProcessContext::Initialize hardcoded ES2 attribs;
+patches/0007-gl-in-process-context-type.patch adds an optional `ContextType` param
+(default CONTEXT_TYPE_OPENGLES2, the native gpu::ContextType the mojom field typemaps to)
+threaded into GLESCreationAttribs. MbPlatform::CreateWebGLGraphicsContextProvider now maps
+blink's WebGLContextType (kWebGL2ContextType -> CONTEXT_TYPE_OPENGLES3, else ES2) and
+MakeWebGLContextProvider(want_webgl2) requests it. WebGL 1 keeps the proven ES2 path
+unchanged. Verified mb_smoke_render 41z2: getContext('webgl2') clear(blue)+readPixels ->
+[0,0,255,255], GL_VERSION "WebGL 2.0 (OpenGL ES 3.0 Chromium)" (render 103->104). Full
+battery green (mb_smoke 145, platform 46, shot 66, wke 114), no leaks. Possible follow-ons:
+accelerated 2D-canvas compositing into page paint (the provider's null raster/image-decode
+hooks would need filling); WebGL canvas compositing into mbPaintToBitmap screenshots
+(WebGL draws to its own buffer; whether it reaches the page paint is untested).
 13. [DONE] PDF options. `mbSavePdfEx(path, width_pt, height_pt, landscape, scale, margin_pt)`
 (mbSavePdf kept = Letter default) + `mb_shot --pdf-size letter|a4|legal|a3|tabloid|WxH
 --landscape --pdf-scale N --pdf-margin PT`. Page size in points; landscape swaps w/h; content

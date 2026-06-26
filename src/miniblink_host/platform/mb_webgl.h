@@ -18,8 +18,10 @@ class WebGraphicsContext3DProvider;
 
 namespace mb {
 
-// Build an in-process WebGL context provider, or null if GPU init fails.
-std::unique_ptr<blink::WebGraphicsContext3DProvider> MakeWebGLContextProvider();
+// Build an in-process WebGL context provider, or null if GPU init fails. `want_webgl2`
+// requests an OpenGL ES 3 context (WebGL 2); false gives ES 2 (WebGL 1).
+std::unique_ptr<blink::WebGraphicsContext3DProvider> MakeWebGLContextProvider(
+    bool want_webgl2);
 
 }  // namespace mb
 

@@ -3,6 +3,7 @@
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
+#include "gpu/command_buffer/common/context_creation_attribs.h"
 #include "gpu/command_buffer/common/context_result.h"
 #include "gpu/config/gpu_feature_info.h"
 #include "gpu/ipc/gl_in_process_context.h"
@@ -49,12 +50,15 @@ gpu::InProcessGpuThreadHolder* GetGpuThreadHolder() {
 // return null (blink only consults them for accelerated 2D-canvas / raster).
 class MbWebGLContextProvider : public blink::WebGraphicsContext3DProvider {
  public:
-  static std::unique_ptr<MbWebGLContextProvider> Create() {
+  static std::unique_ptr<MbWebGLContextProvider> Create(bool want_webgl2) {
     gpu::InProcessGpuThreadHolder* holder = GetGpuThreadHolder();
     if (!holder)
       return nullptr;
     auto context = std::make_unique<gpu::GLInProcessContext>();
-    if (context->Initialize(holder->GetTaskExecutor()) !=
+    // WebGL 2 needs an ES3 context; WebGL 1 keeps the proven ES2 path.
+    const gpu::ContextType type =
+        want_webgl2 ? gpu::CONTEXT_TYPE_OPENGLES3 : gpu::CONTEXT_TYPE_OPENGLES2;
+    if (context->Initialize(holder->GetTaskExecutor(), type) !=
         gpu::ContextResult::kSuccess) {
       return nullptr;
     }
@@ -105,8 +109,9 @@ class MbWebGLContextProvider : public blink::WebGraphicsContext3DProvider {
 
 }  // namespace
 
-std::unique_ptr<blink::WebGraphicsContext3DProvider> MakeWebGLContextProvider() {
-  return MbWebGLContextProvider::Create();
+std::unique_ptr<blink::WebGraphicsContext3DProvider> MakeWebGLContextProvider(
+    bool want_webgl2) {
+  return MbWebGLContextProvider::Create(want_webgl2);
 }
 
 }  // namespace mb

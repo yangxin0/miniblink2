@@ -553,6 +553,35 @@ static void RunCases(mbView* v, int W, int H) {
            "wg=[" + wg + "] ver=[" + Eval(v, "window.__wgver") + "]");
   }
 
+  // 41z2. WebGL 2 renders: getContext('webgl2') returns an ES3-backed context (the
+  // provider requests an OpenGL ES 3 command buffer for WebGL 2 — patches/0007 lets
+  // GLInProcessContext::Initialize pick the context type), clear(blue)+readPixels
+  // round-trips, and GL_VERSION reports WebGL 2.0.
+  mbLoadHTML(v, "<body><canvas id='g2' width='32' height='32'></canvas></body>",
+             "about:blank");
+  mbRunJS(v,
+    "window.__w2='';try{"
+    "var gl=document.getElementById('g2').getContext('webgl2');"
+    "if(!gl){window.__w2='null';}else{"
+    "gl.clearColor(0,0,1,1);gl.clear(gl.COLOR_BUFFER_BIT);"
+    "var p=new Uint8Array(4);gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);"
+    "window.__w2=p[0]+','+p[1]+','+p[2]+','+p[3];"
+    "window.__w2ver=''+gl.getParameter(gl.VERSION);}}"
+    "catch(e){window.__w2='err:'+e;}");
+  {
+    std::string w2;
+    for (int i = 0; i < 200; ++i) {
+      mbWait(v, 25);
+      w2 = Eval(v, "window.__w2");
+      if (!w2.empty())
+        break;
+    }
+    const std::string ver = Eval(v, "window.__w2ver");
+    Expect(w2 == "0,0,255,255" && ver.find("WebGL 2.0") != std::string::npos,
+           "WebGL 2 renders: getContext('webgl2') ES3 context + clear + readPixels",
+           "w2=[" + w2 + "] ver=[" + ver + "]");
+  }
+
   // 41b. A 2D canvas COMPOSITES into the page paint (not just its in-memory backing
   // store): draw a red square, render the page, and read the canvas region from the
   // page bitmap. Proves canvas-drawn content rasterizes into the rendered output —

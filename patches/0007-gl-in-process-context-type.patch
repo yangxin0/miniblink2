@@ -1,0 +1,49 @@
+Let GLInProcessContext::Initialize take a context_type (default ES2) so the WebGL
+provider can request an OpenGL ES 3 context for WebGL 2.
+
+GLInProcessContext is the simplest in-process command-buffer wrapper (used by
+platform/mb_webgl.cc for WebGL), but it hardcodes GLESCreationAttribs to the default
+(ES2), so WebGL 2 — which needs an ES3 context — can't be created. This adds an
+optional `ContextType context_type = CONTEXT_TYPE_OPENGLES2` parameter (the native
+gpu::ContextType the mojom field typemaps to), threaded into the GLESCreationAttribs.
+Default preserves every existing caller (mb_gpu_probe + the WebGL 1 path) unchanged.
+
+diff --git a/gpu/ipc/gl_in_process_context.cc b/gpu/ipc/gl_in_process_context.cc
+index b92d9bc..6c09109 100644
+--- a/gpu/ipc/gl_in_process_context.cc
++++ b/gpu/ipc/gl_in_process_context.cc
+@@ -54,14 +54,17 @@ SharedImageInterface* GLInProcessContext::GetSharedImageInterface() {
+ }
+ 
+ ContextResult GLInProcessContext::Initialize(
+-    CommandBufferTaskExecutor* task_executor) {
++    CommandBufferTaskExecutor* task_executor,
++    ContextType context_type) {
+   DCHECK(base::SingleThreadTaskRunner::GetCurrentDefault());
+ 
+   command_buffer_ = std::make_unique<InProcessCommandBuffer>(
+       task_executor, GURL("chrome://gpu/GLInProcessContext::Initialize"));
+ 
++  auto gles_attribs = mojom::GLESCreationAttribs::New();
++  gles_attribs->context_type = context_type;
+   auto attribs =
+-      mojom::ContextCreationAttribs::NewGles(mojom::GLESCreationAttribs::New());
++      mojom::ContextCreationAttribs::NewGles(std::move(gles_attribs));
+ 
+   auto result = command_buffer_->Initialize(
+       std::move(attribs), base::SingleThreadTaskRunner::GetCurrentDefault(),
+diff --git a/gpu/ipc/gl_in_process_context.h b/gpu/ipc/gl_in_process_context.h
+index 8ea698d..204a87c 100644
+--- a/gpu/ipc/gl_in_process_context.h
++++ b/gpu/ipc/gl_in_process_context.h
+@@ -34,7 +34,9 @@ class GL_IN_PROCESS_CONTEXT_EXPORT GLInProcessContext {
+ 
+   ~GLInProcessContext();
+ 
+-  ContextResult Initialize(CommandBufferTaskExecutor* task_executor);
++  ContextResult Initialize(
++      CommandBufferTaskExecutor* task_executor,
++      ContextType context_type = CONTEXT_TYPE_OPENGLES2);
+ 
+   const Capabilities& GetCapabilities() const;
+   const GpuFeatureInfo& GetGpuFeatureInfo() const;

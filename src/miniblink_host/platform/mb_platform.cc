@@ -180,13 +180,14 @@ std::unique_ptr<blink::WebGraphicsContext3DProvider>
 MbPlatform::CreateWebGLGraphicsContextProvider(
     bool /*prefer_low_power_gpu*/,
     bool /*fail_if_major_performance_caveat*/,
-    blink::Platform::WebGLContextType /*context_type*/,
+    blink::Platform::WebGLContextType context_type,
     const blink::WebURL& /*document_url*/,
     blink::Platform::WebGLContextInfo* /*gl_info*/) {
-  // In-process ANGLE/SwiftShader GLES2 command buffer (platform/mb_webgl.cc). Null on
-  // GPU-init failure -> blink reports context-creation failure (getContext returns null),
-  // same as before this override existed, so it degrades gracefully.
-  return MakeWebGLContextProvider();
+  // In-process ANGLE/SwiftShader command buffer (platform/mb_webgl.cc): ES2 for WebGL 1,
+  // ES3 for WebGL 2. Null on GPU-init failure -> blink reports context-creation failure
+  // (getContext returns null), same as before this override existed, so it degrades.
+  return MakeWebGLContextProvider(
+      context_type == blink::Platform::kWebGL2ContextType);
 }
 
 }  // namespace mb
