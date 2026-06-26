@@ -255,6 +255,10 @@ class MbWebView {
   // in a screenshot). `*has_active` (optional) is set true when a match was selected.
   // Runs blink's real TextFinder synchronously. Call StopFind() to clear the highlights.
   int FindText(const char* text, bool match_case, bool forward, bool* has_active);
+  // Step to the next (forward=true) / previous match of the LAST mbFindText search,
+  // scrolling it into view and making it the active (highlighted) match. Wraps around.
+  // Returns true if a match is now active (false if no prior search / no matches).
+  bool FindNext(bool forward);
   void StopFind();  // clear the find selection + highlight markers
   // Per-element scraping by selector. Fill *out with the first match's innerText
   // / the named attribute's value and return true; return false if no element
@@ -550,7 +554,9 @@ class MbWebView {
   [[maybe_unused]] blink::WebViewImpl* web_view_ = nullptr;     // owned by blink; Close() in dtor
   [[maybe_unused]] blink::WebLocalFrame* main_frame_ = nullptr; // owned by blink
   float dsf_ = 1.0f;  // device pixel ratio; PaintInto scales the canvas by it
-  int find_id_ = 0;   // monotonic find-in-page session identifier (FindText)
+  int find_id_ = 0;   // find-in-page session identifier (stable across FindText/FindNext)
+  std::string find_text_;     // last mbFindText needle (for FindNext)
+  bool find_match_case_ = false;  // last search's case sensitivity
   std::string init_script_;  // runs before each new document's own scripts
   std::vector<std::unique_ptr<NativeBinding>> js_bindings_;  // BindJsFunction
   JsDialogFn dialog_cb_ = nullptr;       // alert/confirm/prompt handler (optional)

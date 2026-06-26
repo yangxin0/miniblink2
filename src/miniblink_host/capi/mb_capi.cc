@@ -813,6 +813,12 @@ int mbFindText(mbView* v, const char* text, int match_case) {
   return v->impl->FindText(text, match_case != 0, /*forward=*/true, &active);
 }
 
+int mbFindNext(mbView* v, int forward) {
+  if (!v || !v->impl)
+    return 0;
+  return v->impl->FindNext(forward != 0) ? 1 : 0;
+}
+
 void mbStopFind(mbView* v) {
   if (v && v->impl)
     v->impl->StopFind();

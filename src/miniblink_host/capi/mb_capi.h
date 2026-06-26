@@ -655,6 +655,10 @@ MB_EXPORT int mbGetAXTree(mbView*, char* out, int out_cap);
 // markers render into a screenshot). `match_case` != 0 for case-sensitive search. Uses
 // blink's real TextFinder. Call mbStopFind to clear the selection + highlights.
 MB_EXPORT int mbFindText(mbView*, const char* text, int match_case);
+// Step to the next (forward!=0) / previous match of the last mbFindText search, scrolling
+// it into view and making it the active highlighted match; wraps around at the ends.
+// Returns 1 if a match is now active, 0 if there was no prior search or no matches.
+MB_EXPORT int mbFindNext(mbView*, int forward);
 MB_EXPORT void mbStopFind(mbView*);
 
 // Write the visible text (innerText) of the first element matching `css_selector`

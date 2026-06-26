@@ -1243,12 +1243,35 @@ int MbWebView::FindText(const char* text, bool match_case, bool forward,
   // this also lays down the find-match markers (visible in a screenshot).
   finder.ResetMatchCount();
   finder.StartScopingStringMatches(id, needle, *options);
+  // Remember the session so FindNext can step through these matches.
+  find_text_ = text;
+  find_match_case_ = match_case;
   if (has_active)
     *has_active = active;
   return finder.TotalMatchCount();
 }
 
+bool MbWebView::FindNext(bool forward) {
+  if (find_text_.empty() || !main_frame_)
+    return false;
+  auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
+  if (!impl || !impl->GetFrame() || !impl->GetTextFinder())
+    return false;
+  if (widget_ && widget_->widget())
+    widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kFindInPage);
+  auto options = blink::mojom::blink::FindOptions::New();
+  options->match_case = find_match_case_;
+  options->forward = forward;
+  options->new_session = false;  // continue the session: advance from the active match
+  options->run_synchronously_for_testing = true;
+  // wrap_within_frame=true so stepping past the last/first match loops around.
+  return impl->GetTextFinder()->Find(find_id_, blink::WebString::FromUtf8(find_text_),
+                                     *options, /*wrap_within_frame=*/true,
+                                     /*active_now=*/nullptr);
+}
+
 void MbWebView::StopFind() {
+  find_text_.clear();  // end the session: a later FindNext returns false
   if (!main_frame_)
     return;
   auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);

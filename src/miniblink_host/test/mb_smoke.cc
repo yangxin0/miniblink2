@@ -2894,6 +2894,40 @@ int main() {
                " none=" + std::to_string(n_none));
   }
 
+  // 30e (find). mbFindNext steps THROUGH the matches (the Ctrl+F navigation the count
+  // alone can't do): on a tall page with the word spread 3000px apart, each FindNext
+  // scrolls the next match into view (scrollY jumps), and stepping past the last wraps to
+  // the first. mbStopFind ends the session (a later FindNext returns 0).
+  {
+    mbLoadHTML(v,
+               "<body style='margin:0'>"
+               "<div>needle one</div><div style='height:3000px'></div>"
+               "<div>needle two</div><div style='height:3000px'></div>"
+               "<div>needle three</div></body>",
+               "about:blank");
+    mbWait(v, 60);
+    auto scroll_y = [&]() {
+      return std::atoi(Eval(v, "String(Math.round(window.scrollY))").c_str());
+    };
+    const int n = mbFindText(v, "needle", 0);
+    const int y0 = scroll_y();             // active = match 1 (near top)
+    const int a1 = mbFindNext(v, 1);
+    const int y1 = scroll_y();             // -> match 2 (~3000 down)
+    const int a2 = mbFindNext(v, 1);
+    const int y2 = scroll_y();             // -> match 3 (~6000 down)
+    const int a3 = mbFindNext(v, 1);
+    const int y3 = scroll_y();             // wraps -> match 1 (near top again)
+    mbStopFind(v);
+    const int after_stop = mbFindNext(v, 1);  // no session -> 0
+    const bool steps_down = y1 > y0 + 1000 && y2 > y1 + 1000;
+    const bool wrapped = y3 < y1;          // back near the top
+    Expect(n == 3 && a1 && a2 && a3 && steps_down && wrapped && after_stop == 0,
+           "mbFindNext: steps through matches (scroll follows), wraps, stops",
+           "n=" + std::to_string(n) + " y=" + std::to_string(y0) + "," +
+               std::to_string(y1) + "," + std::to_string(y2) + "," +
+               std::to_string(y3) + " stop=" + std::to_string(after_stop));
+  }
+
   // Network cases (31, 32) are OPT-IN via MB_NET_TESTS=1: a dead host costs ~45s
   // per load (connect-timeout x retries), which would make every default run crawl.
   // They still skip gracefully if enabled but httpbin is unreachable.

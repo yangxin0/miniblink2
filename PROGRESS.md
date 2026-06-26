@@ -1166,6 +1166,20 @@ blink.h (internal, already linked via core). mb_smoke 151->152, full battery gre
 46, render 122, shot 66, wke 114), no leaks. (Probed first that animations/transitions/
 <dialog>/<details>/selection/structuredClone/elementFromPoint all already work - find-in-
 page was the one genuine self-contained browser feature still stubbed.)
+[DONE - find-in-page NAVIGATION (mbFindNext): step through matches]. Completed the Ctrl+F
+primitive: mbFindText counts, mbFindNext(view, forward) steps to the next/previous match of
+the last search, scrolls it into view + makes it the active highlighted match, and WRAPS at
+the ends. (The count alone can't navigate; this is what stepping through results needs.)
+Impl (MbWebView::FindNext): MbWebView remembers the session (find_text_ + find_match_case_ +
+the stable find_id_); FindNext re-runs TextFinder::Find with new_session=false (continue,
+advancing from the active match) and wrap_within_frame=true (loop around). StopFind clears
+find_text_ so a later FindNext returns false. Verified mb_smoke 30e: a tall page with
+"needle" spread 3000px apart -> mbFindText=3, scrollY 0; each mbFindNext steps the scroll to
+the next match (y 0 -> 2727 -> 5454) and the 4th wraps back to 0; after mbStopFind, mbFindNext
+returns 0. mb_smoke 152->153, full battery green (platform 46, render 122, shot 66, wke 114),
+no leaks. Find-in-page is now complete: count + case sensitivity + highlight + navigate +
+wrap + stop - a full Ctrl+F usable for automation (count occurrences AND walk each one,
+screenshot showing the scrolled-to highlighted match).
 
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
