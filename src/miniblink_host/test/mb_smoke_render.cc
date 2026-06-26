@@ -500,6 +500,26 @@ static void RunCases(mbView* v, int W, int H) {
              Eval(v, "String(window.__gl)") == "true",
          "Canvas 2D round-trip (draw/getImageData/toDataURL); WebGL null");
 
+  // 41b. A 2D canvas COMPOSITES into the page paint (not just its in-memory backing
+  // store): draw a red square, render the page, and read the canvas region from the
+  // page bitmap. Proves canvas-drawn content rasterizes into the rendered output —
+  // so screenshots of canvas charts/visualizations capture the drawing.
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0;background:#fff'>"
+      "<canvas id='cp' width='80' height='80'></canvas>"
+      "<script>var x=document.getElementById('cp').getContext('2d');"
+      "x.fillStyle='#ff0000';x.fillRect(0,0,80,80);</script></body>",
+      "about:blank");
+    std::vector<uint8_t> cv(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, cv.data(), W, H, W * 4);
+    size_t ci = (40u * W + 40u) * 4;  // inside the canvas box
+    Expect(cv[ci + 2] == 255 && cv[ci + 1] == 0 && cv[ci] == 0,
+           "a 2D canvas composites into the page paint (red square rasterizes)",
+           "R=" + std::to_string(cv[ci + 2]) + " G=" +
+               std::to_string(cv[ci + 1]) + " B=" + std::to_string(cv[ci]));
+  }
+
   // 42. Drawing to a canvas via mbEvalJS (not just mbRunJS) must also be
   // crash-safe. EvalToString/EvalIsolated used to run ExecuteScript
   // synchronously, so a draw inside an eval expression hit the same

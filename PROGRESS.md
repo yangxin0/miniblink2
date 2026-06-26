@@ -867,8 +867,13 @@ constraints, atomic abort, and compound keys — the whole object-store/index AP
    records also not captured. Verified mb_smoke 23m2: save 'authtoken' -> overwrite 'CHANGED' ->
    restore -> reopen reads back 'authtoken'. [REMAINING: secondary-index persistence (blocked on
    blink export); per-origin IDB partitioning.] 10. Blob-from-file
-+ ranged blob reads + DataPipeGetter uploads. 11. **GPU content path** (WebGL / accel-2d-canvas /
-`<video>` render blank) — the heaviest; needs a GL/media provider. Last.
++ ranged blob reads + DataPipeGetter uploads. 11. **GPU content path** — [CHARACTERIZED] the gap is
+NARROWER than "all GPU content blank": 2D `<canvas>` FULLY works — draw + getImageData + toDataURL (tests
+6/41) AND it COMPOSITES into the page paint / screenshots (test 41b: a red fillRect reads back R=255,G=0,
+B=0 from mbPaintToBitmap). So canvas charts/visualizations render + screenshot correctly via the software
+Skia raster. The ACTUAL gaps are only: WebGL (getContext('webgl') returns null — no in-process GL backend;
+would need SwiftShader/ANGLE + the GPU command-buffer infra, deep) and `<video>`/`<audio>` playback (no
+media pipeline). Both are the genuinely heaviest, GPU/media-provider items. Last.
 
 **Tier 3 — input & rendering refinements:**
 [DEFERRED: device emulation] `WebView::EnableDeviceEmulation` (the DevTools device-mode path —
