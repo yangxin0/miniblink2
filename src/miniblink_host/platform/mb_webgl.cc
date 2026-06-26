@@ -1,7 +1,9 @@
 #include "miniblink_host/platform/mb_webgl.h"
 
 #include "base/command_line.h"
+#include "base/location.h"
 #include "base/memory/ptr_util.h"
+#include "base/task/sequenced_task_runner.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/common/context_creation_attribs.h"
 #include "gpu/command_buffer/common/context_result.h"
@@ -97,14 +99,31 @@ class MbWebGLContextProvider : public blink::WebGraphicsContext3DProvider {
     return nullptr;
   }
 
+  ~MbWebGLContextProvider() override {
+    // The GLInProcessContext (its GLES2Implementation) is sequence-bound to the thread
+    // it was CREATED on. For a WORKER context, V8's cppgc sweeps this provider at worker
+    // shutdown OFF that sequence -> destroying context_ inline trips the GPU
+    // sequence_checker DCHECK (fatal). Hand the teardown back to the creation sequence so
+    // it runs where the context was bound. On the main thread (creation == current
+    // sequence) this is a normal inline destruction.
+    if (context_ && creation_runner_ &&
+        !creation_runner_->RunsTasksInCurrentSequence()) {
+      creation_runner_->DeleteSoon(FROM_HERE, std::move(context_));
+    }
+  }
+
  private:
   explicit MbWebGLContextProvider(
       std::unique_ptr<gpu::GLInProcessContext> context)
-      : context_(std::move(context)) {}
+      : context_(std::move(context)),
+        creation_runner_(base::SequencedTaskRunner::GetCurrentDefault()) {}
 
   gpu::gles2::GLES2Implementation* Gl() { return context_->GetImplementation(); }
 
   std::unique_ptr<gpu::GLInProcessContext> context_;
+  // The sequence the context was created/bound on (worker or main); teardown is posted
+  // here so ~GLES2Implementation runs on its bind sequence.
+  scoped_refptr<base::SequencedTaskRunner> creation_runner_;
 };
 
 }  // namespace

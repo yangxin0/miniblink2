@@ -684,13 +684,41 @@ static void RunCases(mbView* v, int W, int H) {
            "WebGL on an OffscreenCanvas renders (off-DOM GPU rendering)",
            "oc=[" + oc + "]");
   }
-  // NOTE: WebGL in a WORKER (transferControlToOffscreen -> worker getContext('webgl'))
-  // RENDERS correctly (verified ad-hoc: a worker clear+readPixels returns the cleared
-  // color), but the worker's WebGL context TEARDOWN crashes: at worker shutdown V8's GC
-  // sweeps the context off the worker's bind sequence, tripping the GPU
-  // GLES2Implementation sequence_checker DCHECK (abort under DCHECK_ALWAYS_ON). Needs the
-  // provider/GLInProcessContext destroyed on its creation sequence — deferred (see
-  // PROGRESS "worker WebGL teardown"). No worker-WebGL test until that's fixed.
+
+  // 41z6. WebGL in a WORKER via transferControlToOffscreen: a <canvas>'s control is
+  // transferred to a dedicated worker, which creates the WebGL context and renders —
+  // true off-MAIN-THREAD GPU rendering (the headline OffscreenCanvas use). Exercises
+  // Platform::CreateWebGLGraphicsContextProvider on a worker thread + the process-wide
+  // in-process GPU thread shared across threads. Worker clears to yellow + readPixels.
+  // (The provider posts its context teardown back to the worker's creation sequence, so
+  // worker shutdown no longer aborts on the GPU sequence_checker DCHECK — the reason this
+  // had been deferred. The whole render suite exiting 0 is part of the proof.)
+  mbLoadHTML(v, "<body><canvas id='ocw' width='32' height='32'></canvas></body>",
+             "about:blank");
+  mbRunJS(v,
+    "window.__ocw='';try{"
+    "var w=new Worker('data:text/javascript,'+encodeURIComponent("
+    "'onmessage=function(e){try{var gl=e.data.getContext(\"webgl\");"
+    "if(!gl){postMessage(\"null\");return;}"
+    "gl.clearColor(1,1,0,1);gl.clear(gl.COLOR_BUFFER_BIT);"
+    "var p=new Uint8Array(4);gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);"
+    "postMessage(p[0]+\",\"+p[1]+\",\"+p[2]+\",\"+p[3]);}"
+    "catch(err){postMessage(\"werr:\"+err);}}'));"
+    "w.onmessage=function(e){window.__ocw=String(e.data);};"
+    "var oc=document.getElementById('ocw').transferControlToOffscreen();"
+    "w.postMessage(oc,[oc]);}catch(e){window.__ocw='err:'+e;}");
+  {
+    std::string ocw;
+    for (int i = 0; i < 200; ++i) {
+      mbWait(v, 25);
+      ocw = Eval(v, "window.__ocw");
+      if (!ocw.empty())
+        break;
+    }
+    Expect(ocw == "255,255,0,255",
+           "WebGL renders in a Worker via transferControlToOffscreen (off-main-thread)",
+           "ocw=[" + ocw + "]");
+  }
 
   // 41b. A 2D canvas COMPOSITES into the page paint (not just its in-memory backing
   // store): draw a red square, render the page, and read the canvas region from the

@@ -1107,18 +1107,19 @@ COMPLETE for headless use: WebGL 1 + WebGL 2 + readPixels + screenshot capture.
 [DONE — OffscreenCanvas WebGL (main thread)]. new OffscreenCanvas(w,h).getContext('webgl')
 renders via the same in-process provider (no DOM <canvas> needed) — off-DOM GPU rendering.
 Verified mb_smoke_render 41z5: clear cyan + readPixels -> 0,255,255,255 (render 107->108).
-[DEFERRED — worker WebGL teardown crash]. WebGL in a WORKER (canvas.transferControl-
-ToOffscreen() -> worker getContext('webgl')) RENDERS correctly (verified ad-hoc: a worker
-clear+readPixels returned the cleared color, 255,255,0,255), but the worker's WebGL context
-TEARDOWN aborts: at WorkerThread::PerformShutdownOnWorkerThread, V8 cppgc sweeps the
-WebGLRenderingContextBase -> DrawingBuffer -> MbWebGLContextProvider -> GLInProcessContext ->
-~GLES2Implementation, which hits gpu::ImplementationBase's sequence_checker DCHECK
-(CalledOnValidSequence) -> FATAL under this build's DCHECK_ALWAYS_ON. Root: the worker's
-GLES2Implementation is created bound to one sequence but swept on another at shutdown. FIX
-(deferred): the provider must destroy its GLInProcessContext on the sequence it was created
-on (e.g. hold the creation SequencedTaskRunner and post the teardown), or give the worker
-context an explicit pre-GC cleanup. Removed the worker-WebGL test until fixed; main-thread
-OffscreenCanvas is unaffected (its context tears down on the main sequence, exit 0).
+[DONE - worker WebGL (transferControlToOffscreen)]. WebGL in a WORKER now both RENDERS and
+TEARS DOWN cleanly. A worker getContext('webgl') (via canvas.transferControlToOffscreen())
+rendered correctly all along, but the worker's WebGL context teardown USED to abort: at
+worker shutdown V8 cppgc sweeps WebGLRenderingContextBase -> DrawingBuffer ->
+MbWebGLContextProvider -> ~GLInProcessContext -> ~GLES2Implementation OFF the sequence the
+context was bound to, tripping gpu::ImplementationBase's sequence_checker DCHECK (fatal under
+DCHECK_ALWAYS_ON). FIX: MbWebGLContextProvider captures its creation SequencedTaskRunner
+(base::SequencedTaskRunner::GetCurrentDefault() in the ctor) and, in its dtor, if destroyed
+OFF that sequence, hands the GLInProcessContext teardown back via creation_runner_->DeleteSoon
+-- so ~GLES2Implementation runs on its bind sequence. Main-thread contexts (creation ==
+current sequence) still destroy inline, unchanged. Verified mb_smoke_render 41z6: a worker
+clears yellow + readPixels -> 255,255,0,255 AND the whole render suite exits 0 (was SIGABRT
+134). render 108->109, full battery green, no leaks. Off-main-thread GPU rendering works.
 [VERIFIED — real shader rendering]. Beyond clearColor, the full WebGL pipeline works:
 mb_smoke_render 41z4 compiles a vertex+fragment shader, links a program, uploads a vertex
 buffer, and drawArrays a viewport-covering triangle in orange -> readPixels center =
