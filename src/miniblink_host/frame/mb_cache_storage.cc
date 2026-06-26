@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "base/types/expected.h"
+#include "miniblink_host/frame/mb_frame_origin.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/self_owned_associated_receiver.h"
@@ -165,37 +166,48 @@ class MbCacheStorageCache : public m::CacheStorageCache {
 
 class MbCacheStorage : public m::CacheStorage {
  public:
+  // `frame_key` -> the frame's origin: cache names are stored under a per-origin
+  // prefix so caches.open('v1') in different origins are ISOLATED (the registry
+  // was keyed by bare name -> cross-origin cache data sharing). 0 = unknown origin.
+  explicit MbCacheStorage(uint64_t frame_key) : frame_key_(frame_key) {}
+
   void Has(const blink::String& cache_name, int64_t,
            HasCallback callback) override {
-    std::move(callback).Run(CacheRegistry().count(cache_name.Utf8())
+    std::move(callback).Run(CacheRegistry().count(Key(cache_name))
                                 ? m::CacheStorageError::kSuccess
                                 : m::CacheStorageError::kErrorCacheNameNotFound);
   }
   void Delete(const blink::String& cache_name, int64_t,
               DeleteCallback callback) override {
-    bool existed = CacheRegistry().erase(cache_name.Utf8()) != 0;
+    bool existed = CacheRegistry().erase(Key(cache_name)) != 0;
     std::move(callback).Run(existed
                                 ? m::CacheStorageError::kSuccess
                                 : m::CacheStorageError::kErrorCacheNameNotFound);
   }
   void Keys(int64_t, KeysCallback callback) override {
     blink::Vector<blink::String> names;
+    const std::string scope = Scope();
     for (const auto& cache : CacheRegistry())
-      names.push_back(blink::String::FromUtf8(std::string_view(cache.first)));
+      if (cache.first.rfind(scope, 0) == 0)  // this origin's caches only
+        names.push_back(
+            blink::String::FromUtf8(cache.first.substr(scope.size())));
     std::move(callback).Run(names);
   }
-  // caches.match(request, options): search every cache (or just options.cache_name) for the
-  // first matching entry, honoring ignoreSearch.
+  // caches.match(request, options): search this origin's caches (or just
+  // options.cache_name) for the first matching entry, honoring ignoreSearch.
   void Match(m::FetchAPIRequestPtr request, m::MultiCacheQueryOptionsPtr options,
              bool, bool, int64_t, MatchCallback callback) override {
     const std::string target = UrlKey(request);
     const bool ignore_search =
         options && options->query_options &&
         options->query_options->ignore_search;
+    const std::string scope = Scope();
     const std::string only_cache =
-        options && !options->cache_name.IsNull() ? options->cache_name.Utf8()
+        options && !options->cache_name.IsNull() ? Key(options->cache_name)
                                                  : std::string();
     for (auto& cache : CacheRegistry()) {
+      if (cache.first.rfind(scope, 0) != 0)  // skip other origins' caches
+        continue;
       if (!only_cache.empty() && cache.first != only_cache)
         continue;
       for (auto& e : cache.second->entries) {
@@ -210,8 +222,7 @@ class MbCacheStorage : public m::CacheStorage {
   }
   void Open(const blink::String& cache_name, int64_t,
             OpenCallback callback) override {
-    std::string key = cache_name.Utf8();
-    auto& slot = CacheRegistry()[key];
+    auto& slot = CacheRegistry()[Key(cache_name)];
     if (!slot)
       slot = std::make_unique<MbCacheData>();
     mojo::PendingAssociatedRemote<m::CacheStorageCache> remote;
@@ -220,13 +231,23 @@ class MbCacheStorage : public m::CacheStorage {
         remote.InitWithNewEndpointAndPassReceiver());
     std::move(callback).Run(std::move(remote));
   }
+
+ private:
+  // Per-origin prefix for cache-name registry keys (SEP can't appear in an origin
+  // or a cache name). For a bucket, frame_key maps to "origin\x01bucket:name".
+  std::string Scope() const { return MbGetFrameOrigin(frame_key_) + "\x01"; }
+  std::string Key(const blink::String& cache_name) const {
+    return Scope() + cache_name.Utf8();
+  }
+  uint64_t frame_key_ = 0;
 };
 
 }  // namespace
 
 void BindCacheStorage(
-    mojo::PendingReceiver<blink::mojom::blink::CacheStorage> receiver) {
-  mojo::MakeSelfOwnedReceiver(std::make_unique<MbCacheStorage>(),
+    mojo::PendingReceiver<blink::mojom::blink::CacheStorage> receiver,
+    uint64_t frame_key) {
+  mojo::MakeSelfOwnedReceiver(std::make_unique<MbCacheStorage>(frame_key),
                               std::move(receiver));
 }
 

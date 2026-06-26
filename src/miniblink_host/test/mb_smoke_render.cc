@@ -1462,6 +1462,38 @@ static void RunCases(mbView* v, int W, int H) {
     if (b) mbDestroyView(b);
   }
 
+  // 73d. Cross-origin Cache Storage ISOLATION: caches.open(name) is per-ORIGIN (the
+  // registry was keyed by bare cache name -> cross-origin cache sharing). View A
+  // (origin X) puts an entry; view B (origin Y) opening the same-named cache must
+  // NOT match it. Status-only (does match find it) — orthogonal to the known cached-
+  // body-bytes bug.
+  {
+    mbView* a = mbCreateView(W, H);
+    mbView* b = mbCreateView(W, H);
+    if (a && b) {
+      mbLoadHTML(a, "<body>A</body>", "https://a-cache.test/");
+      mbLoadHTML(b, "<body>B</body>", "https://b-cache.test/");
+      mbRunJS(a,
+        "window.__ca='';caches.open('shared').then(function(c){"
+        "return c.put('/x',new Response('hi')).then(function(){window.__ca='put';});"
+        "}).catch(function(e){window.__ca='err:'+e.name;});");
+      for (int i = 0; i < 120 && Eval(a, "window.__ca") == ""; ++i)
+        mbWait(a, 25);
+      mbRunJS(b,
+        "window.__cb='';caches.open('shared').then(function(c){"
+        "return c.match('/x').then(function(r){window.__cb=r?'found':'miss';});"
+        "}).catch(function(e){window.__cb='err:'+e.name;});");
+      for (int i = 0; i < 120 && Eval(b, "window.__cb") == ""; ++i)
+        mbWait(b, 25);
+      const std::string ca = Eval(a, "window.__ca"), cb = Eval(b, "window.__cb");
+      Expect(ca == "put" && cb == "miss",
+             "cross-origin Cache Storage is isolated (one origin can't match another's entry)",
+             "ca=" + ca + " cb(isolated)=" + cb);
+    }
+    if (a) mbDestroyView(a);
+    if (b) mbDestroyView(b);
+  }
+
   // 78b. Storage partitioning across views: two views are independent top-level browsing
   // contexts, so their sessionStorage is ISOLATED (each view mints a unique session-namespace
   // id), while localStorage is per-ORIGIN and therefore SHARED process-wide. Same origin in both.

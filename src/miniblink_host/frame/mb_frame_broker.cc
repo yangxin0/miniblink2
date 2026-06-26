@@ -1297,7 +1297,7 @@ class MbBrowserInterfaceBroker
     }
     // caches (Cache Storage) — in-process Request/Response cache.
     if (auto r = receiver.As<blink::mojom::blink::CacheStorage>()) {
-      BindCacheStorage(std::move(r));
+      BindCacheStorage(std::move(r), frame_key_);  // per-origin Cache Storage
       return;
     }
     // navigator.getBattery() — headless static "full, charging" battery.

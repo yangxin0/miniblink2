@@ -38,8 +38,8 @@ m::FileSystemAccessErrorPtr FsOk() {
 
 // One storage bucket. Storage APIs delegate to the existing in-process backends; metadata
 // (persist/estimate/durability/expiry) is reported for a headless host. Its IndexedDB is
-// now origin+bucket scoped (isolated cross-origin + from the default partition); Cache/OPFS
-// remain process-wide (not yet bucket-partitioned).
+// origin+bucket scoped (isolated cross-origin + from the default partition) — IndexedDB, Cache
+// Storage, and OPFS all via the shared (origin, bucket) scope key (ScopeKey / the OPFS scope string).
 class MbBucketHost : public m::BucketHost {
  public:
   // `frame_key` -> the opening frame's origin; `bucket_name` partitions storage
@@ -49,8 +49,8 @@ class MbBucketHost : public m::BucketHost {
   MbBucketHost(uint64_t frame_key, std::string bucket_name)
       : frame_key_(frame_key), bucket_name_(std::move(bucket_name)) {}
   ~MbBucketHost() override {
-    if (idb_frame_key_)
-      MbClearFrameOrigin(idb_frame_key_);
+    if (scope_frame_key_)
+      MbClearFrameOrigin(scope_frame_key_);
   }
 
   void Persist(PersistCallback cb) override {
@@ -74,22 +74,13 @@ class MbBucketHost : public m::BucketHost {
     std::move(cb).Run(expires_, /*success=*/true);
   }
   void GetIdbFactory(mojo::PendingReceiver<m::IDBFactory> r) override {
-    // Scope the bucket's IDB to (origin, bucket) via a synthetic frame_key whose
-    // mapped origin is origin + SEP + bucket — distinct from the default partition
-    // ("origin") and from other buckets, and isolated cross-origin. Allocated
-    // lazily (first IDB request) and freed in the dtor.
-    if (!idb_frame_key_) {
-      const std::string origin = MbGetFrameOrigin(frame_key_);
-      idb_frame_key_ = MbAllocWorkerFrameKey();
-      MbSetFrameOrigin(idb_frame_key_, origin + "\x01" + "bucket:" + bucket_name_);
-    }
-    BindIDBFactory(std::move(r), idb_frame_key_);
+    BindIDBFactory(std::move(r), ScopeKey());  // (origin, bucket)-scoped IDB
   }
   void GetLockManager(mojo::PendingReceiver<m::LockManager> r) override {
     BindLockManager(std::move(r));
   }
   void GetCaches(mojo::PendingReceiver<m::CacheStorage> r) override {
-    BindCacheStorage(std::move(r));
+    BindCacheStorage(std::move(r), ScopeKey());  // (origin, bucket)-scoped caches
   }
   void GetDirectory(GetDirectoryCallback cb) override {
     // Scope the bucket's OPFS to (origin, bucket) — same scope string as its IDB.
@@ -106,10 +97,23 @@ class MbBucketHost : public m::BucketHost {
   }
 
  private:
+  // Lazily allocate a synthetic frame_key whose mapped "origin" is origin + SEP +
+  // bucket, scoping this bucket's IDB + Cache Storage to (origin, bucket) — distinct
+  // from the default partition and other buckets, isolated cross-origin. Freed in
+  // the dtor. (OPFS uses the same scope STRING directly via MbBindOpfsRootDirectory.)
+  uint64_t ScopeKey() {
+    if (!scope_frame_key_) {
+      scope_frame_key_ = MbAllocWorkerFrameKey();
+      MbSetFrameOrigin(scope_frame_key_, MbGetFrameOrigin(frame_key_) + "\x01" +
+                                             "bucket:" + bucket_name_);
+    }
+    return scope_frame_key_;
+  }
+
   std::optional<base::Time> expires_;
   uint64_t frame_key_ = 0;       // the opening frame's key (-> its origin)
   std::string bucket_name_;      // partitions storage within the origin
-  uint64_t idb_frame_key_ = 0;   // synthetic key for this bucket's IDB (0 = unset)
+  uint64_t scope_frame_key_ = 0; // synthetic (origin,bucket) key for IDB+Cache (0=unset)
 };
 
 class MbBucketManagerHost : public m::BucketManagerHost {

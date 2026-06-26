@@ -11,15 +11,19 @@
 #ifndef MINIBLINK_HOST_FRAME_MB_CACHE_STORAGE_H_
 #define MINIBLINK_HOST_FRAME_MB_CACHE_STORAGE_H_
 
+#include <cstdint>
+
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "third_party/blink/public/mojom/cache_storage/cache_storage.mojom-blink.h"
 
 namespace mb {
 
 // Bind a CacheStorage receiver to the in-process backend (self-owned). Bound on the broker's
-// service thread.
+// service thread. `frame_key` -> the frame's origin, which scopes the cache names so
+// caches.open() is ISOLATED per origin (a bare-name registry leaks cache data across origins).
 void BindCacheStorage(
-    mojo::PendingReceiver<blink::mojom::blink::CacheStorage> receiver);
+    mojo::PendingReceiver<blink::mojom::blink::CacheStorage> receiver,
+    uint64_t frame_key);
 
 }  // namespace mb
 

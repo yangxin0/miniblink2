@@ -726,8 +726,17 @@ IndexedDB). `BindFileSystemAccessManager(receiver, frame_key)` (broker passes th
 default OPFS by `MbGetFrameOrigin(frame_key)`; a bucket's OPFS uses (origin, bucket) like its IDB. Verified
 mb_smoke_render 73c (view A at https://a-opfs.test writes f.txt; view B at https://b-opfs.test gets
 NotFoundError — isolated). All single-origin OPFS tests unchanged (consistent origin -> same root). render
-99->100, no leaks. (Cache Storage in a bucket remains process-wide — the lone non-origin-scoped storage,
-niche + entangled with the known cache-body bug.)
+99->100, no leaks.
+[DONE: per-origin Cache Storage isolation] The default Cache Storage (caches.open) was keyed by bare cache
+NAME -> cross-origin cache data sharing (the same leak class as IDB/OPFS). Now cache-registry keys carry a
+per-origin prefix: `MbCacheStorage(frame_key)` scopes Open/Has/Delete/Keys/Match by MbGetFrameOrigin
+(frame_key) + SEP; `BindCacheStorage(receiver, frame_key)` (broker passes the frame's key). A bucket's
+Cache Storage uses the bucket's (origin, bucket) scope key (shared with its IDB via MbBucketHost::ScopeKey).
+Verified mb_smoke_render 73d (view A at a-cache.test caches.open('shared').put; view B at b-cache.test
+match -> miss = isolated). All single-origin Cache tests unchanged (consistent origin -> same scope). render
+100->101, no leaks. With this, EVERY persistent/messaging storage API is origin-isolated — IDB, OPFS,
+BroadcastChannel, AND Cache Storage (default + worker + bucket). The cache-body intermittent-empty bug
+(orthogonal to isolation) remains the one open Cache item.
 [DONE: mockable worker scripts] `MbFetchUrl` now consults the response-mock table (MbFindMock) before
 any scheme fetch, matching the async loader. So worker scripts / iframes / top-level navs can be
 served by `mbMockResponse` — and a worker from a mocked https URL is SAME-ORIGIN with the page (a
@@ -743,7 +752,8 @@ ISOLATED: GetIdbFactory scopes it to (origin, bucket) via a synthetic frame_key 
 origin+SEP+"bucket:"+name (BindBucketManagerHost now carries the frame_key from the broker; lazily
 allocated, freed in the bucket host dtor) — so it's separate from the default partition AND other buckets
 AND isolated cross-origin. Verified mb_smoke 23ae2 (default db 'shared' vs bucket 'p' db 'shared', same
-key -> 'D'/'B', not clobbered). Cache Storage + OPFS in a bucket remain process-wide (not bucket-
+key -> 'D'/'B', not clobbered). [Cache Storage + OPFS in a bucket are now ALSO (origin,bucket)-scoped —
+see the per-origin Cache/OPFS entries.] (Old note: were process-wide, not bucket-
 partitioned yet — niche).
 [DONE: Cache Storage] `frame/mb_cache_storage.{h,cc}` (`MbCacheStorage` + `MbCacheStorageCache`,
 bound from the frame broker). `caches.open/has/delete/keys`, `caches.match`, `cache.put`/`delete`
