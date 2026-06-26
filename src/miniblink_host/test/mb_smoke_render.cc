@@ -961,6 +961,37 @@ static void RunCases(mbView* v, int W, int H) {
            "vd=[" + vd + "]");
   }
 
+  // 41j. A <video> FRAME DECODES + paints (media step 3b, the visible payoff): the
+  // player decodes the first video frame (libvpx via media::VideoThumbnailDecoder) and
+  // exposes it through GetCurrentFrameThenUpdate, so drawImage(video) paints it onto a
+  // 2D canvas -> readback shows an OPAQUE pixel (a real frame, not transparent).
+  {
+    mbLoadHTML(v, "<body>vf</body>", "about:blank");
+    mbRunJS(v,
+      "window.__vf='';var vd=document.createElement('video');"
+      "vd.addEventListener('loadeddata',function(){try{"
+      "var c=document.createElement('canvas');c.width=16;c.height=16;"
+      "var x=c.getContext('2d');x.drawImage(vd,0,0,16,16);"
+      "var d=x.getImageData(8,8,1,1).data;"
+      "window.__vf='a:'+d[3]+',sum:'+(d[0]+d[1]+d[2]);}"
+      "catch(e){window.__vf='drawerr:'+e;}});"
+      "vd.addEventListener('error',function(){window.__vf='err:'+(vd.error?vd.error.code:'?');});"
+      "vd.src='data:video/webm;base64,"
+      R"B64(GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAlFEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHYTbuMU6uEElTDZ1OsggEyTbuMU6uEHFO7a1Osggkv7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsirXsYMPQkBNgI1MYXZmNjAuMTYuMTAwV0GNTGF2ZjYwLjE2LjEwMESJiECfQAAAAAAAFlSua9WuAQAAAAAAAEzXgQFzxYia5fG0kqblX5yBACK1nIN1bmSIgQCGhVZfVlA4g4EBI+ODhAJiWgDgnbCCAUC6gfCagQJVsJBVuoEGVbGBBlW7gQZVuYEBElTDZ/xzc6BjwIBnyJpFo4dFTkNPREVSRIeNTGF2ZjYwLjE2LjEwMHNz1mPAi2PFiJrl8bSSpuVfZ8ihRaOHRU5DT0RFUkSHlExhdmM2MC4zMS4xMDIgbGlidnB4Z8ihRaOIRFVSQVRJT05Eh5MwMDowMDowMi4wMDAwMDAwMDAAH0O2dUd254EAo0FBgQAAgLAZAJ0BKkAB8AAARwiFhYiFhIgCAgJ11Qv6r+APKVZN5L+AP6V8YL2B/SDJ/7wH6A/wHEAf0B9/+7M/0BDOvyNdTe2kAOhssA11N7iM8FbiLywDXU3vpKf8sbEXlgGwkKEX/yxsReWC9ReWAa6m9xF8rFjYi8sA11N/st1N7aQpXKtwTRwOjvNUlj52/QP/R8q3BJM+NiLyjZjeEZpnl4llgGuqu3VupvcReWAcO+WAa6m9xF5ZwdDZYBrqb3EZ4K3EXlgGupvfSU/5Y2IvLANhIUIv/eAA/v8TQv6yqGPcwQRXjDp/8VrvQ2qcnhkpmvt2j5Y////6oC66ZjiEcEcC5FYSDFeSkq3RmH6Bc7f8AAAABEgEt/+vgEu5xzOlCBr1pYgIHuPMpafdVvCdAAAAAAAAAADuGs4AAAAAo56BACgA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEAUADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQB4ANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BAKAA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEAyADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQDwANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo62BARgAMQMABRAQFGAmPwKSjQ68AQ4ABc4TxgsFq1yTzAAAAAT4AMOAAAAAAACjnoEBQADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQFoANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BAZAA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEBuADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQHgANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BAggA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoECMADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQJYANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BAoAA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoECqADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQLQANECAAUQEBRgAGFgv9AAIgAQzX61yT5xzAAAo56BAvgA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEDIADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQNIANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BA3AA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEDmADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQPAANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BA+gA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEEEADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQQ4ANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BBGAA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEEiADRAgAFEBAUYABhYL/QACIAEM1+tck+ccwAAKOegQSwANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BBNgA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEFAADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQUoANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BBVAA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEFeADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQWgANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BBcgA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEF8ADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQYYANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BBkAA0QIABRAQFGAAYWC/0AAiABDNfrXJPnHMAACjnoEGaADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQaQANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BBrgA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEG4ADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQcIANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BBzAA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEHWADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQeAANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BB6gA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAAAcU7trkbuPs4EAt4r3gQHxggGz8IED)B64"
+      "';vd.load();");
+    std::string vf;
+    for (int i = 0; i < 300; ++i) {
+      mbWait(v, 25);
+      vf = Eval(v, "window.__vf");
+      if (!vf.empty())
+        break;
+    }
+    // Opaque alpha (255) => a real decoded frame was painted (not a transparent miss).
+    Expect(vf.rfind("a:255,", 0) == 0,
+           "a <video> frame decodes (libvpx) + drawImage(video) paints it to a canvas",
+           "vf=[" + vf + "]");
+  }
+
   // 42. Drawing to a canvas via mbEvalJS (not just mbRunJS) must also be
   // crash-safe. EvalToString/EvalIsolated used to run ExecuteScript
   // synchronously, so a draw inside an eval expression hit the same

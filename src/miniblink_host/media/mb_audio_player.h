@@ -37,6 +37,12 @@ class PaintCanvas;
 class PaintFlags;
 }  // namespace cc
 
+namespace media {
+class PaintCanvasVideoRenderer;
+class VideoFrame;
+class VideoThumbnailDecoder;
+}  // namespace media
+
 namespace blink {
 class MediaPlayerClient;
 class WebMediaPlayerClient;
@@ -118,18 +124,18 @@ class MbAudioPlayer : public blink::WebMediaPlayer {
   void SuspendForFrameClosed() override {}
   void RecordAutoPictureInPictureInfo(
       const media::PictureInPictureEventsInfo::AutoPipInfo&) override {}
-  void Paint(cc::PaintCanvas*,
-             const gfx::Rect&,
-             const cc::PaintFlags&,
-             bool) override {}
+  // Paints the current decoded video frame into `canvas` (drawImage(video), the video's
+  // own paint). No-op until a frame decodes. Defined in the .cc (uses the renderer).
+  void Paint(cc::PaintCanvas* canvas,
+             const gfx::Rect& rect,
+             const cc::PaintFlags& flags,
+             bool force_pixel_readback) override;
   scoped_refptr<media::VideoFrame> GetCurrentFrameThenUpdate() override {
-    return nullptr;
+    return current_frame_;
   }
-  std::optional<media::VideoFrame::ID> CurrentFrameId() const override {
-    return std::nullopt;
-  }
-  bool HasAvailableVideoFrame() const override { return false; }
-  bool HasReadableVideoFrame() const override { return false; }
+  std::optional<media::VideoFrame::ID> CurrentFrameId() const override;
+  bool HasAvailableVideoFrame() const override { return !!current_frame_; }
+  bool HasReadableVideoFrame() const override { return !!current_frame_; }
   void RegisterFrameSinkHierarchy() override {}
   void UnregisterFrameSinkHierarchy() override {}
 
@@ -138,6 +144,8 @@ class MbAudioPlayer : public blink::WebMediaPlayer {
   void DecodeAndReport(std::string url);
   // The playback clock tick (fires TimeChanged -> the element's timeupdate/ended).
   void OnPlaybackTick();
+  // Called when the first video frame decodes -> store it + advance to HAVE_ENOUGH_DATA.
+  void OnFirstFrameDecoded(scoped_refptr<media::VideoFrame> frame);
 
   blink::MediaPlayerClient* client_;  // internal client: state-change callbacks
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
@@ -150,6 +158,10 @@ class MbAudioPlayer : public blink::WebMediaPlayer {
   bool has_audio_ = false;
   bool has_video_ = false;
   gfx::Size natural_size_;  // video dimensions (codec width/height), empty for audio
+  // First decoded video frame (for drawImage(video) / GetCurrentFrameThenUpdate).
+  scoped_refptr<media::VideoFrame> current_frame_;
+  std::unique_ptr<media::VideoThumbnailDecoder> frame_decoder_;
+  std::unique_ptr<media::PaintCanvasVideoRenderer> video_renderer_;
   bool paused_ = true;
   bool ended_ = false;
   bool seeking_ = false;

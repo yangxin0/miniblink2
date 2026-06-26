@@ -5,9 +5,18 @@
 #include "base/containers/span.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
+#include "media/base/encryption_scheme.h"
+#include "media/base/video_codecs.h"
+#include "media/base/video_color_space.h"
+#include "media/base/video_decoder_config.h"
+#include "media/base/video_frame.h"
+#include "media/base/video_thumbnail_decoder.h"
+#include "media/base/video_transformation.h"
+#include "media/renderers/paint_canvas_video_renderer.h"
 #include "media/filters/demuxer_manager.h"  // media::TrackManager (a MediaPlayerClient base)
 #include "media/filters/ffmpeg_glue.h"
 #include "media/filters/in_memory_url_protocol.h"
+#include "media/filters/vpx_video_decoder.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "third_party/blink/public/platform/web_media_player_source.h"
 #include "third_party/blink/public/platform/web_url.h"
@@ -52,6 +61,12 @@ blink::WebMediaPlayer::LoadTiming MbAudioPlayer::Load(
 void MbAudioPlayer::DecodeAndReport(std::string url) {
   std::string body, content_type;
   bool ok = !url.empty() && MbFetchUrl(url, &body, &content_type);
+
+  std::vector<uint8_t> video_keyframe;  // first video packet bytes (a keyframe)
+  std::vector<uint8_t> video_extra_data;
+  media::VideoCodec video_codec = media::VideoCodec::kUnknown;
+  media::VideoCodecProfile video_profile = media::VIDEO_CODEC_PROFILE_UNKNOWN;
+
   if (ok) {
     // Read container metadata with FFmpeg (no decode): stream kinds + video size +
     // duration. avformat_find_stream_info fills codecpar->width/height without a
@@ -62,6 +77,7 @@ void MbAudioPlayer::DecodeAndReport(std::string url) {
     if (glue.OpenContext() &&
         avformat_find_stream_info(glue.format_context(), nullptr) >= 0) {
       AVFormatContext* fc = glue.format_context();
+      int video_idx = -1;
       for (unsigned i = 0; i < fc->nb_streams; ++i) {
         const AVCodecParameters* cp = fc->streams[i]->codecpar;
         if (cp->codec_type == AVMEDIA_TYPE_AUDIO) {
@@ -70,28 +86,102 @@ void MbAudioPlayer::DecodeAndReport(std::string url) {
                    cp->height > 0) {
           has_video_ = true;
           natural_size_ = gfx::Size(cp->width, cp->height);
+          video_idx = static_cast<int>(i);
+          if (cp->codec_id == AV_CODEC_ID_VP8) {
+            video_codec = media::VideoCodec::kVP8;
+            video_profile = media::VP8PROFILE_ANY;
+          } else if (cp->codec_id == AV_CODEC_ID_VP9) {
+            video_codec = media::VideoCodec::kVP9;
+            video_profile = media::VP9PROFILE_PROFILE0;
+          }
+          if (cp->extradata && cp->extradata_size > 0) {
+            video_extra_data.assign(cp->extradata,
+                                    cp->extradata + cp->extradata_size);
+          }
         }
       }
       if (fc->duration != AV_NOPTS_VALUE)
         duration_ = fc->duration / static_cast<double>(AV_TIME_BASE);
+      // Demux the first video packet (a keyframe in our assets) for a one-shot decode.
+      if (video_idx >= 0 && video_codec != media::VideoCodec::kUnknown) {
+        AVPacket* pkt = av_packet_alloc();
+        while (pkt && av_read_frame(fc, pkt) >= 0) {
+          if (pkt->stream_index == video_idx && pkt->size > 0) {
+            video_keyframe.assign(pkt->data, pkt->data + pkt->size);
+            av_packet_unref(pkt);
+            break;
+          }
+          av_packet_unref(pkt);
+        }
+        av_packet_free(&pkt);
+      }
       ok = has_audio_ || has_video_;
     } else {
       ok = false;
     }
   }
 
-  if (ok) {
-    // Jump straight to "have enough data": the element fires loadedmetadata ->
-    // durationchange -> canplay -> canplaythrough for the levels crossed.
-    network_state_ = kNetworkStateLoaded;
-    ready_state_ = kReadyStateHaveEnoughData;
-    client_->DurationChanged();
-    client_->ReadyStateChanged();
-    client_->NetworkStateChanged();
-  } else {
+  if (!ok) {
     network_state_ = kNetworkStateFormatError;
     client_->NetworkStateChanged();
+    return;
   }
+
+  network_state_ = kNetworkStateLoaded;
+  if (has_video_ && !video_keyframe.empty()) {
+    // Kick off a one-shot decode of the first frame (libvpx). The frame arrives
+    // asynchronously -> OnFirstFrameDecoded advances readyState to HAVE_ENOUGH_DATA.
+    // Report metadata now (loadedmetadata) at HAVE_METADATA.
+    media::VideoDecoderConfig config(
+        video_codec, video_profile,
+        media::VideoDecoderConfig::AlphaMode::kIsOpaque,
+        media::VideoColorSpace::REC709(), media::kNoTransformation, natural_size_,
+        gfx::Rect(natural_size_), natural_size_, video_extra_data,
+        media::EncryptionScheme::kUnencrypted);
+    frame_decoder_ = std::make_unique<media::VideoThumbnailDecoder>(
+        std::make_unique<media::VpxVideoDecoder>(), config,
+        std::move(video_keyframe));
+    frame_decoder_->Start(base::BindOnce(&MbAudioPlayer::OnFirstFrameDecoded,
+                                         weak_ptr_factory_.GetWeakPtr()));
+    ready_state_ = kReadyStateHaveMetadata;
+  } else {
+    // Audio-only (or unsupported video codec): jump to "have enough data".
+    ready_state_ = kReadyStateHaveEnoughData;
+  }
+  client_->DurationChanged();
+  client_->ReadyStateChanged();
+  client_->NetworkStateChanged();
+}
+
+void MbAudioPlayer::Paint(cc::PaintCanvas* canvas,
+                          const gfx::Rect& rect,
+                          const cc::PaintFlags& flags,
+                          bool /*force_pixel_readback*/) {
+  if (!current_frame_ || !canvas)
+    return;
+  if (!video_renderer_)
+    video_renderer_ = std::make_unique<media::PaintCanvasVideoRenderer>();
+  media::PaintCanvasVideoRenderer::PaintParams params;
+  params.dest_rect = gfx::RectF(rect);
+  // Software (I420) frame -> no raster context needed; PaintCanvasVideoRenderer
+  // converts YUV to the canvas.
+  video_renderer_->Paint(current_frame_, canvas, flags, params,
+                         /*raster_context_provider=*/nullptr);
+}
+
+void MbAudioPlayer::OnFirstFrameDecoded(scoped_refptr<media::VideoFrame> frame) {
+  // Whether or not a frame came back, advance to HAVE_ENOUGH_DATA so the element is
+  // playable; a decoded frame additionally enables drawImage(video) + paint.
+  if (frame)
+    current_frame_ = std::move(frame);
+  ready_state_ = kReadyStateHaveEnoughData;
+  client_->ReadyStateChanged();
+}
+
+std::optional<media::VideoFrame::ID> MbAudioPlayer::CurrentFrameId() const {
+  if (current_frame_)
+    return current_frame_->unique_id();
+  return std::nullopt;
 }
 
 double MbAudioPlayer::CurrentTime() const {

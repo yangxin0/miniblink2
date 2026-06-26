@@ -993,6 +993,26 @@ tests are unchanged (FFmpegGlue gives the same duration AudioFileReader did - bo
 fc->duration). REMAINING for <video>: actual FRAME decode + paint into the canvas/screenshot
 (VideoFrameCompositor / GetCurrentFrameThenUpdate + Paint) is the next step - the big visible
 piece; this metadata brick is the prerequisite (container parsed, dims known).
+[DONE - <video> FRAME DECODE + PAINT (media step 3b, the visible payoff)]. A <video> frame
+now DECODES and PAINTS: drawImage(video) shows the picture, so headless video capture works.
+After reading metadata, DecodeAndReport demuxes the first video keyframe (av_read_frame on the
+already-open AVFormatContext) and kicks off a one-shot decode via media::VideoThumbnailDecoder
++ media::VpxVideoDecoder (libvpx; media_use_libvpx=true) with a hand-built VideoDecoderConfig
+(codec/profile from codecpar - VP8->kVP8/VP8PROFILE_ANY, VP9->kVP9/PROFILE0; coded_size,
+extradata). The decode is async -> OnFirstFrameDecoded stores the media::VideoFrame +
+advances readyState HAVE_METADATA->HAVE_ENOUGH_DATA. drawImage(video) goes through
+HTMLVideoElement::PaintCurrentFrame -> wmp->Paint() (NOT GetCurrentFrameThenUpdate - the key
+finding; the no-op Paint stub was why the first attempt painted transparent), so I implemented
+MbAudioPlayer::Paint() with media::PaintCanvasVideoRenderer (software I420 frame -> canvas, no
+raster context needed). GetCurrentFrameThenUpdate/HasAvailableVideoFrame/CurrentFrameId also
+return the frame. Verified mb_smoke_render 41j: a tiny VP8 webm -> the first frame decodes,
+drawImage(vd,canvas) -> getImageData reads an OPAQUE pixel (a:255, non-zero color) = the real
+frame painted (render 114->115, full battery green, no leaks). So <video> is functionally
+usable headless: load -> metadata -> timeline -> FRAME decode + drawImage/paint. REMAINING
+(polish): per-currentTime frame stepping (we decode only the FIRST frame; seeking/playing
+doesn't update the picture yet), and direct frame compositing into the page paint (the element
+paints via drawImage today; a <video> in the page layout would need the same IsComposited-vs-
+software-paint handling WebGL needed). Real audio OUTPUT (silent sink) remains untestable.
 **Tier 3 — input & rendering refinements:**
 [DEFERRED: device emulation] `WebView::EnableDeviceEmulation` (the DevTools device-mode path —
 mobile viewport + coarse-pointer/no-hover) was attempted and REVERTED: it builds a
