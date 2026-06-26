@@ -1149,6 +1149,24 @@ battery green (platform 46, render 122, shot 66, wke 114), no leaks. This is the
 after signal an agent reads around an action (did the checkbox actually toggle? which field
 is focused?) - the AX snapshot is now role + name + value + bounds + live state.
 
+[DONE - FIND-IN-PAGE with match count (mbFindText/mbStopFind)]. Wired blink's REAL find-in-
+page (the Ctrl+F primitive), previously only a stubbed FrameHost callback. mbFindText(view,
+text, match_case) returns the TOTAL match count, selects/scrolls to the first match, and
+lays down find-highlight markers (which render into a screenshot); mbStopFind clears them.
+Impl (MbWebView::FindText): reach the internal blink::WebLocalFrameImpl (blink::To<>),
+UpdateAllLifecyclePhases(kFindInPage) so scoping walks current layout, then drive
+TextFinder directly - Find() (select + highlight the active match) + ResetMatchCount() +
+StartScopingStringMatches() with FindOptions.run_synchronously_for_testing=true (the same
+synchronous-count path blink's own text_finder_test uses), then read TotalMatchCount().
+This finds across element boundaries and is case-sensitive on demand - things a JS innerText
+search can't do (and it highlights). Verified mb_smoke 30d: "The cat sat. A CAT ran.
+Another cat slept." + a <div>cat</div> -> case-insensitive "cat" = 4 (cat/CAT/cat/cat),
+case-sensitive = 3, a missing term = 0. New includes: text_finder.h + find_in_page.mojom-
+blink.h (internal, already linked via core). mb_smoke 151->152, full battery green (platform
+46, render 122, shot 66, wke 114), no leaks. (Probed first that animations/transitions/
+<dialog>/<details>/selection/structuredClone/elementFromPoint all already work - find-in-
+page was the one genuine self-contained browser feature still stubbed.)
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

@@ -806,6 +806,18 @@ int mbGetAXTree(mbView* v, char* out, int out_cap) {
   return static_cast<int>(result.size());
 }
 
+int mbFindText(mbView* v, const char* text, int match_case) {
+  if (!v || !v->impl)
+    return 0;
+  bool active = false;
+  return v->impl->FindText(text, match_case != 0, /*forward=*/true, &active);
+}
+
+void mbStopFind(mbView* v) {
+  if (v && v->impl)
+    v->impl->StopFind();
+}
+
 int mbGetTextForSelector(mbView* v, const char* css_selector, char* out,
                          int out_cap) {
   if (!v || !v->impl)

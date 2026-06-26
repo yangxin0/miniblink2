@@ -66,6 +66,8 @@
 #include "third_party/blink/renderer/core/fileapi/file_list.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/public/mojom/frame/find_in_page.mojom-blink.h"
+#include "third_party/blink/renderer/core/editing/finder/text_finder.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/paint/paint_flags.h"
@@ -1209,6 +1211,49 @@ std::string MbWebView::GetAXTree() {
   std::string out;
   SerializeAXNode(root, &out);
   return out;
+}
+
+int MbWebView::FindText(const char* text, bool match_case, bool forward,
+                        bool* has_active) {
+  if (has_active)
+    *has_active = false;
+  if (!text || !*text || !main_frame_)
+    return 0;
+  auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
+  if (!impl || !impl->GetFrame())
+    return 0;
+  // Bring style/layout current — scoping walks the laid-out text (the find tests do the
+  // same before counting).
+  if (widget_ && widget_->widget())
+    widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kFindInPage);
+  blink::WebString needle = blink::WebString::FromUtf8(text);
+  blink::TextFinder& finder = impl->EnsureTextFinder();
+  auto options = blink::mojom::blink::FindOptions::New();
+  options->match_case = match_case;
+  options->forward = forward;
+  options->new_session = true;
+  options->run_synchronously_for_testing = true;  // count + select in this call
+  const int id = ++find_id_;
+  // Find() selects + scrolls to (and highlights) the active match.
+  bool active = impl->GetFrame()->GetDocument()
+                    ? finder.Find(id, needle, *options, /*wrap_within_frame=*/false,
+                                  /*active_now=*/nullptr)
+                    : false;
+  // Scope the whole document to count every match (synchronous with the testing flag);
+  // this also lays down the find-match markers (visible in a screenshot).
+  finder.ResetMatchCount();
+  finder.StartScopingStringMatches(id, needle, *options);
+  if (has_active)
+    *has_active = active;
+  return finder.TotalMatchCount();
+}
+
+void MbWebView::StopFind() {
+  if (!main_frame_)
+    return;
+  auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
+  if (impl && impl->GetTextFinder())
+    impl->GetTextFinder()->StopFindingAndClearSelection();  // clears matches + markers
 }
 
 bool MbWebView::GetTextForSelector(const char* css_selector, std::string* out) {

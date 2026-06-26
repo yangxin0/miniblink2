@@ -650,6 +650,13 @@ MB_EXPORT int mbGetHTML(mbView*, char* out, int out_cap);
 // with mbSendMouseClick. Returns 0 if there is no document. No compositor needed.
 MB_EXPORT int mbGetAXTree(mbView*, char* out, int out_cap);
 
+// FIND-IN-PAGE. Search the page for `text`; returns the TOTAL number of matches (0 if
+// none). Also selects/scrolls to the first match and highlights ALL matches (the find
+// markers render into a screenshot). `match_case` != 0 for case-sensitive search. Uses
+// blink's real TextFinder. Call mbStopFind to clear the selection + highlights.
+MB_EXPORT int mbFindText(mbView*, const char* text, int match_case);
+MB_EXPORT void mbStopFind(mbView*);
+
 // Write the visible text (innerText) of the first element matching `css_selector`
 // into `out`. Returns the value's length in bytes (>=0), or -1 if no element
 // matches. Size first with out=NULL/out_cap=0. Companion to mbGetElementRect:

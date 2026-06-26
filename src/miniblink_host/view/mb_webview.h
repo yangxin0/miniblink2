@@ -250,6 +250,12 @@ class MbWebView {
   // via WebAXContext (which enables the AXObjectCache), with ignored nodes flattened out.
   // Empty string if there is no document/cache. No compositor needed (DOM/layout level).
   std::string GetAXTree();
+  // FIND-IN-PAGE. Search the page for `text`; returns the TOTAL match count (0 if none),
+  // selects/scrolls to the first match, and lays down find-highlight markers (which show
+  // in a screenshot). `*has_active` (optional) is set true when a match was selected.
+  // Runs blink's real TextFinder synchronously. Call StopFind() to clear the highlights.
+  int FindText(const char* text, bool match_case, bool forward, bool* has_active);
+  void StopFind();  // clear the find selection + highlight markers
   // Per-element scraping by selector. Fill *out with the first match's innerText
   // / the named attribute's value and return true; return false if no element
   // matches (GetAttribute also returns false if the attribute is absent). *out is
@@ -544,6 +550,7 @@ class MbWebView {
   [[maybe_unused]] blink::WebViewImpl* web_view_ = nullptr;     // owned by blink; Close() in dtor
   [[maybe_unused]] blink::WebLocalFrame* main_frame_ = nullptr; // owned by blink
   float dsf_ = 1.0f;  // device pixel ratio; PaintInto scales the canvas by it
+  int find_id_ = 0;   // monotonic find-in-page session identifier (FindText)
   std::string init_script_;  // runs before each new document's own scripts
   std::vector<std::unique_ptr<NativeBinding>> js_bindings_;  // BindJsFunction
   JsDialogFn dialog_cb_ = nullptr;       // alert/confirm/prompt handler (optional)

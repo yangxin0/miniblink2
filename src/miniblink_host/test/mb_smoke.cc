@@ -2874,6 +2874,26 @@ int main() {
                (checked_ok ? "1" : "0") + " focused=" + (focused_ok ? "1" : "0"));
   }
 
+  // 30d (find). mbFindText runs blink's real find-in-page: it returns the TOTAL match
+  // count, is case-sensitive on demand, and finds across element boundaries. mbStopFind
+  // clears it. This is the Ctrl+F primitive (counting + highlighting), distinct from a
+  // JS innerText search (it also selects/scrolls to + highlights the match).
+  {
+    mbLoadHTML(v,
+               "<body><p>The cat sat. A CAT ran. Another cat slept.</p>"
+               "<div>cat</div></body>",
+               "about:blank");
+    mbWait(v, 60);
+    const int n_ci = mbFindText(v, "cat", 0);  // case-insensitive: cat,CAT,cat,cat = 4
+    const int n_cs = mbFindText(v, "cat", 1);  // case-sensitive: cat,cat,cat = 3
+    const int n_none = mbFindText(v, "zzzznotfound", 0);
+    mbStopFind(v);
+    Expect(n_ci == 4 && n_cs == 3 && n_none == 0,
+           "mbFindText: real find-in-page counts matches (case-insensitive vs -sensitive)",
+           "ci=" + std::to_string(n_ci) + " cs=" + std::to_string(n_cs) +
+               " none=" + std::to_string(n_none));
+  }
+
   // Network cases (31, 32) are OPT-IN via MB_NET_TESTS=1: a dead host costs ~45s
   // per load (connect-timeout x retries), which would make every default run crawl.
   // They still skip gracefully if enabled but httpbin is unreachable.
