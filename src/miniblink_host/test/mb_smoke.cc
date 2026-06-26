@@ -981,6 +981,34 @@ int main() {
                " ptrmove=" + (ptrmove ? "1" : "0") + " ptrust=" + (ptrust ? "1" : "0"));
   }
 
+  // 12e. A touch TAP synthesizes a trusted `click` (tap-to-click) so touch automation
+  // triggers buttons/links — what mobile UIs depend on. mbSendTouchTap sends a GestureTap
+  // (handled by blink's GestureManager on the main thread, no compositor) after the
+  // touch/pointer events, so a button's click handler fires with isTrusted=true.
+  {
+    mbLoadHTML(v,
+        "<body style='margin:0'><button id='bt' style='width:200px;height:100px'>x</button>"
+        "<script>window.__clk=0;window.__ct=0;"
+        "document.getElementById('bt').addEventListener('click',function(e){"
+        "window.__clk=1;window.__ct=e.isTrusted?1:0;});</script></body>", "about:blank");
+    {
+      std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+      mbPaintToBitmap(v, tmp.data(), W, H, W * 4);
+    }
+    mbSendTouchTap(v, 50, 40);
+    for (int i = 0; i < 80; ++i) {
+      mbWait(v, 25);
+      if (Eval(v, "String(window.__clk)") == "1")
+        break;
+    }
+    const bool clicked = Eval(v, "String(window.__clk)") == "1";
+    const bool trusted = Eval(v, "String(window.__ct)") == "1";
+    Expect(clicked && trusted,
+           "a touch tap synthesizes a trusted click (tap-to-click on a button)",
+           "clk=" + Eval(v, "String(window.__clk)") + " trusted=" +
+               Eval(v, "String(window.__ct)"));
+  }
+
   // 13. Body with an embedded NUL byte must not truncate the document (the host
   // used to commit body.c_str(), losing everything after the first NUL). Load via
   // file:// (the length-preserving path) and verify content AFTER the NUL parsed.

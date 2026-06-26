@@ -1225,6 +1225,19 @@ touchstart/touchmove/touchend for Touch-Events UIs. Verified mb_smoke 12d: swipe
 unchanged, mb_smoke 147, full battery green, no leaks. So both touch primitives (tap + swipe)
 now deliver trusted Pointer Events - the modern standard for mobile/touch interaction
 (complements mbEmulateDevice for mobile testing).
+[DONE - touch tap synthesizes a trusted CLICK (tap-to-click)]. A touch tap fired touch +
+pointer events but NO click (the gesture recognizer that turns a tap into a click runs in
+the compositor/input pipeline, absent here -> probed: clk=0). FIX: MbWidget::SendTouchTap
+now also sends a WebGestureEvent(kGestureTap, kTouchscreen) after the touch/pointer events;
+blink's GestureManager handles it on the MAIN thread (NOT the compositor, so no crash unlike
+the scroll-gesture path) -> mousedown/mouseup/click. So a tap on a button/link fires its
+click handler with isTrusted=true. Verified mb_smoke 12e: mbSendTouchTap on a <button> ->
+click fired, isTrusted true (clk=1 trusted=1). 12c/12d (touch + pointer events) unaffected,
+wke touch unchanged. mb_smoke 147->148, full battery green, no leaks. So the MOBILE-TESTING
+CLUSTER is now complete end to end: mbEmulateDevice (mobile viewport + coarse-pointer/no-hover
+media queries) + trusted touch tap (touch + pointer + CLICK) + trusted touch swipe (touch +
+pointer drag) - a mobile page can be emulated, tapped (buttons work), and swiped, all
+headlessly via the input/settings layer, no compositor.
 
 [SCOPED — WebGL (biggest remaining gap): feasibility CONFIRMED, implementation is multi-
 session]. Investigated this tick. (1) The donor out/Release already SHIPS the GL stack:

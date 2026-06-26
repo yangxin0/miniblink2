@@ -14,6 +14,7 @@
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/common/input/web_keyboard_event.h"
 #include "third_party/blink/public/common/input/web_mouse_event.h"
+#include "third_party/blink/public/common/input/web_gesture_event.h"
 #include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
 #include "third_party/blink/public/common/input/web_pointer_event.h"
 #include "third_party/blink/public/common/input/web_touch_event.h"
@@ -327,6 +328,21 @@ bool MbWidget::SendTouchTap(int x, int y) {
   impl->HandleInputEvent(blink::WebCoalescedInputEvent(
       make(blink::WebInputEvent::Type::kPointerUp, /*start=*/false),
       ui::LatencyInfo()));
+  // A GestureTap turns the tap into a `click` (the gesture recognizer that would
+  // synthesize this from the touch sequence isn't wired in the non-compositing widget,
+  // so a tap alone fires touch/pointer but no click). blink's GestureManager handles
+  // kGestureTap -> mousedown/up/click on the main thread (no compositor).
+  blink::WebGestureEvent tap(blink::WebInputEvent::Type::kGestureTap,
+                             blink::WebInputEvent::kNoModifiers,
+                             base::TimeTicks::Now(),
+                             blink::WebGestureDevice::kTouchscreen);
+  tap.SetPositionInWidget(gfx::PointF(x, y));
+  tap.SetPositionInScreen(gfx::PointF(x, y));
+  tap.data.tap.tap_count = 1;
+  tap.data.tap.width = 24;
+  tap.data.tap.height = 24;
+  impl->HandleInputEvent(
+      blink::WebCoalescedInputEvent(tap, ui::LatencyInfo()));
   return true;
 }
 
