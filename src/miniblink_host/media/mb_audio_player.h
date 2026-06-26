@@ -83,11 +83,15 @@ class MbAudioPlayer : public blink::WebMediaPlayer {
   void SetWasPlayedWithUserActivationAndHighMediaEngagement(bool) override {}
   void SetShouldPauseWhenFrameIsHidden(bool) override {}
   void OnRequestPictureInPicture() override {}
+  // We have the whole clip in memory, so it is fully buffered AND seekable. An empty
+  // seekable range makes the element clamp/refuse currentTime sets (no `seeked`).
   blink::WebTimeRanges Buffered() const override {
-    return blink::WebTimeRanges();
+    return has_audio_ ? blink::WebTimeRanges(0.0, duration_)
+                      : blink::WebTimeRanges();
   }
   blink::WebTimeRanges Seekable() const override {
-    return blink::WebTimeRanges();
+    return has_audio_ ? blink::WebTimeRanges(0.0, duration_)
+                      : blink::WebTimeRanges();
   }
   void OnFrozen() override {}
   bool SetSinkId(const blink::WebString&,
@@ -96,7 +100,7 @@ class MbAudioPlayer : public blink::WebMediaPlayer {
   }
   gfx::Size NaturalSize() const override { return gfx::Size(); }
   gfx::Size VisibleSize() const override { return gfx::Size(); }
-  bool Seeking() const override { return false; }
+  bool Seeking() const override { return seeking_; }
   blink::WebString GetErrorMessage() const override {
     return blink::WebString();
   }
@@ -146,6 +150,7 @@ class MbAudioPlayer : public blink::WebMediaPlayer {
   bool has_audio_ = false;
   bool paused_ = true;
   bool ended_ = false;
+  bool seeking_ = false;
   NetworkState network_state_ = kNetworkStateEmpty;
   ReadyState ready_state_ = kReadyStateHaveNothing;
   base::RepeatingTimer play_timer_;  // drives timeupdate/ended while playing

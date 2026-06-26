@@ -964,6 +964,16 @@ not blocked). render 110->111, full battery green, no leaks. REMAINING for media
 OUTPUT through the sink (render callback feeding decoded PCM) and <video> (VideoFrameCompositor
 + frames into paint) - step 3. <audio> is now functionally usable for timeline/event-driven
 apps.
+[DONE - <audio> error + seek hardening]. Verified + fixed real <audio> behaviors. ERROR path
+already worked: an undecodable source (AudioFileReader.Open fails -> networkState=FormatError
+-> NetworkStateChanged) makes the element fire `error` with a MediaError (mb_smoke_render
+41g: audio.error.code>0). SEEK was BROKEN and is now fixed - two bugs: (1) Buffered()/
+Seekable() returned EMPTY ranges, so the element clamped/refused a currentTime set (no seek);
+now they report [0,duration] (whole clip is in memory = fully buffered + seekable). (2) Seek()
+notified the client REENTRANTLY from the element's own seek(); now it sets seeking_=true and
+posts a task that clears seeking_ + calls TimeChanged(), so the element finishes the seek and
+fires `seeked`. Seeking() returns seeking_. Verified mb_smoke_render 41h: a.currentTime=0.25
+-> `seeked` fires at 0.25. render 111->113, full battery green, no leaks.
 **Tier 3 — input & rendering refinements:**
 [DEFERRED: device emulation] `WebView::EnableDeviceEmulation` (the DevTools device-mode path —
 mobile viewport + coarse-pointer/no-hover) was attempted and REVERTED: it builds a

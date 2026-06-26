@@ -878,6 +878,61 @@ static void RunCases(mbView* v, int W, int H) {
            "pb=[" + pb + "]");
   }
 
+  // 41g. <audio> error handling: an undecodable source must fire `error` (not hang) with
+  // a media error set, so apps can fall back. The player reports networkState=FormatError
+  // when AudioFileReader can't open the bytes; the element surfaces MediaError.
+  {
+    mbLoadHTML(v, "<body>aerr</body>", "about:blank");
+    mbRunJS(v,
+      "window.__ae='';var a=document.createElement('audio');"
+      "a.addEventListener('error',function(){window.__ae='err:'+(a.error?a.error.code>0:false);});"
+      "a.addEventListener('canplay',function(){window.__ae='unexpected-ok';});"
+      "a.src='data:audio/wav;base64,'+btoa('not a real wav file at all');a.load();");
+    std::string ae;
+    for (int i = 0; i < 200; ++i) {
+      mbWait(v, 25);
+      ae = Eval(v, "window.__ae");
+      if (!ae.empty())
+        break;
+    }
+    Expect(ae == "err:true",
+           "an <audio> element fires `error` with a MediaError on an undecodable source",
+           "ae=[" + ae + "]");
+  }
+
+  // 41h. <audio> seek: currentTime can be set; the player re-anchors and the element
+  // fires `seeked`, with currentTime reflecting the new position. (Paused seek — no
+  // playback needed.)
+  {
+    mbLoadHTML(v, "<body>ask</body>", "about:blank");
+    mbRunJS(v,
+      "window.__sk='';try{var sr=8000,n=4000,buf=new ArrayBuffer(44+n*2),"
+      "dv=new DataView(buf);"
+      "function S(o,t){for(var i=0;i<t.length;i++)dv.setUint8(o+i,t.charCodeAt(i));}"
+      "S(0,'RIFF');dv.setUint32(4,36+n*2,true);S(8,'WAVE');S(12,'fmt ');"
+      "dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,1,true);"
+      "dv.setUint32(24,sr,true);dv.setUint32(28,sr*2,true);dv.setUint16(32,2,true);"
+      "dv.setUint16(34,16,true);S(36,'data');dv.setUint32(40,n*2,true);"
+      "var u8=new Uint8Array(buf),bin='';"
+      "for(var i=0;i<u8.length;i++)bin+=String.fromCharCode(u8[i]);"
+      "var a=document.createElement('audio');"
+      "a.addEventListener('seeked',function(){"
+      "window.__sk='seeked:'+a.currentTime.toFixed(2);});"
+      "a.addEventListener('canplaythrough',function(){a.currentTime=0.25;});"
+      "a.src='data:audio/wav;base64,'+btoa(bin);a.load();"
+      "}catch(e){window.__sk='throw:'+e;}");
+    std::string sk;
+    for (int i = 0; i < 200; ++i) {
+      mbWait(v, 25);
+      sk = Eval(v, "window.__sk");
+      if (!sk.empty())
+        break;
+    }
+    Expect(sk == "seeked:0.25",
+           "an <audio> element seeks: currentTime set -> seeked fires at the new position",
+           "sk=[" + sk + "]");
+  }
+
   // 42. Drawing to a canvas via mbEvalJS (not just mbRunJS) must also be
   // crash-safe. EvalToString/EvalIsolated used to run ExecuteScript
   // synchronously, so a draw inside an eval expression hit the same

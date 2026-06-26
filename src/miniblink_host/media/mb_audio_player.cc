@@ -114,7 +114,18 @@ void MbAudioPlayer::Seek(double seconds) {
   anchor_media_ = seconds;
   anchor_ticks_ = base::TimeTicks::Now();
   ended_ = false;
-  client_->TimeChanged();  // element fires seeking/seeked + timeupdate
+  seeking_ = true;
+  // The element calls Seek() synchronously from its own seek(); notify the completion
+  // asynchronously (not reentrantly) so it can finish the seek and fire `seeked`.
+  task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(
+                     [](base::WeakPtr<MbAudioPlayer> self) {
+                       if (!self)
+                         return;
+                       self->seeking_ = false;
+                       self->client_->TimeChanged();
+                     },
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void MbAudioPlayer::SetRate(double rate) {
