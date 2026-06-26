@@ -252,6 +252,14 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      → callback gets mime+bytes, the prior page stays (not committed). [DONE: wke peer]
      `wkeOnDownload` (URL-only per the miniblink signature; bytes via mbOnDownload) routes
      through it — verified (wke_smoke +1=107).
+     [GAP — deferred] mbOnDownload only catches TOP-LEVEL navigation downloads (MbWebView::LoadURL ->
+     IsDownloadResponse). A page-initiated download — `<a download href="blob:...">` click, or
+     `URL.createObjectURL(new Blob([...]))` + a programmatic click (the common client-generated-file
+     case: CSV/PDF built in JS) — goes through LocalFrameHost.DownloadURL, a no-op in MbLocalFrameHost,
+     so it's NOT captured. Wiring it is non-trivial: DownloadURL (service thread) carries a blob: url +
+     blob_url_token; resolving the bytes needs the blob store + an async Blob.ReadAll, then a cross-thread
+     hop to on_download_. MbFetchUrl can't resolve blob: (file/http/data only), so the main thread can't
+     just re-fetch the url. Left for a focused effort.
    - [DONE] **`mbSetFileForSelector(css_selector, paths_newline)`**: the privileged host op a
      page's own script is forbidden to do. Reaches the core `HTMLInputElement`, reads each
      path's bytes into an **in-memory `BlobData` registered with our BlobRegistry** (via

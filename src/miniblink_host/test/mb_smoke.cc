@@ -1074,6 +1074,27 @@ int main() {
            "gp=[" + granted + "|" + denied + "]");
   }
 
+  // 23d3. Permission-API consistency for the permissions we actually service: Notification.permission,
+  // navigator.permissions.query, and Notification.requestPermission() all AGREE (notifications +
+  // clipboard granted — the APIs work) instead of one reporting a stale/denied state. Guards the
+  // consistency invariant the geolocation fix (23d2) established across the three permission surfaces.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://permprobe.test/");
+    Eval(v,
+         "window.__pp='';"
+         "var o=[];o.push('Nperm:'+(typeof Notification!=='undefined'?Notification.permission:'no-api'));"
+         "Promise.all(["
+         "  navigator.permissions.query({name:'notifications'}).then(function(s){return 'q-notif:'+s.state;}),"
+         "  navigator.permissions.query({name:'clipboard-read'}).then(function(s){return 'q-clip:'+s.state;},function(e){return 'q-clip:rej';}),"
+         "  (typeof Notification!=='undefined'?Notification.requestPermission():Promise.resolve('no-api')).then(function(p){return 'req:'+p;})"
+         "]).then(function(r){window.__pp=o.concat(r).join(' ');}).catch(function(e){window.__pp='err:'+e.name;});");
+    mbWaitForFunction(v, "window.__pp!==''", 3000);
+    const std::string pp = Eval(v, "window.__pp");
+    Expect(pp == "Nperm:granted q-notif:granted q-clip:granted req:granted",
+           "permission APIs agree (Notification.permission / permissions.query / requestPermission)",
+           "pp=[" + pp + "]");
+  }
+
   // 23e. Clipboard (broker #8): navigator.clipboard read/write works against the
   // in-process clipboard (permission granted), and the host shares it via mbGet/Set-
   // Clipboard — a page's writeText is readable by the host; the host's set is readable
