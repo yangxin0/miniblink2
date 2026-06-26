@@ -386,6 +386,37 @@ static void RunCases(mbView* v, int W, int H) {
     mbClearMocks();
   }
 
+  // 37n. A Blob/File value stored in IndexedDB reads back intact within the session.
+  // The record's structured-serialized bytes reference attached blobs by index; the
+  // backend must RETAIN the WebBlobInfo handles (mb_indexeddb MbRecord::blob_info) so
+  // the in-process MbBlob stays alive, then re-attach them on get() — mojo serializes
+  // the blob handle back to the renderer. Without retention the value's blob ref is
+  // dangling and rec.f.text() never resolves (or 'norec'). (IDB needs a non-opaque
+  // origin — an opaque about:blank/data: context gets SecurityError.)
+  mbLoadHTML(v, "<body>blobidb</body>", "https://blobidb.test/");
+  mbRunJS(v,
+    "window.__br='';var blob=new Blob(['hello-blob'],{type:'text/plain'});"
+    "var q=indexedDB.open('blobidb',1);q.onupgradeneeded=function(e){"
+    "e.target.result.createObjectStore('s',{keyPath:'id'});};"
+    "q.onsuccess=function(e){var db=e.target.result;"
+    "var t=db.transaction('s','readwrite');t.objectStore('s').put({id:1,f:blob});"
+    "t.oncomplete=function(){var g=db.transaction('s').objectStore('s').get(1);"
+    "g.onsuccess=function(){var rec=g.result;"
+    "if(!rec||!rec.f){window.__br='norec';return;}"
+    "rec.f.text().then(function(txt){window.__br='got:'+txt;});};};};");
+  {
+    std::string br;
+    for (int i = 0; i < 200; ++i) {
+      mbWait(v, 25);
+      br = Eval(v, "window.__br");
+      if (!br.empty())
+        break;
+    }
+    Expect(br == "got:hello-blob",
+           "a Blob value stored in IndexedDB reads back intact (get -> blob.text())",
+           "br=[" + br + "]");
+  }
+
   // 38. ServiceWorker spawn must be crash-safe. (SharedWorker now runs — see 37g.)
   // navigator.serviceWorker.register() either rejects cleanly or, on a
   // real origin where we have no provider, is null-guarded (pending promise,

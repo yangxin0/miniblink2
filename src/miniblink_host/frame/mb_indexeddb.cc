@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/modules/indexeddb/idb_key_range.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_metadata.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_value.h"
+#include "third_party/blink/public/platform/web_blob_info.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace mb {
@@ -42,10 +43,16 @@ using m::IDBFactoryClient;
 using m::IDBTransaction;
 
 // One stored record: the primary key (kept so getAll/cursors can report it) + the
-// serialized value bytes.
+// serialized value bytes + any attached Blobs/Files. The SSV `bytes` reference blobs
+// by index; `blob_info` carries the WebBlobInfo handles (each holds a ref-counted
+// BlobDataHandle), so retaining them keeps the in-process MbBlobs alive for the life
+// of the record. On read we re-attach them to the IDBValue, and mojo serializes the
+// blob handles back to the renderer — so a stored File/Blob reads back intact within
+// the session. (Persistence does NOT capture blob bytes — see SerializeRegistry.)
 struct MbRecord {
   std::unique_ptr<blink::IDBKey> key;
   std::string bytes;
+  blink::Vector<blink::WebBlobInfo> blob_info;
 };
 
 // In-memory backing store for one database name: its current version + schema (object
@@ -84,7 +91,7 @@ std::map<int64_t, std::map<std::string, MbRecord>> CloneData(
     auto& dst = out[store.first];
     for (const auto& rec : store.second)
       dst[rec.first] = MbRecord{blink::IDBKey::Clone(rec.second.key.get()),
-                                rec.second.bytes};
+                                rec.second.bytes, rec.second.blob_info};
   }
   return out;
 }
@@ -261,9 +268,13 @@ blink::IDBKeyPath StoreKeyPath(MbIDBBackend* b, int64_t store_id) {
                                                : blink::IDBKeyPath();
 }
 
-std::unique_ptr<blink::IDBValue> MakeValue(const std::string& bytes) {
+std::unique_ptr<blink::IDBValue> MakeValue(
+    const std::string& bytes,
+    const blink::Vector<blink::WebBlobInfo>& blob_info = {}) {
   auto v = std::make_unique<blink::IDBValue>();
   v->SetData(mojo_base::BigBuffer(base::as_byte_span(bytes)));
+  if (!blob_info.empty())
+    v->SetBlobInfo(blob_info);  // re-attach stored Blobs/Files (handles still live)
   return v;
 }
 
@@ -289,6 +300,8 @@ m::IDBReturnValuePtr BuildReturnValue(const MbRecord& rec,
   auto rv = m::IDBReturnValue::New();
   rv->value = std::make_unique<blink::IDBValue>();
   rv->value->SetData(mojo_base::BigBuffer(base::as_byte_span(rec.bytes)));
+  if (!rec.blob_info.empty())
+    rv->value->SetBlobInfo(rec.blob_info);  // re-attach stored Blobs/Files
   // primary_key is non-nullable. Only in-line-key stores (a String key path) re-inject the
   // key into the deserialized value; for out-of-line stores send a None-typed key, which
   // blink ignores (a real key + a non-String path would DCHECK in the key injector).
@@ -410,7 +423,8 @@ class MbIDBCursor : public m::IDBCursor {
                                      : blink::IDBKey::Clone(it->second.key));
         cv->primary_keys.push_back(blink::IDBKey::Clone(it->second.key));
         if (!key_only_)
-          cv->values.push_back(MakeValue(it->second.bytes));
+          cv->values.push_back(
+              MakeValue(it->second.bytes, it->second.blob_info));
         return true;
       }
     }
@@ -603,7 +617,7 @@ class MbIDBDatabase : public m::IDBDatabase {
                         : blink::IDBKey::Clone(first.key);
     val->primary_key = blink::IDBKey::Clone(first.key);
     if (!key_only)
-      val->value = MakeValue(first.bytes);
+      val->value = MakeValue(first.bytes, first.blob_info);
 
     auto cursor = std::make_unique<MbIDBCursor>(
         backend_, object_store_id, key_only, is_index, std::move(entries));
@@ -788,7 +802,8 @@ class MbIDBTransactionImpl : public IDBTransaction {
 
     RemoveFromIndexes(backend_, object_store_id, ekey);  // shed old index entries
     backend_->data[object_store_id][ekey] =
-        MbRecord{blink::IDBKey::Clone(use_key), ValueBytes(value.get())};
+        MbRecord{blink::IDBKey::Clone(use_key), ValueBytes(value.get()),
+                 value->BlobInfo()};  // retain attached Blobs/Files (keeps them alive)
     // Populate this record's secondary-index entries (blink computes the keys per index).
     for (const blink::IDBIndexKeys& ik : index_keys)
       for (const std::unique_ptr<blink::IDBKey>& ikey : ik.keys) {
@@ -902,8 +917,10 @@ class MbIDBFactory : public m::IDBFactory {
 // ---- Persistence: serialize the whole Registry to a flat byte buffer ----------
 // Format is private (we own both ends): a length-prefixed binary dump of every
 // database's metadata (object stores + indexes + key paths), records (encoded key
-// + opaque value bytes), key generators, and secondary-index data. Blob-referenced
-// values aren't captured (the backend already stores only the value byte payload).
+// + opaque value bytes), key generators, and secondary-index data. NOTE: a record's
+// attached Blob/File payloads (MbRecord::blob_info) are NOT serialized — the bytes live
+// in the service-thread MbBlob, which would need an async read here. So blobs round-trip
+// IN-SESSION (handles retained) but a SAVED blob record reloads without its blob.
 
 void WU8(std::string* o, uint8_t v) { o->push_back(static_cast<char>(v)); }
 void WU32(std::string* o, uint32_t v) {

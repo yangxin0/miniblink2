@@ -887,7 +887,20 @@ constraints, atomic abort, and compound keys — the whole object-store/index AP
    {primaryKeys}); DeserializeRegistry reconstructs IDBIndexMetadata::Create() + the data, and the
    index-free skip (HasAnyIndex) is gone. Verified mb_smoke 23m2 (index-free, still works) + 23m3 (save
    a store+index+record, CLEAR the store, restore, reopen, query via the INDEX -> id1:alice returns —
-   proving index metadata AND data round-trip). Blob-valued records still not captured. [REMAINING:
+   proving index metadata AND data round-trip).
+   [DONE — IN-SESSION BLOB/FILE IDB VALUES] A Blob/File stored in IndexedDB now reads back intact within
+   the session. The record's structured-serialized bytes reference attached blobs by INDEX; the value's
+   actual blobs ride in a separate WebBlobInfo list (IDBValue::BlobInfo()), which the backend previously
+   dropped (ValueBytes captured only Data()) -> a dangling blob ref -> get() returned a broken Blob whose
+   .text() never resolved. Fix: MbRecord now RETAINS `blink::Vector<blink::WebBlobInfo> blob_info` (each
+   WebBlobInfo holds a ref-counted BlobDataHandle, keeping the in-process MbBlob alive for the record's
+   life); Put captures `value->BlobInfo()`, and every read path (BuildReturnValue for get/getAll, MakeValue
+   for cursors) re-attaches it via IDBValue::SetBlobInfo — mojo then serializes the blob handle back to the
+   renderer. CloneData copies it so transaction rollback preserves blobs. Verified mb_smoke_render 37n: put
+   {id:1,f:new Blob(['hello-blob'])} then get(1).f.text() -> 'hello-blob' (render 101->102, no leaks).
+   PERSISTENCE residual (narrowed): SerializeRegistry still writes only `bytes` (blob bytes live in the
+   service-thread MbBlob, not serialized), so a blob record SAVED to disk and reloaded loses its blob —
+   capturing that needs an async blob-byte read in the save path (the documented heavy residual). [REMAINING:
    per-origin IDB partitioning — DONE separately (see the per-origin isolation entries).] 10. Blob-from-file
 + ranged blob reads + DataPipeGetter uploads. 11. **GPU content path** — [CHARACTERIZED] the gap is
 NARROWER than "all GPU content blank": 2D `<canvas>` FULLY works — draw + getImageData + toDataURL (tests
