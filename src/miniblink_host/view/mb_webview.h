@@ -259,6 +259,10 @@ class MbWebView {
   // scrolling it into view and making it the active (highlighted) match. Wraps around.
   // Returns true if a match is now active (false if no prior search / no matches).
   bool FindNext(bool forward);
+  // Bounds of the ACTIVE find match in viewport (client) CSS pixels — the same space
+  // mbSendMouseClick takes, so the caller can click or crop-screenshot the match. Returns
+  // false when there is no active match. Writes are skipped on false.
+  bool GetFindActiveRect(int* x, int* y, int* w, int* h);
   void StopFind();  // clear the find selection + highlight markers
   // Per-element scraping by selector. Fill *out with the first match's innerText
   // / the named attribute's value and return true; return false if no element

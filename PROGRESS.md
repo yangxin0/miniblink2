@@ -1193,6 +1193,20 @@ maxTouchPoints===0. mb_smoke battery green (153, platform 46, render 122, shot 6
 no leaks. Mobile emulation now presents a consistent touch device (coarse pointer + no hover
 + touch points + mobile viewport) so touch-gated responsive UIs render.
 
+[DONE - mbGetFindActiveRect: locate the active find match (clickable coords)]. The final
+piece of find-in-page: after mbFindText/mbFindNext, mbGetFindActiveRect(view,&x,&y,&w,&h)
+returns the active match's bounds in VIEWPORT (client) CSS pixels - the same space
+mbSendMouseClick / mbPaintRectToBitmap take - so a caller can click or crop-screenshot the
+exact match. Impl (MbWebView::GetFindActiveRect): TextFinder::ActiveMatch() -> Range*, then
+Range::BoundingRect() (the getBoundingClientRect() path -> viewport coords). Verified mb_smoke
+30f end-to-end: a unique word inside a clickable <span> 2000px down -> mbFindText scrolls it
+in, mbGetFindActiveRect -> rect 0,291,119,18 (y within the viewport, proving the scroll +
+the coord space), and a click at the rect center fires the span's onclick (window.__fc=1). So
+find is now count -> navigate -> LOCATE -> act, mirroring the AX-tree see->act loop. mb_smoke
+153->154, full battery green (platform 46, render 122, shot 66, wke 114), no leaks. Find-in-
+page is fully complete: mbFindText (count + highlight + scroll-to-first), mbFindNext (step +
+wrap), mbGetFindActiveRect (locate in clickable coords), mbStopFind (clear).
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

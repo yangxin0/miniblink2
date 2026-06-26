@@ -819,6 +819,12 @@ int mbFindNext(mbView* v, int forward) {
   return v->impl->FindNext(forward != 0) ? 1 : 0;
 }
 
+int mbGetFindActiveRect(mbView* v, int* x, int* y, int* w, int* h) {
+  if (!v || !v->impl)
+    return 0;
+  return v->impl->GetFindActiveRect(x, y, w, h) ? 1 : 0;
+}
+
 void mbStopFind(mbView* v) {
   if (v && v->impl)
     v->impl->StopFind();

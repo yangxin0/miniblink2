@@ -61,6 +61,7 @@
 #include "ui/accessibility/ax_mode.h"
 #include "third_party/blink/renderer/core/css/media_value_change.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/range.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/fileapi/file.h"
 #include "third_party/blink/renderer/core/fileapi/file_list.h"
@@ -1268,6 +1269,29 @@ bool MbWebView::FindNext(bool forward) {
   return impl->GetTextFinder()->Find(find_id_, blink::WebString::FromUtf8(find_text_),
                                      *options, /*wrap_within_frame=*/true,
                                      /*active_now=*/nullptr);
+}
+
+bool MbWebView::GetFindActiveRect(int* x, int* y, int* w, int* h) {
+  if (!main_frame_)
+    return false;
+  auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
+  if (!impl || !impl->GetTextFinder())
+    return false;
+  blink::Range* active = impl->GetTextFinder()->ActiveMatch();
+  if (!active)
+    return false;
+  // BoundingRect() is the getBoundingClientRect() rect — viewport (client) CSS px, the
+  // same space mbSendMouseClick takes, so the caller can click/crop the match directly.
+  gfx::RectF r = active->BoundingRect();
+  if (x)
+    *x = static_cast<int>(r.x());
+  if (y)
+    *y = static_cast<int>(r.y());
+  if (w)
+    *w = static_cast<int>(r.width());
+  if (h)
+    *h = static_cast<int>(r.height());
+  return true;
 }
 
 void MbWebView::StopFind() {

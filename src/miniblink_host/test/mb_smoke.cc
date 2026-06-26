@@ -2930,6 +2930,35 @@ int main() {
                std::to_string(y3) + " stop=" + std::to_string(after_stop));
   }
 
+  // 30f (find). mbGetFindActiveRect locates the active match in clickable viewport coords:
+  // find a unique word inside a clickable span 2000px down the page; the match scrolls into
+  // view, its rect (viewport CSS px) is read, and a click at the rect center hits the span
+  // (its onclick fires). End-to-end: find -> locate -> act on the located match.
+  {
+    mbLoadHTML(v,
+               "<body style='margin:0'><div style='height:2000px'></div>"
+               "<span id='s' onclick='window.__fc=1' "
+               "style='display:inline-block'>UNIQUEWORDZ</span>"
+               "<div style='height:2000px'></div></body>",
+               "about:blank");
+    mbWait(v, 60);
+    const int n = mbFindText(v, "UNIQUEWORDZ", 1);  // scrolls the span into view
+    int x = 0, y = 0, w = 0, h = 0;
+    const int got = mbGetFindActiveRect(v, &x, &y, &w, &h);
+    bool hit = false;
+    if (got && w > 0 && h > 0) {
+      mbSendMouseClick(v, x + w / 2, y + h / 2);  // click the located match
+      mbWait(v, 40);
+      hit = Eval(v, "String(window.__fc||0)") == "1";
+    }
+    mbStopFind(v);
+    Expect(n == 1 && got == 1 && w > 0 && h > 0 && hit,
+           "mbGetFindActiveRect: locates the match in clickable viewport coords",
+           "n=" + std::to_string(n) + " rect=" + std::to_string(x) + "," +
+               std::to_string(y) + "," + std::to_string(w) + "," + std::to_string(h) +
+               " hit=" + (hit ? "1" : "0"));
+  }
+
   // Network cases (31, 32) are OPT-IN via MB_NET_TESTS=1: a dead host costs ~45s
   // per load (connect-timeout x retries), which would make every default run crawl.
   // They still skip gracefully if enabled but httpbin is unreachable.

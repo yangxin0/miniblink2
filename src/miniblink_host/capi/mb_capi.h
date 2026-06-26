@@ -659,6 +659,11 @@ MB_EXPORT int mbFindText(mbView*, const char* text, int match_case);
 // it into view and making it the active highlighted match; wraps around at the ends.
 // Returns 1 if a match is now active, 0 if there was no prior search or no matches.
 MB_EXPORT int mbFindNext(mbView*, int forward);
+// Bounds of the ACTIVE find match (after mbFindText/mbFindNext) in viewport CSS pixels —
+// the same coordinates mbSendMouseClick takes, so you can click or crop-screenshot the
+// match (e.g. mbPaintRectToBitmap). Any of x/y/w/h may be NULL. Returns 1 if a match is
+// active (values written), 0 otherwise.
+MB_EXPORT int mbGetFindActiveRect(mbView*, int* x, int* y, int* w, int* h);
 MB_EXPORT void mbStopFind(mbView*);
 
 // Write the visible text (innerText) of the first element matching `css_selector`
