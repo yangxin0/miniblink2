@@ -900,7 +900,21 @@ constraints, atomic abort, and compound keys — the whole object-store/index AP
    {id:1,f:new Blob(['hello-blob'])} then get(1).f.text() -> 'hello-blob' (render 101->102, no leaks).
    PERSISTENCE residual (narrowed): SerializeRegistry still writes only `bytes` (blob bytes live in the
    service-thread MbBlob, not serialized), so a blob record SAVED to disk and reloaded loses its blob —
-   capturing that needs an async blob-byte read in the save path (the documented heavy residual). [REMAINING:
+   capturing that needs an async blob-byte read in the save path (the documented heavy residual).
+   [INVESTIGATED + RULED OUT — synchronous uuid->bytes mirror (2026-06)]: attempted a process-wide
+   UUID->bytes map in MbBlob (register data_ at materialize, look it up by WebBlobInfo.Uuid() during
+   SerializeRegistry) so the save could read blob bytes synchronously, no async. Built + ran end to end
+   (no crash, round-trips a re-minted blob) but the bytes came back EMPTY. ROOT CAUSE (fresh
+   instrumentation): the blob blink stores in the IDB record has a DIFFERENT uuid than the MbBlob that
+   actually serves it — a put-time blob registered as uuid `e2a3ea5a`, but the record's
+   WebBlobInfo.Uuid() was `7bb2e785` (blink mints a fresh handle uuid when the value is stored/cloned;
+   MbBlob::Clone keeps the ORIGINAL uuid_, so the serving MbBlob registered under `e2a3ea5a` while the
+   lookup key is `7bb2e785` -> always misses). So a uuid-keyed mirror is a DEAD END: WebBlobInfo.Uuid()
+   is not the serving MbBlob's id. The only viable path is the documented async read — at save, clone
+   each record blob's remote (WebBlobInfo::CloneBlobRemote) and MbReadBlobRemoteBytes it, gathering all
+   bytes BEFORE serialize (the save's main-thread WaitableEvent can't block on a same-thread async read,
+   so the reads must complete on the service thread first, then serialize). Reverted the sync attempt
+   clean. [REMAINING:
    per-origin IDB partitioning — DONE separately (see the per-origin isolation entries).] 10. Blob-from-file
 + ranged blob reads + DataPipeGetter uploads. 11. **GPU content path** — [CHARACTERIZED] the gap is
 NARROWER than "all GPU content blank": 2D `<canvas>` FULLY works — draw + getImageData + toDataURL (tests
