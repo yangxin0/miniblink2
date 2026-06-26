@@ -933,6 +933,20 @@ void MbWebView::EmulateMedia(const char* feature, const char* value) {
                                 blink::String(value ? value : ""));
 }
 
+void MbWebView::EmulateMediaType(const char* media_type) {
+  // Override the media TYPE (the DevTools Emulation.setEmulatedMedia `media`
+  // param) — distinct from the media FEATURES above. "print" makes @media print
+  // rules and matchMedia('print') apply while the page is still rendered to the
+  // screen, so a screenshot/PDF reflects print styles; "screen" forces screen;
+  // ""/NULL clears the override (back to the natural screen media). The
+  // mediaTypeOverride setting is annotated invalidate:["MediaQuery"], so blink
+  // re-evaluates all media queries on the change — no manual recalc needed.
+  if (!web_view_ || !web_view_->GetPage())
+    return;
+  web_view_->GetPage()->GetSettings().SetMediaTypeOverride(
+      blink::String(media_type ? media_type : ""));
+}
+
 std::string MbWebView::DrainConsole() {
   return frame_client_ ? frame_client_->DrainConsole() : std::string();
 }

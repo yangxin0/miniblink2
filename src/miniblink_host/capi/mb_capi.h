@@ -348,6 +348,13 @@ MB_EXPORT void mbSetDarkMode(mbView*, int dark);
 // all overrides. (A general form of mbSetDarkMode for accessibility/theme testing.)
 MB_EXPORT void mbEmulateMedia(mbView*, const char* feature, const char* value);
 
+// Override the CSS media TYPE — the DevTools `media` knob, distinct from the media
+// FEATURES above. "print" makes @media print rules and matchMedia('print') apply
+// while the page is still rendered to the screen, so a screenshot (mbSavePng) or
+// PDF reflects the page's PRINT stylesheet; "screen" forces screen; ""/NULL clears
+// the override (natural screen media). Re-runs the page's media queries live.
+MB_EXPORT void mbEmulateMediaType(mbView*, const char* media_type);
+
 // Set the view's window-focus state: focused (1, the default) or blurred (0).
 // Clearing it makes document.hasFocus() false and blurs the active element, as
 // if the window lost focus; setting it restores focus. For simulating focus/blur.

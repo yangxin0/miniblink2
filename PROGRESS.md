@@ -789,6 +789,14 @@ media feature LIVE (re-runs the page's media queries): prefers-reduced-motion, p
 forced-colors, color-gamut, prefers-reduced-data, etc. Empty value clears a feature; empty feature
 clears all. A general form of mbSetDarkMode for accessibility/theme testing + screenshots. Verified
 mb_smoke 36b (reduced-motion + contrast flip matchMedia live, then clear reverts).
+[DONE: media-TYPE emulation] `mbEmulateMediaType(view, media_type)` -> MbWebView::EmulateMediaType ->
+Page::GetSettings().SetMediaTypeOverride (the DevTools setEmulatedMedia `media` knob, distinct from the
+features above). "print" makes @media print rules + matchMedia('print') apply while STILL rendering to
+screen, so a screenshot (mbSavePng) / PDF reflects the page's print stylesheet; "screen" forces screen;
+""/NULL clears. The mediaTypeOverride setting is annotated invalidate:["MediaQuery"] so blink re-runs all
+media queries on the change (no manual recalc). Verified mb_smoke 36c: with "print" matchMedia('print')
+flips true AND #p's COMPUTED color switches rgb(9,9,9)->rgb(1,2,3) (the @media print rule), reverting on
+clear — proving the print cascade actually takes effect, not just the matchMedia bit. Count 136->137.
 [DONE: online/offline] `mbSetOnline(online)` -> MbSetOnline -> blink::GetNetworkStateNotifier()
 .SetOnLine, flipping navigator.onLine and firing the window online/offline events on every frame
 (process-global). The online state is initialized to true at view creation so the first toggle to

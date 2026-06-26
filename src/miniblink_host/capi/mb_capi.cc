@@ -424,6 +424,11 @@ void mbEmulateMedia(mbView* v, const char* feature, const char* value) {
     v->impl->EmulateMedia(feature, value);
 }
 
+void mbEmulateMediaType(mbView* v, const char* media_type) {
+  if (v && v->impl)
+    v->impl->EmulateMediaType(media_type);
+}
+
 void mbSetFocus(mbView* v, int focused) {
   if (v && v->impl)
     v->impl->SetFocus(focused != 0);

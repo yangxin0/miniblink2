@@ -206,6 +206,10 @@ class MbWebView {
   // forced-colors, color-gamut, …) so matchMedia()/@media evaluate to `value`
   // live. Empty `feature` clears all overrides; empty `value` clears that one.
   void EmulateMedia(const char* feature, const char* value);
+  // Override the CSS media TYPE ("print" / "screen"); ""/NULL clears it. With
+  // "print", @media print rules and matchMedia('print') apply while still
+  // rendering to the screen — so a screenshot/PDF reflects print styles.
+  void EmulateMediaType(const char* media_type);
   // Return captured console output ("level: text" per line) and clear the buffer.
   std::string DrainConsole();
   // Return the HTTP cookie jar's cookies for `url` ("name=value; ..."), for session export.

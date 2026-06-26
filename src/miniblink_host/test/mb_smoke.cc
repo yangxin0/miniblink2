@@ -2847,6 +2847,36 @@ int main() {
     mbEmulateMedia(v, "", "");  // clear all overrides for later cases
   }
 
+  // 36c. mbEmulateMediaType: override the media TYPE (DevTools setEmulatedMedia
+  // `media`, distinct from the features above). With "print", matchMedia('print')
+  // flips true AND @media print rules apply to COMPUTED STYLE while the page is
+  // still on screen — so a screenshot/PDF reflects the print stylesheet. Clearing
+  // reverts to screen. Asserting computed color (not just matchMedia) proves the
+  // print cascade actually took effect.
+  {
+    mbLoadHTML(v,
+        "<style>#p{color:rgb(9,9,9)}@media print{#p{color:rgb(1,2,3)}}</style>"
+        "<body><div id=p>t</div></body>",
+        "about:blank");
+    const std::string s0 = Eval(v, "String(matchMedia('print').matches)");
+    const std::string col0 =
+        Eval(v, "getComputedStyle(document.getElementById('p')).color");
+    mbEmulateMediaType(v, "print");
+    mbWait(v, 20);
+    const std::string s1 = Eval(v, "String(matchMedia('print').matches)");
+    const std::string col1 =
+        Eval(v, "getComputedStyle(document.getElementById('p')).color");
+    mbEmulateMediaType(v, "");  // clear -> back to screen
+    mbWait(v, 20);
+    const std::string col2 =
+        Eval(v, "getComputedStyle(document.getElementById('p')).color");
+    Expect(s0 == "false" && col0 == "rgb(9, 9, 9)" && s1 == "true" &&
+               col1 == "rgb(1, 2, 3)" && col2 == "rgb(9, 9, 9)",
+           "mbEmulateMediaType applies @media print to computed style live + clears",
+           "mt=[" + s0 + "," + col0 + " / " + s1 + "," + col1 + " / " + col2 +
+               "]");
+  }
+
   // 37. Locale: navigator.language / navigator.languages reflect the set value.
   mbSetLocale(v, "fr-FR,fr,en");
   mbLoadHTML(v, "<body>x</body>", "about:blank");
