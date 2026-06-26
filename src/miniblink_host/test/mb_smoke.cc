@@ -1592,6 +1592,32 @@ int main() {
            "perm=[" + perm + "] show=[" + shown + "] requestPerm=[" + rp + "]");
   }
 
+  // 23j2. mbOnNotificationShown reaches the EMBEDDER: a page's `new Notification(title,
+  // {body, tag})` previously fired onshow but its fields were discarded — the host couldn't
+  // surface it. Now the process-wide hook delivers title/body/tag/icon so an embedder can
+  // show a native toast / its own UI.
+  {
+    static std::string* note = new std::string();  // -Wexit-time-destructors
+    note->clear();
+    mbOnNotificationShown(
+        [](void*, const char* title, const char* body, const char* tag,
+           const char* icon) {
+          *note = std::string("t=") + (title ? title : "") + " b=" +
+                  (body ? body : "") + " tag=" + (tag ? tag : "") + " icon=" +
+                  (icon ? icon : "");
+        },
+        nullptr);
+    mbLoadHTML(v, "<body>notif</body>", "https://notifhook.test/");
+    mbRunJS(v, "new Notification('Hello',{body:'World',tag:'t1',"
+               "icon:'https://notifhook.test/i.png'});");
+    mbWaitForFunction(v, "true", 200);  // pump for the async Display call
+    mbWait(v, 60);
+    Expect(*note == "t=Hello b=World tag=t1 icon=https://notifhook.test/i.png",
+           "mbOnNotificationShown: a page Notification's fields reach the embedder",
+           "[" + *note + "]");
+    mbOnNotificationShown(nullptr, nullptr);
+  }
+
   // 23k. WebSocket (broker #8): the in-process WebSocketConnector establishes the
   // connection (onopen fires, readyState OPEN) and runs a loopback echo — a message the
   // page sends comes straight back via onmessage. Proves the whole WebSocket mojo data

@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "base/functional/callback_helpers.h"
+#include "base/no_destructor.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
@@ -30,10 +31,16 @@ class MbNotificationService : public NotificationService {
 
   void DisplayNonPersistentNotification(
       const blink::String& token,
-      blink::mojom::blink::NotificationDataPtr /*data*/,
+      blink::mojom::blink::NotificationDataPtr data,
       blink::mojom::blink::NotificationResourcesPtr /*resources*/,
       mojo::PendingRemote<NonPersistentNotificationListener> event_listener)
       override {
+    // Surface the notification's fields to the embedder (a native toast / its own UI) —
+    // otherwise `new Notification(...)` is invisible to the host.
+    if (data) {
+      MbInvokeNotificationHook(data->title.Utf8(), data->body.Utf8(),
+                               data->tag.Utf8(), data->icon.GetString().Utf8());
+    }
     mojo::Remote<NonPersistentNotificationListener> listener(
         std::move(event_listener));
     listener->OnShow();  // fire Notification.onshow
@@ -71,7 +78,22 @@ class MbNotificationService : public NotificationService {
       listeners_;
 };
 
+MbNotificationHook& NotificationHook() {
+  static base::NoDestructor<MbNotificationHook> hook;
+  return *hook;
+}
+
 }  // namespace
+
+void MbSetNotificationHook(MbNotificationHook hook) {
+  NotificationHook() = std::move(hook);
+}
+
+void MbInvokeNotificationHook(const std::string& title, const std::string& body,
+                              const std::string& tag, const std::string& icon) {
+  if (NotificationHook())
+    NotificationHook()(title, body, tag, icon);
+}
 
 void BindNotificationService(
     mojo::PendingReceiver<blink::mojom::blink::NotificationService> receiver) {

@@ -12,6 +12,7 @@
 #include "miniblink_host/frame/mb_frame_broker.h"
 #include "miniblink_host/frame/mb_indexeddb.h"
 #include "miniblink_host/frame/mb_opfs.h"
+#include "miniblink_host/frame/mb_notification_service.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/runtime/mb_runtime.h"
 #include "miniblink_host/view/mb_webview.h"
@@ -641,6 +642,27 @@ void mbSetResponseCallback(mbResponseCallback cb, void* userdata) {
         });
   } else {
     mb::MbSetResponseHook({});
+  }
+}
+
+namespace {
+mbNotificationCallback g_notification_cb = nullptr;
+void* g_notification_ud = nullptr;
+}  // namespace
+
+void mbOnNotificationShown(mbNotificationCallback cb, void* userdata) {
+  g_notification_cb = cb;
+  g_notification_ud = userdata;
+  if (cb) {
+    mb::MbSetNotificationHook(
+        [](const std::string& title, const std::string& body,
+           const std::string& tag, const std::string& icon) {
+          if (g_notification_cb)
+            g_notification_cb(g_notification_ud, title.c_str(), body.c_str(),
+                              tag.c_str(), icon.c_str());
+        });
+  } else {
+    mb::MbSetNotificationHook({});
   }
 }
 

@@ -1314,6 +1314,19 @@ streaming-instantiate fast path most use) runs here. render 126->127, full batte
 (mb_smoke 156, platform 46, shot 66, wke 114), no leaks. (No wiring was needed - WASM is V8 +
 the existing fetch/loader; this locks in a major capability that had never been exercised.)
 
+[DONE - page Notifications reach the embedder (mbOnNotificationShown)]. The in-process
+NotificationService accepted new Notification(...) and fired onshow but DISCARDED the
+NotificationData (title/body/icon were /*ignored*/), so a page notification was invisible to
+the host - it couldn't show a native toast / its own UI. Added a process-wide hook (the
+NotificationService is not view-scoped, like the loader request/response hooks):
+MbSetNotificationHook / MbInvokeNotificationHook, called from DisplayNonPersistentNotification
+with data->title/body/tag/icon. capi mbOnNotificationShown(cb, userdata) -> cb(userdata,
+title, body, tag, icon). Verified mb_smoke 23j2: a page's new Notification('Hello',{body:
+'World',tag:'t1',icon:'.../i.png'}) -> the hook gets t=Hello b=World tag=t1 icon=<resolved
+url>. mb_smoke 156->157, full battery green (platform 46, render 127, shot 66, wke 114), no
+leaks. (Same "discarded data" pattern as the console source/line/stack + DOMContentLoaded
+ticks - blink/the service already had the data, the embedder just wasn't given it.)
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

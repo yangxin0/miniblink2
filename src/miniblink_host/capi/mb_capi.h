@@ -556,6 +556,17 @@ MB_EXPORT int mbResponseStatus(mbResponse*);
 MB_EXPORT const char* mbResponseBody(mbResponse*, int* out_len);
 MB_EXPORT void mbResponseSetBody(mbResponse*, const char* body, int len);
 
+// Notification hook: a process-wide callback fired when a page DISPLAYS a Notification
+// (new Notification(title, {body, tag, icon})). The embedder gets the notification's
+// fields and can surface it (a native toast / its own UI) — otherwise a page notification
+// is invisible to the host. (Notification.permission is granted, onshow still fires.)
+// Process-wide (the NotificationService is not view-scoped, like mbSetResponseCallback).
+// NULL clears it. `tag`/`icon` may be "" when unset.
+typedef void (*mbNotificationCallback)(void* userdata, const char* title,
+                                       const char* body, const char* tag,
+                                       const char* icon);
+MB_EXPORT void mbOnNotificationShown(mbNotificationCallback cb, void* userdata);
+
 // Response mocking — the signature interception feature. Any request whose URL
 // CONTAINS `url_substring` is served `body` WITHOUT a real network fetch: run a
 // page fully offline, or substitute an API/XHR/fetch response in tests/automation.
