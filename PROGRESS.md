@@ -1181,6 +1181,18 @@ no leaks. Find-in-page is now complete: count + case sensitivity + highlight + n
 wrap + stop - a full Ctrl+F usable for automation (count occurrences AND walk each one,
 screenshot showing the scrolled-to highlighted match).
 
+[DONE - mobile emulation reports navigator.maxTouchPoints (touch-capability gap)]. Found a
+real hole in mbEmulateDevice: it set pointer:coarse / hover:none media queries but left
+navigator.maxTouchPoints at 0, so sites that gate their mobile/touch UI on
+`navigator.maxTouchPoints > 0` (the modern, reliable touch-detection signal - more robust
+than 'ontouchstart' in window) still saw a non-touch device. FIX: EmulateDevice now calls
+WebSettings::SetMaxTouchPoints(mobile ? 5 : 0) (5 = a typical phone; navigator.maxTouchPoints
+reads straight from GetSettings()->GetMaxTouchPoints()). Verified mb_smoke 15b (extended):
+mobile -> navigator.maxTouchPoints>0 (alongside coarse/no-hover/dpr3); desktop revert ->
+maxTouchPoints===0. mb_smoke battery green (153, platform 46, render 122, shot 66, wke 114),
+no leaks. Mobile emulation now presents a consistent touch device (coarse pointer + no hover
++ touch points + mobile viewport) so touch-gated responsive UIs render.
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

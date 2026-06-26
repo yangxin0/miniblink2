@@ -1139,14 +1139,16 @@ int main() {
         Eval(v,
              "matchMedia('(pointer: coarse)').matches+','+"
              "matchMedia('(hover: none)').matches+','+"
-             "(window.devicePixelRatio===3)");
+             "(window.devicePixelRatio===3)+','+"
+             "(navigator.maxTouchPoints>0)");  // touch-capable device
     mbEmulateDevice(v, 1280, 800, 1.0f, /*mobile=*/0);  // back to desktop
     const std::string desk =
         Eval(v,
              "matchMedia('(pointer: fine)').matches+','+"
-             "matchMedia('(hover: hover)').matches");
-    Expect(mob == "true,true,true" && desk == "true,true",
-           "mbEmulateDevice: mobile -> coarse/no-hover/dpr; desktop reverts to fine/hover",
+             "matchMedia('(hover: hover)').matches+','+"
+             "(navigator.maxTouchPoints===0)");  // no touch on desktop
+    Expect(mob == "true,true,true,true" && desk == "true,true,true",
+           "mbEmulateDevice: mobile -> coarse/no-hover/dpr/touch; desktop reverts",
            "mob=[" + mob + "] desk=[" + desk + "]");
   }
 

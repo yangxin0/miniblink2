@@ -1805,6 +1805,9 @@ void MbWebView::EmulateDevice(int width, int height, float device_scale_factor,
                                   : m::HoverType::kHoverHoverType);
     s->SetAvailableHoverTypes(static_cast<int>(
         mobile ? m::HoverType::kHoverNone : m::HoverType::kHoverHoverType));
+    // navigator.maxTouchPoints — the modern, reliable touch-capability signal sites gate
+    // their mobile/touch UI on. 5 (a typical phone) in mobile mode, 0 on desktop.
+    s->SetMaxTouchPoints(mobile ? 5 : 0);
     s->SetViewportEnabled(mobile);
     s->SetViewportMetaEnabled(mobile);
     s->SetViewportStyle(mobile ? m::ViewportStyle::kMobile
