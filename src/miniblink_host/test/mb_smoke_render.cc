@@ -804,6 +804,42 @@ static void RunCases(mbView* v, int W, int H) {
            "dec=[" + dec + "]");
   }
 
+  // 41e. An <audio> element LOADS + reports metadata (media playback bring-up step 1):
+  // a custom WebMediaPlayer (media/mb_audio_player.cc) fetches the src + decodes it with
+  // FFmpeg and reaches HAVE_ENOUGH_DATA, so loadedmetadata fires and audio.duration is
+  // the file's duration (0.1s WAV). Previously <audio> had no player (loadedmetadata
+  // never fired, duration NaN). Playback timeline is a follow-on; metadata is step 1.
+  {
+    mbLoadHTML(v, "<body>au</body>", "about:blank");
+    mbRunJS(v,
+      "window.__au='';try{"
+      "var sr=8000,n=800,buf=new ArrayBuffer(44+n*2),dv=new DataView(buf);"
+      "function S(o,t){for(var i=0;i<t.length;i++)dv.setUint8(o+i,t.charCodeAt(i));}"
+      "S(0,'RIFF');dv.setUint32(4,36+n*2,true);S(8,'WAVE');S(12,'fmt ');"
+      "dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,1,true);"
+      "dv.setUint32(24,sr,true);dv.setUint32(28,sr*2,true);dv.setUint16(32,2,true);"
+      "dv.setUint16(34,16,true);S(36,'data');dv.setUint32(40,n*2,true);"
+      "for(var i=0;i<n;i++)dv.setInt16(44+i*2,Math.round(Math.sin(i/10)*10000),true);"
+      "var u8=new Uint8Array(buf),bin='';"
+      "for(var i=0;i<u8.length;i++)bin+=String.fromCharCode(u8[i]);"
+      "var a=document.createElement('audio');"
+      "a.addEventListener('loadedmetadata',function(){"
+      "window.__au='dur:'+a.duration.toFixed(2)+',ready:'+(a.readyState>=1);});"
+      "a.addEventListener('error',function(){window.__au='err:'+(a.error?a.error.code:'?');});"
+      "a.src='data:audio/wav;base64,'+btoa(bin);a.load();"
+      "}catch(e){window.__au='throw:'+e;}");
+    std::string au;
+    for (int i = 0; i < 200; ++i) {
+      mbWait(v, 25);
+      au = Eval(v, "window.__au");
+      if (!au.empty())
+        break;
+    }
+    Expect(au == "dur:0.10,ready:true",
+           "an <audio> element loads + reports duration/metadata (custom WebMediaPlayer)",
+           "au=[" + au + "]");
+  }
+
   // 42. Drawing to a canvas via mbEvalJS (not just mbRunJS) must also be
   // crash-safe. EvalToString/EvalIsolated used to run ExecuteScript
   // synchronously, so a draw inside an eval expression hit the same

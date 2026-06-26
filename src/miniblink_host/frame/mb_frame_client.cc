@@ -16,6 +16,7 @@
 #include "miniblink_host/frame/mb_frame_origin.h"
 #include "miniblink_host/frame/mb_local_frame_host.h"
 #include "miniblink_host/loader/mb_url_loader.h"
+#include "miniblink_host/media/mb_audio_player.h"
 #include "miniblink_host/view/mb_webview.h"
 #include "miniblink_host/worker/mb_worker_fetch_context.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
@@ -479,6 +480,20 @@ std::unique_ptr<blink::URLLoader> MbFrameClient::CreateURLLoaderForTesting() {
   // network identity is consistent across the document and its subresources.
   return std::make_unique<MbURLLoader>(
       user_agent_.empty() ? MbDefaultUserAgent() : user_agent_, extra_headers_);
+}
+
+std::unique_ptr<blink::WebMediaPlayer> MbFrameClient::CreateMediaPlayer(
+    const blink::WebMediaPlayerSource&,
+    blink::WebMediaPlayerClient* client,
+    blink::MediaInspectorContext*,
+    blink::WebMediaPlayerEncryptedMediaClient*,
+    blink::WebContentDecryptionModule*,
+    const blink::WebString& /*sink_id*/,
+    const cc::LayerTreeSettings* /*settings*/,
+    scoped_refptr<base::TaskRunner> /*compositor_worker_task_runner*/) {
+  // Audio-only player; runs on the frame's (main) thread.
+  return std::make_unique<MbAudioPlayer>(
+      client, base::SingleThreadTaskRunner::GetCurrentDefault());
 }
 
 scoped_refptr<blink::WebWorkerFetchContext>

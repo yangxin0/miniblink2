@@ -927,6 +927,27 @@ audio files (sound effects / music / analysis), and the FFmpeg audio-decode foun
 (WebMediaPlayerImpl) for <audio>/<video> elements is the big remaining lift (renderer factory
 + demuxer manager + audio renderer/sink + resource loading + a video-frame compositor);
 decodeAudioData is the one-shot decode path, a separate (now working) feature.
+[DONE - <audio> loads + reports metadata (media playback bring-up STEP 1)]. <audio>/<video>
+had NO player: WebLocalFrameClient::CreateMediaPlayer returns null by default, so the element
+never loaded (loadedmetadata never fired, duration NaN). Implemented a minimal audio
+WebMediaPlayer (media/mb_audio_player.{h,cc}) + the CreateMediaPlayer override. KEY FINDINGS
+that made it tractable: (1) blink::EmptyWebMediaPlayer (platform/testing) is the complete
+empty override set - copied its ~38 stubs so I only implement the audio bits. (2) The PUBLIC
+blink::WebMediaPlayerClient has NO state callbacks (only GetElementId) - the real protocol is
+the INTERNAL blink::MediaPlayerClient (renderer/platform/media/media_player_client.h:
+NetworkStateChanged / ReadyStateChanged / DurationChanged, all arg-less - the element POLLS
+the player after each). The client blink passes IS that internal class (its only subclass per
+the friend decl), so we downcast and drive it (we link blink renderer internals). (3) Load
+gets the src URL (WebMediaPlayerSource::GetAsURL); MbFetchUrl (sync; data:/file/http) fetches
+the bytes; media::AudioFileReader (the decodeAudioData path) decodes -> duration. FLOW: Load
+posts a task (no reentrant notify) that fetches+decodes, sets network_state=Loaded +
+ready_state=HAVE_ENOUGH_DATA, and calls DurationChanged/ReadyStateChanged/NetworkStateChanged;
+the element fires loadedmetadata..canplaythrough for the levels crossed. Verified mb_smoke_
+render 41e: a data: WAV (800 frames @ 8000 Hz) -> loadedmetadata fires, audio.duration 0.10,
+readyState>=HAVE_METADATA (render 109->110, battery green, no leaks). REMAINING for media: the
+PLAYBACK TIMELINE (Play -> currentTime advances via a clock, timeupdate/ended, audio output
+through the sink) is step 2; <video> (VideoFrameCompositor + frames into paint) is step 3.
+The sync MbFetchUrl in the load task blocks the main thread (fine for short/data: clips).
 
 **Tier 3 — input & rendering refinements:**
 [DEFERRED: device emulation] `WebView::EnableDeviceEmulation` (the DevTools device-mode path —

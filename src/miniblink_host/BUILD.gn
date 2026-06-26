@@ -59,6 +59,8 @@ component("miniblink_host") {
     "frame/mb_view_client.h",
     "loader/mb_url_loader.cc",
     "loader/mb_url_loader.h",
+    "media/mb_audio_player.cc",
+    "media/mb_audio_player.h",
     "platform/mb_platform.cc",
     "platform/mb_platform.h",
     "platform/mb_webgl.cc",

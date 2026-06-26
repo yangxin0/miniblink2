@@ -65,6 +65,19 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // a non-null loader makes Blink use it for subresources. -> our file-backed loader.
   std::unique_ptr<blink::URLLoader> CreateURLLoaderForTesting() override;
 
+  // <audio>/<video> media player. Base returns null (no playback). We return a minimal
+  // audio player that loads + decodes via FFmpeg and reports metadata (see
+  // media/mb_audio_player.{h,cc}); a non-audio source reports a format error cleanly.
+  std::unique_ptr<blink::WebMediaPlayer> CreateMediaPlayer(
+      const blink::WebMediaPlayerSource&,
+      blink::WebMediaPlayerClient*,
+      blink::MediaInspectorContext*,
+      blink::WebMediaPlayerEncryptedMediaClient*,
+      blink::WebContentDecryptionModule*,
+      const blink::WebString& sink_id,
+      const cc::LayerTreeSettings* settings,
+      scoped_refptr<base::TaskRunner> compositor_worker_task_runner) override;
+
   // A Worker's subresource fetch context (importScripts/fetch inside the worker).
   // Returns the host's libcurl-backed context so worker loads don't die at creation.
   // (Step 1 of worker bring-up; the worker thread itself is still started elsewhere.)
