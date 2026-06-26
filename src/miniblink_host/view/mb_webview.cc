@@ -64,6 +64,9 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/paint/paint_flags.h"
+#include "third_party/blink/renderer/platform/graphics/paint/cull_rect.h"
+#include "third_party/blink/renderer/platform/graphics/paint/paint_record_builder.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/public/common/dom_storage/session_storage_namespace_id.h"
@@ -2358,7 +2361,15 @@ bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y) {
   // is in CSS px because it's applied after the dsf scale.
   if (origin_x != 0 || origin_y != 0)
     canvas.translate(static_cast<float>(-origin_x), static_cast<float>(-origin_y));
-  frame->View()->GetPaintRecord().Playback(&canvas);
+  // Capture with kOmitCompositingInfo (the screenshot/print path): this FLATTENS
+  // composited layers (<video>, and any other cc_layer content) into the software paint
+  // so their frames rasterize into the bitmap. The plain GetPaintRecord() omits them (a
+  // composited <video> records only a foreign-layer placeholder we can't draw -> blank).
+  blink::PaintRecordBuilder builder;
+  frame->View()->PaintOutsideOfLifecycle(builder.Context(),
+                                         blink::PaintFlag::kOmitCompositingInfo,
+                                         blink::CullRect::Infinite());
+  builder.EndRecording().Playback(&canvas);
   return true;
 }
 

@@ -1013,6 +1013,23 @@ usable headless: load -> metadata -> timeline -> FRAME decode + drawImage/paint.
 doesn't update the picture yet), and direct frame compositing into the page paint (the element
 paints via drawImage today; a <video> in the page layout would need the same IsComposited-vs-
 software-paint handling WebGL needed). Real audio OUTPUT (silent sink) remains untestable.
+[DONE - <video> frame composites into PAGE screenshots (mbPaintToBitmap)]. A <video> element
+laid out in the page now shows its decoded frame in a full-page screenshot, not just via
+drawImage onto a canvas. ROOT CAUSE (same class as the WebGL screenshot gap): VideoPainter::
+PaintReplaced paints the frame in SOFTWARE only when paint_info.ShouldOmitCompositingInfo() is
+true (the print / capture-node-image path); a normal paint records a foreign cc_layer
+placeholder our non-compositing software paint can't draw -> the video box was blank/white.
+FIX (general, in MbWebView::PaintInto): instead of frame->View()->GetPaintRecord() (the normal
+lifecycle record, which omits composited content), capture via a transient PaintRecordBuilder +
+frame->View()->PaintOutsideOfLifecycle(builder.Context(), PaintFlag::kOmitCompositingInfo,
+CullRect::Infinite()) -> EndRecording().Playback(canvas). kOmitCompositingInfo FLATTENS all
+composited layers (<video>, and any cc_layer content) into the software raster - the standard
+blink screenshot path. Verified mb_smoke_render 41k: a <video width=64 height=64> in the page,
+after loadeddata, mbPaintToBitmap -> the 32,32 pixel is OPAQUE + a frame color (not the white
+bg). NO regressions: the WebGL-composite (41z3) + 2D-canvas-composite (41b) screenshot tests
+still pass, mb_shot_smoke 66/66, full battery green (mb_smoke 145, platform 46, wke 114), no
+leaks. (This generalizes screenshot compositing; the earlier WebGL IsComposited patch 0008 is
+now belt-and-suspenders - WebGL paints inline either way.)
 **Tier 3 — input & rendering refinements:**
 [DEFERRED: device emulation] `WebView::EnableDeviceEmulation` (the DevTools device-mode path —
 mobile viewport + coarse-pointer/no-hover) was attempted and REVERTED: it builds a

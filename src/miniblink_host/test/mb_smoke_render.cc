@@ -992,6 +992,41 @@ static void RunCases(mbView* v, int W, int H) {
            "vf=[" + vf + "]");
   }
 
+  // 41k. A <video> element in the PAGE shows its frame in a screenshot (mbPaintToBitmap),
+  // not just via drawImage onto a canvas. Like a WebGL canvas, a <video> is normally
+  // composited (a cc_layer the absent compositor would draw); this checks whether the
+  // decoded frame reaches the software page paint. (If it does not, the fix is the same
+  // class as the WebGL screenshot-compositing one.)
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0;background:#fff'>"
+      "<video id='pv' width='64' height='64'></video>"
+      "<script>window.__pv='';var pv=document.getElementById('pv');"
+      "pv.addEventListener('loadeddata',function(){window.__pv='ready';});"
+      "pv.src='data:video/webm;base64,"
+      R"B64(GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAlFEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHYTbuMU6uEElTDZ1OsggEyTbuMU6uEHFO7a1Osggkv7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsirXsYMPQkBNgI1MYXZmNjAuMTYuMTAwV0GNTGF2ZjYwLjE2LjEwMESJiECfQAAAAAAAFlSua9WuAQAAAAAAAEzXgQFzxYia5fG0kqblX5yBACK1nIN1bmSIgQCGhVZfVlA4g4EBI+ODhAJiWgDgnbCCAUC6gfCagQJVsJBVuoEGVbGBBlW7gQZVuYEBElTDZ/xzc6BjwIBnyJpFo4dFTkNPREVSRIeNTGF2ZjYwLjE2LjEwMHNz1mPAi2PFiJrl8bSSpuVfZ8ihRaOHRU5DT0RFUkSHlExhdmM2MC4zMS4xMDIgbGlidnB4Z8ihRaOIRFVSQVRJT05Eh5MwMDowMDowMi4wMDAwMDAwMDAAH0O2dUd254EAo0FBgQAAgLAZAJ0BKkAB8AAARwiFhYiFhIgCAgJ11Qv6r+APKVZN5L+AP6V8YL2B/SDJ/7wH6A/wHEAf0B9/+7M/0BDOvyNdTe2kAOhssA11N7iM8FbiLywDXU3vpKf8sbEXlgGwkKEX/yxsReWC9ReWAa6m9xF8rFjYi8sA11N/st1N7aQpXKtwTRwOjvNUlj52/QP/R8q3BJM+NiLyjZjeEZpnl4llgGuqu3VupvcReWAcO+WAa6m9xF5ZwdDZYBrqb3EZ4K3EXlgGupvfSU/5Y2IvLANhIUIv/eAA/v8TQv6yqGPcwQRXjDp/8VrvQ2qcnhkpmvt2j5Y////6oC66ZjiEcEcC5FYSDFeSkq3RmH6Bc7f8AAAABEgEt/+vgEu5xzOlCBr1pYgIHuPMpafdVvCdAAAAAAAAAADuGs4AAAAAo56BACgA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEAUADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQB4ANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BAKAA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEAyADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQDwANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo62BARgAMQMABRAQFGAmPwKSjQ68AQ4ABc4TxgsFq1yTzAAAAAT4AMOAAAAAAACjnoEBQADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQFoANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BAZAA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEBuADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQHgANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BAggA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoECMADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQJYANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BAoAA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoECqADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQLQANECAAUQEBRgAGFgv9AAIgAQzX61yT5xzAAAo56BAvgA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEDIADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQNIANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BA3AA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEDmADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQPAANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BA+gA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEEEADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQQ4ANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BBGAA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEEiADRAgAFEBAUYABhYL/QACIAEM1+tck+ccwAAKOegQSwANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BBNgA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEFAADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQUoANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BBVAA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEFeADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQWgANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BBcgA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEF8ADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQYYANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BBkAA0QIABRAQFGAAYWC/0AAiABDNfrXJPnHMAACjnoEGaADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQaQANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BBrgA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEG4ADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQcIANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BBzAA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAACjnoEHWADRAgAFEKwAGAAYWC/0AAiABDNfrXJPnHMAAKOegQeAANECAAUQrAAYABhYL/QACIAEM1+tck+ccwAAo56BB6gA0QIABRCsABgAGFgv9AAIgAQzX61yT5xzAAAcU7trkbuPs4EAt4r3gQHxggGz8IED)B64"
+      "';pv.load();</script></body>",
+      "about:blank");
+    std::string pv;
+    for (int i = 0; i < 300; ++i) {
+      mbWait(v, 25);
+      pv = Eval(v, "window.__pv");
+      if (pv == "ready")
+        break;
+    }
+    std::vector<uint8_t> cv(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, cv.data(), W, H, W * 4);
+    size_t ci = (32u * W + 32u) * 4;  // inside the 64x64 video box
+    // Opaque + not the white background => the video frame rasterized into the page.
+    bool painted = cv[ci + 3] == 255 &&
+                   !(cv[ci] == 255 && cv[ci + 1] == 255 && cv[ci + 2] == 255);
+    Expect(painted,
+           "a <video> element paints its frame into the page screenshot (mbPaintToBitmap)",
+           "ready=[" + pv + "] B=" + std::to_string(cv[ci]) + " G=" +
+               std::to_string(cv[ci + 1]) + " R=" + std::to_string(cv[ci + 2]) +
+               " A=" + std::to_string(cv[ci + 3]));
+  }
+
   // 42. Drawing to a canvas via mbEvalJS (not just mbRunJS) must also be
   // crash-safe. EvalToString/EvalIsolated used to run ExecuteScript
   // synchronously, so a draw inside an eval expression hit the same
