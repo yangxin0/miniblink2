@@ -14,6 +14,9 @@
 
 #include "base/compiler_specific.h"
 #include "base/containers/span.h"
+#include "base/functional/bind.h"
+#include "base/location.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/containers/span_writer.h"
 #include "base/memory/scoped_refptr.h"
 #include "components/webcrypto/webcrypto_impl.h"
@@ -223,6 +226,18 @@ std::unique_ptr<blink::WebAudioBus> MbPlatform::DecodeAudioFileData(
       dest_channels[ch].Write(packet->channel(ch));
   }
   return out;
+}
+
+void MbPlatform::CreateWebGPUGraphicsContext3DProviderAsync(
+    const blink::WebURL& /*document_url*/,
+    blink::Platform::WebGPUReplyThread /*reply_thread*/,
+    base::OnceCallback<void(
+        std::unique_ptr<blink::WebGraphicsContext3DProvider>)> callback) {
+  // No WebGPU backend -> hand back NO provider (posted, not reentrant). blink then
+  // resolves requestAdapter() to a null adapter instead of hanging on a callback the
+  // base Platform never runs.
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), nullptr));
 }
 
 std::unique_ptr<blink::WebGraphicsContext3DProvider>

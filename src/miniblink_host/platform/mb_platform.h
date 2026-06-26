@@ -92,6 +92,18 @@ class MbPlatform : public blink::Platform {
   std::unique_ptr<blink::WebAudioBus> DecodeAudioFileData(
       base::span<const char> data) override;
 
+  // WebGPU: we have no Dawn/WebGPU backend. The base Platform's async provider
+  // creation never invokes its callback, so navigator.gpu.requestAdapter() HANGS
+  // forever (a page that `await`s it never proceeds). Override to invoke the callback
+  // with no provider -> blink resolves requestAdapter() to null ("WebGPU unavailable"),
+  // so pages feature-detect and fall back (e.g. to WebGL) cleanly.
+  void CreateWebGPUGraphicsContext3DProviderAsync(
+      const blink::WebURL& document_url,
+      blink::Platform::WebGPUReplyThread reply_thread,
+      base::OnceCallback<void(
+          std::unique_ptr<blink::WebGraphicsContext3DProvider>)> callback)
+      override;
+
   // Resource bundle: Blink asks for built-in resources (UA stylesheet, etc.).
   // P1: back with a real bundle / packed file. TODO(mb): wire resource pak.
   blink::WebData GetDataResource(

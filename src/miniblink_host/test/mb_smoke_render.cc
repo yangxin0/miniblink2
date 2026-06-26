@@ -1108,6 +1108,29 @@ static void RunCases(mbView* v, int W, int H) {
            "wc=[" + wc + "]");
   }
 
+  // 41n. navigator.gpu.requestAdapter() resolves to null (graceful "WebGPU unavailable")
+  // instead of HANGING. We have no Dawn/WebGPU backend; without the Platform override the
+  // async provider-creation callback is dropped and the promise never settles, so a page
+  // that `await`s requestAdapter() (then falls back to WebGL) would hang forever. The
+  // override settles it null so feature-detection works.
+  {
+    mbLoadHTML(v, "<body>wg</body>", "https://wg.test/");
+    mbRunJS(v,
+      "window.__wg='';navigator.gpu.requestAdapter().then("
+      "function(a){window.__wg=(a===null)?'null':'adapter';},"
+      "function(e){window.__wg='reject';});");
+    std::string wg;
+    for (int i = 0; i < 200; ++i) {
+      mbWait(v, 25);
+      wg = Eval(v, "window.__wg");
+      if (!wg.empty())
+        break;
+    }
+    Expect(wg == "null" || wg == "adapter",
+           "navigator.gpu.requestAdapter() settles (no hang) -> null when WebGPU absent",
+           "wg=[" + wg + "]");
+  }
+
   // 42. Drawing to a canvas via mbEvalJS (not just mbRunJS) must also be
   // crash-safe. EvalToString/EvalIsolated used to run ExecuteScript
   // synchronously, so a draw inside an eval expression hit the same

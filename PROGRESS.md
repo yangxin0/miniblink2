@@ -1052,6 +1052,19 @@ encoders/decoders (libvpx, already linked for <video>) are reachable from blink'
 NO extra wiring - low-level codec access for JS just works. render 117->118, full battery green,
 no leaks. (The other probed APIs are present but their deeper functionality - real geolocation
 fixes, RTC connectivity, notifications display, WebGPU - is unverified / mostly headless-stubbed.)
+[DONE - WebGPU requestAdapter() no longer HANGS (graceful degradation)]. The probe found
+navigator.gpu.requestAdapter() never settled (a page that `await`s it then falls back to WebGL
+would hang FOREVER). ROOT CAUSE: blink GPU::EnsureDawnControlClientInitialized calls
+Platform::CreateWebGPUGraphicsContext3DProviderAsync(url, reply_thread, callback) and only
+settles the adapter promise from that callback; the base Platform impl DROPS the callback (no
+WebGPU backend) -> the dawn_control_client_initialized_callbacks_ never run -> promise hangs.
+FIX: MbPlatform overrides CreateWebGPUGraphicsContext3DProviderAsync to PostTask the callback
+with a null provider; blink then takes the "Failed to create context provider" path and
+resolves requestAdapter() to a null adapter. So WebGPU feature-detection works (null -> fall
+back to WebGL), no hang. Verified mb_smoke_render 41n: requestAdapter() -> null (settles, no
+hang). render 118->119, full battery green (mb_smoke 145, platform 46, shot 66, wke 114), no
+leaks. (Real WebGPU support would need a Dawn device + the WebGPU context provider - heavy,
+the dawn_context_provider the GPU service CHECKed for in WebGL milestone B; deferred.)
 **Tier 3 — input & rendering refinements:**
 [DEFERRED: device emulation] `WebView::EnableDeviceEmulation` (the DevTools device-mode path —
 mobile viewport + coarse-pointer/no-hover) was attempted and REVERTED: it builds a
