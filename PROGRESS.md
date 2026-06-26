@@ -493,7 +493,26 @@ backpressure-honest), and `StartClosingHandshake` -> `OnDropChannel` drives `onc
 -> onmessage 'hello-ws', `close()` -> onclose. This is a LOOPBACK echo (proves the entire mojo
 data plane offline); a real network backend over libcurl's WebSocket support can replace the echo
 later with identical plumbing.
-[IN PROGRESS: WebSocket REAL backend — step 1 of N, curl foundation] The macOS SYSTEM libcurl (8.7.1)
+[DONE: WebSocket REAL backend] `new WebSocket('wss://realserver/')` now opens an ACTUAL connection over
+the vendored ws-enabled libcurl (curl_ws_send/curl_ws_recv) — the loopback echo is kept only for
+reserved-TLD `.test` hosts (so the offline mojo-data-plane tests stay green). Architecture (mb_websocket.cc):
+`CurlWsTransport` owns a CURL* doing the blocking ws/wss handshake (CURLOPT_CONNECT_ONLY=2) + a send/recv
+loop on a DETACHED worker thread; the socket is made non-blocking so curl_ws_recv polls (CURLE_AGAIN) and
+teardown just flips an atomic `stop_` (never joins the service thread). The worker holds a shared_ptr to
+keep the transport alive until it exits; results hop to the service thread via base::BindPostTask + a
+MbWebSocket WeakPtr (a dropped socket discards them). A REAL `MbWebSocket` starts in a CONNECTING state
+holding the deferred OnConnectionEstablished payload (page pipe-ends + handshake client) and consumes it
+only when the handshake SUCCEEDS — so onopen reflects a real connection (OnFailure + self-delete on
+failure), unlike the loopback which establishes immediately. The page's outgoing messages (framed off the
+writable pipe) -> curl_ws_send; server frames (curl_ws_recv, reassembled across CURLWS_CONT/bytesleft) ->
+OnDataFrame + the readable pipe; CURLWS_CLOSE / StartClosingHandshake -> OnDropChannel (onclose). Verified
+vs a PUBLIC echo server (mb_smoke 23k2, MB_NET_TESTS): `wss://echo.websocket.org` -> onopen, send
+'mb-ws-probe-42' -> received back echoed (open=1, msgs=[greeting, 'mb-ws-probe-42']), mb_smoke 153->154
+net, no leaked threads/processes. Offline 23k (`.test` loopback) unchanged: 138/46/92/66, wke 114.
+(Note: echo.websocket.events failed a TLS handshake with OpenSSL 3.6 — server-specific; echo.websocket.org
++ plain HTTPS work fine.) Follow-ups: real subprotocol/headers in the handshake response (currently a
+synthesized 101); bundle openssl@3 dylibs for portability.
+[SUPERSEDED: WebSocket — step 1 curl foundation] The macOS SYSTEM libcurl (8.7.1)
 is compiled WITHOUT ws/wss (Apple disables it), so curl_ws_send/recv are unusable. Built our own
 WebSocket-enabled libcurl and vendored it: `tools/build-curl-macos.sh` downloads curl 8.21.0 and
 builds it `--enable-websockets --with-openssl` (curl 8.21 removed SecureTransport) as a DYLIB —

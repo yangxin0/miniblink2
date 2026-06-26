@@ -1363,6 +1363,33 @@ int main() {
            "open=[" + open + "] msg=[" + msg + "] close=[" + closed + "]");
   }
 
+  // 23k2. REAL WebSocket over the vendored ws-enabled libcurl: a non-".test" host
+  // gets an actual ws/wss connection (curl_ws_send/recv on a worker thread), vs the
+  // in-process loopback above. Connect to a PUBLIC echo server, send a unique
+  // message, and confirm it comes back echoed. Gated on MB_NET_TESTS (real network).
+  if (getenv("MB_NET_TESTS")) {
+    mbLoadHTML(v, "<body>ws</body>", "https://wsclient.test/");
+    mbRunJS(v,
+            "window.__wopen=0;window.__wmsgs=[];"
+            "var s=new WebSocket('wss://echo.websocket.org/');"
+            "s.onopen=function(){window.__wopen=1;s.send('mb-ws-probe-42');};"
+            "s.onmessage=function(e){window.__wmsgs.push(''+e.data);};"
+            "window.__ws=s;");
+    std::string got;
+    for (int i = 0; i < 240; ++i) {  // ~12s for the real handshake + echo
+      mbWait(v, 50);
+      got = Eval(v, "JSON.stringify(window.__wmsgs)");
+      if (got.find("mb-ws-probe-42") != std::string::npos)
+        break;
+    }
+    const std::string opened = Eval(v, "''+window.__wopen");
+    Expect(opened == "1" && got.find("mb-ws-probe-42") != std::string::npos,
+           "real WebSocket (wss) connects + echoes through libcurl",
+           "open=" + opened + " msgs=" + got);
+    mbRunJS(v, "try{window.__ws.close()}catch(e){}");
+    mbWait(v, 150);  // let the close frame + worker teardown settle
+  }
+
   // 23l. navigator.storage.estimate() (broker #8): the in-process QuotaManagerHost
   // reports a generous quota + zero usage, so storage.estimate() resolves with a usable
   // quota instead of hanging (the QuotaManagerHost was dropped before). Apps that gate
