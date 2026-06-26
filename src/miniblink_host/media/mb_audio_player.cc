@@ -5,12 +5,21 @@
 #include "base/containers/span.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
-#include "media/filters/audio_file_reader.h"
+#include "media/filters/demuxer_manager.h"  // media::TrackManager (a MediaPlayerClient base)
+#include "media/filters/ffmpeg_glue.h"
 #include "media/filters/in_memory_url_protocol.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "third_party/blink/public/platform/web_media_player_source.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/renderer/platform/media/media_player_client.h"
+#include "ui/gfx/geometry/size.h"
+
+// FFmpeg headers MUST come last: media/ffmpeg/ffmpeg_common.h is visibility-restricted to
+// //media, so we include libav* directly (//third_party/ffmpeg supplies the path), and its
+// macros would otherwise pollute the blink/chromium headers above.
+extern "C" {
+#include <libavformat/avformat.h>
+}
 
 namespace mb {
 
@@ -44,12 +53,28 @@ void MbAudioPlayer::DecodeAndReport(std::string url) {
   std::string body, content_type;
   bool ok = !url.empty() && MbFetchUrl(url, &body, &content_type);
   if (ok) {
+    // Read container metadata with FFmpeg (no decode): stream kinds + video size +
+    // duration. avformat_find_stream_info fills codecpar->width/height without a
+    // decoder, so this covers <audio> AND <video> (and audio/video tracks together).
     media::InMemoryUrlProtocol protocol(base::as_byte_span(body),
                                         /*streaming=*/false);
-    media::AudioFileReader reader(&protocol);
-    if (reader.Open() && reader.channels() > 0 && reader.sample_rate() > 0) {
-      duration_ = reader.GetDuration().InSecondsF();
-      has_audio_ = true;
+    media::FFmpegGlue glue(&protocol);
+    if (glue.OpenContext() &&
+        avformat_find_stream_info(glue.format_context(), nullptr) >= 0) {
+      AVFormatContext* fc = glue.format_context();
+      for (unsigned i = 0; i < fc->nb_streams; ++i) {
+        const AVCodecParameters* cp = fc->streams[i]->codecpar;
+        if (cp->codec_type == AVMEDIA_TYPE_AUDIO) {
+          has_audio_ = true;
+        } else if (cp->codec_type == AVMEDIA_TYPE_VIDEO && cp->width > 0 &&
+                   cp->height > 0) {
+          has_video_ = true;
+          natural_size_ = gfx::Size(cp->width, cp->height);
+        }
+      }
+      if (fc->duration != AV_NOPTS_VALUE)
+        duration_ = fc->duration / static_cast<double>(AV_TIME_BASE);
+      ok = has_audio_ || has_video_;
     } else {
       ok = false;
     }
@@ -82,7 +107,7 @@ double MbAudioPlayer::CurrentTime() const {
 }
 
 void MbAudioPlayer::Play() {
-  if (!has_audio_)
+  if (!has_audio_ && !has_video_)
     return;
   if (ended_) {  // replay from the start
     ended_ = false;

@@ -57,7 +57,8 @@ class MbAudioPlayer : public blink::WebMediaPlayer {
                   CorsMode,
                   bool is_cache_disabled) override;
   bool HasAudio() const override { return has_audio_; }
-  bool HasVideo() const override { return false; }
+  bool HasVideo() const override { return has_video_; }
+  gfx::Size NaturalSize() const override { return natural_size_; }
   double Duration() const override { return duration_; }
   double CurrentTime() const override;
   bool Paused() const override { return paused_; }
@@ -98,8 +99,7 @@ class MbAudioPlayer : public blink::WebMediaPlayer {
                  blink::WebSetSinkIdCompleteCallback) override {
     return false;
   }
-  gfx::Size NaturalSize() const override { return gfx::Size(); }
-  gfx::Size VisibleSize() const override { return gfx::Size(); }
+  gfx::Size VisibleSize() const override { return natural_size_; }
   bool Seeking() const override { return seeking_; }
   blink::WebString GetErrorMessage() const override {
     return blink::WebString();
@@ -148,6 +148,8 @@ class MbAudioPlayer : public blink::WebMediaPlayer {
   base::TimeTicks anchor_ticks_;
   double rate_ = 1.0;
   bool has_audio_ = false;
+  bool has_video_ = false;
+  gfx::Size natural_size_;  // video dimensions (codec width/height), empty for audio
   bool paused_ = true;
   bool ended_ = false;
   bool seeking_ = false;

@@ -96,6 +96,10 @@ component("miniblink_host") {
     "//components/language_detection/content/common:common_blink",  # LanguageDetector broker stub
     "//components/webcrypto",  # WebCrypto impl for Platform::Crypto() (SubtleCrypto)
     "//media",  # media::AudioRendererSink / OutputDeviceStatus for CreateAudioDevice
+    # <audio>/<video> container metadata (media/mb_audio_player.cc): FFmpegGlue (in
+    # //media) + the FFmpeg headers directly (media/ffmpeg is visibility-restricted to
+    # //media). //third_party/ffmpeg's public config adds the libav* include path.
+    "//third_party/ffmpeg",
     "//cc/paint",
     # In-process WebGL (platform/mb_webgl.cc): ANGLE/SwiftShader GLES2 over an
     # in-process GPU command buffer. The two in-process targets are de-testonly'd by

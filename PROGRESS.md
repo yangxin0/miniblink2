@@ -974,6 +974,25 @@ notified the client REENTRANTLY from the element's own seek(); now it sets seeki
 posts a task that clears seeking_ + calls TimeChanged(), so the element finishes the seek and
 fires `seeked`. Seeking() returns seeking_. Verified mb_smoke_render 41h: a.currentTime=0.25
 -> `seeked` fires at 0.25. render 111->113, full battery green, no leaks.
+[DONE - <video> METADATA (dimensions + duration; media step 3a)]. A <video> element now
+loads + reports videoWidth/videoHeight + duration via FFmpeg container parsing (NO frame
+decode). MbAudioPlayer's DecodeAndReport now reads the whole container with media::FFmpegGlue
++ avformat_find_stream_info (replacing the audio-only AudioFileReader): it walks fc->streams,
+sets has_audio_/has_video_ + natural_size_ (video codecpar width/height) + duration
+(fc->duration / AV_TIME_BASE). HasVideo()/NaturalSize()/VisibleSize() now report real values;
+Play() gates on has_audio_||has_video_ so video-only files play the timeline. BUILD NOTES
+(non-obvious): (1) media/ffmpeg:ffmpeg is visibility-restricted to //media, so include the
+FFmpeg headers DIRECTLY - `extern "C" { #include <libavformat/avformat.h> }` - via a dep on
+//third_party/ffmpeg (its ffmpeg_dependent_config public-adds the libav include path); the
+FFmpeg include MUST be LAST (its macros pollute the blink headers). (2) blink's internal
+MediaPlayerClient also inherits media::TrackManager (media/filters/demuxer_manager.h), which
+the old AudioFileReader include transitively pulled - now included explicitly. Verified
+mb_smoke_render 41i: a tiny VP8 webm (embedded base64) -> loadedmetadata fires, videoWidth>0,
+videoHeight>0, duration>0 (render 113->114, full battery green, no leaks). The existing audio
+tests are unchanged (FFmpegGlue gives the same duration AudioFileReader did - both read
+fc->duration). REMAINING for <video>: actual FRAME decode + paint into the canvas/screenshot
+(VideoFrameCompositor / GetCurrentFrameThenUpdate + Paint) is the next step - the big visible
+piece; this metadata brick is the prerequisite (container parsed, dims known).
 **Tier 3 — input & rendering refinements:**
 [DEFERRED: device emulation] `WebView::EnableDeviceEmulation` (the DevTools device-mode path —
 mobile viewport + coarse-pointer/no-hover) was attempted and REVERTED: it builds a
