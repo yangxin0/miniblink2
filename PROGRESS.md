@@ -1117,6 +1117,17 @@ responsive page renders in the emulated mode and screenshots correctly. Verified
 green, no leaks. (The DevTools-style EnableDeviceEmulation VISUAL transform / "fit to
 window" still needs the compositor; this covers the layout/media-query emulation that
 matters for responsive headless capture - device emulation is no longer a blank gap.)
+[VERIFIED - mbEmulateDevice mobile VIEWPORT layout works (the core of the feature)]. Beyond
+the pointer/hover media queries (15b), confirmed the mobile <meta viewport> actually drives
+LAYOUT: mb_smoke 15c emulates mobile at a 640-wide widget, loads a page with
+<meta name=viewport content="width=320">, and document.documentElement.clientWidth +
+a 100%-width div are BOTH 320 (the layout viewport honors the meta) - while desktop mode
+ignores the meta and the div fills the 800 widget. (NOTE found while writing the test:
+window.innerWidth reports the VISUAL viewport = widget width 640, not the 320 layout viewport;
+documentElement.clientWidth / a 100% element is the correct layout-viewport probe.) So a
+responsive mobile page lays out at its mobile width and screenshots correctly. mb_smoke
+146->147, full battery green, no leaks. mbEmulateDevice is now fully validated end to end
+(pointer/hover/dpr + viewport layout) - mobile responsive capture works headlessly.
 **Tier 3 — input & rendering refinements:**
 [DEFERRED: device emulation] `WebView::EnableDeviceEmulation` (the DevTools device-mode path —
 mobile viewport + coarse-pointer/no-hover) was attempted and REVERTED: it builds a

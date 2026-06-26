@@ -1100,6 +1100,31 @@ int main() {
            "mob=[" + mob + "] desk=[" + desk + "]");
   }
 
+  // 15c. mbEmulateDevice honors the mobile <meta viewport>: in mobile mode a page with
+  // `width=320` lays out at a 320-CSS-px LAYOUT viewport even though the widget is 640
+  // wide — so a 100%-width element is 320px (and documentElement.clientWidth is 320). In
+  // desktop mode the viewport meta is ignored and the layout viewport tracks the widget
+  // (800). This is the core of mobile responsive rendering (SetViewport*Enabled).
+  {
+    mbEmulateDevice(v, 640, 800, 1.0f, /*mobile=*/1);
+    mbLoadHTML(v,
+        "<head><meta name='viewport' content='width=320'></head>"
+        "<body style='margin:0'><div id='w' style='width:100%;height:10px'></div></body>",
+        "about:blank");
+    const std::string mvw =
+        Eval(v, "document.documentElement.clientWidth + ',' + "
+                "document.getElementById('w').clientWidth");
+    mbEmulateDevice(v, 800, 600, 1.0f, /*mobile=*/0);  // desktop: viewport meta ignored
+    mbLoadHTML(v,
+        "<head><meta name='viewport' content='width=320'></head>"
+        "<body style='margin:0'><div id='w' style='width:100%;height:10px'></div></body>",
+        "about:blank");
+    const std::string dvw = Eval(v, "''+document.getElementById('w').clientWidth");
+    Expect(mvw == "320,320" && dvw == "800",
+           "mbEmulateDevice: mobile <meta viewport width=320> -> 320-px layout viewport",
+           "mobile=[" + mvw + "] desktop_div=[" + dvw + "]");
+  }
+
   // 18. User-Agent: default is a real (non-empty) UA, and the override is reflected
   // in navigator.userAgent. Set before load so it applies to the committed document.
   mbLoadHTML(v, "<body>x</body>", "about:blank");  // default UA
