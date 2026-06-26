@@ -964,6 +964,26 @@ int mbEvalJSInFrame(mbView* v, int frame_index, const char* utf8_script, char* o
   return static_cast<int>(result.size());
 }
 
+int mbFillSelectorInFrame(mbView* v, int frame_index, const char* css_selector,
+                          const char* utf8_text) {
+  if (!v || !v->impl || !css_selector)
+    return 0;
+  return v->impl->FillSelectorInFrame(frame_index, css_selector, utf8_text) ? 1
+                                                                            : 0;
+}
+
+int mbGetTextForSelectorInFrame(mbView* v, int frame_index,
+                                const char* css_selector, char* out,
+                                int out_cap) {
+  if (!v || !v->impl)
+    return -1;
+  std::string result;
+  if (!v->impl->GetTextForSelectorInFrame(frame_index, css_selector, &result))
+    return -1;  // no element matched (or out-of-range / remote frame)
+  CopyToBuffer(result, out, out_cap);
+  return static_cast<int>(result.size());
+}
+
 int mbEvalJSEx(mbView* v, const char* utf8_script, char* out_value,
                int value_cap, char* out_type, int type_cap) {
   if (!v || !v->impl)

@@ -167,8 +167,19 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
    - [DONE] **`mb_shot --frame N`** — routes `--eval`/`--eval-json` into child frame N
      (host-privileged), so the CLI scrapes iframe content the page can't. mb_shot_smoke:
      parent body=`parent`, `--frame 0 --eval document.body.textContent`=`CHILD-77`.
-   - [NEXT] per-frame selector ops (click/fill/text-by-selector in a frame) via the same
-     child-frame mechanism + a wke `wkeRunJsByFrame` peer.
+   - [DONE] **per-frame DOM selector ops** — `mbFillSelectorInFrame(frame_index, sel, text)` +
+     `mbGetTextForSelectorInFrame(frame_index, sel, out, cap)`: the typed peers of mbFillSelector /
+     mbGetTextForSelector scoped to the Nth child frame (-1 = main), host-privileged so they reach a
+     CROSS-ORIGIN iframe. Both run their canonical JS (extracted to shared `BuildFillJs` / `BuildGetTextJs`
+     so the React-compatible value-set + input/change dispatch and the no-match sentinel stay identical to
+     the main-frame ops) through the existing `EvalInFrame` child-frame mechanism — DOM-only, so an embedded
+     cross-origin form/widget is fillable + scrapable with NO cross-frame coordinate mapping. Verified
+     mb_smoke_render 78b2 (data: iframe under an https parent: fill `#f`->value read back `typed-in-frame`,
+     read `#t`->`FRAME-TEXT`, miss->-1), count 91->92.
+   - [NEXT] per-frame *gesture* click (`ClickSelectorInFrame`): deferred — unlike fill/get-text it needs
+     cross-frame coordinate mapping (child element rect in child-viewport coords -> the iframe element's
+     offset in the parent -> root widget coords) to land a real SendMouseClick; fiddly with scroll/borders/
+     nesting. A wke `wkeRunJsByFrame` peer also still pending (needs the wke frame-handle model first).
 4. **Push callback model** — replace poll-only readiness with real engine signals.
    - [DONE] **live console push** — `mbOnConsoleMessage(view, cb, userdata)`: cb fires for each
      page console message (console.log/warn/error) with level + text as it happens (vs polling

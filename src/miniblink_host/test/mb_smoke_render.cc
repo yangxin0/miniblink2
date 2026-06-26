@@ -1618,6 +1618,36 @@ static void RunCases(mbView* v, int W, int H) {
                parent_read + "] inframe=[" + in_frame + "]");
   }
 
+  // 78b2. Per-frame selector ops (fill + get-text) reach a CROSS-ORIGIN iframe:
+  // the typed peers of mbFillSelector / mbGetTextForSelector scoped to a child
+  // frame. mbFillSelectorInFrame fills a form field inside the (opaque-origin)
+  // child with the same React-compatible value-set + input/change dispatch;
+  // mbGetTextForSelectorInFrame reads an element's innerText there. So an embedded
+  // cross-origin form/widget is fillable + scrapable like the main document — DOM
+  // only, no synthetic gesture (no cross-frame coordinate mapping needed).
+  {
+    mbLoadHTML(v,
+        "<body>parent<iframe src='data:text/html,"
+        "<input id=f><div id=t>FRAME-TEXT</div>"
+        "' width='120' height='60'></iframe></body>",
+        "https://parent.test/");
+    mbWait(v, 250);  // child navigation + commit
+    const int filled = mbFillSelectorInFrame(v, 0, "#f", "typed-in-frame");
+    char vb[128] = {0};  // read the filled value back from the child's own world
+    mbEvalJSInFrame(v, 0, "document.querySelector('#f').value", vb, sizeof(vb));
+    const std::string fval(vb);
+    char tb[128] = {0};
+    const int tlen = mbGetTextForSelectorInFrame(v, 0, "#t", tb, sizeof(tb));
+    const std::string ftext(tb);
+    // A non-matching selector in the same frame returns -1 (distinct from "").
+    const int miss = mbGetTextForSelectorInFrame(v, 0, "#nope", tb, sizeof(tb));
+    Expect(filled == 1 && fval == "typed-in-frame" && tlen == 10 &&
+               ftext == "FRAME-TEXT" && miss == -1,
+           "per-frame fill + get-text reach a cross-origin iframe's form/content",
+           "filled=" + std::to_string(filled) + " val=[" + fval + "] text=[" +
+               ftext + "] miss=" + std::to_string(miss));
+  }
+
   // 78c. Non-UTF-8 iframe charset (audit #14): a child frame whose response declares a
   // non-UTF-8 charset must decode with THAT charset, not the old hardcoded UTF-8 (which
   // turned the bytes into mojibake). Mock an iframe serving the Shift-JIS bytes for

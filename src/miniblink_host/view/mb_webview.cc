@@ -113,6 +113,24 @@ std::string JsEscape(const char* s) {
   }
   return out;
 }
+
+// Canonical JS for the fill / get-text selector ops, shared by the main-frame
+// methods and their per-frame variants so the (React-compatible) fill semantics
+// and the no-match sentinel ('0'/'' = no element) stay identical across both.
+std::string BuildFillJs(const char* css_selector, const char* text) {
+  return "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+         "\");if(!e)return '0';e.focus();var t=\"" + JsEscape(text ? text : "") +
+         "\";var proto=(e instanceof HTMLTextAreaElement)?HTMLTextAreaElement."
+         "prototype:(e instanceof HTMLInputElement)?HTMLInputElement.prototype:"
+         "null;var d=proto&&Object.getOwnPropertyDescriptor(proto,'value');"
+         "if(d&&d.set){d.set.call(e,t);}else{try{e.value=t;}catch(ex){return "
+         "'0';}}e.dispatchEvent(new Event('input',{bubbles:true}));"
+         "e.dispatchEvent(new Event('change',{bubbles:true}));return '1';})()";
+}
+std::string BuildGetTextJs(const char* css_selector) {
+  return "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
+         "\");if(!e)return '';return '1'+(e.innerText||'');})()";
+}
 }  // namespace
 
 // static
@@ -762,16 +780,20 @@ bool MbWebView::FillSelector(const char* css_selector, const char* text) {
   // the change; then fire input + change (bubbling) like real typing. Falls back
   // to a direct assignment for non-input/textarea elements. Returns "1" on
   // success, "0" if the selector matches nothing.
-  std::string js =
-      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
-      "\");if(!e)return '0';e.focus();var t=\"" + JsEscape(text ? text : "") +
-      "\";var proto=(e instanceof HTMLTextAreaElement)?HTMLTextAreaElement.prototype"
-      ":(e instanceof HTMLInputElement)?HTMLInputElement.prototype:null;"
-      "var d=proto&&Object.getOwnPropertyDescriptor(proto,'value');"
-      "if(d&&d.set){d.set.call(e,t);}else{try{e.value=t;}catch(ex){return '0';}}"
-      "e.dispatchEvent(new Event('input',{bubbles:true}));"
-      "e.dispatchEvent(new Event('change',{bubbles:true}));return '1';})()";
-  return EvalToString(js.c_str()) == "1";
+  return EvalToString(BuildFillJs(css_selector, text).c_str()) == "1";
+}
+
+bool MbWebView::FillSelectorInFrame(int frame_index,
+                                    const char* css_selector,
+                                    const char* text) {
+  // Per-frame FillSelector: same React-compatible value-set + input/change
+  // dispatch, but run host-privileged in the frame_index-th child frame's own
+  // world (so it fills a form inside a cross-origin iframe the parent can't
+  // reach). DOM-only, so no cross-frame coordinate mapping is needed. -1 = main.
+  if (!css_selector)
+    return false;
+  return EvalInFrame(frame_index, BuildFillJs(css_selector, text).c_str()) ==
+         "1";
 }
 
 bool MbWebView::SetFileForSelector(const char* css_selector,
@@ -993,12 +1015,26 @@ bool MbWebView::GetTextForSelector(const char* css_selector, std::string* out) {
   // innerText of the first match. We prefix a '1' flag on success so an element
   // whose text is genuinely "" is distinguishable from "no element matched" (JS
   // returns "" only in the no-match case). Strip the flag before returning.
-  std::string js =
-      "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
-      "\");if(!e)return '';return '1'+(e.innerText||'');})()";
-  std::string s = EvalToString(js.c_str());
+  std::string s = EvalToString(BuildGetTextJs(css_selector).c_str());
   if (s.empty())
     return false;  // no element matched
+  if (out)
+    *out = s.substr(1);
+  return true;
+}
+
+bool MbWebView::GetTextForSelectorInFrame(int frame_index,
+                                          const char* css_selector,
+                                          std::string* out) {
+  // Per-frame GetTextForSelector: innerText of the first match in the
+  // frame_index-th child frame's own world (reads a cross-origin iframe's text).
+  // Same '1'-flag sentinel so an element whose text is genuinely "" is
+  // distinguishable from no-match. -1 = main frame.
+  if (!css_selector)
+    return false;
+  std::string s = EvalInFrame(frame_index, BuildGetTextJs(css_selector).c_str());
+  if (s.empty())
+    return false;  // no element matched (or out-of-range / remote frame)
   if (out)
     *out = s.substr(1);
   return true;

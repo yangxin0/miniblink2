@@ -157,6 +157,12 @@ class MbWebView {
   // like React observe it), and fires input+change. Playwright-style fill().
   // Returns false if the selector matches nothing.
   bool FillSelector(const char* css_selector, const char* text);
+  // Per-frame FillSelector: fills a match inside the frame_index-th child frame
+  // (0-based, document order; -1 = main frame) host-privileged, so it can fill a
+  // form in a cross-origin iframe. Same React-compatible semantics; DOM-only.
+  bool FillSelectorInFrame(int frame_index,
+                           const char* css_selector,
+                           const char* text);
   // Set an <input type=file>'s selected files from disk paths (newline-separated for a
   // `multiple` input) — the privileged host op a page's script can't do — and fire
   // change, so a form submit then uploads the file(s). The bytes are read from disk into
@@ -226,6 +232,12 @@ class MbWebView {
   // matches (GetAttribute also returns false if the attribute is absent). *out is
   // only written on success.
   bool GetTextForSelector(const char* css_selector, std::string* out);
+  // Per-frame GetTextForSelector: first match's innerText inside the
+  // frame_index-th child frame (-1 = main frame) host-privileged, so it reads a
+  // cross-origin iframe's text the parent's contentDocument can't.
+  bool GetTextForSelectorInFrame(int frame_index,
+                                 const char* css_selector,
+                                 std::string* out);
   // innerText of EVERY element matching `css_selector`, as a JSON array string
   // (one call for list scraping, vs count + :nth-of-type loop). Returns false on
   // an invalid selector; zero matches yields the valid "[]".

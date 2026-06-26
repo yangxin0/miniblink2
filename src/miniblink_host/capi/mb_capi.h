@@ -759,6 +759,21 @@ MB_EXPORT int mbGetFrameCount(mbView*);
 MB_EXPORT int mbEvalJSInFrame(mbView*, int frame_index, const char* utf8_script,
                               char* out, int out_cap);
 
+// Per-frame selector ops — the typed peers of mbFillSelector / mbGetTextForSelector
+// scoped to the frame_index-th child frame (-1 = main frame), host-privileged so
+// they reach a CROSS-ORIGIN iframe. mbFillSelectorInFrame fills with the same
+// React-compatible value-set + input/change dispatch as mbFillSelector (returns 1
+// on success, 0 if nothing matched). mbGetTextForSelectorInFrame reads the first
+// match's innerText (same out-buffer contract as mbGetTextForSelector; returns -1
+// if nothing matched or the frame index is out of range). DOM-only — no synthetic
+// gesture, so an iframe form/text is reachable without cross-frame coord mapping.
+MB_EXPORT int mbFillSelectorInFrame(mbView*, int frame_index,
+                                    const char* css_selector,
+                                    const char* utf8_text);
+MB_EXPORT int mbGetTextForSelectorInFrame(mbView*, int frame_index,
+                                          const char* css_selector, char* out,
+                                          int out_cap);
+
 // Like mbEvalJS, but ALSO reports the JS typeof the result via `out_type` (one of
 // "number"/"string"/"boolean"/"object"/"function"/"undefined"/"array"/"null"),
 // captured from the SAME single evaluation (no re-run, so side effects fire once).
