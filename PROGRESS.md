@@ -1198,7 +1198,22 @@ fires, letting pages pause timers/video/polling/rAF when hidden. Verified mb_smo
     (kTouch) path was assessed but deferred this tick — blink routes real touch through an
     async queue (the widget code notes HandleInputEvent guards against raw touch), and
     touch handlers already work synthesized, so the marginal isTrusted/pointer-event gain
-    didn't justify destabilizing the working path. [REMAINING: trusted touch (low value).]
+    didn't justify destabilizing the working path. [DONE below - trusted POINTER events.]
+[DONE - mbSendTouchTap now fires TRUSTED Pointer Events (+ keeps touch events)]. Complements
+mbEmulateDevice (testing mobile pages). Empirically settled the long-deferred "trusted touch"
+question: (1) a real WebTouchEvent through HandleInputEvent DOES DCHECK/abort in the offscreen
+widget (the old note's fear - CONFIRMED, exit 134); (2) but a WebPointerEvent(kTouch) does
+NOT - it dispatches trusted pointerdown/pointerup (isTrusted=true). A WebPointerEvent alone
+yields only POINTER events, not touch events (blink derives touch events only from the raw
+WebTouchEvent path). SOLUTION (MbWidget::SendTouchTap = WebPointerEvent down+up; MbWebView::
+SendTouchTap calls it THEN the existing JS-synthesized TouchEvents): a tap now fires trusted
+pointerdown/up (the modern Pointer Events standard mobile UIs use) AND touchstart/touchend
+(Touch-Events UIs), covering both. The pointer events dispatch ASYNC (the touch queue) so
+callers pump (mbWait) - 12c updated to poll. Verified mb_smoke 12c: tap -> touchstart (x=50) +
+touchend + pointerdown with isTrusted=true. wke touch tests + 12d swipe unchanged (the JS touch
+path is preserved). mb_smoke still 147, full battery green, no leaks. (Touch events themselves
+remain JS-synthesized/untrusted - a fully-trusted WebTouchEvent needs the touch-queue/compositor
+path that DCHECKs here; the trusted POINTER events are the valuable modern-standard part.)
 
 [SCOPED — WebGL (biggest remaining gap): feasibility CONFIRMED, implementation is multi-
 session]. Investigated this tick. (1) The donor out/Release already SHIPS the GL stack:

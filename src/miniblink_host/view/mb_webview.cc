@@ -516,12 +516,13 @@ void MbWebView::SendMouseDown(int x, int y) {
 }
 
 void MbWebView::SendTouchTap(int x, int y) {
-  // A single-finger tap at (x,y): dispatch correctly-shaped touchstart+touchend
-  // TouchEvents on the element under the point. Synthetic (not a native input
-  // event) because Blink routes real WebTouchEvents through an async touch queue
-  // the offscreen widget doesn't wire (HandleInputEvent DCHECKs against touch);
-  // this drives touch-only handlers, with touches[0].clientX/Y populated. No-op
-  // if no element is under the point or the Touch API is unavailable.
+  // A single-finger tap fires BOTH: (1) TRUSTED pointer events via a real WebPointerEvent
+  // (pointerdown/up, isTrusted=true — what modern Pointer-Events mobile UIs use), and
+  // (2) JS-synthesized TouchEvents (touchstart/touchend) for Touch-Events UIs (a raw
+  // WebTouchEvent that would carry both DCHECKs in this offscreen widget). The pointer
+  // events dispatch async (the touch queue) — callers pump (mbWait) before reading.
+  if (widget_)
+    widget_->SendTouchTap(x, y);
   const std::string sx = std::to_string(x), sy = std::to_string(y);
   std::string js =
       "(function(){try{var e=document.elementFromPoint(" + sx + "," + sy +

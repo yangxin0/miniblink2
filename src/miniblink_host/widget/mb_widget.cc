@@ -15,6 +15,8 @@
 #include "third_party/blink/public/common/input/web_keyboard_event.h"
 #include "third_party/blink/public/common/input/web_mouse_event.h"
 #include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
+#include "third_party/blink/public/common/input/web_pointer_event.h"
+#include "third_party/blink/public/common/input/web_touch_event.h"
 #include "third_party/blink/public/platform/web_input_event_result.h"
 #include "ui/events/types/scroll_types.h"
 #include "third_party/blink/public/mojom/page/widget.mojom-blink.h"
@@ -296,6 +298,36 @@ bool MbWidget::SendWheel(int x, int y, int delta_x, int delta_y, int modifiers) 
   // (or none) leaves it kNotHandled -> the caller applies the default scroll.
   return r == blink::WebInputEventResult::kHandledApplication ||
          r == blink::WebInputEventResult::kHandledSystem;
+}
+
+bool MbWidget::SendTouchTap(int x, int y) {
+  if (!widget_)
+    return false;
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  // TRUSTED pointer events via a WebPointerEvent. (A raw WebTouchEvent would derive touch
+  // events too but DCHECKs in this offscreen widget; the caller adds JS-synthesized touch
+  // events for Touch-Events UIs.) Dispatch is async via the touch queue; callers pump.
+  auto make = [&](blink::WebInputEvent::Type type, bool start) {
+    blink::WebPointerEvent e(
+        type,
+        blink::WebPointerProperties(
+            /*id=*/1, blink::WebPointerProperties::PointerType::kTouch,
+            blink::WebPointerProperties::Button::kLeft),
+        /*width=*/24.0f, /*height=*/24.0f);
+    e.SetPositionInWidget(x, y);
+    e.SetPositionInScreen(x, y);
+    e.hovering = false;
+    e.touch_start_or_first_touch_move = start;
+    e.dispatch_type = blink::WebInputEvent::DispatchType::kBlocking;
+    return e;
+  };
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+      make(blink::WebInputEvent::Type::kPointerDown, /*start=*/true),
+      ui::LatencyInfo()));
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+      make(blink::WebInputEvent::Type::kPointerUp, /*start=*/false),
+      ui::LatencyInfo()));
+  return true;
 }
 
 void MbWidget::SendText(const char* utf8) {

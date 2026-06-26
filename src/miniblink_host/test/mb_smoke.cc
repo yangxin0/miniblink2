@@ -909,13 +909,17 @@ int main() {
                std::to_string(nomatch));
   }
 
-  // 12c. mbSendTouchTap fires real touch events (touchstart+touchend) that mouse
-  // events don't — a touch-only handler runs and sees touches[0].clientX == tap x.
+  // 12c. mbSendTouchTap fires a TRUSTED touch — a real WebPointerEvent, so the element
+  // sees pointerdown (isTrusted=true) AND touchstart/touchend with touches[0].clientX,
+  // unlike a JS-synthesized TouchEvent (untrusted, no pointer events). Pointer Events are
+  // the modern standard mobile UIs use. Dispatch is async (touch queue) -> poll.
   {
     mbLoadHTML(v,
         "<body style='margin:0'><div id='b' style='width:200px;height:100px'></div>"
-        "<script>window.__ts=0;window.__tx=-1;window.__te=0;"
+        "<script>window.__ts=0;window.__tx=-1;window.__te=0;window.__pd=0;window.__tr=0;"
         "var b=document.getElementById('b');"
+        "b.addEventListener('pointerdown',function(e){window.__pd=1;"
+        "window.__tr=e.isTrusted?1:0;});"
         "b.addEventListener('touchstart',function(e){window.__ts=1;"
         "if(e.touches[0])window.__tx=Math.round(e.touches[0].clientX);});"
         "b.addEventListener('touchend',function(){window.__te=1;});"
@@ -925,13 +929,21 @@ int main() {
       mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // layout for hit-testing
     }
     mbSendTouchTap(v, 50, 40);
+    for (int i = 0; i < 80; ++i) {  // the trusted pointer events dispatch asynchronously
+      mbWait(v, 25);
+      if (Eval(v, "String(window.__pd)") == "1")
+        break;
+    }
     const bool start = Eval(v, "String(window.__ts)") == "1";
     const bool coord = Eval(v, "String(window.__tx)") == "50";
     const bool end = Eval(v, "String(window.__te)") == "1";
-    Expect(start && coord && end,
-           "mbSendTouchTap fires touchstart+touchend with touches[0].clientX",
+    const bool pointer = Eval(v, "String(window.__pd)") == "1";
+    const bool trusted = Eval(v, "String(window.__tr)") == "1";
+    Expect(start && coord && end && pointer && trusted,
+           "mbSendTouchTap fires a TRUSTED pointerdown + touchstart/end (touches[0].clientX)",
            std::string("start=") + (start ? "1" : "0") + " x=" +
-               Eval(v, "String(window.__tx)") + " end=" + (end ? "1" : "0"));
+               Eval(v, "String(window.__tx)") + " end=" + (end ? "1" : "0") +
+               " pointer=" + (pointer ? "1" : "0") + " trusted=" + (trusted ? "1" : "0"));
   }
 
   // 12d. mbSendTouchSwipe drives touchmove: a handler sees the moves and the final

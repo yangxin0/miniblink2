@@ -45,6 +45,10 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   // `wheel` handlers (isTrusted=true). Returns true if a blocking listener consumed
   // it (called preventDefault) — the caller then suppresses the default scroll.
   bool SendWheel(int x, int y, int delta_x, int delta_y, int modifiers);
+  // Trusted single-finger touch tap at (x,y): a real WebPointerEvent(kTouch) down+up,
+  // so blink fires pointerdown/up + touchstart/end with isTrusted=true. Returns false if
+  // no widget. (Dispatch may be async — the element's handlers run on the next pump.)
+  bool SendTouchTap(int x, int y);
   void SendText(const char* utf8);    // type ASCII text into the focused element
   // Press a named non-text key ("Enter", "Tab", "Escape", "Backspace", "Delete",
   // "Arrow{Left,Up,Right,Down}", "Home", "End", "PageUp", "PageDown") as a real
