@@ -646,6 +646,29 @@ bool MbWebView::DragSelector(const char* from_selector, const char* to_selector)
   return true;
 }
 
+bool MbWebView::DragDropSelector(const char* from_selector,
+                                 const char* to_selector) {
+  if (!from_selector || !to_selector || !main_frame_)
+    return false;
+  // HTML5 NATIVE drag-and-drop (vs DragSelector's mouse-based drag): synthesize
+  // the standard DragEvent sequence with ONE shared DataTransfer, so handlers
+  // that setData() on dragstart and getData() on drop round-trip — the contract
+  // for drag-to-upload, sortable lists, kanban boards, etc. that listen on
+  // drag*/drop rather than mouse moves. dragover is dispatched (cancelable) so a
+  // target that preventDefault()s it accepts the drop. Returns true if both
+  // selectors matched. (Synthetic events are isTrusted=false; native gesture
+  // synthesis would need the drag controller — this drives app-level handlers.)
+  std::string js =
+      "(function(){var s=document.querySelector(\"" + JsEscape(from_selector) +
+      "\");var t=document.querySelector(\"" + JsEscape(to_selector) +
+      "\");if(!s||!t)return '0';var dt=new DataTransfer();"
+      "function f(el,ty){el.dispatchEvent(new DragEvent(ty,{bubbles:true,"
+      "cancelable:true,dataTransfer:dt}));}"
+      "f(s,'dragstart');f(t,'dragenter');f(t,'dragover');f(t,'drop');"
+      "f(s,'dragend');return '1';})()";
+  return EvalToString(js.c_str()) == "1";
+}
+
 bool MbWebView::GetContentSize(int* w, int* h) {
   // The full scrollable document size (logical px), >= the viewport. For
   // full-page screenshots: mbResize to this height, then paint — content below

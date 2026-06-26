@@ -878,8 +878,15 @@ fires, letting pages pause timers/video/polling/rAF when hidden. Verified mb_smo
     widget's SetComposition (compositionstart/update preview) + CommitText (compositionend +
     input, inserts) — CJK/accented input via an input method. Verified (mb_smoke 0i2): focus
     input, mbSendIme("にほ","日本") → value 日本, compositionstart+end each fired once.
-    [REMAINING: native HTML5 drag-drop (hard — drag controller + DataTransfer), trusted
-    touch/wheel.]
+    [DONE: HTML5 drag-drop] `mbDragDropSelector(from, to)` -> MbWebView::DragDropSelector: the HTML5
+    NATIVE drag-and-drop peer of mbDragSelector (mouse). Synthesizes the DragEvent sequence (dragstart ->
+    dragenter -> dragover -> drop -> dragend) with ONE shared `new DataTransfer()`, so a source's
+    dragstart setData() and a target's drop getData() round-trip — the contract for drag-to-upload /
+    sortable lists / kanban widgets that listen on drag*/drop (mbDragSelector's mouse moves don't reach
+    them). Done in JS (events are isTrusted=false — app handlers fire; a few trusted-gesture-only
+    behaviors won't; the native drag controller would be needed for those). Verified mb_smoke 12b2
+    (drag #src -> #tgt: payload 'PKG-7' arrives via the target's getData; no-match -> 0), 138->139.
+    [REMAINING: trusted touch/wheel.]
 13. [DONE] PDF options. `mbSavePdfEx(path, width_pt, height_pt, landscape, scale, margin_pt)`
 (mbSavePdf kept = Letter default) + `mb_shot --pdf-size letter|a4|legal|a3|tabloid|WxH
 --landscape --pdf-scale N --pdf-margin PT`. Page size in points; landscape swaps w/h; content

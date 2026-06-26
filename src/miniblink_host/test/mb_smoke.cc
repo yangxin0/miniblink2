@@ -846,6 +846,30 @@ int main() {
              Eval(v, "String(window.__dropx)") + " nomatch=" + (nomatch ? "1" : "0"));
   }
 
+  // 12b2. mbDragDropSelector fires HTML5 NATIVE drag-and-drop (vs 12b's mouse
+  // drag): the source's dragstart setData()s a payload, the target's drop (after
+  // accepting via dragover preventDefault) getData()s it. One shared DataTransfer
+  // round-trips the payload — proving the full drag*/drop sequence + DataTransfer,
+  // the contract for drag-to-upload / sortable / kanban widgets.
+  {
+    mbLoadHTML(v,
+        "<body>"
+        "<div id=src draggable=true ondragstart=\"event.dataTransfer."
+        "setData('text/plain','PKG-7')\">S</div>"
+        "<div id=tgt ondragover=\"event.preventDefault()\" ondrop=\""
+        "event.preventDefault();this.textContent='got:'+event.dataTransfer."
+        "getData('text/plain')\">T</div></body>",
+        "about:blank");
+    const int ok = mbDragDropSelector(v, "#src", "#tgt");
+    const std::string tgt =
+        Eval(v, "document.getElementById('tgt').textContent");
+    const int nomatch = mbDragDropSelector(v, "#src", "#none");
+    Expect(ok == 1 && tgt == "got:PKG-7" && nomatch == 0,
+           "mbDragDropSelector fires HTML5 DnD (dragstart setData -> drop getData)",
+           "ok=" + std::to_string(ok) + " tgt=[" + tgt + "] nomatch=" +
+               std::to_string(nomatch));
+  }
+
   // 12c. mbSendTouchTap fires real touch events (touchstart+touchend) that mouse
   // events don't — a touch-only handler runs and sees touches[0].clientX == tap x.
   {

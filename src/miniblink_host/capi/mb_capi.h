@@ -214,6 +214,16 @@ MB_EXPORT int mbClickSelector(mbView*, const char* css_selector);
 MB_EXPORT int mbDragSelector(mbView*, const char* from_selector,
                              const char* to_selector);
 
+// HTML5 NATIVE drag-and-drop (the peer of mbDragSelector's mouse drag): fire the
+// DragEvent sequence dragstart -> dragenter -> dragover -> drop -> dragend on the
+// matched elements, sharing one DataTransfer so a handler's setData()/getData()
+// round-trips. Drives drag-to-upload, sortable lists, kanban boards and other
+// widgets that listen on drag*/drop events (not mouse moves). Returns 1 if both
+// selectors matched. (Events are isTrusted=false — app handlers fire; a few
+// trusted-gesture-only behaviors won't.)
+MB_EXPORT int mbDragDropSelector(mbView*, const char* from_selector,
+                                 const char* to_selector);
+
 // Dispatch a synthetic bubbling, cancelable DOM event of `type` (e.g. "mouseover",
 // "focus", "submit", or a custom event name) on the first element matching
 // `css_selector` — trigger handlers that mbClickSelector / mbFillSelector don't.

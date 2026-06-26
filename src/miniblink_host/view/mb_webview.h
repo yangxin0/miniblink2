@@ -124,6 +124,12 @@ class MbWebView {
   // sortable/map-pan widgets. Not HTML5 native DnD. Both must be in view. Returns
   // true if both matched.
   bool DragSelector(const char* from_selector, const char* to_selector);
+  // HTML5 NATIVE drag-and-drop: synthesize the DragEvent sequence (dragstart ->
+  // dragenter -> dragover -> drop -> dragend) with one shared DataTransfer, so
+  // handlers that setData/getData round-trip — drives drag-to-upload, sortable
+  // lists, kanban boards (which listen on drag*/drop, not mouse). The peer of
+  // DragSelector (mouse-based). Returns true if both selectors matched.
+  bool DragDropSelector(const char* from_selector, const char* to_selector);
   // Dispatch a bubbling, cancelable DOM Event of `type` on the first match —
   // trigger handlers click/fill don't (mouseover/focus/blur/submit/custom events).
   // Returns true if an element matched.

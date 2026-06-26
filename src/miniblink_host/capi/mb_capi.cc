@@ -288,6 +288,13 @@ int mbDragSelector(mbView* v, const char* from_selector,
   return v->impl->DragSelector(from_selector, to_selector) ? 1 : 0;
 }
 
+int mbDragDropSelector(mbView* v, const char* from_selector,
+                       const char* to_selector) {
+  if (!v || !v->impl || !from_selector || !to_selector)
+    return 0;
+  return v->impl->DragDropSelector(from_selector, to_selector) ? 1 : 0;
+}
+
 int mbHoverSelector(mbView* v, const char* css_selector) {
   if (!v || !v->impl || !css_selector)
     return 0;
