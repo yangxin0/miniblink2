@@ -546,8 +546,11 @@ pages / session restore). Now it UNIONs the store with MbGetCookiesForUrl(url) (
 secure/host-scoped cookies): store names first (JS-authoritative), then jar-only names appended.
 Offline non-http JS cookies (store-only) still work; HttpOnly server cookies stay excluded (the jar
 reader drops #HttpOnly_). Verified mb_smoke_platform 87b: a cookie placed via mbSetCookie (jar only)
-appears in document.cookie alongside a JS-set one. [FOLLOW-UP: cookieStore.getAll (GetAllForUrl) still
-reads the store only — same jar-blindness; should union the jar too for consistency.]
+appears in document.cookie alongside a JS-set one. cookieStore.getAll (GetAllForUrl) got the SAME
+union (filter-aware: jar cookies matching the EQUALS/STARTS_WITH option are added as
+net::CanonicalCookies, store names win), so document.cookie and cookieStore.getAll stay consistent.
+Verified mb_smoke 23aa3 (a jar-only cookie shows up in cookieStore.getAll alongside a cookieStore.set
+cookie -> g=[jsone,srvjar]).
 [DONE: MediaDevices] `navigator.mediaDevices.enumerateDevices()` — `MbMediaDevicesDispatcherHost`
 (blink.mojom.MediaDevicesDispatcherHost, bound from the frame broker) returns empty device lists
 (no cameras/mics/speakers headless), so enumerateDevices() resolves to []. BUG fixed: without the

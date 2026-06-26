@@ -1654,6 +1654,26 @@ int main() {
            "cc=[" + r + "]");
   }
 
+  // 23aa3. cookieStore.getAll() reflects the HTTP jar too (consistent with document.cookie): a
+  // jar-only cookie (mbSetCookie / server Set-Cookie) appears in getAll() alongside a
+  // cookieStore.set() cookie, even though it was never set through a cookie API.
+  {
+    mbClearCookies(v);
+    mbSetCookie(v, "https://cksjar.test/", "srvjar=1");
+    mbLoadHTML(v, "<body>x</body>", "https://cksjar.test/");
+    Eval(v,
+         "window.__g='';"
+         "cookieStore.set('jsone','2').then(function(){return cookieStore.getAll();})"
+         ".then(function(all){window.__g=all.map(function(c){return c.name;}).sort().join(',');})"
+         ".catch(function(e){window.__g='err:'+e.name;});");
+    mbWaitForFunction(v, "window.__g!==''", 3000);
+    const std::string r = Eval(v, "window.__g");
+    Expect(r == "jsone,srvjar",
+           "cookieStore.getAll() reflects jar (server/mbSetCookie) + cookieStore.set",
+           "g=[" + r + "]");
+    mbClearCookies(v);
+  }
+
   // 23ab. MediaDevices.enumerateDevices() (broker MediaDevicesDispatcherHost): headless has no
   // cameras/mics/speakers, so it must RESOLVE to an empty list. Before the host was bound, the
   // unbound pipe disconnected and blink rejected the promise with AbortError — this verifies it

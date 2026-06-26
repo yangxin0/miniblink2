@@ -286,24 +286,47 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
     const bool exact =
         options &&
         options->match_type == network::mojom::blink::CookieMatchType::EQUALS;
-    if (auto it = CookieStore().find(OriginKey(url)); it != CookieStore().end()) {
-      for (const auto& [n, v] : it->second) {
-        if (exact ? (n != filter) : (n.rfind(filter, 0) != 0))
-          continue;  // name doesn't match the requested filter
-        net::CookieInclusionStatus status;
-        std::unique_ptr<net::CanonicalCookie> cc =
-            net::CanonicalCookie::CreateSanitizedCookie(
-                gurl, n, v, /*domain=*/std::string(), /*path=*/"/",
-                base::Time::Now(), /*expiration=*/base::Time(),
-                base::Time::Now(), /*secure=*/false, /*http_only=*/false,
-                net::CookieSameSite::UNSPECIFIED,
-                net::COOKIE_PRIORITY_DEFAULT, /*partition_key=*/std::nullopt,
-                &status);
-        if (!cc)
-          continue;
+    const auto matches = [&](const std::string& n) {
+      return exact ? (n == filter) : (n.rfind(filter, 0) == 0);
+    };
+    std::set<std::string> seen;  // store names are authoritative
+    const auto add_cookie = [&](const std::string& n, const std::string& v) {
+      net::CookieInclusionStatus status;
+      std::unique_ptr<net::CanonicalCookie> cc =
+          net::CanonicalCookie::CreateSanitizedCookie(
+              gurl, n, v, /*domain=*/std::string(), /*path=*/"/",
+              base::Time::Now(), /*expiration=*/base::Time(), base::Time::Now(),
+              /*secure=*/false, /*http_only=*/false,
+              net::CookieSameSite::UNSPECIFIED, net::COOKIE_PRIORITY_DEFAULT,
+              /*partition_key=*/std::nullopt, &status);
+      if (cc) {
         out.push_back(network::mojom::blink::CookieWithAccessResult::New(
             *cc, network::mojom::blink::CookieAccessResult::New()));
+        seen.insert(n);
       }
+    };
+    if (auto it = CookieStore().find(OriginKey(url)); it != CookieStore().end()) {
+      for (const auto& [n, v] : it->second) {
+        if (matches(n))
+          add_cookie(n, v);
+      }
+    }
+    // Also surface the HTTP jar's non-HttpOnly cookies (server Set-Cookie / mbSetCookie),
+    // names not already from the store — keeping cookieStore.getAll consistent with
+    // document.cookie (GetCookiesString).
+    const std::string jar = MbGetCookiesForUrl(url.GetString().Utf8());
+    for (size_t pos = 0; pos < jar.size();) {
+      const size_t semi = jar.find("; ", pos);
+      const std::string pair =
+          jar.substr(pos, semi == std::string::npos ? semi : semi - pos);
+      pos = semi == std::string::npos ? jar.size() : semi + 2;
+      const size_t eq = pair.find('=');
+      if (eq == std::string::npos)
+        continue;
+      const std::string n = pair.substr(0, eq);
+      if (n.empty() || seen.count(n) || !matches(n))
+        continue;
+      add_cookie(n, pair.substr(eq + 1));
     }
     std::move(callback).Run(std::move(out));
   }
