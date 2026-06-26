@@ -1125,6 +1125,18 @@ Also wke peer not added (host-only feature). Verified mb_smoke 30a: a page with 
 page structure (what a screen reader / an AI agent sees), complementary to mbGetText (raw
 text) and mbGetHTML (raw DOM). The accessible NAME computation is blink's real algorithm
 (label association, aria-label, text content), not a DOM heuristic.
+[DONE - AX snapshot is ACTIONABLE: each node carries frame-relative BOUNDS]. Extended
+mbGetAXTree so every node with a non-empty box also emits "x","y","w","h" (frame-relative,
+via WebAXObject::GetBoundsInFrameCoordinates) - which are widget/page coordinates, so an
+automation caller can locate a node by role+name and click its CENTER with the existing
+trusted mbSendMouseClick. This closes the see->act loop for AI/automation agents (the AX
+tree is the "see"; the bounds + trusted input are the "act"), all without a compositor.
+Verified mb_smoke 30b (end to end): a <button> at CSS left:40 top:30 w:120 h:40 -> the AX
+JSON reports bounds exactly 40,30,120,40; clicking (bx+bw/2, by+bh/2) fires the button's
+own onclick with event.isTrusted true. mb_smoke 149->150, full battery green (platform 46,
+render 122, shot 66, wke 114), no leaks. So mbGetAXTree now yields role + accessible name +
+value + clickable bounds per node - a complete automation primitive (an agent can read the
+semantic page AND act on any node by coordinates).
 
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),

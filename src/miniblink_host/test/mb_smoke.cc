@@ -2789,6 +2789,56 @@ int main() {
                " head=[" + tree.substr(0, 140) + "]");
   }
 
+  // 30b (a11y). The AX snapshot is ACTIONABLE: each node carries frame-relative bounds
+  // (x,y,w,h = widget/page coords), so an agent can locate a node by role+name and click
+  // its center. End-to-end see->act: read the button's bounds from the AX JSON, click the
+  // center via mbSendMouseClick, and confirm the button's own handler fired (isTrusted).
+  {
+    mbLoadHTML(v,
+               "<body style='margin:0'>"
+               "<button style='position:absolute;left:40px;top:30px;width:120px;"
+               "height:40px' onclick='window.__axc=event.isTrusted?2:1'>Submit</button>"
+               "</body>",
+               "about:blank");
+    mbWait(v, 80);
+    std::string tree;
+    int n = mbGetAXTree(v, nullptr, 0);
+    if (n > 0) {
+      std::vector<char> buf(static_cast<size_t>(n) + 1, 0);
+      mbGetAXTree(v, buf.data(), n + 1);
+      tree.assign(buf.data());
+    }
+    // Parse the button node's bounds: the first "x"/"y"/"w"/"h" after its role (the
+    // serializer emits bounds before the node's children, so these are the button's own).
+    auto field_after = [&](size_t from, const char* key) -> int {
+      std::string k = std::string("\"") + key + "\":";
+      size_t p = tree.find(k, from);
+      if (p == std::string::npos)
+        return -1;
+      return std::atoi(tree.c_str() + p + k.size());
+    };
+    size_t bpos = tree.find("\"role\":\"button\"");
+    int bx = -1, by = -1, bw = -1, bh = -1;
+    if (bpos != std::string::npos) {
+      bx = field_after(bpos, "x");
+      by = field_after(bpos, "y");
+      bw = field_after(bpos, "w");
+      bh = field_after(bpos, "h");
+    }
+    const bool bounds_ok = bx >= 0 && by >= 0 && bw > 0 && bh > 0;
+    bool ax_click_ok = false;
+    if (bounds_ok) {
+      mbSendMouseClick(v, bx + bw / 2, by + bh / 2);  // click the button's center
+      mbWait(v, 40);
+      ax_click_ok = Eval(v, "String(window.__axc||0)") == "2";  // fired + trusted
+    }
+    Expect(bounds_ok && ax_click_ok,
+           "mbGetAXTree: node bounds drive a trusted click on the button's center",
+           "bounds=" + std::to_string(bx) + "," + std::to_string(by) + "," +
+               std::to_string(bw) + "," + std::to_string(bh) +
+               " click=" + (ax_click_ok ? "1" : "0"));
+  }
+
   // Network cases (31, 32) are OPT-IN via MB_NET_TESTS=1: a dead host costs ~45s
   // per load (connect-timeout x retries), which would make every default run crawl.
   // They still skip gracefully if enabled but httpbin is unreachable.

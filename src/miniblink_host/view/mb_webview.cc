@@ -1148,6 +1148,16 @@ void SerializeAXNode(const blink::WebAXObject& obj, std::string* out) {
     AppendJsonEscaped(value, out);
     *out += '"';
   }
+  // Frame-relative bounds (x,y,w,h), emitted only when the node has a non-empty box.
+  // These are widget/page coordinates for the main frame, so an automation caller can
+  // click a node's center via mbSendMouseClick — turning the snapshot into actions.
+  gfx::Rect r = obj.GetBoundsInFrameCoordinates();
+  if (r.width() > 0 && r.height() > 0) {
+    char buf[80];
+    std::snprintf(buf, sizeof(buf), ",\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d", r.x(),
+                  r.y(), r.width(), r.height());
+    *out += buf;
+  }
   // Recurse. Open the array first so AppendIncludedChildren's comma logic (which checks
   // for a trailing '[') works, then drop it again if no child was actually emitted.
   size_t before = out->size();
