@@ -10,10 +10,18 @@
 #include "miniblink_host/platform/mb_platform.h"
 
 #include <memory>
+#include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/containers/span.h"
+#include "base/containers/span_writer.h"
 #include "base/memory/scoped_refptr.h"
 #include "components/webcrypto/webcrypto_impl.h"
+#include "media/base/audio_bus.h"
+#include "media/base/limits.h"
+#include "media/filters/audio_file_reader.h"
+#include "media/filters/in_memory_url_protocol.h"
+#include "third_party/blink/public/platform/web_audio_bus.h"
 #include "media/base/output_device_info.h"
 #include "third_party/blink/public/platform/web_audio_device.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
@@ -174,6 +182,47 @@ std::string MbPlatform::GetDataResourceString(int resource_id) {
     return {};
   return ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(
       resource_id);
+}
+
+std::unique_ptr<blink::WebAudioBus> MbPlatform::DecodeAudioFileData(
+    base::span<const char> data) {
+  // Adapted from content/renderer/media/audio_decoder.cc: decode an in-memory audio
+  // file with FFmpeg (synchronous; the path Web Audio's decodeAudioData expects).
+  media::InMemoryUrlProtocol url_protocol(base::as_byte_span(data),
+                                          /*streaming=*/false);
+  auto reader = std::make_unique<media::AudioFileReader>(&url_protocol);
+  if (!reader->Open())
+    return nullptr;
+
+  const size_t number_of_channels = reader->channels();
+  const double sample_rate = reader->sample_rate();
+  if (!number_of_channels ||
+      number_of_channels > static_cast<size_t>(media::limits::kMaxChannels) ||
+      sample_rate < media::limits::kMinSampleRate ||
+      sample_rate > media::limits::kMaxSampleRate) {
+    return nullptr;
+  }
+
+  std::vector<std::unique_ptr<media::AudioBus>> decoded_audio_packets;
+  const size_t number_of_frames = reader->Read(&decoded_audio_packets);
+  if (number_of_frames == 0)
+    return nullptr;
+
+  auto out = std::make_unique<blink::WebAudioBus>();
+  if (!out->TryInitialize(number_of_channels, number_of_frames, sample_rate))
+    return nullptr;
+
+  std::vector<base::SpanWriter<float>> dest_channels;
+  dest_channels.reserve(number_of_channels);
+  for (size_t ch = 0; ch < number_of_channels; ++ch) {
+    dest_channels.emplace_back(
+        UNSAFE_TODO(base::span(out->ChannelData(ch), out->length())));
+  }
+  for (const auto& packet : decoded_audio_packets) {
+    for (size_t ch = 0; ch < number_of_channels; ++ch)
+      dest_channels[ch].Write(packet->channel(ch));
+  }
+  return out;
 }
 
 std::unique_ptr<blink::WebGraphicsContext3DProvider>

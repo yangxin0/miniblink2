@@ -84,6 +84,14 @@ class MbPlatform : public blink::Platform {
       const blink::WebURL& document_url,
       blink::Platform::WebGLContextInfo* gl_info) override;
 
+  // Web Audio decodeAudioData(): blink's AudioBus delegates in-memory audio-file
+  // decode to Platform::DecodeAudioFileData (audio_bus.cc). Base returns null ->
+  // decodeAudioData rejects with EncodingError. Decode via FFmpeg (media::Audio-
+  // FileReader), so decodeAudioData works (sound effects / music / analysis), and
+  // the FFmpeg audio-decode foundation under <audio>/<video> is exercised.
+  std::unique_ptr<blink::WebAudioBus> DecodeAudioFileData(
+      base::span<const char> data) override;
+
   // Resource bundle: Blink asks for built-in resources (UA stylesheet, etc.).
   // P1: back with a real bundle / packed file. TODO(mb): wire resource pak.
   blink::WebData GetDataResource(

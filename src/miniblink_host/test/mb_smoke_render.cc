@@ -708,6 +708,41 @@ static void RunCases(mbView* v, int W, int H) {
            "wa=[" + wa + "]");
   }
 
+  // 41d. Web Audio decodeAudioData() decodes a real audio FILE into an AudioBuffer —
+  // exercises the FFmpeg media-decode stack (media::AudioFileReader) the embedder links
+  // but had never been verified through a web API. Synthesize a 16-bit PCM mono WAV
+  // (800 samples @ 8000 Hz) in JS and decode it; the AudioBuffer must report the file's
+  // rate/length with non-zero samples. This is the decode foundation under <audio>/
+  // <video> playback, and a real feature on its own (sound effects, music, analysis).
+  {
+    mbLoadHTML(v, "<body>dec</body>", "about:blank");
+    mbRunJS(v,
+      "window.__dec='';try{"
+      "var sr=8000,n=800,buf=new ArrayBuffer(44+n*2),dv=new DataView(buf);"
+      "function S(o,t){for(var i=0;i<t.length;i++)dv.setUint8(o+i,t.charCodeAt(i));}"
+      "S(0,'RIFF');dv.setUint32(4,36+n*2,true);S(8,'WAVE');S(12,'fmt ');"
+      "dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,1,true);"
+      "dv.setUint32(24,sr,true);dv.setUint32(28,sr*2,true);dv.setUint16(32,2,true);"
+      "dv.setUint16(34,16,true);S(36,'data');dv.setUint32(40,n*2,true);"
+      "for(var i=0;i<n;i++)dv.setInt16(44+i*2,Math.round(Math.sin(i/10)*10000),true);"
+      "var ctx=new OfflineAudioContext(1,n,sr);"
+      "ctx.decodeAudioData(buf).then(function(b){var d=b.getChannelData(0);var nz=0;"
+      "for(var i=0;i<d.length;i++)if(d[i]!==0)nz++;"
+      "window.__dec='sr:'+b.sampleRate+',ch:'+b.numberOfChannels+',len:'+b.length+"
+      "',nonzero:'+(nz>0);}).catch(function(e){window.__dec='err:'+e.name;});"
+      "}catch(e){window.__dec='throw:'+e.name;}");
+    std::string dec;
+    for (int i = 0; i < 200; ++i) {
+      mbWait(v, 25);
+      dec = Eval(v, "window.__dec");
+      if (!dec.empty())
+        break;
+    }
+    Expect(dec == "sr:8000,ch:1,len:800,nonzero:true",
+           "Web Audio decodeAudioData decodes a WAV file (FFmpeg media-decode stack)",
+           "dec=[" + dec + "]");
+  }
+
   // 42. Drawing to a canvas via mbEvalJS (not just mbRunJS) must also be
   // crash-safe. EvalToString/EvalIsolated used to run ExecuteScript
   // synchronously, so a draw inside an eval expression hit the same

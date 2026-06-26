@@ -913,6 +913,20 @@ oscillator to a buffer with non-zero samples, so DSP/synthesis/analysis (the hea
 use) is fine; only audio/video FILE playback needs the pipeline.] The original blanket note said `<audio>`
 playback (no
 media pipeline). Both are the genuinely heaviest, GPU/media-provider items. Last.
+[DONE — Web Audio decodeAudioData() works (first media-decode brick)]. decodeAudioData was
+REJECTING with EncodingError: blink's AudioBus delegates in-memory audio-file decode to
+Platform::DecodeAudioFileData (audio_bus.cc:771), which MbPlatform didn't override -> base
+returns null -> EncodingError. Implemented it (adapted from content/renderer/media/audio_
+decoder.cc): media::InMemoryUrlProtocol over the bytes -> media::AudioFileReader (synchronous
+FFmpeg decode) -> WebAudioBus (TryInitialize + copy channels via SpanWriter). Links against
+the already-present //media (FFmpeg = libffmpeg.dylib, ENABLE_FFMPEG=1). Verified mb_smoke_
+render 41d: a JS-synthesized 16-bit PCM mono WAV (800 frames @ 8000 Hz) -> AudioBuffer sr
+8000, ch 1, len 800, non-zero samples (render 106->107). So Web Audio can now decode real
+audio files (sound effects / music / analysis), and the FFmpeg audio-decode foundation under
+<audio>/<video> is proven in-tree. NEXT for media: the streaming playback pipeline
+(WebMediaPlayerImpl) for <audio>/<video> elements is the big remaining lift (renderer factory
++ demuxer manager + audio renderer/sink + resource loading + a video-frame compositor);
+decodeAudioData is the one-shot decode path, a separate (now working) feature.
 
 **Tier 3 — input & rendering refinements:**
 [DEFERRED: device emulation] `WebView::EnableDeviceEmulation` (the DevTools device-mode path —
