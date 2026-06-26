@@ -1447,6 +1447,33 @@ int main() {
     mbClearMocks();
   }
 
+  // 23k4. REAL streaming SSE over the worker-thread loader (MbSseStream): connect
+  // to a PUBLIC long-lived stream (Wikimedia EventStreams, which pushes recent-
+  // change events continuously) and receive events INCREMENTALLY. The old buffered
+  // loader would hang forever (the stream never EOFs), so any delivered event
+  // proves the streaming path works. Gated on MB_NET_TESTS (real network).
+  if (getenv("MB_NET_TESTS")) {
+    mbLoadHTML(v, "<body>sse-stream</body>", "https://ssereal.test/");
+    mbRunJS(v,
+            "window.__n=0;"
+            "var es=new EventSource("
+            "'https://stream.wikimedia.org/v2/stream/recentchange');"
+            "es.onmessage=function(e){window.__n++;if(window.__n>=3)es.close();};"
+            "es.onerror=function(){window.__sseE=(window.__sseE||0)+1;};");
+    std::string n;
+    for (int i = 0; i < 240; ++i) {  // ~12s; the stream emits many events/sec
+      mbWait(v, 50);
+      n = Eval(v, "''+window.__n");
+      if (std::atoi(n.c_str()) >= 3)
+        break;
+    }
+    Expect(std::atoi(n.c_str()) >= 3,
+           "real streaming SSE delivers events incrementally (Wikimedia stream)",
+           "events=" + n);
+    mbRunJS(v, "try{es.close()}catch(e){}");
+    mbWait(v, 200);  // let the worker observe stop_ + tear down
+  }
+
   // 23l. navigator.storage.estimate() (broker #8): the in-process QuotaManagerHost
   // reports a generous quota + zero usage, so storage.estimate() resolves with a usable
   // quota instead of hanging (the QuotaManagerHost was dropped before). Apps that gate

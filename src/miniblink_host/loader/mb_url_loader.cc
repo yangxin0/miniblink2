@@ -3,12 +3,15 @@
 
 #include <curl/curl.h>
 
+#include <atomic>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <variant>
 #include <vector>
 
@@ -17,6 +20,7 @@
 #include "base/functional/bind.h"
 #include "base/no_destructor.h"
 #include "base/synchronization/lock.h"
+#include "base/task/bind_post_task.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
@@ -871,10 +875,115 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
   return false;
 }
 
+// A long-lived streaming HTTP GET over libcurl on a DETACHED worker thread, for
+// EventSource / SSE. The buffered FetchHttp would block until EOF (which a live
+// SSE stream never reaches) AND has a 30s timeout — both fatal here. We stream
+// the body via the curl write callback as chunks arrive, with NO read timeout,
+// and abort promptly via the progress callback (called even while idle) when the
+// page drops the loader. The worker holds a shared_ptr to itself, so it outlives
+// the loader if it's mid-call during teardown; chunks hop to the loader through
+// BindPostTask + a WeakPtr (dropped after the loader dies). Mirrors the WebSocket
+// transport's lifecycle.
+class MbSseStream : public std::enable_shared_from_this<MbSseStream> {
+ public:
+  using ChunkCb = base::RepeatingCallback<void(std::string)>;
+  using DoneCb = base::OnceCallback<void()>;
+  MbSseStream(std::string url,
+              std::string req_headers,
+              std::string user_agent,
+              ChunkCb chunk,
+              DoneCb done)
+      : url_(std::move(url)),
+        req_headers_(std::move(req_headers)),
+        user_agent_(std::move(user_agent)),
+        chunk_(std::move(chunk)),
+        done_(std::move(done)) {}
+
+  void Start() {
+    auto self = shared_from_this();  // keep alive across the worker's life
+    std::thread([self] { self->Run(); }).detach();
+  }
+  void Stop() { stop_.store(true); }
+
+ private:
+  static size_t WriteThunk(char* p, size_t s, size_t n, void* ud) {
+    auto* self = static_cast<MbSseStream*>(ud);
+    if (self->stop_.load())
+      return 0;  // returning <bytes aborts curl_easy_perform
+    self->chunk_.Run(std::string(p, s * n));
+    return s * n;
+  }
+  static int XferThunk(void* ud, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+    // Called periodically even while the stream is idle -> prompt cancellation.
+    return static_cast<MbSseStream*>(ud)->stop_.load() ? 1 : 0;
+  }
+
+  void Run() {
+    CURL* c = curl_easy_init();
+    if (!c) {
+      std::move(done_).Run();
+      return;
+    }
+    curl_easy_setopt(c, CURLOPT_URL, url_.c_str());
+    std::string proxy;
+    if (MbProxyConfigured(&proxy))
+      curl_easy_setopt(c, CURLOPT_PROXY, proxy.c_str());
+    if (MbIgnoreCertErrors()) {
+      curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
+      curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
+    curl_easy_setopt(
+        c, CURLOPT_USERAGENT,
+        (user_agent_.empty() ? MbDefaultUserAgent() : user_agent_).c_str());
+    curl_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");
+    curl_easy_setopt(c, CURLOPT_COOKIEFILE, "");  // in-memory cookie engine
+    if (CURLSH* share = CookieShare())
+      curl_easy_setopt(c, CURLOPT_SHARE, share);
+    curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 15L);
+    // NO CURLOPT_TIMEOUT — an SSE stream is intentionally long-lived.
+    curl_slist* headers = nullptr;
+    std::string line, lines = req_headers_;
+    lines.push_back('\n');
+    for (char ch : lines) {
+      if (ch == '\n' || ch == '\r') {
+        if (!line.empty()) {
+          headers = curl_slist_append(headers, line.c_str());
+          line.clear();
+        }
+      } else {
+        line.push_back(ch);
+      }
+    }
+    if (headers)
+      curl_easy_setopt(c, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, &WriteThunk);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, this);
+    curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, &XferThunk);
+    curl_easy_setopt(c, CURLOPT_XFERINFODATA, this);
+    curl_easy_perform(c);  // streams via WriteThunk until EOF / error / abort
+    if (headers)
+      curl_slist_free_all(headers);
+    curl_easy_cleanup(c);
+    std::move(done_).Run();  // -> OnSseDone on the loader thread (if alive)
+  }
+
+  std::string url_;
+  std::string req_headers_;
+  std::string user_agent_;
+  ChunkCb chunk_;
+  DoneCb done_;
+  std::atomic<bool> stop_{false};
+};
+
 MbURLLoader::MbURLLoader(std::string user_agent, std::string extra_headers)
     : user_agent_(std::move(user_agent)),
       extra_headers_(std::move(extra_headers)) {}
-MbURLLoader::~MbURLLoader() = default;
+MbURLLoader::~MbURLLoader() {
+  if (sse_stream_)
+    sse_stream_->Stop();  // detached worker observes stop_ and exits
+}
 
 void MbURLLoader::LoadAsynchronously(
     std::unique_ptr<network::ResourceRequest> request,
@@ -914,6 +1023,33 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
         base::TimeTicks::Now(), blink::URLLoaderClient::kUnknownEncodedDataLength,
         0, 0);
     return;
+  }
+
+  // EventSource / SSE: a request with `Accept: text/event-stream` to http(s) is a
+  // long-lived stream. The buffered path below would block forever (no EOF) and
+  // freeze the engine. Stream it on a worker thread instead — UNLESS it's mocked
+  // (an offline test serves a complete event-stream body the buffered way).
+  if (fetch_url.SchemeIsHTTPOrHTTPS()) {
+    std::string accept;
+    for (const auto& kv : request->headers.GetHeaderVector())
+      if (ToLower(kv.key) == "accept")
+        accept = kv.value;
+    std::string mock_b, mock_c;
+    int mock_s = 0;
+    if (accept.find("text/event-stream") != std::string::npos &&
+        !MbFindMock(fetch_url.spec(), &mock_b, &mock_c, &mock_s)) {
+      std::string req_headers = extra_headers_;
+      for (const auto& kv : request->headers.GetHeaderVector()) {
+        if (ToLower(kv.key) == "content-type")
+          continue;
+        if (!req_headers.empty())
+          req_headers += "\n";
+        req_headers += kv.key + ": " + kv.value;
+      }
+      mb::MbApplyRequestHeaders(fetch_url.spec(), &req_headers);
+      StartSse(fetch_url.spec(), req_headers, url.spec());
+      return;
+    }
   }
 
   std::string contents;
@@ -1129,6 +1265,92 @@ void MbURLLoader::OnBodyWritten(int64_t length, uint32_t /*MojoResult*/ result) 
   data_pipe_producer_.reset();
   if (client_)
     client_->DidFinishLoading(base::TimeTicks::Now(), length, length, length);
+}
+
+void MbURLLoader::StartSse(const std::string& fetch_url,
+                           const std::string& req_headers,
+                           const std::string& report_url) {
+  if (!client_)
+    return;
+  // Synthesize the response head: EventSource only requires a 2xx + a
+  // text/event-stream Content-Type to begin reading the stream.
+  blink::WebURLResponse response;
+  response.SetCurrentRequestUrl(ToWebURL(GURL(report_url)));
+  response.SetMimeType(blink::WebString::FromUtf8("text/event-stream"));
+  response.SetHttpStatusCode(200);
+  response.SetHttpHeaderField(blink::WebString::FromUtf8("Content-Type"),
+                              blink::WebString::FromUtf8("text/event-stream"));
+  response.SetExpectedContentLength(-1);  // unknown / streaming
+
+  mojo::ScopedDataPipeProducerHandle producer;
+  mojo::ScopedDataPipeConsumerHandle consumer;
+  if (mojo::CreateDataPipe(nullptr, producer, consumer) != MOJO_RESULT_OK) {
+    client_->DidFail(
+        blink::WebURLError(net::ERR_FAILED, ToWebURL(GURL(report_url))),
+        base::TimeTicks::Now(),
+        blink::URLLoaderClient::kUnknownEncodedDataLength, 0, 0);
+    return;
+  }
+  client_->DidReceiveResponse(response, std::move(consumer), std::nullopt);
+  sse_producer_ = std::move(producer);
+  sse_watcher_ = std::make_unique<mojo::SimpleWatcher>(
+      FROM_HERE, mojo::SimpleWatcher::ArmingPolicy::MANUAL);
+  sse_watcher_->Watch(
+      sse_producer_.get(), MOJO_HANDLE_SIGNAL_WRITABLE,
+      base::BindRepeating(&MbURLLoader::DrainSse, weak_factory_.GetWeakPtr()));
+
+  auto runner = base::SingleThreadTaskRunner::GetCurrentDefault();
+  sse_stream_ = std::make_shared<MbSseStream>(
+      fetch_url, req_headers, user_agent_,
+      base::BindPostTask(runner, base::BindRepeating(
+                                     &MbURLLoader::OnSseChunk,
+                                     weak_factory_.GetWeakPtr())),
+      base::BindPostTask(runner, base::BindOnce(&MbURLLoader::OnSseDone,
+                                                weak_factory_.GetWeakPtr())));
+  sse_stream_->Start();
+}
+
+void MbURLLoader::OnSseChunk(std::string bytes) {
+  sse_buf_ += bytes;
+  DrainSse();
+}
+
+void MbURLLoader::OnSseDone() {
+  sse_ended_ = true;
+  DrainSse();
+}
+
+void MbURLLoader::DrainSse(MojoResult /*result*/) {
+  if (!sse_producer_.is_valid())
+    return;
+  while (sse_pos_ < sse_buf_.size()) {
+    size_t written = 0;
+    base::span<const uint8_t> data =
+        base::as_byte_span(sse_buf_).subspan(sse_pos_);
+    MojoResult rv =
+        sse_producer_->WriteData(data, MOJO_WRITE_DATA_FLAG_NONE, written);
+    if (rv == MOJO_RESULT_OK && written > 0) {
+      sse_pos_ += written;
+      sse_total_ += static_cast<int64_t>(written);
+      continue;
+    }
+    if (rv == MOJO_RESULT_SHOULD_WAIT) {
+      sse_watcher_->ArmOrNotify();
+      return;
+    }
+    break;  // pipe error -> tear down
+  }
+  if (sse_pos_ >= sse_buf_.size()) {  // fully drained -> compact
+    sse_buf_.clear();
+    sse_pos_ = 0;
+  }
+  if (sse_ended_ && sse_buf_.empty()) {
+    sse_watcher_.reset();
+    sse_producer_.reset();  // EOF -> EventSource sees the stream end (reconnects)
+    if (client_)
+      client_->DidFinishLoading(base::TimeTicks::Now(), sse_total_, sse_total_,
+                                sse_total_);
+  }
 }
 
 }  // namespace mb

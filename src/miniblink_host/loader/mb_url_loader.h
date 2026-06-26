@@ -19,6 +19,8 @@
 #include <string>
 
 #include "base/memory/weak_ptr.h"
+#include "mojo/public/cpp/system/data_pipe.h"
+#include "mojo/public/cpp/system/simple_watcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/url_loader/url_loader.h"
 
 namespace network {
@@ -29,6 +31,11 @@ class DataPipeProducer;
 }
 
 namespace mb {
+
+// A long-lived streaming HTTP read over libcurl on a worker thread (for Event-
+// Source / Server-Sent Events). Defined in the .cc; the loader holds it by
+// shared_ptr so it outlives the loader if the worker is mid-call during teardown.
+class MbSseStream;
 
 // The default User-Agent — a realistic modern desktop string so UA-sniffing sites
 // serve their current desktop experience (the base Platform::UserAgent() is empty).
@@ -204,11 +211,29 @@ class MbURLLoader : public blink::URLLoader {
   void Deliver(std::unique_ptr<network::ResourceRequest> request);
   void OnBodyWritten(int64_t length, uint32_t /*MojoResult*/ result);
 
+  // EventSource / SSE streaming path (Accept: text/event-stream): deliver a
+  // text/event-stream response head, then stream the body INCREMENTALLY from a
+  // worker thread so the page sees events as they arrive (the buffered path would
+  // hang on a never-closing stream). OnSseChunk/OnSseDone hop from the worker.
+  void StartSse(const std::string& fetch_url, const std::string& req_headers,
+                const std::string& report_url);
+  void OnSseChunk(std::string bytes);
+  void OnSseDone();
+  void DrainSse(MojoResult result = 0);
+
   blink::URLLoaderClient* client_ = nullptr;  // not owned; valid until done/cancel
   std::string user_agent_;  // sent on each request (empty -> default)
   std::string extra_headers_;  // newline-separated "Name: Value" added per request
   std::string body_;  // owns the bytes while the data pipe drains them
   std::unique_ptr<mojo::DataPipeProducer> data_pipe_producer_;
+  // SSE streaming state (main thread): the producer + a watcher draining chunks.
+  std::shared_ptr<MbSseStream> sse_stream_;
+  mojo::ScopedDataPipeProducerHandle sse_producer_;
+  std::unique_ptr<mojo::SimpleWatcher> sse_watcher_;
+  std::string sse_buf_;       // incoming chunk bytes awaiting the pipe
+  size_t sse_pos_ = 0;        // write offset into sse_buf_
+  int64_t sse_total_ = 0;     // total bytes delivered (for DidFinishLoading)
+  bool sse_ended_ = false;    // worker reported the stream ended
   base::WeakPtrFactory<MbURLLoader> weak_factory_{this};
 };
 

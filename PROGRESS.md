@@ -532,15 +532,26 @@ runs with no Homebrew present. tools/build-curl-macos.sh now does this automatic
 bundle_deps walk + re-sign). Verified: offline mb_smoke 140, and net 156/0 — real-TLS HTTPS (httpbin)
 + real WebSocket (echo.websocket.org) both work through the bundled OpenSSL, no leaks. (~9 MB of dylibs
 vendored; HTTP/2 + IDN retained, unlike a leaner --without-nghttp2/libidn2 rebuild.)
-[PARTIAL: EventSource / Server-Sent Events] `new EventSource(url)` IS wired through our loader and PARSES
-a `text/event-stream` body into `message` events — verified offline (mb_smoke 23k3: a mocked
-`data: ev1\n\ndata: ev2\n\n` -> two onmessage with .data=ev1/ev2, no error). So the common SSE shape
-(server sends a batch of events then the response completes) works, correcting the earlier "SSE entirely
-deferred" assumption. REMAINING (deferred): true INCREMENTAL streaming over a long-lived connection — the
-libcurl loader is buffered (waits for EOF / a complete response), so a never-closing SSE stream that
-trickles events would hang. That needs a streaming loader path (curl write-callback delivering chunks on
-a worker thread -> incremental URLLoaderClient delivery), the same threading shape as the WebSocket
-transport. Bounded follow-up, but verifying it needs a live streaming endpoint.
+[DONE: EventSource / Server-Sent Events — full streaming] `new EventSource(url)` now streams a long-lived
+`text/event-stream` connection INCREMENTALLY (events arrive as the server pushes them), not just buffered
+complete responses. `MbSseStream` (mb_url_loader.cc) does the GET on a DETACHED worker thread over libcurl
+with NO read timeout (an SSE stream never EOFs) — the curl WRITEFUNCTION posts each chunk to the loader
+thread (BindPostTask + WeakPtr), and the progress callback (CURLOPT_XFERINFOFUNCTION, called even while
+idle) returns nonzero to ABORT promptly when the page drops the loader. `MbURLLoader::Deliver` detects
+`Accept: text/event-stream` on an http(s) request (unless mocked) and takes the streaming path: synthesize
+a 200 text/event-stream head -> DidReceiveResponse, then DrainSse writes each chunk to the body pipe with
+SimpleWatcher backpressure; OnSseDone resets the producer (EOF -> EventSource reconnects). The worker holds
+a shared_ptr to itself (outlives the loader during teardown); ~MbURLLoader -> Stop(). Verified mb_smoke
+23k4 (MB_NET_TESTS): `new EventSource('https://stream.wikimedia.org/v2/stream/recentchange')` delivers 3
+real recent-change events incrementally then closes — proving streaming (the buffered path would hang
+forever). Offline 23k3 (mocked event-stream, buffered) still works (the SSE path skips mocks). net mb_smoke
+157, no leaked threads.
+[FIX: vendored-curl install_name regression] Last session's MANUAL dep-bundling step wrongly re-id'd
+libcurl.4.dylib ITSELF to `@loader_path/libcurl.4.dylib` (only its DEPS should be @loader_path); the tests
+passed then only because the binaries weren't rebuilt. A fresh build this session linked that bad id ->
+dyld "Library not loaded: @loader_path/libcurl.4.dylib" abort. Restored libcurl's id to its absolute
+vendored path (deps stay @loader_path) + re-signed. build-curl-macos.sh was already correct (its
+bundle_deps re-ids deps, not the root), so only the committed dylib needed the fix.
 [SUPERSEDED: WebSocket — step 1 curl foundation] The macOS SYSTEM libcurl (8.7.1)
 is compiled WITHOUT ws/wss (Apple disables it), so curl_ws_send/recv are unusable. Built our own
 WebSocket-enabled libcurl and vendored it: `tools/build-curl-macos.sh` downloads curl 8.21.0 and
