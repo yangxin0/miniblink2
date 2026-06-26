@@ -1104,6 +1104,21 @@ sites are all gated on IsRenderingContext2D(), so WebGL is safe. Verified mb_smo
 104->105). WebGL 1+2 readPixels unaffected. Full battery green (mb_smoke 145, platform 46,
 shot 66, wke 114), no leaks. So mb_shot can now screenshot WebGL visualizations. WebGL is
 COMPLETE for headless use: WebGL 1 + WebGL 2 + readPixels + screenshot capture.
+[DONE — OffscreenCanvas WebGL (main thread)]. new OffscreenCanvas(w,h).getContext('webgl')
+renders via the same in-process provider (no DOM <canvas> needed) — off-DOM GPU rendering.
+Verified mb_smoke_render 41z5: clear cyan + readPixels -> 0,255,255,255 (render 107->108).
+[DEFERRED — worker WebGL teardown crash]. WebGL in a WORKER (canvas.transferControl-
+ToOffscreen() -> worker getContext('webgl')) RENDERS correctly (verified ad-hoc: a worker
+clear+readPixels returned the cleared color, 255,255,0,255), but the worker's WebGL context
+TEARDOWN aborts: at WorkerThread::PerformShutdownOnWorkerThread, V8 cppgc sweeps the
+WebGLRenderingContextBase -> DrawingBuffer -> MbWebGLContextProvider -> GLInProcessContext ->
+~GLES2Implementation, which hits gpu::ImplementationBase's sequence_checker DCHECK
+(CalledOnValidSequence) -> FATAL under this build's DCHECK_ALWAYS_ON. Root: the worker's
+GLES2Implementation is created bound to one sequence but swept on another at shutdown. FIX
+(deferred): the provider must destroy its GLInProcessContext on the sequence it was created
+on (e.g. hold the creation SequencedTaskRunner and post the teardown), or give the worker
+context an explicit pre-GC cleanup. Removed the worker-WebGL test until fixed; main-thread
+OffscreenCanvas is unaffected (its context tears down on the main sequence, exit 0).
 [VERIFIED — real shader rendering]. Beyond clearColor, the full WebGL pipeline works:
 mb_smoke_render 41z4 compiles a vertex+fragment shader, links a program, uploads a vertex
 buffer, and drawArrays a viewport-covering triangle in orange -> readPixels center =

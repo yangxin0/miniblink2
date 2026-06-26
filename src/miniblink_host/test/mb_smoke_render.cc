@@ -659,6 +659,39 @@ static void RunCases(mbView* v, int W, int H) {
            "gs=[" + gs + "]");
   }
 
+  // 41z5. WebGL on an OffscreenCanvas (no DOM <canvas>): the same in-process provider
+  // serves OffscreenCanvas.getContext('webgl'), so off-DOM/worker-style GPU rendering
+  // works — a major modern WebGL use (render off the main thread / without a visible
+  // canvas). Clear to cyan, readPixels.
+  mbLoadHTML(v, "<body>oc</body>", "about:blank");
+  mbRunJS(v,
+    "window.__oc='';try{"
+    "var oc=new OffscreenCanvas(32,32);var gl=oc.getContext('webgl');"
+    "if(!gl){window.__oc='null';}else{"
+    "gl.clearColor(0,1,1,1);gl.clear(gl.COLOR_BUFFER_BIT);"
+    "var p=new Uint8Array(4);gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);"
+    "window.__oc=p[0]+','+p[1]+','+p[2]+','+p[3];}}"
+    "catch(e){window.__oc='err:'+e;}");
+  {
+    std::string oc;
+    for (int i = 0; i < 200; ++i) {
+      mbWait(v, 25);
+      oc = Eval(v, "window.__oc");
+      if (!oc.empty())
+        break;
+    }
+    Expect(oc == "0,255,255,255",
+           "WebGL on an OffscreenCanvas renders (off-DOM GPU rendering)",
+           "oc=[" + oc + "]");
+  }
+  // NOTE: WebGL in a WORKER (transferControlToOffscreen -> worker getContext('webgl'))
+  // RENDERS correctly (verified ad-hoc: a worker clear+readPixels returns the cleared
+  // color), but the worker's WebGL context TEARDOWN crashes: at worker shutdown V8's GC
+  // sweeps the context off the worker's bind sequence, tripping the GPU
+  // GLES2Implementation sequence_checker DCHECK (abort under DCHECK_ALWAYS_ON). Needs the
+  // provider/GLInProcessContext destroyed on its creation sequence — deferred (see
+  // PROGRESS "worker WebGL teardown"). No worker-WebGL test until that's fixed.
+
   // 41b. A 2D canvas COMPOSITES into the page paint (not just its in-memory backing
   // store): draw a red square, render the page, and read the canvas region from the
   // page bitmap. Proves canvas-drawn content rasterizes into the rendered output —
