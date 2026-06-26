@@ -194,8 +194,17 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   void SetExtraHeaders(const std::string& h) { extra_headers_ = h; }
   const std::string& extra_headers() const { return extra_headers_; }
 
-  // Capture page console output (console.log/warn/error) so a host or automation
-  // script can read it back. Each entry is "level: text".
+  // Opt in to DETAILED console messages so blink generates the full JS stack trace for
+  // errors / uncaught exceptions (otherwise stack_trace below arrives empty). Cheap here
+  // (single process, no IPC) and exactly what error monitoring wants.
+  bool ShouldReportDetailedMessageForSourceAndSeverity(
+      blink::mojom::ConsoleMessageLevel,
+      const blink::WebString&) override {
+    return true;
+  }
+  // Capture page console output (console.log/warn/error, AND uncaught exceptions /
+  // unhandled rejections, which blink reports as console errors with source/line/stack)
+  // so a host or automation script can read it back. Each entry is "level: text".
   void DidAddMessageToConsole(const blink::WebConsoleMessage&,
                               const blink::WebString& source_name,
                               unsigned source_line,

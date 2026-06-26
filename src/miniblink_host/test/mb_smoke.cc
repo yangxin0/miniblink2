@@ -378,6 +378,52 @@ int main() {
     mbOnConsoleMessage(v, nullptr, nullptr);
   }
 
+  // 0k2. mbOnConsoleMessageEx delivers source/line/stack, so an embedder can monitor
+  // UNCAUGHT EXCEPTIONS (blink reports them here as console errors) with full location —
+  // not just the message. A page that throws at top level must surface: level=error, the
+  // thrown text, the page URL as source, a line number, and a non-empty JS stack.
+  {
+    static std::string* einfo = new std::string();  // -Wexit-time-destructors
+    einfo->clear();
+    mbOnConsoleMessageEx(
+        v,
+        [](mbView*, void*, const char* level, const char* msg, const char* source,
+           int line, const char* stack) {
+          if (level && std::string(level) == "error") {
+            *einfo = std::string("msg=[") + (msg ? msg : "") + "] src=[" +
+                     (source ? source : "") + "] line=" + std::to_string(line) +
+                     " stacklen=" +
+                     std::to_string(stack ? std::string(stack).size() : 0);
+          }
+        },
+        nullptr);
+    mbLoadHTML(v, "<body><script>throw new Error('kaboom');</script></body>",
+               "https://errpage.test/");
+    mbWait(v, 80);
+    // Uncaught exception: message + source URL + line are delivered (error monitoring).
+    const bool has_msg = einfo->find("kaboom") != std::string::npos;
+    const bool has_src = einfo->find("errpage.test") != std::string::npos;
+    const bool has_line = einfo->find("line=0 ") == std::string::npos &&
+                          einfo->find("line=") != std::string::npos;
+    const std::string exc = *einfo;
+    // console.error from a nested call chain: the detailed-message opt-in
+    // (ShouldReportDetailedMessageForSourceAndSeverity) makes blink capture the FULL JS
+    // stack, so `stack` names the call chain — what a monitor needs to locate the source.
+    einfo->clear();
+    mbLoadHTML(v,
+               "<body><script>function inner(){console.error('traced');}"
+               "function outer(){inner();}outer();</script></body>",
+               "https://errpage2.test/");
+    mbWait(v, 80);
+    const bool stack_ok = einfo->find("stacklen=0") == std::string::npos &&
+                          einfo->find("stacklen=") != std::string::npos &&
+                          einfo->find("traced") != std::string::npos;
+    Expect(has_msg && has_src && has_line && stack_ok,
+           "mbOnConsoleMessageEx: exception gives message+source+line; console.* gives a stack",
+           "exc=[" + exc + "] traced=[" + *einfo + "]");
+    mbOnConsoleMessageEx(v, nullptr, nullptr);
+  }
+
   // 0l. URL-changed: mbOnUrlChanged fires on every main-frame commit with the new URL —
   // track where the view is (host loads, navigations, redirects).
   {

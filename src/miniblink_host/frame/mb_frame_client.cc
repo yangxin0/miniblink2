@@ -520,9 +520,9 @@ const std::string& MbFrameClient::EffectiveUserAgent() const {
 }
 
 void MbFrameClient::DidAddMessageToConsole(const blink::WebConsoleMessage& msg,
-                                           const blink::WebString& /*source*/,
-                                           unsigned /*line*/,
-                                           const blink::WebString& /*stack*/) {
+                                           const blink::WebString& source,
+                                           unsigned line,
+                                           const blink::WebString& stack) {
   const char* level = "log";
   switch (msg.level) {
     case blink::mojom::ConsoleMessageLevel::kVerbose: level = "verbose"; break;
@@ -531,8 +531,11 @@ void MbFrameClient::DidAddMessageToConsole(const blink::WebConsoleMessage& msg,
     case blink::mojom::ConsoleMessageLevel::kError: level = "error"; break;
   }
   console_.push_back(std::string(level) + ": " + msg.text.Utf8());
+  // source/line locate the message; stack is populated for errors and uncaught exceptions
+  // / unhandled rejections (which blink reports here as console errors).
   if (owner_)
-    owner_->OnConsoleMessage(level, msg.text.Utf8());  // live push (vs. DrainConsole poll)
+    owner_->OnConsoleMessage(level, msg.text.Utf8(), source.Utf8(),
+                             static_cast<int>(line), stack.Utf8());
 }
 
 std::string MbFrameClient::DrainConsole() {

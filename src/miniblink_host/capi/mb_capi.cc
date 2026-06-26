@@ -770,8 +770,25 @@ void mbOnConsoleMessage(mbView* v, mbConsoleCallback cb, void* userdata) {
     return;
   if (cb)
     v->impl->SetConsoleCallback(
-        [v, cb, userdata](const std::string& level, const std::string& message) {
+        [v, cb, userdata](const std::string& level, const std::string& message,
+                          const std::string& /*source*/, int /*line*/,
+                          const std::string& /*stack*/) {
           cb(v, userdata, level.c_str(), message.c_str());
+        });
+  else
+    v->impl->SetConsoleCallback({});
+}
+
+void mbOnConsoleMessageEx(mbView* v, mbConsoleCallbackEx cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetConsoleCallback(
+        [v, cb, userdata](const std::string& level, const std::string& message,
+                          const std::string& source, int line,
+                          const std::string& stack) {
+          cb(v, userdata, level.c_str(), message.c_str(), source.c_str(), line,
+             stack.c_str());
         });
   else
     v->impl->SetConsoleCallback({});

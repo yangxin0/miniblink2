@@ -818,6 +818,19 @@ typedef void (*mbConsoleCallback)(mbView*, void* userdata, const char* level,
                                   const char* message);
 MB_EXPORT void mbOnConsoleMessage(mbView*, mbConsoleCallback cb, void* userdata);
 
+// Richer console push for error monitoring: like mbOnConsoleMessage but also delivers the
+// `source` URL, `line` number, and JS `stack`. UNCAUGHT EXCEPTIONS and unhandled promise
+// rejections arrive here (blink reports them as console errors) with their message +
+// source + line — so an embedder can monitor page health and locate failures. `stack` is
+// the full JS call stack for console.* messages (a detailed-message opt-in is enabled);
+// for plain thrown exceptions only source/line are available (stack is ""). `source`/
+// `stack` are "" when not available. NULL clears it. Setting either console callback
+// replaces the other (one slot).
+typedef void (*mbConsoleCallbackEx)(mbView*, void* userdata, const char* level,
+                                    const char* message, const char* source,
+                                    int line, const char* stack);
+MB_EXPORT void mbOnConsoleMessageEx(mbView*, mbConsoleCallbackEx cb, void* userdata);
+
 // Evaluate JS and write its result (coerced to string) into `out` (NUL-terminated,
 // up to out_cap bytes). Returns the full result length in bytes (may exceed out_cap-1,
 // indicating truncation). Lets the host read data back from the page (e.g. document.title).

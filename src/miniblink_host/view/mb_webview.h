@@ -388,11 +388,17 @@ class MbWebView {
   void NotifyLoadFailed();
   // Register a callback fired on each main-frame load finish. Pass {} to clear.
   void SetLoadFinishCallback(std::function<void()> cb);
-  // Called by MbFrameClient for each page console message (console.log/warn/error). A
-  // live push (vs. polling DrainConsole) — react to logs/errors during a long script.
-  void OnConsoleMessage(const std::string& level, const std::string& message);
-  using ConsoleFn = std::function<void(const std::string& level,
-                                       const std::string& message)>;
+  // Called by MbFrameClient for each page console message (console.log/warn/error, AND
+  // uncaught exceptions / unhandled promise rejections, which blink reports as console
+  // errors). A live push (vs. polling DrainConsole). `source`/`line` locate the message
+  // and `stack` is the JS stack (both present for errors/exceptions, empty otherwise).
+  void OnConsoleMessage(const std::string& level, const std::string& message,
+                        const std::string& source, int line,
+                        const std::string& stack);
+  using ConsoleFn =
+      std::function<void(const std::string& level, const std::string& message,
+                         const std::string& source, int line,
+                         const std::string& stack)>;
   void SetConsoleCallback(ConsoleFn cb);  // {} clears
   // Called by MbFrameClient for a PAGE-initiated main-frame navigation (link click,
   // location=, form submit, JS redirect) BEFORE it commits. Returns true to allow,

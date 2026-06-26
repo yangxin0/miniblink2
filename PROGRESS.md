@@ -1274,6 +1274,23 @@ text-naive format would corrupt). Write the tree, mbSaveOPFS, removeEntry('sub',
 exactly [0,1,2,255,65,0,200]. So WNode/ReadNodeInto recurse correctly and the length-prefixed
 format is byte-exact (no NUL/UTF-8 corruption). render 125->126, full battery green, no leaks.
 
+[DONE - console messages carry source/line/stack (uncaught-exception monitoring)]. The console
+callback discarded the source URL, line, and stack that DidAddMessageToConsole already receives
+(source/line/stack were /*ignored*/). Added mbOnConsoleMessageEx(view, cb, userdata) - like
+mbOnConsoleMessage but the callback also gets `source`, `line`, `stack` (the basic callback
+stays, one shared slot). The internal ConsoleFn + MbFrameClient::DidAddMessageToConsole now
+thread all five fields through. KEY: blink only fills the stack for DETAILED messages, gated by
+WebLocalFrameClient::ShouldReportDetailedMessageForSourceAndSeverity (default false) - overrode
+it to return true (cheap in-process, no IPC), which makes blink CaptureWithFullStackTrace for
+console.* messages. Verified mb_smoke 0k2: an UNCAUGHT exception (throw new Error) -> level=error,
+msg 'Uncaught Error: kaboom', source 'https://errpage.test/', line 1 (so an embedder can locate
+page failures); a nested console.error -> a full JS stack (stacklen 144, names inner/outer). Note
+the stack is empty for plain thrown exceptions (kJavaScript source uses location->ToString(),
+which lacks frames here) but present for console.* (kConsoleApi captures the full trace) -
+documented honestly in the capi. So page error MONITORING now works: message + source + line for
+every error/exception, + full stacks for console.* . mb_smoke 154->155, full battery green
+(platform 46, render 126, shot 66, wke 114), no leaks.
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

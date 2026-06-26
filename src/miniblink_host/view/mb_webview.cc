@@ -1709,9 +1709,11 @@ void MbWebView::SetLoadFinishCallback(std::function<void()> cb) {
 }
 
 void MbWebView::OnConsoleMessage(const std::string& level,
-                                 const std::string& message) {
+                                 const std::string& message,
+                                 const std::string& source, int line,
+                                 const std::string& stack) {
   if (on_console_)
-    on_console_(level, message);
+    on_console_(level, message, source, line, stack);
 }
 
 void MbWebView::SetConsoleCallback(ConsoleFn cb) {
