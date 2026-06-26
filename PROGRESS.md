@@ -1090,6 +1090,12 @@ sites are all gated on IsRenderingContext2D(), so WebGL is safe. Verified mb_smo
 104->105). WebGL 1+2 readPixels unaffected. Full battery green (mb_smoke 145, platform 46,
 shot 66, wke 114), no leaks. So mb_shot can now screenshot WebGL visualizations. WebGL is
 COMPLETE for headless use: WebGL 1 + WebGL 2 + readPixels + screenshot capture.
+[VERIFIED — real shader rendering]. Beyond clearColor, the full WebGL pipeline works:
+mb_smoke_render 41z4 compiles a vertex+fragment shader, links a program, uploads a vertex
+buffer, and drawArrays a viewport-covering triangle in orange -> readPixels center =
+255,128,0,255 (shader COMPILE_STATUS + program LINK_STATUS both true). So shaders, attribs,
+buffers, and draw all round-trip through the in-process command buffer — the actual machinery
+behind 3D/charts/shadertoy, not just buffer clears. render 105->106, battery green, no leaks.
 13. [DONE] PDF options. `mbSavePdfEx(path, width_pt, height_pt, landscape, scale, margin_pt)`
 (mbSavePdf kept = Letter default) + `mb_shot --pdf-size letter|a4|legal|a3|tabloid|WxH
 --landscape --pdf-scale N --pdf-margin PT`. Page size in points; landscape swaps w/h; content

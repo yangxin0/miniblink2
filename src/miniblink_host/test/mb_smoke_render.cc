@@ -611,6 +611,54 @@ static void RunCases(mbView* v, int W, int H) {
                " B=" + std::to_string(cv[ci]) + " gp=[" + Eval(v, "window.__gp") + "]");
   }
 
+  // 41z4. WebGL does REAL shader rendering, not just clear: compile a vertex+fragment
+  // shader, link a program, upload a vertex buffer, and drawArrays a viewport-covering
+  // triangle in orange — then readPixels the center. Exercises the full WebGL pipeline
+  // (shader compile/link, attributes, buffers, draw) through the in-process command
+  // buffer — the actual use case behind charts/3D/shadertoy, beyond clearColor.
+  mbLoadHTML(v, "<body><canvas id='gs' width='32' height='32'></canvas></body>",
+             "about:blank");
+  mbRunJS(v,
+    "window.__gs='';try{"
+    "var gl=document.getElementById('gs').getContext('webgl');"
+    "var vs=gl.createShader(gl.VERTEX_SHADER);"
+    "gl.shaderSource(vs,'attribute vec2 p;void main(){gl_Position=vec4(p,0.0,1.0);}');"
+    "gl.compileShader(vs);"
+    "var fs=gl.createShader(gl.FRAGMENT_SHADER);"
+    "gl.shaderSource(fs,'void main(){gl_FragColor=vec4(1.0,0.5,0.0,1.0);}');"
+    "gl.compileShader(fs);"
+    "var ok=gl.getShaderParameter(vs,gl.COMPILE_STATUS)&&"
+    "gl.getShaderParameter(fs,gl.COMPILE_STATUS);"
+    "var pr=gl.createProgram();gl.attachShader(pr,vs);gl.attachShader(pr,fs);"
+    "gl.linkProgram(pr);ok=ok&&gl.getProgramParameter(pr,gl.LINK_STATUS);"
+    "gl.useProgram(pr);"
+    "var b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);"
+    "gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);"
+    "var l=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(l);"
+    "gl.vertexAttribPointer(l,2,gl.FLOAT,false,0,0);"
+    "gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);"
+    "gl.drawArrays(gl.TRIANGLES,0,3);gl.finish();"
+    "var p=new Uint8Array(4);gl.readPixels(16,16,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);"
+    "window.__gs=(ok?'ok':'shaderfail')+':'+p[0]+','+p[1]+','+p[2]+','+p[3];"
+    "}catch(e){window.__gs='err:'+e;}");
+  {
+    std::string gs;
+    for (int i = 0; i < 200; ++i) {
+      mbWait(v, 25);
+      gs = Eval(v, "window.__gs");
+      if (!gs.empty())
+        break;
+    }
+    // Orange (1.0,0.5,0.0) -> R255 G~128 B0; allow a tolerance on G for rounding.
+    bool ok = gs.rfind("ok:", 0) == 0;
+    int r = 0, g = 0, bl = 0, a = 0;
+    if (ok)
+      sscanf(gs.c_str(), "ok:%d,%d,%d,%d", &r, &g, &bl, &a);
+    Expect(ok && r == 255 && g >= 120 && g <= 136 && bl == 0 && a == 255,
+           "WebGL shader pipeline: compile+link+drawArrays renders a triangle",
+           "gs=[" + gs + "]");
+  }
+
   // 41b. A 2D canvas COMPOSITES into the page paint (not just its in-memory backing
   // store): draw a red square, render the page, and read the canvas region from the
   // page bitmap. Proves canvas-drawn content rasterizes into the rendered output —
