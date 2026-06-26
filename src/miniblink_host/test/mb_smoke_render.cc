@@ -1162,6 +1162,30 @@ static void RunCases(mbView* v, int W, int H) {
            "hp=[" + hp + "]");
   }
 
+  // 41p. WebRTC SDP/negotiation layer works: an RTCPeerConnection with a data channel
+  // produces a valid SDP offer (type 'offer', a media section for the data channel) and
+  // accepts it as the local description. Full peer connectivity needs ICE/network, but
+  // the SDP machinery — what apps build signaling on — runs in-process.
+  {
+    mbLoadHTML(v, "<body>rtc</body>", "https://rtc.test/");
+    mbRunJS(v,
+      "window.__rtc='';try{var pc=new RTCPeerConnection();pc.createDataChannel('chat');"
+      "pc.createOffer().then(function(o){return pc.setLocalDescription(o).then(function(){"
+      "var dc=(o.sdp.indexOf('webrtc-datachannel')>=0||o.sdp.indexOf('m=application')>=0);"
+      "window.__rtc='type:'+o.type+',dc:'+dc+',local:'+(pc.localDescription?true:false);});},"
+      "function(e){window.__rtc='rej:'+e.name;});}catch(e){window.__rtc='throw:'+e.name;}");
+    std::string rtc;
+    for (int i = 0; i < 200; ++i) {
+      mbWait(v, 25);
+      rtc = Eval(v, "window.__rtc");
+      if (!rtc.empty())
+        break;
+    }
+    Expect(rtc == "type:offer,dc:true,local:true",
+           "WebRTC: RTCPeerConnection generates a data-channel SDP offer + sets it local",
+           "rtc=[" + rtc + "]");
+  }
+
   // 42. Drawing to a canvas via mbEvalJS (not just mbRunJS) must also be
   // crash-safe. EvalToString/EvalIsolated used to run ExecuteScript
   // synchronously, so a draw inside an eval expression hit the same

@@ -1077,6 +1077,31 @@ asserts no 'HANG'), so a future change can't silently reintroduce a hang in thes
 from the API survey across these ticks: WebCodecs encode/decode works, geolocation/permissions
 are fully wired, the one real hang - WebGPU requestAdapter - is fixed, and the rest degrade
 gracefully. The embedder is robust against browser-absence across the modern promise APIs.)
+[VERIFIED - WebRTC SDP/negotiation layer works in-process]. RTCPeerConnection's signaling
+machinery runs without a browser: mb_smoke_render 41p creates an RTCPeerConnection + a data
+channel, createOffer() -> a valid SDP offer (type 'offer', a data-channel media section), and
+setLocalDescription() accepts it (pc.localDescription set). So apps' WebRTC SIGNALING (offer/
+answer/SDP munging) works; full peer CONNECTIVITY still needs ICE candidates + a network/STUN
+path (not wired - a data channel won't actually open to a remote). render 120->121, full
+battery green, no leaks.
+
+=== PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
+and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
+media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),
+WebCodecs (encode+decode), WebRTC SDP, Web Audio DSP, IndexedDB/OPFS/Cache/Cookies/Buckets
+(origin-isolated), Workers (dedicated+shared), Service Worker (crash-safe), DOM Storage,
+Geolocation/Permissions, WebSocket/SSE/fetch, Clipboard, WebCrypto, trusted input (mouse/key/
+IME/wheel). All browser-service-backed promise APIs degrade gracefully (no hangs). The
+REMAINING gaps are all DEEP/architectural and each is a focused multi-tick (or upstream-blocked)
+effort, NOT a quick win: (1) a software COMPOSITOR/LayerTreeHost - the shared root cause behind
+device emulation AND per-frame trusted gesture clicks into sub-frames (both SIGSEGV on the null
+LayerTreeHost); (2) full WebGPU (a Dawn device + the WebGPU context provider); (3) session +
+child-frame HISTORY routing; (4) blob-IDB PERSISTENCE (in-session works; disk save/load needs
+async blob-byte capture or a blob-UUID registry, both fragile against the heavily-used blob
+system); (5) the cache-body LARGE-BLOB durability bug (upstream in blink's in-process blob
+delivery; ~3 sessions deep). Future ticks should commit to ONE of these as a multi-tick arc
+(the compositor is the highest-leverage - it unblocks 1 + helps 3) rather than incremental
+verification.
 **Tier 3 — input & rendering refinements:**
 [DEFERRED: device emulation] `WebView::EnableDeviceEmulation` (the DevTools device-mode path —
 mobile viewport + coarse-pointer/no-hover) was attempted and REVERTED: it builds a
