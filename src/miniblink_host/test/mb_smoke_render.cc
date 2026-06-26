@@ -1074,6 +1074,40 @@ static void RunCases(mbView* v, int W, int H) {
            "fa=[" + fa + "]");
   }
 
+  // 41m. WebCodecs encode + decode round-trip: encode a canvas frame to VP8
+  // (VideoEncoder, libvpx) then decode the chunk back (VideoDecoder) -> a VideoFrame of
+  // the same size. WebCodecs is a major modern API (low-level codec access for JS); this
+  // proves the platform-less in-process media encoders/decoders are reachable from JS.
+  {
+    mbLoadHTML(v, "<body>wc</body>", "https://wc.test/");
+    mbRunJS(v,
+      "window.__wc='';(async function(){try{"
+      "var cn=document.createElement('canvas');cn.width=32;cn.height=32;"
+      "var cx=cn.getContext('2d');cx.fillStyle='#00ff00';cx.fillRect(0,0,32,32);"
+      "var fr=new VideoFrame(cn,{timestamp:0});"
+      "var chunks=[];"
+      "var enc=new VideoEncoder({output:function(c){chunks.push(c);},"
+      "error:function(e){window.__wc='encerr:'+e.message;}});"
+      "enc.configure({codec:'vp8',width:32,height:32});"
+      "enc.encode(fr,{keyFrame:true});fr.close();await enc.flush();"
+      "if(!chunks.length){window.__wc='noenc';return;}"
+      "var dec=new VideoDecoder({output:function(f){"
+      "window.__wc='decoded:'+f.codedWidth+'x'+f.codedHeight;f.close();},"
+      "error:function(e){window.__wc='decerr:'+e.message;}});"
+      "dec.configure({codec:'vp8'});dec.decode(chunks[0]);await dec.flush();"
+      "}catch(e){window.__wc='throw:'+e;}})();");
+    std::string wc;
+    for (int i = 0; i < 300; ++i) {
+      mbWait(v, 25);
+      wc = Eval(v, "window.__wc");
+      if (!wc.empty())
+        break;
+    }
+    Expect(wc == "decoded:32x32",
+           "WebCodecs VideoEncoder->VideoDecoder round-trips a frame (vp8, in-process)",
+           "wc=[" + wc + "]");
+  }
+
   // 42. Drawing to a canvas via mbEvalJS (not just mbRunJS) must also be
   // crash-safe. EvalToString/EvalIsolated used to run ExecuteScript
   // synchronously, so a draw inside an eval expression hit the same

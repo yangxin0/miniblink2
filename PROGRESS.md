@@ -1041,6 +1041,17 @@ from data:/file:/http) + <video> (metadata + first-frame decode + drawImage + in
 capture). Remaining polish (deferred, lower value): per-currentTime video frame STEPPING (only
 the first frame decodes today - seeking/playing doesn't update the picture), and real audio
 OUTPUT (the sink is silent; untestable headless).
+[VERIFIED - WebCodecs encode+decode works (major modern API)]. An API-availability probe
+across the embedder showed WebCodecs (VideoDecoder/AudioDecoder/VideoEncoder/ImageDecoder),
+Notification, Permissions, Geolocation, RTCPeerConnection, WebTransport, navigator.gpu,
+CompressionStream, showOpenFilePicker, navigator.locks are all PRESENT (blink exposes them).
+WebCodecs is also FUNCTIONAL: mb_smoke_render 41m round-trips a frame entirely in JS - paint a
+canvas, new VideoFrame(canvas), VideoEncoder({codec:'vp8'}).encode -> EncodedVideoChunk,
+VideoDecoder({codec:'vp8'}).decode -> a VideoFrame (decoded:32x32). So the in-process media
+encoders/decoders (libvpx, already linked for <video>) are reachable from blink's WebCodecs with
+NO extra wiring - low-level codec access for JS just works. render 117->118, full battery green,
+no leaks. (The other probed APIs are present but their deeper functionality - real geolocation
+fixes, RTC connectivity, notifications display, WebGPU - is unverified / mostly headless-stubbed.)
 **Tier 3 — input & rendering refinements:**
 [DEFERRED: device emulation] `WebView::EnableDeviceEmulation` (the DevTools device-mode path —
 mobile viewport + coarse-pointer/no-hover) was attempted and REVERTED: it builds a
