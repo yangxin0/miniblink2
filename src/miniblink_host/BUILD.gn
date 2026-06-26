@@ -116,6 +116,7 @@ component("miniblink_host") {
     "//mojo/public/cpp/bindings",
     "//mojo/public/cpp/system",
     "//skia",
+    "//ui/accessibility:ax_base",
     "//ui/base",
     "//ui/gfx",
     "//ui/gfx/codec",

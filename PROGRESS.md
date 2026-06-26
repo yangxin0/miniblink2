@@ -1107,6 +1107,25 @@ answer/SDP munging) works; full peer CONNECTIVITY still needs ICE candidates + a
 path (not wired - a data channel won't actually open to a remote). render 120->121, full
 battery green, no leaks.
 
+[DONE - ACCESSIBILITY TREE extraction (mbGetAXTree) - the "a11y snapshot"]. Added the
+semantic accessibility snapshot that modern test tools (Playwright's aria snapshot) and
+AI/automation agents read instead of raw DOM: mbGetAXTree(view, out, cap) returns the AX
+tree as compact JSON, each node {"role","name"[,"value"][,"children":[...]]}. Impl
+(MbWebView::GetAXTree): a live blink::WebAXContext(doc, ui::AXMode::kWebContents) enables
+the AXObjectCache, UpdateAXForAllDocuments() brings it current, WebAXObject::FromWebDocument
+gives the root, then a recursive serializer walks ChildCount/ChildAt emitting role
+(ui::ToString(ax::mojom::Role)) + GetName() + GetValueForControl(); ignored/presentational
+nodes are FLATTENED (skipped, their included children pulled up) to match the platform tree.
+No compositor needed - it's a DOM/layout-level feature (new dep //ui/accessibility:ax_base).
+Also wke peer not added (host-only feature). Verified mb_smoke 30a: a page with <h1>, a
+<button>, and a labelled <input value> -> the JSON root is rootWebArea, contains roles
+"heading"+"button", the accessible names "Hello AX"/"Click me", and the field value
+"a@b.com" (len 565). mb_smoke 148->149, full battery green (platform 46, render 122, shot
+66, wke 114), no leaks. This is a high-value scraping/automation primitive: the semantic
+page structure (what a screen reader / an AI agent sees), complementary to mbGetText (raw
+text) and mbGetHTML (raw DOM). The accessible NAME computation is blink's real algorithm
+(label association, aria-label, text content), not a DOM heuristic.
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

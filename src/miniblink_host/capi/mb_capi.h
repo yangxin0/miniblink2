@@ -639,6 +639,13 @@ MB_EXPORT int mbGetText(mbView*, char* out, int out_cap);
 // bytes (size first with out=NULL/out_cap=0 — pages can be large).
 MB_EXPORT int mbGetHTML(mbView*, char* out, int out_cap);
 
+// Write the ACCESSIBILITY TREE (the "accessibility snapshot") as compact JSON into
+// `out`; returns the full length in bytes (size first with out=NULL/out_cap=0). Each
+// node is {"role":..,"name":..[,"value":..][,"children":[..]]} — the semantic view of
+// the page used by testing tools and AI/automation agents (roles + accessible names,
+// not raw DOM). Returns 0 if there is no document. No compositor needed.
+MB_EXPORT int mbGetAXTree(mbView*, char* out, int out_cap);
+
 // Write the visible text (innerText) of the first element matching `css_selector`
 // into `out`. Returns the value's length in bytes (>=0), or -1 if no element
 // matches. Size first with out=NULL/out_cap=0. Companion to mbGetElementRect:

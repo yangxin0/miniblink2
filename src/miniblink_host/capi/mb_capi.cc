@@ -798,6 +798,14 @@ int mbGetHTML(mbView* v, char* out, int out_cap) {
   return static_cast<int>(result.size());
 }
 
+int mbGetAXTree(mbView* v, char* out, int out_cap) {
+  if (!v || !v->impl)
+    return 0;
+  std::string result = v->impl->GetAXTree();
+  CopyToBuffer(result, out, out_cap);
+  return static_cast<int>(result.size());
+}
+
 int mbGetTextForSelector(mbView* v, const char* css_selector, char* out,
                          int out_cap) {
   if (!v || !v->impl)

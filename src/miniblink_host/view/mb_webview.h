@@ -245,6 +245,11 @@ class MbWebView {
   // Scraping reads: visible text (body.innerText) and the post-JS serialized DOM.
   std::string GetText();
   std::string GetHTML();
+  // The ACCESSIBILITY TREE as compact JSON (the "accessibility snapshot" used by test
+  // tools and AI/automation agents): {"role","name"[,"value"],"children":[...]}. Built
+  // via WebAXContext (which enables the AXObjectCache), with ignored nodes flattened out.
+  // Empty string if there is no document/cache. No compositor needed (DOM/layout level).
+  std::string GetAXTree();
   // Per-element scraping by selector. Fill *out with the first match's innerText
   // / the named attribute's value and return true; return false if no element
   // matches (GetAttribute also returns false if the attribute is absent). *out is

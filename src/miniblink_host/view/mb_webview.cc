@@ -39,6 +39,8 @@
 #include "third_party/blink/public/platform/scheduler/web_agent_group_scheduler.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/mojom/css/preferred_color_scheme.mojom-shared.h"
+#include "third_party/blink/public/web/web_ax_context.h"
+#include "third_party/blink/public/web/web_ax_object.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_local_frame.h"
@@ -55,6 +57,8 @@
 #include "third_party/icu/source/common/unicode/unistr.h"
 #include "third_party/icu/source/common/unicode/uscript.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
+#include "ui/accessibility/ax_enum_util.h"
+#include "ui/accessibility/ax_mode.h"
 #include "third_party/blink/renderer/core/css/media_value_change.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
@@ -1084,6 +1088,99 @@ std::string MbWebView::GetHTML() {
   // .outerHTML) — for scraping the live document, not the original source.
   return EvalToString(
       "document.documentElement ? document.documentElement.outerHTML : ''");
+}
+
+namespace {
+
+// Append `s` to `out` as a JSON string body (no surrounding quotes), escaping the
+// characters JSON requires. Keeps the snapshot machine-parseable.
+void AppendJsonEscaped(const std::string& s, std::string* out) {
+  for (char c : s) {
+    switch (c) {
+      case '"': *out += "\\\""; break;
+      case '\\': *out += "\\\\"; break;
+      case '\n': *out += "\\n"; break;
+      case '\r': *out += "\\r"; break;
+      case '\t': *out += "\\t"; break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          char buf[8];
+          std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+          *out += buf;
+        } else {
+          *out += c;
+        }
+    }
+  }
+}
+
+void SerializeAXNode(const blink::WebAXObject& obj, std::string* out);
+
+// Append the included descendants of `obj` as comma-separated JSON objects. Nodes the
+// AX tree marks "not included" (presentational/ignored wrappers) are flattened: we skip
+// them but pull their included children up to this level, matching the platform tree.
+void AppendIncludedChildren(const blink::WebAXObject& obj, std::string* out) {
+  unsigned n = obj.ChildCount();
+  for (unsigned i = 0; i < n; ++i) {
+    blink::WebAXObject c = obj.ChildAt(i);
+    if (c.IsNull() || c.IsDetached())
+      continue;
+    if (c.IsIncludedInTree()) {
+      if (!out->empty() && out->back() != '[')
+        *out += ',';
+      SerializeAXNode(c, out);
+    } else {
+      AppendIncludedChildren(c, out);
+    }
+  }
+}
+
+// Serialize one included node: {"role","name"[,"value"][,"children":[...]]}.
+void SerializeAXNode(const blink::WebAXObject& obj, std::string* out) {
+  *out += "{\"role\":\"";
+  AppendJsonEscaped(ui::ToString(obj.Role()), out);
+  *out += "\",\"name\":\"";
+  AppendJsonEscaped(obj.GetName().Utf8(), out);
+  *out += '"';
+  std::string value = obj.GetValueForControl().Utf8();
+  if (!value.empty()) {
+    *out += ",\"value\":\"";
+    AppendJsonEscaped(value, out);
+    *out += '"';
+  }
+  // Recurse. Open the array first so AppendIncludedChildren's comma logic (which checks
+  // for a trailing '[') works, then drop it again if no child was actually emitted.
+  size_t before = out->size();
+  *out += ",\"children\":[";
+  size_t array_open = out->size();
+  AppendIncludedChildren(obj, out);
+  if (out->size() == array_open)
+    out->resize(before);  // no children emitted — remove the empty "children" key
+  else
+    *out += ']';
+  *out += '}';
+}
+
+}  // namespace
+
+std::string MbWebView::GetAXTree() {
+  if (!main_frame_)
+    return std::string();
+  blink::WebDocument doc = main_frame_->GetDocument();
+  if (doc.IsNull())
+    return std::string();
+  // A live WebAXContext enables the AXObjectCache for `doc` for as long as it exists;
+  // kWebContents builds the web-content accessibility tree (roles + names + values).
+  blink::WebAXContext ax_context(doc, ui::AXMode(ui::AXMode::kWebContents));
+  if (!ax_context.HasActiveDocument() || !ax_context.HasAXObjectCache())
+    return std::string();
+  ax_context.UpdateAXForAllDocuments();  // bring the tree up to date before walking
+  blink::WebAXObject root = blink::WebAXObject::FromWebDocument(doc);
+  if (root.IsNull() || root.IsDetached())
+    return std::string();
+  std::string out;
+  SerializeAXNode(root, &out);
+  return out;
 }
 
 bool MbWebView::GetTextForSelector(const char* css_selector, std::string* out) {

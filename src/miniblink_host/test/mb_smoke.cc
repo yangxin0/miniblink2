@@ -2755,6 +2755,40 @@ int main() {
 
   // (IndexedDB is now covered by case 23m — the open+schema step-1 backend.)
 
+  // 30a (a11y). mbGetAXTree returns the ACCESSIBILITY SNAPSHOT (roles + accessible
+  // names + control values) as JSON — the semantic view that testing tools and
+  // AI/automation agents read instead of raw DOM. A page with a heading, a button, and
+  // a labelled text field must surface those accessible NAMES and a nested structure.
+  {
+    mbLoadHTML(v,
+               "<body><h1>Hello AX</h1>"
+               "<button>Click me</button>"
+               "<label>Email <input type='text' value='a@b.com'></label>"
+               "</body>",
+               "about:blank");
+    mbWait(v, 80);
+    std::string tree;
+    int n = mbGetAXTree(v, nullptr, 0);  // size first (out=NULL)
+    if (n > 0) {
+      std::vector<char> buf(static_cast<size_t>(n) + 1, 0);
+      mbGetAXTree(v, buf.data(), n + 1);
+      tree.assign(buf.data());
+    }
+    const bool well_formed = tree.rfind("{\"role\":", 0) == 0 &&
+                             tree.find("\"children\":[") != std::string::npos;
+    const bool names_ok = tree.find("Hello AX") != std::string::npos &&
+                          tree.find("Click me") != std::string::npos;
+    const bool value_ok = tree.find("a@b.com") != std::string::npos;
+    const bool roles_ok = tree.find("\"role\":\"heading\"") != std::string::npos &&
+                          tree.find("\"role\":\"button\"") != std::string::npos;
+    Expect(well_formed && names_ok && value_ok && roles_ok,
+           "mbGetAXTree: a11y snapshot has heading/button roles + accessible names + value",
+           "len=" + std::to_string((int)tree.size()) + " wf=" +
+               (well_formed ? "1" : "0") + " names=" + (names_ok ? "1" : "0") +
+               " val=" + (value_ok ? "1" : "0") + " roles=" + (roles_ok ? "1" : "0") +
+               " head=[" + tree.substr(0, 140) + "]");
+  }
+
   // Network cases (31, 32) are OPT-IN via MB_NET_TESTS=1: a dead host costs ~45s
   // per load (connect-timeout x retries), which would make every default run crawl.
   // They still skip gracefully if enabled but httpbin is unreachable.
