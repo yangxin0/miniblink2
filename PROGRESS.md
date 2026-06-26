@@ -868,13 +868,17 @@ constraints, atomic abort, and compound keys — the whole object-store/index AP
    opaque value bytes] + key generators) to a private binary file and restores it (call Load
    BEFORE the page opens). Registry access hops to the IDB SERVICE thread via a WaitableEvent
    (touching it from the main C-ABI thread would destroy service-thread-bound AssociatedRemotes
-   off-sequence — confirmed by a mojo sequence-checker FATAL, then fixed). LIMITATION: databases
-   with SECONDARY INDEXES are skipped (not persisted) — blink's IDBIndexMetadata isn't an exported
-   symbol, so it can't be reconstructed from the separate miniblink_host dylib; only index-free
-   keyval-style DBs (the common auth-token/state case, e.g. idb-keyval) persist. Blob-valued
-   records also not captured. Verified mb_smoke 23m2: save 'authtoken' -> overwrite 'CHANGED' ->
-   restore -> reopen reads back 'authtoken'. [REMAINING: secondary-index persistence (blocked on
-   blink export); per-origin IDB partitioning.] 10. Blob-from-file
+   off-sequence — confirmed by a mojo sequence-checker FATAL, then fixed). [DONE: secondary-index
+   persistence] Databases WITH secondary indexes now persist too. The blocker was that blink's
+   IDBIndexMetadata wasn't MODULES_EXPORT (its sibling IDBObjectStoreMetadata is — an oversight), so
+   it couldn't be constructed from the separate dylib on restore; a one-line export patch
+   (patches/0005-export-idb-index-metadata.patch) fixes that. SerializeRegistry now writes each
+   store's index metadata (id/name/keyPath/unique/multiEntry) + the index DATA (index -> indexKey ->
+   {primaryKeys}); DeserializeRegistry reconstructs IDBIndexMetadata::Create() + the data, and the
+   index-free skip (HasAnyIndex) is gone. Verified mb_smoke 23m2 (index-free, still works) + 23m3 (save
+   a store+index+record, CLEAR the store, restore, reopen, query via the INDEX -> id1:alice returns —
+   proving index metadata AND data round-trip). Blob-valued records still not captured. [REMAINING:
+   per-origin IDB partitioning — DONE separately (see the per-origin isolation entries).] 10. Blob-from-file
 + ranged blob reads + DataPipeGetter uploads. 11. **GPU content path** — [CHARACTERIZED] the gap is
 NARROWER than "all GPU content blank": 2D `<canvas>` FULLY works — draw + getImageData + toDataURL (tests
 6/41) AND it COMPOSITES into the page paint / screenshots (test 41b: a red fillRect reads back R=255,G=0,

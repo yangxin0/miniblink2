@@ -1,0 +1,22 @@
+Export IDBIndexMetadata so the (separately-linked) miniblink_host dylib can
+construct it when RESTORING a persisted IndexedDB database with secondary indexes.
+
+Its sibling IDBObjectStoreMetadata is already MODULES_EXPORT; IDBIndexMetadata is
+not — almost certainly an oversight, since both are public metadata structs in the
+same header with public ctors/Create(). Without the export, IDBIndexMetadata::
+Create()/the ctors don't resolve from our dylib, so mb_indexeddb.cc had to SKIP
+persisting any database that has an index. This one-line export lets it reconstruct
+index metadata on load. No behavior change for the donor build (just visibility).
+
+diff --git a/third_party/blink/renderer/modules/indexeddb/idb_metadata.h b/third_party/blink/renderer/modules/indexeddb/idb_metadata.h
+--- a/third_party/blink/renderer/modules/indexeddb/idb_metadata.h
++++ b/third_party/blink/renderer/modules/indexeddb/idb_metadata.h
+@@ -44,7 +44,7 @@
+ // these objects form a tree with the hierarchy shown below.
+ //     IDBDatabaseMetadata -> IDBObjectStoreMetadata -> IDBIndexMetadata
+
+-class IDBIndexMetadata : public RefCounted<IDBIndexMetadata> {
++class MODULES_EXPORT IDBIndexMetadata : public RefCounted<IDBIndexMetadata> {
+   USING_FAST_MALLOC(IDBIndexMetadata);
+
+  public:

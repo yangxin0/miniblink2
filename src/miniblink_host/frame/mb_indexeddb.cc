@@ -981,29 +981,11 @@ struct Reader {
 
 constexpr char kIdbMagic[] = "MBIDB001";
 
-// Whether a database has any secondary index. We can persist only index-FREE
-// databases (the common keyval-style case): blink's IDBIndexMetadata is not an
-// exported symbol, so it can't be reconstructed from this separate dylib. A
-// database with indexes is skipped (not persisted) rather than restored broken.
-bool HasAnyIndex(const MbIDBBackend& b) {
-  for (const auto& [sid, os] : b.metadata.object_stores) {
-    if (!os->indexes.empty())
-      return true;
-  }
-  return false;
-}
-
 std::string SerializeRegistry() {
   std::string o;
   o.append(kIdbMagic, 8);
-  // Count the databases we will actually persist (index-free only).
-  uint32_t persistable = 0;
-  for (const auto& [name, b] : Registry())
-    if (!HasAnyIndex(*b)) ++persistable;
-  WU32(&o, persistable);
+  WU32(&o, Registry().size());  // all databases (secondary indexes now persisted)
   for (const auto& [name, b] : Registry()) {
-    if (HasAnyIndex(*b))
-      continue;  // skip — see HasAnyIndex (index metadata isn't reconstructable)
     const blink::IDBDatabaseMetadata& md = b->metadata;
     WStr(&o, name);
     WI64(&o, md.version);
@@ -1015,6 +997,15 @@ std::string SerializeRegistry() {
       WKeyPath(&o, os->key_path);
       WU8(&o, os->auto_increment ? 1 : 0);
       WI64(&o, os->max_index_id);
+      // Secondary index metadata (id, name, key path, unique, multiEntry).
+      WU32(&o, os->indexes.size());
+      for (const auto& [iid, idx] : os->indexes) {
+        WI64(&o, iid);
+        WStr(&o, idx->name.Utf8());
+        WKeyPath(&o, idx->key_path);
+        WU8(&o, idx->unique ? 1 : 0);
+        WU8(&o, idx->multi_entry ? 1 : 0);
+      }
     }
     // Records.
     WU32(&o, b->data.size());
@@ -1031,6 +1022,22 @@ std::string SerializeRegistry() {
     for (const auto& [sid, next] : b->key_generator) {
       WI64(&o, sid);
       WI64(&o, next);
+    }
+    // Secondary index DATA: store -> index -> indexKey -> {primaryKeys}.
+    WU32(&o, b->index_data.size());
+    for (const auto& [sid, idxmap] : b->index_data) {
+      WI64(&o, sid);
+      WU32(&o, idxmap.size());
+      for (const auto& [iid, keymap] : idxmap) {
+        WI64(&o, iid);
+        WU32(&o, keymap.size());
+        for (const auto& [ikey, pkeys] : keymap) {
+          WStr(&o, ikey);
+          WU32(&o, pkeys.size());
+          for (const auto& pk : pkeys)
+            WStr(&o, pk);
+        }
+      }
     }
   }
   return o;
@@ -1063,6 +1070,18 @@ bool DeserializeRegistry(const std::string& buf) {
       os->key_path = r.KeyPath();
       os->auto_increment = r.U8() != 0;
       os->max_index_id = r.I64();
+      // Secondary index metadata — reconstruct IDBIndexMetadata (linkable via the
+      // 0005-export-idb-index-metadata patch).
+      uint32_t index_count = r.U32();
+      for (uint32_t ix = 0; ix < index_count && r.ok; ++ix) {
+        auto idx = blink::IDBIndexMetadata::Create();
+        idx->id = r.I64();
+        idx->name = blink::String::FromUtf8(r.Str());
+        idx->key_path = r.KeyPath();
+        idx->unique = r.U8() != 0;
+        idx->multi_entry = r.U8() != 0;
+        os->indexes.Set(idx->id, idx);
+      }
       b->metadata.object_stores.Set(sid, os);
     }
     uint32_t data_store_count = r.U32();
@@ -1080,6 +1099,25 @@ bool DeserializeRegistry(const std::string& buf) {
     for (uint32_t s = 0; s < keygen_count && r.ok; ++s) {
       int64_t sid = r.I64();
       b->key_generator[sid] = r.I64();
+    }
+    // Secondary index DATA.
+    uint32_t idxdata_count = r.U32();
+    for (uint32_t s = 0; s < idxdata_count && r.ok; ++s) {
+      int64_t sid = r.I64();
+      uint32_t idx_count = r.U32();
+      auto& idxmap = b->index_data[sid];
+      for (uint32_t ix = 0; ix < idx_count && r.ok; ++ix) {
+        int64_t iid = r.I64();
+        uint32_t key_count = r.U32();
+        auto& keymap = idxmap[iid];
+        for (uint32_t k = 0; k < key_count && r.ok; ++k) {
+          std::string ikey = r.Str();
+          uint32_t pk_count = r.U32();
+          auto& pkeys = keymap[ikey];
+          for (uint32_t p = 0; p < pk_count && r.ok; ++p)
+            pkeys.insert(r.Str());
+        }
+      }
     }
     if (r.ok)
       loaded[key] = std::move(b);

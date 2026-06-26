@@ -1593,6 +1593,54 @@ int main() {
     std::remove(path.c_str());
   }
 
+  // 23m3. IndexedDB persistence of a database WITH a SECONDARY INDEX: previously
+  // such DBs were SKIPPED on save (blink's IDBIndexMetadata wasn't reconstructable
+  // from this dylib); the 0005 export patch makes it linkable, so index metadata +
+  // index data now persist. Save a store+index+record, CLEAR the store, restore,
+  // reopen, and query via the INDEX — the record returns (proving the index itself
+  // AND its data round-tripped; if the index metadata were lost, index() would throw).
+  {
+    const std::string path = "/tmp/mb_idb_idx_persist.bin";
+    mbLoadHTML(v, "<body>x</body>", "https://idbix.test/");
+    Eval(v,
+         "window.__i='';var q=indexedDB.open('mbidx',1);"
+         "q.onupgradeneeded=function(e){var s=e.target.result.createObjectStore("
+         "'people',{keyPath:'id'});s.createIndex('byName','name',{unique:false});};"
+         "q.onsuccess=function(e){var db=e.target.result;var tx=db.transaction("
+         "'people','readwrite');tx.objectStore('people').put({id:1,name:'alice'});"
+         "tx.oncomplete=function(){db.close();window.__i='saved';};};"
+         "q.onerror=function(){window.__i='err1';};");
+    mbWaitForFunction(v, "window.__i!==''", 4000);
+    const bool saved = mbSaveIndexedDB(path.c_str()) == 1;
+    mbLoadHTML(v, "<body>y</body>", "https://idbix.test/");  // drop the connection
+    mbWait(v, 50);
+    Eval(v,
+         "window.__i2='';var q2=indexedDB.open('mbidx',1);"
+         "q2.onsuccess=function(e){var db=e.target.result;var tx=db.transaction("
+         "'people','readwrite');tx.objectStore('people').clear();"
+         "tx.oncomplete=function(){db.close();window.__i2='cleared';};};"
+         "q2.onerror=function(){window.__i2='err2';};");
+    mbWaitForFunction(v, "window.__i2!==''", 4000);
+    mbLoadHTML(v, "<body>z</body>", "https://idbix.test/");  // drop the connection
+    mbWait(v, 50);
+    const bool loaded = mbLoadIndexedDB(path.c_str()) == 1;
+    Eval(v,
+         "window.__i3='';var q3=indexedDB.open('mbidx',1);"
+         "q3.onsuccess=function(e){var db=e.target.result;try{var g=db.transaction("
+         "'people').objectStore('people').index('byName').get('alice');"
+         "g.onsuccess=function(){window.__i3=g.result?('id'+g.result.id+':'+"
+         "g.result.name):'none';};g.onerror=function(){window.__i3='geterr';};"
+         "}catch(ex){window.__i3='noindex:'+ex.name;}};"
+         "q3.onerror=function(){window.__i3='err3';};");
+    mbWaitForFunction(v, "window.__i3!==''", 4000);
+    const std::string got = Eval(v, "window.__i3");
+    Expect(saved && loaded && got == "id1:alice",
+           "IndexedDB persistence restores a database WITH a secondary index (query via index)",
+           "idbix=[saved:" + std::to_string(saved) + ",loaded:" +
+               std::to_string(loaded) + ",got:" + got + "]");
+    std::remove(path.c_str());
+  }
+
   // 23n. IndexedDB count/delete/clear (step 3): round out object-store CRUD. Put 3
   // records; delete one (count drops 3->2); clear the store (count -> 0). Exercises
   // IDBDatabase.Count / DeleteRange / Clear against the in-memory backend.
