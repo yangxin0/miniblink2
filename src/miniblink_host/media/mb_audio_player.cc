@@ -69,4 +69,68 @@ void MbAudioPlayer::DecodeAndReport(std::string url) {
   }
 }
 
+double MbAudioPlayer::CurrentTime() const {
+  if (paused_)
+    return anchor_media_;
+  double t = anchor_media_ +
+             (base::TimeTicks::Now() - anchor_ticks_).InSecondsF() * rate_;
+  if (t < 0.0)
+    t = 0.0;
+  if (t > duration_)
+    t = duration_;
+  return t;
+}
+
+void MbAudioPlayer::Play() {
+  if (!has_audio_)
+    return;
+  if (ended_) {  // replay from the start
+    ended_ = false;
+    anchor_media_ = 0.0;
+  } else {
+    anchor_media_ = CurrentTime();
+  }
+  anchor_ticks_ = base::TimeTicks::Now();
+  paused_ = false;
+  // ~30 Hz: advances currentTime + drives the element's timeupdate/ended. There is no
+  // real audio output (the WebAudioDevice is silent), but the timeline is real.
+  play_timer_.Start(FROM_HERE, base::Milliseconds(33), this,
+                    &MbAudioPlayer::OnPlaybackTick);
+}
+
+void MbAudioPlayer::Pause(PauseReason) {
+  if (paused_)
+    return;
+  anchor_media_ = CurrentTime();
+  paused_ = true;
+  play_timer_.Stop();
+}
+
+void MbAudioPlayer::Seek(double seconds) {
+  if (seconds < 0.0)
+    seconds = 0.0;
+  if (seconds > duration_)
+    seconds = duration_;
+  anchor_media_ = seconds;
+  anchor_ticks_ = base::TimeTicks::Now();
+  ended_ = false;
+  client_->TimeChanged();  // element fires seeking/seeked + timeupdate
+}
+
+void MbAudioPlayer::SetRate(double rate) {
+  anchor_media_ = CurrentTime();  // re-anchor before changing the slope
+  anchor_ticks_ = base::TimeTicks::Now();
+  rate_ = rate;
+}
+
+void MbAudioPlayer::OnPlaybackTick() {
+  if (CurrentTime() >= duration_) {
+    anchor_media_ = duration_;
+    paused_ = true;
+    ended_ = true;
+    play_timer_.Stop();
+  }
+  client_->TimeChanged();  // element fires timeupdate, and ended when IsEnded()
+}
+
 }  // namespace mb

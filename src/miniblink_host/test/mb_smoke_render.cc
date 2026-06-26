@@ -840,6 +840,44 @@ static void RunCases(mbView* v, int W, int H) {
            "au=[" + au + "]");
   }
 
+  // 41f. <audio> PLAYBACK TIMELINE (media bring-up step 2): play() advances currentTime
+  // in real time (the player's clock), fires timeupdate while playing, and fires `ended`
+  // (paused, currentTime==duration) when it reaches the end. A 0.3s WAV is played to
+  // completion. (No real audio output — the device is silent — but the timeline is real:
+  // what timers/seek-bars/"play next" logic depend on.) muted so autoplay isn't blocked.
+  {
+    mbLoadHTML(v, "<body>pb</body>", "about:blank");
+    mbRunJS(v,
+      "window.__pb='';try{var sr=8000,n=2400,buf=new ArrayBuffer(44+n*2),"
+      "dv=new DataView(buf);"
+      "function S(o,t){for(var i=0;i<t.length;i++)dv.setUint8(o+i,t.charCodeAt(i));}"
+      "S(0,'RIFF');dv.setUint32(4,36+n*2,true);S(8,'WAVE');S(12,'fmt ');"
+      "dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,1,true);"
+      "dv.setUint32(24,sr,true);dv.setUint32(28,sr*2,true);dv.setUint16(32,2,true);"
+      "dv.setUint16(34,16,true);S(36,'data');dv.setUint32(40,n*2,true);"
+      "for(var i=0;i<n;i++)dv.setInt16(44+i*2,Math.round(Math.sin(i/10)*10000),true);"
+      "var u8=new Uint8Array(buf),bin='';"
+      "for(var i=0;i<u8.length;i++)bin+=String.fromCharCode(u8[i]);"
+      "var a=document.createElement('audio');a.muted=true;var tu=0;"
+      "a.addEventListener('timeupdate',function(){tu++;});"
+      "a.addEventListener('ended',function(){window.__pb='ended:'+"
+      "a.currentTime.toFixed(1)+',paused:'+a.paused+',tu:'+(tu>0);});"
+      "a.addEventListener('canplaythrough',function(){"
+      "var p=a.play();if(p&&p.catch)p.catch(function(e){window.__pb='playerr:'+e.name;});});"
+      "a.src='data:audio/wav;base64,'+btoa(bin);a.load();"
+      "}catch(e){window.__pb='throw:'+e;}");
+    std::string pb;
+    for (int i = 0; i < 400; ++i) {  // up to 10s; the 0.3s clip ends well before
+      mbWait(v, 25);
+      pb = Eval(v, "window.__pb");
+      if (!pb.empty())
+        break;
+    }
+    Expect(pb == "ended:0.3,paused:true,tu:true",
+           "an <audio> element plays back: currentTime advances, timeupdate + ended fire",
+           "pb=[" + pb + "]");
+  }
+
   // 42. Drawing to a canvas via mbEvalJS (not just mbRunJS) must also be
   // crash-safe. EvalToString/EvalIsolated used to run ExecuteScript
   // synchronously, so a draw inside an eval expression hit the same

@@ -24,6 +24,8 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/single_thread_task_runner.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "media/base/picture_in_picture_events_info.h"
 #include "third_party/blink/public/platform/web_media_player.h"
 #include "third_party/blink/public/platform/web_string.h"
@@ -57,20 +59,24 @@ class MbAudioPlayer : public blink::WebMediaPlayer {
   bool HasAudio() const override { return has_audio_; }
   bool HasVideo() const override { return false; }
   double Duration() const override { return duration_; }
-  double CurrentTime() const override { return current_time_; }
+  double CurrentTime() const override;
   bool Paused() const override { return paused_; }
+  bool IsEnded() const override { return ended_; }
   NetworkState GetNetworkState() const override { return network_state_; }
   ReadyState GetReadyState() const override { return ready_state_; }
-  void Play() override { paused_ = false; }
-  void Pause(PauseReason) override { paused_ = true; }
-  void Shutdown() override { weak_ptr_factory_.InvalidateWeakPtrsAndDoom(); }
+  void Play() override;
+  void Pause(PauseReason) override;
+  void Seek(double seconds) override;
+  void SetRate(double rate) override;
+  void Shutdown() override {
+    play_timer_.Stop();
+    weak_ptr_factory_.InvalidateWeakPtrsAndDoom();
+  }
   base::WeakPtr<WebMediaPlayer> AsWeakPtr() override {
     return weak_ptr_factory_.GetWeakPtr();
   }
 
   // --- empty defaults (mirror blink::EmptyWebMediaPlayer) ---
-  void Seek(double) override {}
-  void SetRate(double) override {}
   void SetVolume(double) override {}
   void SetLatencyHint(double) override {}
   void SetPreservesPitch(bool) override {}
@@ -91,7 +97,6 @@ class MbAudioPlayer : public blink::WebMediaPlayer {
   gfx::Size NaturalSize() const override { return gfx::Size(); }
   gfx::Size VisibleSize() const override { return gfx::Size(); }
   bool Seeking() const override { return false; }
-  bool IsEnded() const override { return false; }
   blink::WebString GetErrorMessage() const override {
     return blink::WebString();
   }
@@ -127,15 +132,23 @@ class MbAudioPlayer : public blink::WebMediaPlayer {
  private:
   // Fetch `url`, decode it, set state, and notify the element (runs off Load()).
   void DecodeAndReport(std::string url);
+  // The playback clock tick (fires TimeChanged -> the element's timeupdate/ended).
+  void OnPlaybackTick();
 
   blink::MediaPlayerClient* client_;  // internal client: state-change callbacks
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   double duration_ = 0.0;
-  double current_time_ = 0.0;
+  // `anchor_media_` is the playback position at `anchor_ticks_`; while playing,
+  // CurrentTime() = anchor_media_ + (now - anchor_ticks_) * rate_, clamped to duration.
+  double anchor_media_ = 0.0;
+  base::TimeTicks anchor_ticks_;
+  double rate_ = 1.0;
   bool has_audio_ = false;
   bool paused_ = true;
+  bool ended_ = false;
   NetworkState network_state_ = kNetworkStateEmpty;
   ReadyState ready_state_ = kReadyStateHaveNothing;
+  base::RepeatingTimer play_timer_;  // drives timeupdate/ended while playing
   base::WeakPtrFactory<MbAudioPlayer> weak_ptr_factory_{this};
 };
 

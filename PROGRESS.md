@@ -948,7 +948,22 @@ readyState>=HAVE_METADATA (render 109->110, battery green, no leaks). REMAINING 
 PLAYBACK TIMELINE (Play -> currentTime advances via a clock, timeupdate/ended, audio output
 through the sink) is step 2; <video> (VideoFrameCompositor + frames into paint) is step 3.
 The sync MbFetchUrl in the load task blocks the main thread (fine for short/data: clips).
-
+[DONE - <audio> PLAYBACK TIMELINE (media playback STEP 2)]. <audio> now PLAYS: play()
+advances currentTime in real time, fires timeupdate while playing, and fires `ended`
+(paused, currentTime==duration) at the end; pause/seek/playbackRate work too. MbAudioPlayer
+keeps a wall-clock anchor (anchor_media_ + anchor_ticks_ + rate_): CurrentTime() = anchor_
+media_ + (Now()-anchor_ticks_)*rate_ clamped to [0,duration]; a ~30 Hz base::RepeatingTimer
+(play_timer_) calls client_->TimeChanged() so the element fires timeupdate, and on reaching
+duration sets paused_+ended_ and stops the timer (element fires ended). Play() re-anchors
+(replays from 0 if ended); Pause() freezes currentTime + stops the timer; Seek() re-anchors +
+TimeChanged(); SetRate() re-anchors then changes the slope; Shutdown() stops the timer. NO
+real audio output (the WebAudioDevice is silent) but the TIMELINE is real - what seek-bars /
+"play next on ended" / timed UIs need. Verified mb_smoke_render 41f: a 0.3s WAV played to
+completion -> ended at currentTime 0.3, paused true, timeupdate fired (muted so autoplay is
+not blocked). render 110->111, full battery green, no leaks. REMAINING for media: real audio
+OUTPUT through the sink (render callback feeding decoded PCM) and <video> (VideoFrameCompositor
++ frames into paint) - step 3. <audio> is now functionally usable for timeline/event-driven
+apps.
 **Tier 3 — input & rendering refinements:**
 [DEFERRED: device emulation] `WebView::EnableDeviceEmulation` (the DevTools device-mode path —
 mobile viewport + coarse-pointer/no-hover) was attempted and REVERTED: it builds a
