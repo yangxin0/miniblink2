@@ -2283,6 +2283,57 @@ static void RunCases(mbView* v, int W, int H) {
                (removed ? "1" : "0") + " final=[" + o + "]");
   }
 
+  // 73c3. OPFS persistence handles the recursive serializer's untested paths: a NESTED
+  // directory (sub/nested.bin) AND BINARY content (bytes incl. 0x00 and 0xFF, which a
+  // text/length-naive format would corrupt). Build the tree, mbSaveOPFS, clear it, reload,
+  // and verify both the nested path and the exact bytes survive.
+  {
+    const char* opfs_path = "/tmp/mb_opfs_nested.bin";
+    mbLoadHTML(v, "<body>opfsnest</body>", "https://opfsnest.test/");
+    // Write sub/nested.bin = [0,1,2,255,65,0,200] via a writable stream.
+    mbRunJS(v,
+      "window.__o='';navigator.storage.getDirectory().then(function(r){"
+      "return r.getDirectoryHandle('sub',{create:true}).then(function(d){"
+      "return d.getFileHandle('nested.bin',{create:true}).then(function(fh){"
+      "return fh.createWritable().then(function(w){"
+      "return w.write(new Uint8Array([0,1,2,255,65,0,200]))."
+      "then(function(){return w.close();});});});});}).then(function(){"
+      "window.__o='wrote';}).catch(function(e){window.__o='err:'+e.name;});");
+    std::string o;
+    for (int i = 0; i < 160 && o != "wrote"; ++i) { mbWait(v, 25); o = Eval(v, "window.__o"); }
+    const bool wrote = (o == "wrote");
+    mbSaveOPFS(opfs_path);
+    // Remove the whole 'sub' dir (recursive) -> gone from memory.
+    mbRunJS(v,
+      "window.__o='';navigator.storage.getDirectory().then(function(r){"
+      "return r.removeEntry('sub',{recursive:true});}).then(function(){"
+      "return navigator.storage.getDirectory().then(function(r){"
+      "return r.getDirectoryHandle('sub').then(function(){return 'still';},"
+      "function(e){return 'gone:'+e.name;});});}).then(function(s){window.__o=s;})"
+      ".catch(function(e){window.__o='err:'+e.name;});");
+    o.clear();
+    for (int i = 0; i < 160 && o.empty(); ++i) { mbWait(v, 25); o = Eval(v, "window.__o"); }
+    const bool removed = (o.rfind("gone:", 0) == 0);
+    mbLoadOPFS(opfs_path);
+    // Read sub/nested.bin back as bytes and report them.
+    mbRunJS(v,
+      "window.__o='';navigator.storage.getDirectory().then(function(r){"
+      "return r.getDirectoryHandle('sub').then(function(d){"
+      "return d.getFileHandle('nested.bin').then(function(fh){return fh.getFile()."
+      "then(function(f){return f.arrayBuffer();});});});}).then(function(ab){"
+      "var u=new Uint8Array(ab);window.__o='bytes:'+u.join(',');})"
+      ".catch(function(e){window.__o='err:'+e.name;});");
+    o.clear();
+    for (int i = 0; i < 200 && o.rfind("bytes:", 0) != 0 && o.rfind("err", 0) != 0; ++i) {
+      mbWait(v, 25);
+      o = Eval(v, "window.__o");
+    }
+    Expect(wrote && removed && o == "bytes:0,1,2,255,65,0,200",
+           "OPFS persistence handles nested dirs + binary content (0x00/0xFF intact)",
+           "wrote=" + std::string(wrote ? "1" : "0") + " removed=" +
+               (removed ? "1" : "0") + " final=[" + o + "]");
+  }
+
   // 73d. Cross-origin Cache Storage ISOLATION: caches.open(name) is per-ORIGIN (the
   // registry was keyed by bare cache name -> cross-origin cache sharing). View A
   // (origin X) puts an entry; view B (origin Y) opening the same-named cache must

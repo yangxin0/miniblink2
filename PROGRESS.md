@@ -1266,6 +1266,13 @@ deleted from memory first). render 124->125, full battery green (mb_smoke 154, p
 shot 66, wke 114), no leaks. Persistence parity is now broad: cookies + localStorage + IDB
 (incl. Blob/File) + OPFS all save/load to disk. (Also corrected a now-stale capi comment that
 claimed IDB blob records aren't captured - they are, since last tick.)
+[HARDENED — OPFS persistence: nested dirs + binary content (2026-06)]: 73c2 only covered one
+flat text file; added mb_smoke_render 73c3 for the recursive serializer's untested paths — a
+NESTED directory (sub/nested.bin) AND BINARY content (bytes incl. 0x00 and 0xFF, which a
+text-naive format would corrupt). Write the tree, mbSaveOPFS, removeEntry('sub',{recursive})
+(confirmed gone via NotFoundError), mbLoadOPFS, read sub/nested.bin's arrayBuffer back ->
+exactly [0,1,2,255,65,0,200]. So WNode/ReadNodeInto recurse correctly and the length-prefixed
+format is byte-exact (no NUL/UTF-8 corruption). render 125->126, full battery green, no leaks.
 
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
