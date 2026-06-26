@@ -520,6 +520,35 @@ static void RunCases(mbView* v, int W, int H) {
                std::to_string(cv[ci + 1]) + " B=" + std::to_string(cv[ci]));
   }
 
+  // 41c. Web Audio PROCESSING works (OfflineAudioContext): unlike <audio>/<video>
+  // playback (which need a media pipeline + audio device), OfflineAudioContext
+  // renders to a BUFFER by pure computation — no hardware. An oscillator rendered
+  // offline must produce non-zero samples. Proves DSP/synthesis/analysis (the
+  // headless-relevant Web Audio use) works, narrowing the "media" gap to playback.
+  {
+    mbLoadHTML(v, "<body>wa</body>", "about:blank");
+    mbRunJS(v,
+      "window.__wa='';try{"
+      "var ctx=new OfflineAudioContext(1,256,44100);"
+      "var osc=ctx.createOscillator();osc.frequency.value=440;"
+      "osc.connect(ctx.destination);osc.start(0);"
+      "ctx.startRendering().then(function(buf){var d=buf.getChannelData(0);"
+      "var nz=0;for(var i=0;i<d.length;i++)if(d[i]!==0)nz++;"
+      "window.__wa='len:'+d.length+',nonzero:'+(nz>0);"
+      "}).catch(function(e){window.__wa='err:'+e.name;});"
+      "}catch(e){window.__wa='throw:'+e.name;}");
+    std::string wa;
+    for (int i = 0; i < 80; ++i) {
+      mbWait(v, 25);
+      wa = Eval(v, "window.__wa");
+      if (!wa.empty())
+        break;
+    }
+    Expect(wa == "len:256,nonzero:true",
+           "Web Audio: OfflineAudioContext renders an oscillator to a buffer (DSP works)",
+           "wa=[" + wa + "]");
+  }
+
   // 42. Drawing to a canvas via mbEvalJS (not just mbRunJS) must also be
   // crash-safe. EvalToString/EvalIsolated used to run ExecuteScript
   // synchronously, so a draw inside an eval expression hit the same

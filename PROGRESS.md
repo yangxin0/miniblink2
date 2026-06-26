@@ -872,7 +872,11 @@ NARROWER than "all GPU content blank": 2D `<canvas>` FULLY works — draw + getI
 6/41) AND it COMPOSITES into the page paint / screenshots (test 41b: a red fillRect reads back R=255,G=0,
 B=0 from mbPaintToBitmap). So canvas charts/visualizations render + screenshot correctly via the software
 Skia raster. The ACTUAL gaps are only: WebGL (getContext('webgl') returns null — no in-process GL backend;
-would need SwiftShader/ANGLE + the GPU command-buffer infra, deep) and `<video>`/`<audio>` playback (no
+would need SwiftShader/ANGLE + the GPU command-buffer infra, deep) and `<video>`/`<audio>` FILE playback
+(decode + media pipeline). [Web Audio PROCESSING works — test 41c: OfflineAudioContext renders an
+oscillator to a buffer with non-zero samples, so DSP/synthesis/analysis (the headless-relevant Web Audio
+use) is fine; only audio/video FILE playback needs the pipeline.] The original blanket note said `<audio>`
+playback (no
 media pipeline). Both are the genuinely heaviest, GPU/media-provider items. Last.
 
 **Tier 3 — input & rendering refinements:**
