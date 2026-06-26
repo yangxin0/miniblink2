@@ -641,12 +641,13 @@ MB_EXPORT int mbGetHTML(mbView*, char* out, int out_cap);
 
 // Write the ACCESSIBILITY TREE (the "accessibility snapshot") as compact JSON into
 // `out`; returns the full length in bytes (size first with out=NULL/out_cap=0). Each
-// node is {"role":..,"name":..[,"value":..][,"x":,"y":,"w":,"h":][,"children":[..]]} —
-// the semantic view of the page used by testing tools and AI/automation agents (roles +
-// accessible names, not raw DOM). The optional x/y/w/h are the node's frame-relative
-// bounds (present when non-empty); they are widget/page coordinates, so a caller can
-// click a node's center with mbSendMouseClick. Returns 0 if there is no document. No
-// compositor needed.
+// node is {"role":..,"name":..[,"value":..][,"checked":..][,"focused":true]
+// [,"x":,"y":,"w":,"h":][,"children":[..]]} — the semantic view of the page used by
+// testing tools and AI/automation agents (roles + accessible names, not raw DOM).
+// "checked" (true/false/"mixed") appears on checkboxes/radios/switches; "focused":true on
+// the focused node. The optional x/y/w/h are the node's frame-relative bounds (present
+// when non-empty); they are widget/page coordinates, so a caller can click a node's center
+// with mbSendMouseClick. Returns 0 if there is no document. No compositor needed.
 MB_EXPORT int mbGetAXTree(mbView*, char* out, int out_cap);
 
 // Write the visible text (innerText) of the first element matching `css_selector`

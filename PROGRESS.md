@@ -1137,6 +1137,17 @@ own onclick with event.isTrusted true. mb_smoke 149->150, full battery green (pl
 render 122, shot 66, wke 114), no leaks. So mbGetAXTree now yields role + accessible name +
 value + clickable bounds per node - a complete automation primitive (an agent can read the
 semantic page AND act on any node by coordinates).
+[DONE - AX snapshot carries live interactive STATE (checked + focused)]. Extended the AX
+node JSON with the control state automation needs but raw text/structure can't convey:
+"checked" (true/false/"mixed", from WebAXObject::CheckedState - checkboxes/radios/switches)
+and "focused":true (IsFocused - which node holds focus). Emitted only where meaningful (a
+checkable node / the focused node) so other nodes stay compact. The state is LIVE - read
+from the current AXObjectCache each call. Verified mb_smoke 30c: an unchecked checkbox ->
+"checked":false (no "checked":true anywhere); after JS sets .checked=true and focuses a
+text field, a FRESH snapshot -> "checked":true + "focused":true. mb_smoke 150->151, full
+battery green (platform 46, render 122, shot 66, wke 114), no leaks. This is the before/
+after signal an agent reads around an action (did the checkbox actually toggle? which field
+is focused?) - the AX snapshot is now role + name + value + bounds + live state.
 
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),

@@ -2839,6 +2839,41 @@ int main() {
                " click=" + (ax_click_ok ? "1" : "0"));
   }
 
+  // 30c (a11y). The snapshot carries interactive STATE: a checkbox reports "checked", and
+  // the state is LIVE — after toggling the checkbox via JS, a fresh snapshot flips it. The
+  // focused element reports "focused". Proves the AX snapshot reflects real control state,
+  // not just static structure (what an automation agent checks before/after acting).
+  {
+    auto ax_json = [&]() -> std::string {
+      int n = mbGetAXTree(v, nullptr, 0);
+      if (n <= 0)
+        return std::string();
+      std::vector<char> buf(static_cast<size_t>(n) + 1, 0);
+      mbGetAXTree(v, buf.data(), n + 1);
+      return std::string(buf.data());
+    };
+    mbLoadHTML(v,
+               "<body><input type='checkbox' id='c'>"
+               "<input type='text' id='t'></body>",
+               "about:blank");
+    mbWait(v, 60);
+    const std::string before = ax_json();
+    const bool unchecked_ok =
+        before.find("\"checked\":false") != std::string::npos &&
+        before.find("\"checked\":true") == std::string::npos;
+    // Toggle the checkbox + focus the text field, then re-snapshot.
+    mbRunJS(v, "document.getElementById('c').checked=true;"
+               "document.getElementById('t').focus();");
+    mbWait(v, 60);
+    const std::string after = ax_json();
+    const bool checked_ok = after.find("\"checked\":true") != std::string::npos;
+    const bool focused_ok = after.find("\"focused\":true") != std::string::npos;
+    Expect(unchecked_ok && checked_ok && focused_ok,
+           "mbGetAXTree: live control state (checkbox checked toggles, focus reported)",
+           std::string("unchecked=") + (unchecked_ok ? "1" : "0") + " checked=" +
+               (checked_ok ? "1" : "0") + " focused=" + (focused_ok ? "1" : "0"));
+  }
+
   // Network cases (31, 32) are OPT-IN via MB_NET_TESTS=1: a dead host costs ~45s
   // per load (connect-timeout x retries), which would make every default run crawl.
   // They still skip gracefully if enabled but httpbin is unreachable.

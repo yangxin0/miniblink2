@@ -1148,6 +1148,24 @@ void SerializeAXNode(const blink::WebAXObject& obj, std::string* out) {
     AppendJsonEscaped(value, out);
     *out += '"';
   }
+  // Interactive STATE that automation needs but raw text can't convey: a checkbox/radio's
+  // checked state, and which node holds focus. Emitted only when meaningful (a checkable
+  // node / the focused node), so non-control nodes stay compact.
+  switch (obj.CheckedState()) {
+    case ax::mojom::CheckedState::kTrue:
+      *out += ",\"checked\":true";
+      break;
+    case ax::mojom::CheckedState::kFalse:
+      *out += ",\"checked\":false";
+      break;
+    case ax::mojom::CheckedState::kMixed:
+      *out += ",\"checked\":\"mixed\"";
+      break;
+    case ax::mojom::CheckedState::kNone:
+      break;  // not a checkable control — omit
+  }
+  if (obj.IsFocused())
+    *out += ",\"focused\":true";
   // Frame-relative bounds (x,y,w,h), emitted only when the node has a non-empty box.
   // These are widget/page coordinates for the main frame, so an automation caller can
   // click a node's center via mbSendMouseClick — turning the snapshot into actions.
