@@ -389,11 +389,17 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
   }
 };
 
+// True when a geolocation fix is configured (mbSetGeolocation). Defined with the geo
+// helpers below; forward-declared so PermissionService can keep its geolocation
+// permission consistent with GeolocationService (which grants only when set).
+bool GeoConfigured();
+
 // Minimal in-process PermissionService. With no browser, navigator.permissions.query()
 // otherwise never resolves (the request is dropped) and a page awaiting it HANGS. Answer
-// every query DENIED — the headless reality (no permission is granted; geolocation etc.
-// already error out), so a permission-gated page takes its no-permission path instead of
-// stalling. Requests/observers are no-ops. Bound on the broker's thread (async; no [Sync]).
+// every query DENIED — the headless reality — EXCEPT the handful we actually service
+// (clipboard, notifications, screen wake lock, and geolocation once a fix is set), so a
+// page's permissions.query() agrees with what the corresponding API does. Requests/
+// observers are no-ops. Bound on the broker's thread (async; no [Sync]).
 class MbPermissionService : public blink::mojom::blink::PermissionService {
  public:
   void HasPermission(blink::mojom::blink::PermissionDescriptorPtr permission,
@@ -453,7 +459,9 @@ class MbPermissionService : public blink::mojom::blink::PermissionService {
         d && (d->name == blink::mojom::blink::PermissionName::CLIPBOARD_READ ||
               d->name == blink::mojom::blink::PermissionName::CLIPBOARD_WRITE ||
               d->name == blink::mojom::blink::PermissionName::NOTIFICATIONS ||
-              d->name == blink::mojom::blink::PermissionName::SCREEN_WAKE_LOCK);
+              d->name == blink::mojom::blink::PermissionName::SCREEN_WAKE_LOCK ||
+              (d->name == blink::mojom::blink::PermissionName::GEOLOCATION &&
+               GeoConfigured()));
     return blink::mojom::blink::PermissionStatusWithDetails::New(
         grant ? blink::mojom::blink::PermissionStatus::GRANTED
               : blink::mojom::blink::PermissionStatus::DENIED,
@@ -1150,6 +1158,10 @@ bool GeoGet(MbGeoFix* out) {
   base::AutoLock al(GeoLock());
   *out = GeoFix();
   return out->set;
+}
+bool GeoConfigured() {
+  MbGeoFix fix;
+  return GeoGet(&fix);
 }
 
 // device.mojom.Geolocation: hands back the configured fix on every position query.

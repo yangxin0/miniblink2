@@ -1053,6 +1053,27 @@ int main() {
            "default=[" + deflt + "] got=[" + got + "]");
   }
 
+  // 23d2. permissions.query({name:'geolocation'}) tracks the configured fix — GRANTED once
+  // mbSetGeolocation sets one, DENIED after mbClearGeolocation — so a page that gates
+  // getCurrentPosition on the permission state agrees with what getCurrentPosition actually does
+  // (it used to always report 'denied' even with a fix set).
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://geoperm.test/");
+    mbSetGeolocation(1.0, 2.0, 3.0);
+    Eval(v, "navigator.permissions.query({name:'geolocation'})"
+            ".then(function(s){window.__gp=s.state;});");
+    mbWaitForFunction(v, "window.__gp!==undefined", 2000);
+    const std::string granted = Eval(v, "window.__gp");
+    mbClearGeolocation();
+    Eval(v, "navigator.permissions.query({name:'geolocation'})"
+            ".then(function(s){window.__gp2=s.state;});");
+    mbWaitForFunction(v, "window.__gp2!==undefined", 2000);
+    const std::string denied = Eval(v, "window.__gp2");
+    Expect(granted == "granted" && denied == "denied",
+           "permissions.query(geolocation) tracks mbSetGeolocation (granted/denied)",
+           "gp=[" + granted + "|" + denied + "]");
+  }
+
   // 23e. Clipboard (broker #8): navigator.clipboard read/write works against the
   // in-process clipboard (permission granted), and the host shares it via mbGet/Set-
   // Clipboard — a page's writeText is readable by the host; the host's set is readable

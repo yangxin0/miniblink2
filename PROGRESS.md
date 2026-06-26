@@ -374,7 +374,14 @@ only [+ Permissions, this tick]. [DONE: Permissions] `MbPermissionService` in th
 broker (mb_frame_broker.cc — the one navigator.* uses, not the platform thread broker)
 answers navigator.permissions.query/.request as DENIED, so the promise resolves instead
 of HANGING (it was dropped → a permission-gated page stalled forever). Verified (mb_smoke
-23c): query({name:'geolocation'}) → state "denied". [DONE: geolocation] `mbSetGeolocation(lat, lng, accuracy)` / `mbClearGeolocation()` + an
+23c): query({name:'geolocation'}) → state "denied". (Clipboard/Notifications/ScreenWakeLock are
+GRANTED — the APIs we service; geolocation is GRANTED once a fix is configured — see next.) [FIX:
+permissions.query(geolocation) consistency] StatusFor returned DENIED for geolocation unconditionally,
+even after mbSetGeolocation made getCurrentPosition succeed — so a page gating geolocation on the
+permission state would wrongly skip it. StatusFor now grants GEOLOCATION when a fix is configured
+(GeoConfigured(), forward-declared so the earlier PermissionService can consult the later geo helpers),
+matching GeolocationService. Verified mb_smoke 23d2 (granted with a fix, denied after mbClearGeolocation).
+[DONE: geolocation] `mbSetGeolocation(lat, lng, accuracy)` / `mbClearGeolocation()` + an
 in-process `MbGeolocationService`/`MbGeolocation` in the frame broker: once a fix is set,
 `navigator.geolocation.getCurrentPosition` resolves to it (the service GRANTS); unset = the
 default PERMISSION_DENIED. Thread-safe (base::Lock; broker on the service thread, API on
