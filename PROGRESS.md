@@ -521,7 +521,17 @@ vs a PUBLIC echo server (mb_smoke 23k2, MB_NET_TESTS): `wss://echo.websocket.org
 net, no leaked threads/processes. Offline 23k (`.test` loopback) unchanged: 138/46/92/66, wke 114.
 (Note: echo.websocket.events failed a TLS handshake with OpenSSL 3.6 — server-specific; echo.websocket.org
 + plain HTTPS work fine.) Follow-ups: real subprotocol/headers in the handshake response (currently a
-synthesized 101); bundle openssl@3 dylibs for portability.
+synthesized 101).
+[DONE: vendored curl is fully self-contained] The vendored libcurl pulled its OpenSSL/nghttp2/idn2 etc.
+from Homebrew at runtime (absolute /opt/homebrew paths), so the build needed brew installed. Now the
+ENTIRE non-system dependency closure is bundled into `third_party/curl/lib/` with `@loader_path`
+references: libssl + libcrypto + libnghttp2 + libidn2 + libunistring + libintl, each re-id'd to
+@loader_path/<name>, their cross-refs rewritten, and ad-hoc re-signed (install_name_tool invalidates
+signatures -> dyld would reject them on arm64). `otool -L` shows ZERO /opt/homebrew refs; the project
+runs with no Homebrew present. tools/build-curl-macos.sh now does this automatically (a recursive
+bundle_deps walk + re-sign). Verified: offline mb_smoke 140, and net 156/0 — real-TLS HTTPS (httpbin)
++ real WebSocket (echo.websocket.org) both work through the bundled OpenSSL, no leaks. (~9 MB of dylibs
+vendored; HTTP/2 + IDN retained, unlike a leaner --without-nghttp2/libidn2 rebuild.)
 [PARTIAL: EventSource / Server-Sent Events] `new EventSource(url)` IS wired through our loader and PARSES
 a `text/event-stream` body into `message` events — verified offline (mb_smoke 23k3: a mocked
 `data: ev1\n\ndata: ev2\n\n` -> two onmessage with .data=ev1/ev2, no error). So the common SSE shape

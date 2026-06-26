@@ -52,6 +52,29 @@ cp -R "$WORK/install/include/curl" "$VEND/include/"
 install_name_tool -id "$VEND/lib/libcurl.4.dylib" "$VEND/lib/libcurl.4.dylib"
 ln -sf libcurl.4.dylib "$VEND/lib/libcurl.dylib"
 
+# Bundle curl's non-system (Homebrew) dependency CLOSURE into the vendor lib dir
+# with @loader_path references, so the dylib is fully SELF-CONTAINED at runtime
+# (no Homebrew needed — the project is standalone). Walks deps recursively.
+echo "==> bundling dependency closure (@loader_path)"
+bundle_deps() {
+  local f="$1"
+  for ref in $(otool -L "$f" | grep -oE '/opt/homebrew[^ ]*\.dylib'); do
+    local base; base="$(basename "$ref")"
+    if [ ! -f "$VEND/lib/$base" ]; then
+      cp "$ref" "$VEND/lib/$base"; chmod u+w "$VEND/lib/$base"
+      install_name_tool -id "@loader_path/$base" "$VEND/lib/$base"
+      bundle_deps "$VEND/lib/$base"   # recurse into the newly copied dep
+    fi
+    install_name_tool -change "$ref" "@loader_path/$base" "$f"
+  done
+}
+( cd "$VEND/lib" && bundle_deps libcurl.4.dylib )
+# install_name_tool invalidates signatures -> ad-hoc re-sign every dylib.
+for f in "$VEND"/lib/*.dylib; do codesign -f -s - "$f" 2>/dev/null || true; done
+if otool -L "$VEND"/lib/*.dylib | grep -q /opt/homebrew; then
+  echo "WARNING: residual Homebrew deps remain" >&2
+fi
+
 echo "==> done. WS check:"
 nm -gU "$VEND/lib/libcurl.4.dylib" | grep -E "_curl_ws_(send|recv)" || { echo "WS symbols MISSING" >&2; exit 1; }
 rm -rf "$WORK"
