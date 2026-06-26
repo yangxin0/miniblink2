@@ -1,0 +1,32 @@
+Make a WebGL canvas paint INLINE (not composited) so its output reaches the software
+page paint / screenshots in this compositor-less embedder.
+
+WebGLRenderingContextBase::IsComposited() is hardcoded true, so blink gives the canvas
+a cc::Layer that only the compositor draws. miniblink-modern is single-process with a
+non-compositing software paint (mbPaintToBitmap), which skips composited layers -> a
+WebGL canvas renders to its drawing buffer (gl.readPixels works) but is BLANK in
+screenshots. Returning false routes the canvas through HTMLCanvasElement::PaintInternal
+-> PaintRenderingResultsToSnapshot(kFrontBuffer), which reads the GPU drawing buffer
+back to a CPU bitmap and draws it inline -> WebGL composites into the page paint. This
+is the correct behavior for headless capture; the CHECK(context_->IsComposited()) paths
+are all gated on IsRenderingContext2D(), so WebGL is unaffected by them.
+
+diff --git a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h
+index 6fa192f..14a7a1a 100644
+--- a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h
++++ b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h
+@@ -709,7 +709,13 @@ class MODULES_EXPORT WebGLRenderingContextBase
+       SourceDrawingBuffer);
+ 
+   // CanvasRenderingContext implementation.
+-  bool IsComposited() const override { return true; }
++  // miniblink-modern: a WebGL canvas is normally composited (a cc_layer the
++  // compositor draws). This embedder has NO compositor (single-process software
++  // paint), so a composited canvas is skipped at paint time and screenshots show it
++  // blank. Returning false routes the canvas through inline snapshot painting
++  // (PaintRenderingResultsToSnapshot reads the GPU drawing buffer back to a bitmap),
++  // so WebGL output composites into mbPaintToBitmap. Correct for headless capture.
++  bool IsComposited() const override { return false; }
+   void PageVisibilityChanged() override;
+   void SizeChanged() override;
+   scoped_refptr<StaticBitmapImage> PaintRenderingResultsToSnapshot(

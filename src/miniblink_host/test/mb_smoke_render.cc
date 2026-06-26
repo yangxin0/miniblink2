@@ -582,6 +582,35 @@ static void RunCases(mbView* v, int W, int H) {
            "w2=[" + w2 + "] ver=[" + ver + "]");
   }
 
+  // 41z3. A WebGL canvas COMPOSITES into the page paint (screenshot): a headless
+  // renderer's WebGL output must reach mbPaintToBitmap, not just gl.readPixels — else
+  // screenshots of WebGL visualizations are blank. Clear a visible WebGL canvas to
+  // magenta, render the page, and read the canvas region from the page bitmap (the
+  // 41b proof, for WebGL). The GPU drawing buffer must be read back + rasterized into
+  // the software page paint.
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0;background:#fff'>"
+      "<canvas id='gp' width='80' height='80'></canvas>"
+      "<script>window.__gp='';try{"
+      "var gl=document.getElementById('gp').getContext('webgl');"
+      "gl.clearColor(1,0,1,1);gl.clear(gl.COLOR_BUFFER_BIT);gl.finish();"
+      "window.__gp='ok';}catch(e){window.__gp='err:'+e;}</script></body>",
+      "about:blank");
+    // Let the WebGL draw + canvas compositing settle before capturing.
+    for (int i = 0; i < 40; ++i)
+      mbWait(v, 25);
+    std::vector<uint8_t> cv(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, cv.data(), W, H, W * 4);
+    size_t ci = (40u * W + 40u) * 4;  // inside the 80x80 canvas box
+    // magenta = R255 G0 B255 (BGRA byte order: [0]=B, [1]=G, [2]=R).
+    const bool magenta = cv[ci + 2] == 255 && cv[ci + 1] == 0 && cv[ci] == 255;
+    Expect(magenta,
+           "a WebGL canvas composites into the page paint (screenshot capture)",
+           "R=" + std::to_string(cv[ci + 2]) + " G=" + std::to_string(cv[ci + 1]) +
+               " B=" + std::to_string(cv[ci]) + " gp=[" + Eval(v, "window.__gp") + "]");
+  }
+
   // 41b. A 2D canvas COMPOSITES into the page paint (not just its in-memory backing
   // store): draw a red square, render the page, and read the canvas region from the
   // page bitmap. Proves canvas-drawn content rasterizes into the rendered output —

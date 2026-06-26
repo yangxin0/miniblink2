@@ -1074,10 +1074,22 @@ blink's WebGLContextType (kWebGL2ContextType -> CONTEXT_TYPE_OPENGLES3, else ES2
 MakeWebGLContextProvider(want_webgl2) requests it. WebGL 1 keeps the proven ES2 path
 unchanged. Verified mb_smoke_render 41z2: getContext('webgl2') clear(blue)+readPixels ->
 [0,0,255,255], GL_VERSION "WebGL 2.0 (OpenGL ES 3.0 Chromium)" (render 103->104). Full
-battery green (mb_smoke 145, platform 46, shot 66, wke 114), no leaks. Possible follow-ons:
-accelerated 2D-canvas compositing into page paint (the provider's null raster/image-decode
-hooks would need filling); WebGL canvas compositing into mbPaintToBitmap screenshots
-(WebGL draws to its own buffer; whether it reaches the page paint is untested).
+battery green (mb_smoke 145, platform 46, shot 66, wke 114), no leaks.
+[DONE — WEBGL COMPOSITES INTO SCREENSHOTS]. A WebGL canvas now appears in mbPaintToBitmap
+(headless capture), not just gl.readPixels. ROOT CAUSE: WebGLRenderingContextBase::
+IsComposited() is hardcoded true, so blink gives the canvas a cc::Layer only the compositor
+draws; our single-process software paint (no compositor) SKIPS composited layers -> the
+WebGL canvas rendered fine to its drawing buffer (readPixels worked) but was BLANK in
+screenshots (test showed the white page background). FIX: patches/0008-webgl-canvas-paint-
+inline.patch makes IsComposited() return false, routing the canvas through
+HTMLCanvasElement::PaintInternal -> PaintRenderingResultsToSnapshot(kFrontBuffer), which
+reads the GPU drawing buffer back to a CPU bitmap and draws it inline (the same path a 2D
+canvas uses — which is why 41b worked but WebGL didn't). The CHECK(context_->IsComposited())
+sites are all gated on IsRenderingContext2D(), so WebGL is safe. Verified mb_smoke_render
+41z3: a WebGL canvas cleared to magenta reads back R255 G0 B255 from the PAGE bitmap (render
+104->105). WebGL 1+2 readPixels unaffected. Full battery green (mb_smoke 145, platform 46,
+shot 66, wke 114), no leaks. So mb_shot can now screenshot WebGL visualizations. WebGL is
+COMPLETE for headless use: WebGL 1 + WebGL 2 + readPixels + screenshot capture.
 13. [DONE] PDF options. `mbSavePdfEx(path, width_pt, height_pt, landscape, scale, margin_pt)`
 (mbSavePdf kept = Letter default) + `mb_shot --pdf-size letter|a4|legal|a3|tabloid|WxH
 --landscape --pdf-scale N --pdf-margin PT`. Page size in points; landscape swaps w/h; content
