@@ -510,13 +510,9 @@ static void RunCases(mbView* v, int W, int H) {
              Eval(v, "String(window.__ws)") == "msg:ping-render",
          "WebSocket connects + echoes (onopen/onmessage); host scriptable");
 
-  // 41. Canvas 2D full round-trip + WebGL graceful-null. Canvas is core for a
-  // renderer and the backbone of chart/image libraries, so verify the complete
-  // path works offline: get a 2D context, draw, read pixels back via
-  // getImageData (exact color), and encode via toDataURL. Separately, WebGL has
-  // no GPU backend here, so getContext('webgl') must return null (clean
-  // feature-detection), not crash. Both are common; this locks in that 2D works
-  // and WebGL degrades.
+  // 41. Canvas 2D full round-trip. Canvas is core for a renderer and the backbone of
+  // chart/image libraries, so verify the complete path works offline: get a 2D context,
+  // draw, read pixels back via getImageData (exact color), and encode via toDataURL.
   mbLoadHTML(v, "<body><canvas id='c' width='20' height='20'></canvas></body>",
              "about:blank");
   mbRunJS(v,
@@ -524,12 +520,38 @@ static void RunCases(mbView* v, int W, int H) {
     "x.fillStyle='#ff0000';x.fillRect(0,0,20,20);"
     "var d=x.getImageData(10,10,1,1).data;"
     "window.__rgba=d[0]+','+d[1]+','+d[2]+','+d[3];"
-    "window.__png=cv.toDataURL().indexOf('data:image/png')===0;"
-    "window.__gl=(document.createElement('canvas').getContext('webgl')===null);");
+    "window.__png=cv.toDataURL().indexOf('data:image/png')===0;");
   Expect(Eval(v, "window.__rgba") == "255,0,0,255" &&
-             Eval(v, "String(window.__png)") == "true" &&
-             Eval(v, "String(window.__gl)") == "true",
-         "Canvas 2D round-trip (draw/getImageData/toDataURL); WebGL null");
+             Eval(v, "String(window.__png)") == "true",
+         "Canvas 2D round-trip (draw/getImageData/toDataURL)");
+
+  // 41z. WebGL RENDERS (bring-up milestone C): getContext('webgl') returns a real
+  // context backed by our in-process ANGLE/SwiftShader GLES2 command buffer
+  // (platform/mb_webgl.cc), and a clear + readPixels round-trips the cleared color.
+  // Proves WebGL works headlessly (no GPU) — previously getContext('webgl') was null.
+  mbLoadHTML(v, "<body><canvas id='g' width='32' height='32'></canvas></body>",
+             "about:blank");
+  mbRunJS(v,
+    "window.__wg='';try{"
+    "var gl=document.getElementById('g').getContext('webgl');"
+    "if(!gl){window.__wg='null';}else{"
+    "gl.clearColor(0,1,0,1);gl.clear(gl.COLOR_BUFFER_BIT);"
+    "var p=new Uint8Array(4);gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);"
+    "window.__wg=p[0]+','+p[1]+','+p[2]+','+p[3];"
+    "window.__wgver=''+gl.getParameter(gl.VERSION);}}"
+    "catch(e){window.__wg='err:'+e;}");
+  {
+    std::string wg;
+    for (int i = 0; i < 200; ++i) {
+      mbWait(v, 25);
+      wg = Eval(v, "window.__wg");
+      if (!wg.empty())
+        break;
+    }
+    Expect(wg == "0,255,0,255",
+           "WebGL renders: getContext('webgl') + clear + readPixels (in-process ANGLE/SwiftShader)",
+           "wg=[" + wg + "] ver=[" + Eval(v, "window.__wgver") + "]");
+  }
 
   // 41b. A 2D canvas COMPOSITES into the page paint (not just its in-memory backing
   // store): draw a red square, render the page, and read the canvas region from the

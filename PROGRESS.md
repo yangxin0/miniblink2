@@ -1040,12 +1040,33 @@ THREE non-obvious requirements found + encoded (each was a fatal until fixed):
 Client side needs a base::SingleThreadTaskExecutor + base::ThreadPoolInstance. Verified
 (mb_gpu_probe exit 0, wired into build.sh after mb_gl_probe); battery unaffected (mb_smoke
 145, platform 46, render 102, shot 66, wke 114), both probes leak-free.
-NEXT: milestone C — override MbPlatform::CreateWebGLGraphicsContextProvider to return a
-blink::WebGraphicsContext3DProvider wrapping this in-process context (the
-WebGraphicsContext3DProviderWrapper around a viz::ContextProviderCommandBuffer, or a
-direct provider over GLInProcessContext's GLES2Interface + GrDirectContext), then a
-getContext('webgl') smoke test. The two hard unknowns (in-process GL + command buffer)
-are now both proven to work in this tree.
+[DONE — milestone C: WEBGL WORKS END-TO-END]. getContext('webgl') now returns a real,
+rendering context in the actual blink process. Verified mb_smoke_render 41z: a WebGL
+canvas clearColor(green)+clear+readPixels(0,0,1,1) -> [0,255,0,255], and
+gl.getParameter(gl.VERSION) -> "WebGL 1.0 (OpenGL ES 2.0 Chromium)". render 102->103, full
+battery green (mb_smoke 145, platform 46, shot 66, wke 114), no leaks, no exit hang.
+PIECES:
+ - patches/0006-gpu-in-process-not-testonly.patch — drops `testonly = true` from
+   gpu/ipc:gl_in_process_context + :gpu_thread_holder so the (non-testonly) miniblink_host
+   library can link them (all their deps are non-testonly; sound adaptation).
+ - platform/mb_webgl.{h,cc} — MakeWebGLContextProvider() builds an MbWebGLContextProvider
+   (a blink::WebGraphicsContext3DProvider) wrapping a gpu::GLInProcessContext. The
+   GLES2Implementation IS the GLES2Interface (ContextGL) + ContextSupport + InterfaceBase;
+   capabilities/feature-info/shared-image come from the context; raster/webgpu/image-decode/
+   raster-context hooks return null (unused by the WebGL path). A PROCESS-WIDE
+   InProcessGpuThreadHolder is created LAZILY on first WebGL request (the milestone-B
+   recipe: main-thread InitializeGLOneOff sets the ANGLE global, passthrough decoder,
+   gr_context_type=kGL) — so non-WebGL pages pay nothing and the software 2D-canvas path is
+   untouched.
+ - MbPlatform::CreateWebGLGraphicsContextProvider override returns it (null on GPU-init
+   failure -> getContext returns null, graceful).
+ - library BUILD.gn gains the GPU deps; mb_smoke_render 41 split (2D round-trip) + new 41z
+   (WebGL renders).
+NOTE: the in-process GPU singleton is intentionally never torn down (a process-lifetime
+GPU thread); the test processes still exit cleanly (exit 0, no leak). WebGL 2 / accelerated
+2D-canvas compositing into page paint are possible follow-ons (the provider's null raster/
+image-decode hooks would need filling for accelerated 2D), but WebGL 1 — the headline gap —
+is DONE. This GPU foundation also unblocks device emulation + accelerated video later.
 13. [DONE] PDF options. `mbSavePdfEx(path, width_pt, height_pt, landscape, scale, margin_pt)`
 (mbSavePdf kept = Letter default) + `mb_shot --pdf-size letter|a4|legal|a3|tabloid|WxH
 --landscape --pdf-scale N --pdf-margin PT`. Page size in points; landscape swaps w/h; content

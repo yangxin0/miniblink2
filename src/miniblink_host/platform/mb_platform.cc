@@ -22,12 +22,14 @@
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "miniblink_host/blob/mb_blob_registry.h"
 #include "miniblink_host/frame/mb_dom_storage.h"
+#include "miniblink_host/platform/mb_webgl.h"
 #include "miniblink_host/worker/mb_dedicated_worker_host.h"
 #include "third_party/blink/public/mojom/blob/blob_registry.mojom-blink.h"
 #include "third_party/blink/public/mojom/dom_storage/dom_storage.mojom-blink.h"
 #include "third_party/blink/public/mojom/mime/mime_registry.mojom-blink.h"
 #include "third_party/blink/public/platform/web_data.h"
 #include "third_party/blink/public/platform/web_dedicated_worker_host_factory_client.h"
+#include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
 #include "third_party/blink/public/platform/web_worker_fetch_context.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -172,6 +174,19 @@ std::string MbPlatform::GetDataResourceString(int resource_id) {
     return {};
   return ui::ResourceBundle::GetSharedInstance().LoadDataResourceString(
       resource_id);
+}
+
+std::unique_ptr<blink::WebGraphicsContext3DProvider>
+MbPlatform::CreateWebGLGraphicsContextProvider(
+    bool /*prefer_low_power_gpu*/,
+    bool /*fail_if_major_performance_caveat*/,
+    blink::Platform::WebGLContextType /*context_type*/,
+    const blink::WebURL& /*document_url*/,
+    blink::Platform::WebGLContextInfo* /*gl_info*/) {
+  // In-process ANGLE/SwiftShader GLES2 command buffer (platform/mb_webgl.cc). Null on
+  // GPU-init failure -> blink reports context-creation failure (getContext returns null),
+  // same as before this override existed, so it degrades gracefully.
+  return MakeWebGLContextProvider();
 }
 
 }  // namespace mb

@@ -61,6 +61,8 @@ component("miniblink_host") {
     "loader/mb_url_loader.h",
     "platform/mb_platform.cc",
     "platform/mb_platform.h",
+    "platform/mb_webgl.cc",
+    "platform/mb_webgl.h",
     "runtime/mb_runtime.cc",
     "runtime/mb_runtime.h",
     "view/mb_webview.cc",
@@ -93,6 +95,16 @@ component("miniblink_host") {
     "//components/webcrypto",  # WebCrypto impl for Platform::Crypto() (SubtleCrypto)
     "//media",  # media::AudioRendererSink / OutputDeviceStatus for CreateAudioDevice
     "//cc/paint",
+    # In-process WebGL (platform/mb_webgl.cc): ANGLE/SwiftShader GLES2 over an
+    # in-process GPU command buffer. The two in-process targets are de-testonly'd by
+    # patches/0006 so this (non-testonly) library can link them.
+    "//gpu/command_buffer/client:gles2_implementation",
+    "//gpu/command_buffer/common",
+    "//gpu/config",
+    "//gpu/ipc:gl_in_process_context",
+    "//gpu/ipc:gpu_thread_holder",
+    "//ui/gl",
+    "//ui/gl/init",
     "//gin",
     "//mojo/core/embedder",
     "//mojo/public/cpp/bindings",

@@ -71,6 +71,19 @@ class MbPlatform : public blink::Platform {
       blink::WebDedicatedWorker*,
       const blink::BrowserInterfaceBrokerProxy&) override;
 
+  // WebGL: base Platform::CreateWebGLGraphicsContextProvider returns nullptr, so
+  // getContext('webgl') is null. Return an in-process provider backed by an ANGLE/
+  // SwiftShader GLES2 command buffer (see platform/mb_webgl.cc) so WebGL works
+  // headlessly. The GPU thread is spun lazily on first use; non-WebGL pages pay
+  // nothing and the software 2D-canvas path is untouched.
+  std::unique_ptr<blink::WebGraphicsContext3DProvider>
+  CreateWebGLGraphicsContextProvider(
+      bool prefer_low_power_gpu,
+      bool fail_if_major_performance_caveat,
+      blink::Platform::WebGLContextType context_type,
+      const blink::WebURL& document_url,
+      blink::Platform::WebGLContextInfo* gl_info) override;
+
   // Resource bundle: Blink asks for built-in resources (UA stylesheet, etc.).
   // P1: back with a real bundle / packed file. TODO(mb): wire resource pak.
   blink::WebData GetDataResource(
