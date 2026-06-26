@@ -412,7 +412,17 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      Connect either starts a new instance or `AddClient`s to the existing one (a fresh connect event
      + MessagePort to the same `onconnect`); it self-deregisters on `WorkerContextDestroyed`. Verified
      (mb_smoke_render 37h=88): two handles to one url share a worker-global counter (replies 1 then 2).
-     Not yet: module shared workers (untested), worker eviction when the last client disconnects.
+   - [DONE] **module SharedWorkers + http(s)-loaded workers VERIFIED**: both were untested; both work.
+     mb_smoke_render 37i (`new SharedWorker(data:,{type:'module'})` runs its module script -> 5+100=105 —
+     the shared script-param's Content-Type header satisfies the module MIME check on the shared path too)
+     and 37j (`new Worker('https://workerhost.test/w.js')`, script MOCKED so it's offline, runs -> 4*3=12).
+   - [DONE] **SharedWorker eviction**: a SharedWorker now terminates when its LAST client disconnects (its
+     spec lifetime), so a later `new SharedWorker(sameUrl)` starts a FRESH instance instead of leaking the
+     old one forever. `clients_` is a `mojo::RemoteSet`; its disconnect handler (`OnClientGone`) calls
+     `WebSharedWorker::TerminateWorkerContext()` when the set empties -> WorkerContextDestroyed -> deregister
+     + delete. Verified mb_smoke_render 37k (stable x3): session 1 opens the worker (counter -> 1), navigate
+     away (only client drops -> evict), session 2 same url -> counter resets to 1 (vs 2 if it had persisted,
+     per the in-page sharing test 37h). render 92->95, no leaks.
    - [SUPERSEDED] (prior SharedWorker scoping) `new SharedWorker(url)` →
      `SharedWorkerClientHolder::Connect` → `mojom::SharedWorkerConnector.Connect` requested from the
      FRAME broker (mb_frame_broker.cc — bind it there). Implement `SharedWorkerConnector::Connect(info,

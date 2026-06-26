@@ -253,6 +253,103 @@ static void RunCases(mbView* v, int W, int H) {
            "a=[" + Eval(v, "window.__a") + "] b=[" + b + "]");
   }
 
+  // 37i. MODULE SharedWorker: new SharedWorker(url,{type:'module'}) runs its
+  // top-level module script. Module workers MIME-check the script (HttpContentType),
+  // which the shared script-param builder sets — this verifies that holds for the
+  // SHARED path too (module dedicated workers needed the same fix in 37d). onconnect
+  // in module scope is self.onconnect; echo e.data+100 -> 5 becomes 105.
+  mbLoadHTML(v, "<body>module-shared-worker</body>", "https://shared.test/");
+  mbRunJS(v,
+    "window.__msreply='';"
+    "var __mw=new SharedWorker('data:text/javascript,'+encodeURIComponent("
+    "'self.onconnect=function(e){var p=e.ports[0];p.onmessage=function(ev){p.postMessage(ev.data+100)};p.start&&p.start();}'"
+    "),{type:'module'});"
+    "__mw.port.onmessage=function(ev){window.__msreply=String(ev.data)};"
+    "__mw.port.start&&__mw.port.start();__mw.port.postMessage(5);");
+  {
+    std::string r;
+    for (int i = 0; i < 120; ++i) {
+      mbWait(v, 25);
+      r = Eval(v, "window.__msreply");
+      if (!r.empty())
+        break;
+    }
+    Expect(r == "105",
+           "a MODULE SharedWorker runs its module script and round-trips",
+           "reply=[" + r + "]");
+  }
+
+  // 37j. A dedicated Worker loads its script over HTTP(S) (not just data:/blob:):
+  // new Worker('https://host/w.js') fetches the script through MbFetchUrl (here a
+  // MOCK, so it's offline) and runs it. Proves the worker fetch path handles real
+  // http(s) script URLs, the common case for a deployed site's worker.
+  mbMockResponse("workerhost.test/w.js",
+                 "onmessage=function(e){postMessage(e.data*3)}",
+                 "application/javascript", 200);
+  mbLoadHTML(v, "<body>http-worker</body>", "https://workerhost.test/");
+  mbRunJS(v,
+    "window.__hwreply='';"
+    "var __hw=new Worker('https://workerhost.test/w.js');"
+    "__hw.onmessage=function(e){window.__hwreply=String(e.data)};"
+    "__hw.postMessage(4);");
+  {
+    std::string r;
+    for (int i = 0; i < 120; ++i) {
+      mbWait(v, 25);
+      r = Eval(v, "window.__hwreply");
+      if (!r.empty())
+        break;
+    }
+    Expect(r == "12",
+           "a dedicated Worker loads its script over http(s) and runs (mocked)",
+           "reply=[" + r + "]");
+    mbClearMocks();
+  }
+
+  // 37k. SharedWorker EVICTION: a SharedWorker lives only while a client is
+  // connected. When the last page disconnects (navigates away), the worker is
+  // terminated, so a later new SharedWorker(sameUrl) starts FRESH — its instance
+  // counter resets to 1. Without eviction the old instance persists and replies 2
+  // (as the in-page sharing test 37h shows). The worker script is identical across
+  // both sessions, so the registry key matches: only eviction makes session 2 fresh.
+  {
+    const std::string mk =
+        "var __u='data:text/javascript,'+encodeURIComponent('var n=0;"
+        "onconnect=function(e){var p=e.ports[0];p.onmessage=function(){"
+        "p.postMessage(++n)};p.start&&p.start();}');";
+    mbLoadHTML(v, "<body>evict-1</body>", "https://evict.test/");
+    mbRunJS(v, (std::string("window.__r1='';") + mk +
+                "var w=new SharedWorker(__u);"
+                "w.port.onmessage=function(ev){window.__r1=String(ev.data)};"
+                "w.port.start&&w.port.start();w.port.postMessage(0);")
+                   .c_str());
+    std::string r1;
+    for (int i = 0; i < 120; ++i) {
+      mbWait(v, 25);
+      r1 = Eval(v, "window.__r1");
+      if (!r1.empty())
+        break;
+    }
+    // Navigate away (same origin): the only client disconnects -> worker evicts.
+    mbLoadHTML(v, "<body>evict-2</body>", "https://evict.test/");
+    mbWait(v, 500);  // let disconnect + TerminateWorkerContext + deregister settle
+    mbRunJS(v, (std::string("window.__r2='';") + mk +
+                "var w2=new SharedWorker(__u);"
+                "w2.port.onmessage=function(ev){window.__r2=String(ev.data)};"
+                "w2.port.start&&w2.port.start();w2.port.postMessage(0);")
+                   .c_str());
+    std::string r2;
+    for (int i = 0; i < 120; ++i) {
+      mbWait(v, 25);
+      r2 = Eval(v, "window.__r2");
+      if (!r2.empty())
+        break;
+    }
+    Expect(r1 == "1" && r2 == "1",
+           "a SharedWorker is evicted when its last client disconnects (counter resets)",
+           "r1=[" + r1 + "] r2=[" + r2 + "]");
+  }
+
   // 38. ServiceWorker spawn must be crash-safe. (SharedWorker now runs — see 37g.)
   // navigator.serviceWorker.register() either rejects cleanly or, on a
   // real origin where we have no provider, is null-guarded (pending promise,

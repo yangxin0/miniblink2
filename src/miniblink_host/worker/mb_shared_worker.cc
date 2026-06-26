@@ -13,6 +13,7 @@
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "mojo/public/cpp/bindings/remote_set.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "third_party/blink/public/common/messaging/message_port_descriptor.h"
@@ -163,7 +164,20 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
     c->OnCreated(ctx_type);
     worker_->Connect(next_connection_id_++, std::move(message_port));
     c->OnConnected({});
-    clients_.push_back(std::move(c));  // keep the page client alive
+    // Track the client so we can EVICT the worker when the last one disconnects
+    // (a page navigating away / closing drops its client) — the spec lifetime of
+    // a SharedWorker. RemoteSet removes the entry + calls OnClientGone on drop.
+    clients_.set_disconnect_handler(base::BindRepeating(
+        &MbSharedWorkerInstance::OnClientGone, base::Unretained(this)));
+    clients_.Add(std::move(c));  // keep the page client alive
+  }
+
+  // A page client disconnected (already removed from the set). If it was the
+  // last, terminate the worker context -> WorkerContextDestroyed -> deregister +
+  // delete, so a later new SharedWorker(sameUrl) starts a FRESH instance.
+  void OnClientGone(mojo::RemoteSetElementId /*id*/) {
+    if (clients_.empty() && worker_)
+      worker_->TerminateWorkerContext();
   }
 
   // blink::WebSharedWorkerClient:
@@ -176,7 +190,7 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
   std::string key_;
   MbSwPolicyContainerHost policy_host_;  // must outlive the worker (bound remote)
   std::unique_ptr<blink::WebSharedWorker> worker_;
-  std::vector<mojo::Remote<blink::mojom::blink::SharedWorkerClient>> clients_;
+  mojo::RemoteSet<blink::mojom::blink::SharedWorkerClient> clients_;
   int next_connection_id_ = 0;
 };
 
