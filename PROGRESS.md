@@ -1102,6 +1102,21 @@ system); (5) the cache-body LARGE-BLOB durability bug (upstream in blink's in-pr
 delivery; ~3 sessions deep). Future ticks should commit to ONE of these as a multi-tick arc
 (the compositor is the highest-leverage - it unblocks 1 + helps 3) rather than incremental
 verification.
+[DONE - mobile/device EMULATION without the compositor]. Rather than build the
+LayerTreeHost the DevTools EnableDeviceEmulation path crashes on, delivered the VALUABLE
+part of device emulation - responsive/mobile RENDERING - via WebSettings (the layout layer,
+no compositor). mbEmulateDevice(view, width, height, dsf, mobile): mobile -> SetPrimary/
+AvailablePointerType(kPointerCoarseType) + HoverType(kHoverNone) + SetViewportEnabled/
+ViewportMetaEnabled(true) + SetViewportStyle(kMobile) + ShrinksViewportContentToFit +
+MainFrameResizesAreOrientationChanges; desktop -> the fine-pointer/hover/viewport-off
+inverse. Then Resize(w,h) + SetDeviceScaleFactor(dsf) (which already nudges the media
+queries via SetInspectorDeviceScaleFactorOverride, dodging the compositor DCHECK). So a
+responsive page renders in the emulated mode and screenshots correctly. Verified mb_smoke
+15b: mobile -> matchMedia('(pointer: coarse)') + '(hover: none)' match + devicePixelRatio
+3; desktop revert -> '(pointer: fine)' + '(hover: hover)'. mb_smoke 145->146, full battery
+green, no leaks. (The DevTools-style EnableDeviceEmulation VISUAL transform / "fit to
+window" still needs the compositor; this covers the layout/media-query emulation that
+matters for responsive headless capture - device emulation is no longer a blank gap.)
 **Tier 3 — input & rendering refinements:**
 [DEFERRED: device emulation] `WebView::EnableDeviceEmulation` (the DevTools device-mode path —
 mobile viewport + coarse-pointer/no-hover) was attempted and REVERTED: it builds a

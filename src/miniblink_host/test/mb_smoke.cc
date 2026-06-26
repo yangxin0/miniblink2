@@ -1076,6 +1076,29 @@ int main() {
   Expect(Eval(v, "getComputedStyle(document.getElementById('x')).color") ==
              "rgb(1, 2, 3)",
          "HiDPI: min-resolution media query matches");
+  mbSetDeviceScaleFactor(v, 1.0f);  // undo case-15's 2x
+
+  // 15b. mbEmulateDevice: mobile emulation makes the page render as a touch device
+  // (pointer:coarse / hover:none media queries match + the requested devicePixelRatio),
+  // and reverts cleanly to a desktop device — responsive layouts render in the emulated
+  // mode for screenshots, WITHOUT the compositor that EnableDeviceEmulation would crash on.
+  {
+    mbLoadHTML(v, "<body>dev</body>", "about:blank");
+    mbEmulateDevice(v, 390, 844, 3.0f, /*mobile=*/1);  // iPhone-ish
+    const std::string mob =
+        Eval(v,
+             "matchMedia('(pointer: coarse)').matches+','+"
+             "matchMedia('(hover: none)').matches+','+"
+             "(window.devicePixelRatio===3)");
+    mbEmulateDevice(v, 1280, 800, 1.0f, /*mobile=*/0);  // back to desktop
+    const std::string desk =
+        Eval(v,
+             "matchMedia('(pointer: fine)').matches+','+"
+             "matchMedia('(hover: hover)').matches");
+    Expect(mob == "true,true,true" && desk == "true,true",
+           "mbEmulateDevice: mobile -> coarse/no-hover/dpr; desktop reverts to fine/hover",
+           "mob=[" + mob + "] desk=[" + desk + "]");
+  }
 
   // 18. User-Agent: default is a real (non-empty) UA, and the override is reflected
   // in navigator.userAgent. Set before load so it applies to the committed document.

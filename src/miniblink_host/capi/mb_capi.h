@@ -314,6 +314,16 @@ MB_EXPORT void mbSendMouseMove(mbView*, int x, int y);
 // so the scroll is applied programmatically to the document viewport.)
 MB_EXPORT void mbSendWheel(mbView*, int x, int y, int deltaX, int deltaY, int modifiers);
 
+// Device / mobile emulation for responsive rendering + screenshots (no compositor
+// needed). `mobile` != 0 makes the page render as a touch device: matchMedia('(pointer:
+// coarse)') and '(hover: none)' match, the <meta viewport> + mobile viewport are honored;
+// mobile == 0 reverts to a desktop device (fine pointer + hover). `width`/`height` (when
+// > 0) resize the view, and `deviceScaleFactor` (when > 0) sets window.devicePixelRatio.
+// Unlike the DevTools EnableDeviceEmulation path, this drives only the layout-visible
+// settings, so it works in the non-compositing headless widget.
+MB_EXPORT void mbEmulateDevice(mbView*, int width, int height,
+                               float deviceScaleFactor, int mobile);
+
 // Set the device pixel ratio (HiDPI / retina). The view keeps laying out in CSS px
 // but window.devicePixelRatio reports `scale` and paint output is rasterized at
 // `scale`x. Allocate paint/PNG buffers at logical_width*scale x logical_height*scale.

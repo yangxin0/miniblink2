@@ -189,6 +189,12 @@ class MbWebView {
   // window.devicePixelRatio == scale and rasterizes at `scale`x in PaintInto, so
   // captures are retina-crisp. Caller sizes the output bitmap to logical*scale.
   void SetDeviceScaleFactor(float scale);
+  // Device/mobile emulation WITHOUT the compositor (EnableDeviceEmulation drives a null
+  // LayerTreeHost -> SIGSEGV). Drives the layout-visible part via WebSettings: mobile ->
+  // coarse pointer + no hover + viewport-meta/mobile-viewport, desktop -> fine pointer +
+  // hover. Resizes + sets the device pixel ratio. So responsive pages render in the
+  // emulated mode (media queries match) and screenshot correctly.
+  void EmulateDevice(int width, int height, float device_scale_factor, bool mobile);
   // Override the User-Agent for navigator.userAgent and outgoing requests. Set
   // before LoadURL/LoadHTML to take effect for that navigation.
   void SetUserAgent(const char* utf8_ua);

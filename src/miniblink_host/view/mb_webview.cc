@@ -1594,6 +1594,34 @@ void MbWebView::SetTransparentBackground(bool transparent) {
       transparent ? std::optional<SkColor>(SK_ColorTRANSPARENT) : std::nullopt);
 }
 
+void MbWebView::EmulateDevice(int width, int height, float device_scale_factor,
+                             bool mobile) {
+  if (!web_view_)
+    return;
+  if (blink::WebSettings* s = web_view_->GetSettings()) {
+    namespace m = blink::mojom;
+    s->SetPrimaryPointerType(mobile ? m::PointerType::kPointerCoarseType
+                                    : m::PointerType::kPointerFineType);
+    s->SetAvailablePointerTypes(static_cast<int>(
+        mobile ? m::PointerType::kPointerCoarseType
+               : m::PointerType::kPointerFineType));
+    s->SetPrimaryHoverType(mobile ? m::HoverType::kHoverNone
+                                  : m::HoverType::kHoverHoverType);
+    s->SetAvailableHoverTypes(static_cast<int>(
+        mobile ? m::HoverType::kHoverNone : m::HoverType::kHoverHoverType));
+    s->SetViewportEnabled(mobile);
+    s->SetViewportMetaEnabled(mobile);
+    s->SetViewportStyle(mobile ? m::ViewportStyle::kMobile
+                               : m::ViewportStyle::kDefault);
+    s->SetShrinksViewportContentToFit(mobile);
+    s->SetMainFrameResizesAreOrientationChanges(mobile);
+  }
+  if (width > 0 && height > 0)
+    Resize(width, height);
+  // SetDeviceScaleFactor also nudges media queries (covers the pointer/hover change).
+  SetDeviceScaleFactor(device_scale_factor > 0.0f ? device_scale_factor : dsf_);
+}
+
 void MbWebView::SetDeviceScaleFactor(float scale) {
   dsf_ = scale > 0.0f ? scale : 1.0f;
   if (!web_view_ || !web_view_->GetPage())

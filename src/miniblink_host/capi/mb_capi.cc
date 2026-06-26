@@ -385,6 +385,12 @@ void mbSetDeviceScaleFactor(mbView* v, float scale) {
     v->impl->SetDeviceScaleFactor(scale);
 }
 
+void mbEmulateDevice(mbView* v, int width, int height, float deviceScaleFactor,
+                     int mobile) {
+  if (v && v->impl)
+    v->impl->EmulateDevice(width, height, deviceScaleFactor, mobile != 0);
+}
+
 void mbSetUserAgent(mbView* v, const char* utf8_ua) {
   if (v && v->impl)
     v->impl->SetUserAgent(utf8_ua);
