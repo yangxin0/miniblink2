@@ -18,14 +18,17 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "media/base/decoder_status.h"  // media::DecoderStatus (alias, not fwd-declarable)
 #include "media/base/picture_in_picture_events_info.h"
 #include "third_party/blink/public/platform/web_media_player.h"
 #include "third_party/blink/public/platform/web_string.h"
@@ -38,9 +41,10 @@ class PaintFlags;
 }  // namespace cc
 
 namespace media {
+class DecoderBuffer;
 class PaintCanvasVideoRenderer;
 class VideoFrame;
-class VideoThumbnailDecoder;
+class VpxVideoDecoder;
 }  // namespace media
 
 namespace blink {
@@ -93,12 +97,14 @@ class MbAudioPlayer : public blink::WebMediaPlayer {
   // We have the whole clip in memory, so it is fully buffered AND seekable. An empty
   // seekable range makes the element clamp/refuse currentTime sets (no `seeked`).
   blink::WebTimeRanges Buffered() const override {
-    return has_audio_ ? blink::WebTimeRanges(0.0, duration_)
-                      : blink::WebTimeRanges();
+    return (has_audio_ || has_video_) ? blink::WebTimeRanges(0.0, duration_)
+                                      : blink::WebTimeRanges();
   }
   blink::WebTimeRanges Seekable() const override {
-    return has_audio_ ? blink::WebTimeRanges(0.0, duration_)
-                      : blink::WebTimeRanges();
+    // Report a seekable range for ANY loaded media (audio or video). Video-only assets
+    // must be seekable too, or the element clamps currentTime sets and never fires `seeked`.
+    return (has_audio_ || has_video_) ? blink::WebTimeRanges(0.0, duration_)
+                                      : blink::WebTimeRanges();
   }
   void OnFrozen() override {}
   bool SetSinkId(const blink::WebString&,
@@ -144,8 +150,17 @@ class MbAudioPlayer : public blink::WebMediaPlayer {
   void DecodeAndReport(std::string url);
   // The playback clock tick (fires TimeChanged -> the element's timeupdate/ended).
   void OnPlaybackTick();
-  // Called when the first video frame decodes -> store it + advance to HAVE_ENOUGH_DATA.
-  void OnFirstFrameDecoded(scoped_refptr<media::VideoFrame> frame);
+  // Sequential whole-stream video decode (libvpx), so frames can be stepped by
+  // currentTime. Initialize -> feed every demuxed packet one at a time -> EOS flush ->
+  // FinishVideoDecode. OnSeqFrameDecoded collects each output frame.
+  void OnSeqDecoderInitialized(media::DecoderStatus status);
+  void DecodeNextPacket();
+  void OnPacketDecoded(media::DecoderStatus status);
+  void OnFlushDecoded(media::DecoderStatus status);
+  void OnSeqFrameDecoded(scoped_refptr<media::VideoFrame> frame);
+  void FinishVideoDecode();
+  // Point current_frame_ at the frame shown at playback position `t` (seconds).
+  void UpdateCurrentFrameForTime(double t);
 
   blink::MediaPlayerClient* client_;  // internal client: state-change callbacks
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
@@ -158,9 +173,16 @@ class MbAudioPlayer : public blink::WebMediaPlayer {
   bool has_audio_ = false;
   bool has_video_ = false;
   gfx::Size natural_size_;  // video dimensions (codec width/height), empty for audio
-  // First decoded video frame (for drawImage(video) / GetCurrentFrameThenUpdate).
+  // The video frame currently shown (selected by playback position; see
+  // UpdateCurrentFrameForTime). Used by drawImage(video), the page screenshot paint, and
+  // GetCurrentFrameThenUpdate.
   scoped_refptr<media::VideoFrame> current_frame_;
-  std::unique_ptr<media::VideoThumbnailDecoder> frame_decoder_;
+  // All decoded frames, sorted ascending by presentation timestamp (frame stepping index).
+  std::vector<scoped_refptr<media::VideoFrame>> frames_;
+  // Whole-stream decode state (alive only during load).
+  std::unique_ptr<media::VpxVideoDecoder> seq_decoder_;
+  std::vector<scoped_refptr<media::DecoderBuffer>> pending_packets_;  // demuxed, stamped
+  size_t decode_idx_ = 0;  // next packet to feed seq_decoder_
   std::unique_ptr<media::PaintCanvasVideoRenderer> video_renderer_;
   bool paused_ = true;
   bool ended_ = false;

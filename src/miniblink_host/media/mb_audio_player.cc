@@ -1,16 +1,19 @@
 #include "miniblink_host/media/mb_audio_player.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "base/containers/span.h"
 #include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/location.h"
+#include "media/base/decoder_buffer.h"
+#include "media/base/decoder_status.h"
 #include "media/base/encryption_scheme.h"
 #include "media/base/video_codecs.h"
 #include "media/base/video_color_space.h"
 #include "media/base/video_decoder_config.h"
 #include "media/base/video_frame.h"
-#include "media/base/video_thumbnail_decoder.h"
 #include "media/base/video_transformation.h"
 #include "media/renderers/paint_canvas_video_renderer.h"
 #include "media/filters/demuxer_manager.h"  // media::TrackManager (a MediaPlayerClient base)
@@ -62,7 +65,6 @@ void MbAudioPlayer::DecodeAndReport(std::string url) {
   std::string body, content_type;
   bool ok = !url.empty() && MbFetchUrl(url, &body, &content_type);
 
-  std::vector<uint8_t> video_keyframe;  // first video packet bytes (a keyframe)
   std::vector<uint8_t> video_extra_data;
   media::VideoCodec video_codec = media::VideoCodec::kUnknown;
   media::VideoCodecProfile video_profile = media::VIDEO_CODEC_PROFILE_UNKNOWN;
@@ -102,14 +104,27 @@ void MbAudioPlayer::DecodeAndReport(std::string url) {
       }
       if (fc->duration != AV_NOPTS_VALUE)
         duration_ = fc->duration / static_cast<double>(AV_TIME_BASE);
-      // Demux the first video packet (a keyframe in our assets) for a one-shot decode.
+      // Demux ALL video packets (with presentation timestamps) so we can decode the
+      // whole stream and step frames by currentTime. Each becomes a DecoderBuffer stamped
+      // with its PTS in seconds (stream time_base); the decoder copies that onto the output
+      // VideoFrame, which is how we later index frames by playback position.
       if (video_idx >= 0 && video_codec != media::VideoCodec::kUnknown) {
+        const AVRational tb = fc->streams[video_idx]->time_base;
+        int64_t fallback_ts = 0;  // for packets missing pts AND dts
         AVPacket* pkt = av_packet_alloc();
-        while (pkt && av_read_frame(fc, pkt) >= 0) {
+        constexpr size_t kMaxFrames = 1200;  // safety cap (memory) for long videos
+        while (pkt && pending_packets_.size() < kMaxFrames &&
+               av_read_frame(fc, pkt) >= 0) {
           if (pkt->stream_index == video_idx && pkt->size > 0) {
-            video_keyframe.assign(pkt->data, pkt->data + pkt->size);
-            av_packet_unref(pkt);
-            break;
+            int64_t ts = pkt->pts != AV_NOPTS_VALUE
+                             ? pkt->pts
+                             : (pkt->dts != AV_NOPTS_VALUE ? pkt->dts : fallback_ts);
+            fallback_ts = ts + 1;
+            auto buf = media::DecoderBuffer::CopyFrom(
+                base::span(pkt->data, static_cast<size_t>(pkt->size)));
+            buf->set_timestamp(base::Seconds(ts * av_q2d(tb)));
+            buf->set_is_key_frame((pkt->flags & AV_PKT_FLAG_KEY) != 0);
+            pending_packets_.push_back(std::move(buf));
           }
           av_packet_unref(pkt);
         }
@@ -128,9 +143,10 @@ void MbAudioPlayer::DecodeAndReport(std::string url) {
   }
 
   network_state_ = kNetworkStateLoaded;
-  if (has_video_ && !video_keyframe.empty()) {
-    // Kick off a one-shot decode of the first frame (libvpx). The frame arrives
-    // asynchronously -> OnFirstFrameDecoded advances readyState to HAVE_ENOUGH_DATA.
+  if (has_video_ && !pending_packets_.empty()) {
+    // Decode the ENTIRE video stream (libvpx) so we can step frames by currentTime.
+    // Frames arrive asynchronously via OnSeqFrameDecoded; when the stream drains,
+    // FinishVideoDecode sorts them by timestamp and advances to HAVE_ENOUGH_DATA.
     // Report metadata now (loadedmetadata) at HAVE_METADATA.
     media::VideoDecoderConfig config(
         video_codec, video_profile,
@@ -138,11 +154,14 @@ void MbAudioPlayer::DecodeAndReport(std::string url) {
         media::VideoColorSpace::REC709(), media::kNoTransformation, natural_size_,
         gfx::Rect(natural_size_), natural_size_, video_extra_data,
         media::EncryptionScheme::kUnencrypted);
-    frame_decoder_ = std::make_unique<media::VideoThumbnailDecoder>(
-        std::make_unique<media::VpxVideoDecoder>(), config,
-        std::move(video_keyframe));
-    frame_decoder_->Start(base::BindOnce(&MbAudioPlayer::OnFirstFrameDecoded,
-                                         weak_ptr_factory_.GetWeakPtr()));
+    seq_decoder_ = std::make_unique<media::VpxVideoDecoder>();
+    seq_decoder_->Initialize(
+        config, /*low_delay=*/false, /*cdm_context=*/nullptr,
+        base::BindOnce(&MbAudioPlayer::OnSeqDecoderInitialized,
+                       weak_ptr_factory_.GetWeakPtr()),
+        base::BindRepeating(&MbAudioPlayer::OnSeqFrameDecoded,
+                            weak_ptr_factory_.GetWeakPtr()),
+        base::DoNothing());
     ready_state_ = kReadyStateHaveMetadata;
   } else {
     // Audio-only (or unsupported video codec): jump to "have enough data".
@@ -153,10 +172,27 @@ void MbAudioPlayer::DecodeAndReport(std::string url) {
   client_->NetworkStateChanged();
 }
 
+void MbAudioPlayer::UpdateCurrentFrameForTime(double t) {
+  if (frames_.empty())
+    return;
+  // Pick the last frame whose presentation timestamp is <= t (the frame on screen at
+  // playback position t). Frames are sorted ascending by timestamp.
+  scoped_refptr<media::VideoFrame> sel = frames_.front();
+  for (const auto& f : frames_) {
+    if (f->timestamp().InSecondsF() <= t + 1e-6)
+      sel = f;
+    else
+      break;
+  }
+  current_frame_ = std::move(sel);
+}
+
 void MbAudioPlayer::Paint(cc::PaintCanvas* canvas,
                           const gfx::Rect& rect,
                           const cc::PaintFlags& flags,
                           bool /*force_pixel_readback*/) {
+  // Select the frame for the current playback position (drawImage/screenshot pull here).
+  UpdateCurrentFrameForTime(CurrentTime());
   if (!current_frame_ || !canvas)
     return;
   if (!video_renderer_)
@@ -169,11 +205,63 @@ void MbAudioPlayer::Paint(cc::PaintCanvas* canvas,
                          /*raster_context_provider=*/nullptr);
 }
 
-void MbAudioPlayer::OnFirstFrameDecoded(scoped_refptr<media::VideoFrame> frame) {
-  // Whether or not a frame came back, advance to HAVE_ENOUGH_DATA so the element is
-  // playable; a decoded frame additionally enables drawImage(video) + paint.
+void MbAudioPlayer::OnSeqDecoderInitialized(media::DecoderStatus status) {
+  if (!status.is_ok() || pending_packets_.empty()) {
+    FinishVideoDecode();  // can't decode: still mark the element playable
+    return;
+  }
+  decode_idx_ = 0;
+  DecodeNextPacket();
+}
+
+void MbAudioPlayer::DecodeNextPacket() {
+  if (!seq_decoder_)
+    return;
+  if (decode_idx_ >= pending_packets_.size()) {
+    // Drain: an EOS buffer flushes any frames the decoder still holds.
+    seq_decoder_->Decode(media::DecoderBuffer::CreateEOSBuffer(),
+                         base::BindOnce(&MbAudioPlayer::OnFlushDecoded,
+                                        weak_ptr_factory_.GetWeakPtr()));
+    return;
+  }
+  scoped_refptr<media::DecoderBuffer> buf = pending_packets_[decode_idx_++];
+  seq_decoder_->Decode(std::move(buf),
+                       base::BindOnce(&MbAudioPlayer::OnPacketDecoded,
+                                      weak_ptr_factory_.GetWeakPtr()));
+}
+
+void MbAudioPlayer::OnPacketDecoded(media::DecoderStatus status) {
+  if (!status.is_ok()) {
+    FinishVideoDecode();  // stop on first error; keep frames gathered so far
+    return;
+  }
+  // Hop through the task runner so a synchronous decoder can't recurse per packet.
+  task_runner_->PostTask(FROM_HERE,
+                         base::BindOnce(&MbAudioPlayer::DecodeNextPacket,
+                                        weak_ptr_factory_.GetWeakPtr()));
+}
+
+void MbAudioPlayer::OnFlushDecoded(media::DecoderStatus /*status*/) {
+  FinishVideoDecode();
+}
+
+void MbAudioPlayer::OnSeqFrameDecoded(scoped_refptr<media::VideoFrame> frame) {
   if (frame)
-    current_frame_ = std::move(frame);
+    frames_.push_back(std::move(frame));
+}
+
+void MbAudioPlayer::FinishVideoDecode() {
+  pending_packets_.clear();
+  seq_decoder_.reset();
+  // Decode order can differ from presentation order; sort ascending by timestamp so
+  // frame stepping is monotonic in currentTime.
+  std::sort(frames_.begin(), frames_.end(),
+            [](const scoped_refptr<media::VideoFrame>& a,
+               const scoped_refptr<media::VideoFrame>& b) {
+              return a->timestamp() < b->timestamp();
+            });
+  if (!frames_.empty())
+    current_frame_ = frames_.front();
   ready_state_ = kReadyStateHaveEnoughData;
   client_->ReadyStateChanged();
 }
@@ -230,6 +318,7 @@ void MbAudioPlayer::Seek(double seconds) {
   anchor_ticks_ = base::TimeTicks::Now();
   ended_ = false;
   seeking_ = true;
+  UpdateCurrentFrameForTime(seconds);  // step the picture to the seek target
   // The element calls Seek() synchronously from its own seek(); notify the completion
   // asynchronously (not reentrantly) so it can finish the seek and fire `seeked`.
   task_runner_->PostTask(
@@ -256,6 +345,7 @@ void MbAudioPlayer::OnPlaybackTick() {
     ended_ = true;
     play_timer_.Stop();
   }
+  UpdateCurrentFrameForTime(CurrentTime());  // advance the picture while playing
   client_->TimeChanged();  // element fires timeupdate, and ended when IsEnded()
 }
 

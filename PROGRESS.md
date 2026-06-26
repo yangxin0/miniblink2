@@ -1041,6 +1041,28 @@ from data:/file:/http) + <video> (metadata + first-frame decode + drawImage + in
 capture). Remaining polish (deferred, lower value): per-currentTime video frame STEPPING (only
 the first frame decodes today - seeking/playing doesn't update the picture), and real audio
 OUTPUT (the sink is silent; untestable headless).
+[DONE - per-currentTime video FRAME STEPPING (seeking/playing updates the picture)]. Until now
+the player decoded only the FIRST video frame (media::VideoThumbnailDecoder, one-shot), so the
+<video> picture never changed with currentTime - seek/play showed a frozen frame. FIX (mb_audio
+_player): (1) demux ALL video packets, each into a media::DecoderBuffer stamped with its PTS (in
+seconds, from the stream time_base; safety cap 1200 frames); (2) decode the WHOLE stream with a
+raw media::VpxVideoDecoder driven sequentially (Initialize -> feed each packet -> EOS flush ->
+FinishVideoDecode), collecting every output frame into frames_ sorted by timestamp; (3) Update
+CurrentFrameForTime(t) points current_frame_ at the last frame whose timestamp <= t, called from
+Paint() (drawImage/screenshot pull the frame for CurrentTime()), Seek() (steps to the seek
+target), and OnPlaybackTick() (advances the picture while playing). To avoid per-packet recursion
+through a synchronous decoder, each OnPacketDecoded PostTasks the next feed. BUG found + fixed in
+passing: Seekable()/Buffered() only reported ranges for has_audio_ - a VIDEO-ONLY asset had an
+EMPTY seekable range, so the element clamped every currentTime set and NEVER fired `seeked`
+(currentTime=1.8 was silently dropped). Now `has_audio_ || has_video_`. Verified mb_smoke_render
+41q: a 320x240 50-frame VP8 webm whose moving element lives in a y~112-119 band -> draw at t=0,
+seek to 1.8s, draw again, hash that band -> the two frames DIFFER (s0 != s1). (The earlier 16x16
+downscale averaged the thin moving line away - the test samples the band at natural size.) 41j
+(first-frame drawImage) + 41k (in-page screenshot) still pass, so the common static-frame path is
+unchanged. render 121->122, full battery green (mb_smoke 148, platform 46, shot 66, wke 114), no
+leaks. MEDIA <video> is now fully time-accurate: load -> metadata -> timeline -> per-currentTime
+frame (seek + playback) -> drawImage + in-page screenshot. Only real audio OUTPUT remains
+deferred (silent sink, untestable headless).
 [VERIFIED - WebCodecs encode+decode works (major modern API)]. An API-availability probe
 across the embedder showed WebCodecs (VideoDecoder/AudioDecoder/VideoEncoder/ImageDecoder),
 Notification, Permissions, Geolocation, RTCPeerConnection, WebTransport, navigator.gpu,
