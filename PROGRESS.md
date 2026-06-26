@@ -1135,6 +1135,18 @@ data:/blob: worker is opaque-by-URL ("null") so it gets its own bucket rather th
 (the parent origin isn't carried to the host here); [Storage Bucket IDB now scoped — see the Buckets
 entry]; an OLD pre-origin save
 file won't restore (key-format change — acceptable, we own both ends).
+[RESOLVED AS NON-ISSUE — the data:/blob worker storage residual above] Investigated carrying the PARENT
+origin to the worker host (captured via `WebLocalFrame::FrameForCurrentContext()->GetSecurityOrigin()` at
+factory-client creation, used to scope the worker's storage). Built + the capture works (debug confirmed
+parent_origin=[https://dwo.test] for a data: worker). BUT a verification probe proved the scoping can never
+be reached: a data: worker has an OPAQUE security origin, and Blink gates the storage APIs on that origin —
+`indexedDB.open()` throws `SecurityError` (probe: dw=[openthrow:SecurityError]); OPFS/Cache are likewise
+opaque-origin-blocked (already noted at lines ~721/743). So a data: worker correctly has NO storage,
+regardless of our backend scope. The blob: case needs no fix either: a `blob:https://origin/uuid` URL
+carries the CONCRETE creating origin, so `WebSecurityOrigin::Create(blob_url)` already yields the parent
+origin (script origin == parent origin). The speculative parent-origin fix was REVERTED (no verifiable
+storage benefit; its only live effect would be BroadcastChannel cross-origin isolation of data: workers,
+which the existing "" /"null" wildcard rule already handles for the same-origin bridge). Tree left clean.
 [SCOPED — a WINDOW-ONLY IDB isolation slice is feasible/bounded (next)] Re-assessment: the "not a single-
 tick fix" verdict assumed the FULL worker-inclusive fix. A window-only slice is much smaller because (a)
 the backend already stores its db name SEPARATELY from the registry key (`b->metadata.name = name`, mb_
