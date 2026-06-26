@@ -15,7 +15,9 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
+#include "base/functional/callback.h"
 #include "base/memory/scoped_refptr.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "third_party/blink/public/mojom/blob/blob_registry.mojom-blink.h"
@@ -46,6 +48,16 @@ blink::AssociatedInterfaceProvider* MakeBlobUrlNavAssociatedInterfaces(
 scoped_refptr<blink::BlobDataHandle> MbCreateInlineBlob(
     const std::string& bytes,
     const blink::String& content_type);
+
+// Resolve a blob: URL to its full bytes, asynchronously, on the service thread.
+// Looks up the in-process createObjectURL registry; runs `done` with the bytes,
+// or with an empty vector if the URL is unknown/revoked. MUST be called on the
+// service thread (where the BlobURLStore and Blob remotes live). Used by
+// download capture: a page-initiated <a download href="blob:..."> reports the
+// blob: URL through LocalFrameHost.DownloadURL, and we read out the bytes here.
+void MbResolveBlobUrlBytes(
+    const std::string& url,
+    base::OnceCallback<void(std::vector<uint8_t>)> done);
 
 }  // namespace mb
 

@@ -221,6 +221,13 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // .UpdateFaviconURL; forwarded to MbWebView's favicon callback. Main frame only.
   void OnFaviconUrls(const std::string& favicon_urls);
 
+  // A page-initiated blob download (<a download href="blob:...">) resolved by
+  // MbLocalFrameHost and hopped back to this thread; forwarded to MbWebView's
+  // download callback. Main frame only.
+  void OnPageDownload(const std::string& url,
+                      const std::string& suggested_name,
+                      const std::string& body);
+
   // Shared traversal: commit the session-history entry at `target` (same-document
   // via CommitSameDocumentNavigation, else a cross-document re-navigation).
   void GoToHistoryTarget(int target, bool has_user_gesture);

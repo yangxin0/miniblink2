@@ -377,6 +377,12 @@ class MbWebView {
                                         const std::string& filename,
                                         const std::string& body)>;
   void SetDownloadCallback(DownloadFn cb);
+  // Called by MbFrameClient when the page initiates a blob download (a
+  // <a download href="blob:..."> click / createObjectURL). Fires on_download_
+  // with the resolved bytes as the body (generic MIME — see impl).
+  void OnPageDownload(const std::string& url,
+                      const std::string& suggested_name,
+                      const std::string& body);
   // Called by MbFrameClient when the page requests a new window (window.open /
   // target=_blank). A notification only — the popup itself is denied (returns null).
   void OnCreateNewWindow(const std::string& url, const std::string& name);

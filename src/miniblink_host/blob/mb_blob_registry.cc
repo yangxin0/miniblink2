@@ -612,6 +612,25 @@ void BindBlobRegistryOnServiceThread(
           std::move(receiver)));
 }
 
+void MbResolveBlobUrlBytes(
+    const std::string& url,
+    base::OnceCallback<void(std::vector<uint8_t>)> done) {
+  // Service thread: the BlobURLStore registry and the Blob remotes live here.
+  auto& map = BlobUrlMap();
+  auto it = map.find(url);
+  if (it == map.end() || !it->second) {
+    std::move(done).Run({});  // unknown/revoked blob: URL
+    return;
+  }
+  // Clone the Blob (the stored remote stays owned by the registry), then drain it
+  // fully. length=max => the whole blob (BlobRefReader applies [0, size)).
+  mojo::PendingRemote<blink::mojom::blink::Blob> cloned;
+  it->second->Clone(cloned.InitWithNewPipeAndPassReceiver());
+  BlobRefReader::Read(
+      mojo::Remote<blink::mojom::blink::Blob>(std::move(cloned)), /*offset=*/0,
+      /*length=*/std::numeric_limits<uint64_t>::max(), std::move(done));
+}
+
 scoped_refptr<blink::BlobDataHandle> MbCreateInlineBlob(
     const std::string& bytes,
     const blink::String& content_type) {

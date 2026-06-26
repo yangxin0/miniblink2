@@ -1400,6 +1400,17 @@ void MbWebView::SetDownloadCallback(DownloadFn cb) {
   on_download_ = std::move(cb);
 }
 
+void MbWebView::OnPageDownload(const std::string& url,
+                               const std::string& suggested_name,
+                               const std::string& body) {
+  // A page-initiated blob download (createObjectURL + <a download>) resolved by
+  // MbLocalFrameHost. Surface it through the same callback as a server-driven
+  // download. We don't carry the blob's MIME (DownloadURLParams omits it), so
+  // report a generic type — the suggested filename's extension is the real hint.
+  if (on_download_)
+    on_download_(url, "application/octet-stream", suggested_name, body);
+}
+
 void MbWebView::OnCreateNewWindow(const std::string& url,
                                   const std::string& name) {
   if (on_new_window_)

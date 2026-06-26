@@ -416,6 +416,36 @@ int main() {
     mbOnDownload(v, nullptr, nullptr);
   }
 
+  // 0m2. Page-initiated blob download: a client-generated file via
+  // URL.createObjectURL(new Blob(...)) + a <a download> click reaches mbOnDownload
+  // with the suggested filename and the blob's bytes, through LocalFrameHost
+  // .DownloadURL (no server). This is the "export as CSV/PDF" pattern, built in JS.
+  {
+    static std::string* dl = new std::string();  // -Wexit-time-destructors
+    dl->clear();
+    mbLoadHTML(v, "<body>HOST</body>", "about:blank");  // a real host page
+    mbOnDownload(
+        v,
+        [](mbView*, void*, const char* /*url*/, const char* /*mime*/,
+           const char* fn, const char* data, int len) {
+          *dl = std::string("fn=") + (fn ? fn : "") + " body=" +
+                std::string(data ? data : "", data ? len : 0);
+        },
+        nullptr);
+    Eval(v,
+         "(function(){var b=new Blob(['hello,world'],{type:'text/csv'});"
+         "var u=URL.createObjectURL(b);var a=document.createElement('a');"
+         "a.href=u;a.download='data.csv';document.body.appendChild(a);"
+         "a.click();return 1;})()");
+    // The download is async: DownloadURL (service thread) -> blob read -> hop to
+    // the main thread. Pump a moment for it to land (no JS flag tracks it).
+    mbWaitForFunction(v, "window.__mbNever===1", 1500);
+    Expect(*dl == "fn=data.csv body=hello,world",
+           "mbOnDownload captures a page-initiated blob download (<a download>)",
+           "dl=[" + *dl + "]");
+    mbOnDownload(v, nullptr, nullptr);
+  }
+
   // 0n. Failed-load finish (#4 tail): a top-level load that never commits (a file that
   // can't be read) still ENDS — mbOnLoadFinish must fire and mbIsLoadFinished must read
   // true, so a caller awaiting completion isn't stuck on a 404/missing file forever.

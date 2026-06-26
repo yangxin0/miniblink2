@@ -5,7 +5,9 @@
 
 #include <cstdint>
 #include <map>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "base/functional/bind.h"
 #include "base/location.h"
@@ -22,6 +24,8 @@
 #include "third_party/blink/public/mojom/timing/resource_timing.mojom-blink.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
+#include "miniblink_host/blob/mb_blob_registry.h"
+
 namespace mb {
 namespace {
 
@@ -33,6 +37,9 @@ struct SinkEntry {
   base::RepeatingCallback<void(int, bool)> handler;
   base::RepeatingCallback<void(const std::string&, bool)> key_handler;
   base::RepeatingCallback<void(const std::string&)> favicon_handler;
+  base::RepeatingCallback<void(const std::string&, const std::string&,
+                               const std::string&)>
+      download_handler;
 };
 
 // Per-frame registry keyed by a frame id, so multiple views each route their own
@@ -67,12 +74,15 @@ void MbSetHistoryGoToHandler(
     scoped_refptr<base::SingleThreadTaskRunner> runner,
     base::RepeatingCallback<void(int, bool)> handler,
     base::RepeatingCallback<void(const std::string&, bool)> key_handler,
-    base::RepeatingCallback<void(const std::string&)> favicon_handler) {
+    base::RepeatingCallback<void(const std::string&)> favicon_handler,
+    base::RepeatingCallback<void(const std::string&, const std::string&,
+                                 const std::string&)>
+        download_handler) {
   SinkRegistry& s = Sinks();
   base::AutoLock guard(s.lock);
-  s.by_frame[frame_key] = SinkEntry{std::move(runner), std::move(handler),
-                                    std::move(key_handler),
-                                    std::move(favicon_handler)};
+  s.by_frame[frame_key] = SinkEntry{
+      std::move(runner), std::move(handler), std::move(key_handler),
+      std::move(favicon_handler), std::move(download_handler)};
 }
 
 void MbClearHistoryGoToHandler(uint64_t frame_key) {
@@ -218,7 +228,38 @@ void MbLocalFrameHost::UpdateFaviconURL(
                        base::BindOnce(e.favicon_handler, std::move(urls)));
 }
 void MbLocalFrameHost::DownloadURL(
-    blink::mojom::blink::DownloadURLParamsPtr) {}
+    blink::mojom::blink::DownloadURLParamsPtr params) {
+  // A page-initiated download: <a download href="blob:...">, or
+  // URL.createObjectURL(blob) + a programmatic click. blink reports it here
+  // (the no-op FakeLocalFrameHost dropped it). We resolve the blob bytes and
+  // route them to the frame's download sink, so a client-generated file (a
+  // CSV/PDF/etc. built in JS) surfaces through the same callback as a
+  // server-driven download. Only blob: is resolved — that's the client-
+  // generated case; data:/http: flow through other paths and are ignored here.
+  if (!params || !params->url.ProtocolIs("blob"))
+    return;
+  std::string url = params->url.GetString().Utf8();
+  std::string name =
+      params->suggested_name.IsNull() ? std::string()
+                                      : params->suggested_name.Utf8();
+  const uint64_t fk = frame_key_;
+  // Service thread: read the blob's bytes, then hop to the frame's main thread.
+  MbResolveBlobUrlBytes(
+      url,
+      base::BindOnce(
+          [](std::string url, std::string name, uint64_t fk,
+             std::vector<uint8_t> bytes) {
+            SinkEntry e;
+            if (!LookupSink(fk, &e) || !e.runner || !e.download_handler)
+              return;
+            std::string body(bytes.begin(), bytes.end());
+            e.runner->PostTask(
+                FROM_HERE,
+                base::BindOnce(e.download_handler, std::move(url),
+                               std::move(name), std::move(body)));
+          },
+          url, name, fk));
+}
 void MbLocalFrameHost::FocusedElementChanged(bool,
                                              bool,
                                              const gfx::Rect&,

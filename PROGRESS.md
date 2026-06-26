@@ -252,14 +252,17 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      → callback gets mime+bytes, the prior page stays (not committed). [DONE: wke peer]
      `wkeOnDownload` (URL-only per the miniblink signature; bytes via mbOnDownload) routes
      through it — verified (wke_smoke +1=107).
-     [GAP — deferred] mbOnDownload only catches TOP-LEVEL navigation downloads (MbWebView::LoadURL ->
-     IsDownloadResponse). A page-initiated download — `<a download href="blob:...">` click, or
+   - [DONE] **page-initiated blob download capture**: a `<a download href="blob:...">` click or
      `URL.createObjectURL(new Blob([...]))` + a programmatic click (the common client-generated-file
-     case: CSV/PDF built in JS) — goes through LocalFrameHost.DownloadURL, a no-op in MbLocalFrameHost,
-     so it's NOT captured. Wiring it is non-trivial: DownloadURL (service thread) carries a blob: url +
-     blob_url_token; resolving the bytes needs the blob store + an async Blob.ReadAll, then a cross-thread
-     hop to on_download_. MbFetchUrl can't resolve blob: (file/http/data only), so the main thread can't
-     just re-fetch the url. Left for a focused effort.
+     case: CSV/PDF built in JS) now reaches mbOnDownload with the suggested filename + the blob bytes.
+     Path: blink reports it to `MbLocalFrameHost::DownloadURL` (service thread; was a no-op) -> for a
+     blob: url we look it up in the in-process createObjectURL registry (`BlobUrlMap`) and drain the
+     Blob fully via `MbResolveBlobUrlBytes` (reuses `BlobRefReader`) -> hop the bytes to the frame's
+     main thread through the per-frame download sink (added to `SinkEntry`) -> `MbFrameClient::OnPage
+     Download` -> `MbWebView::OnPageDownload` fires `on_download_` (generic MIME — DownloadURLParams
+     omits it; the filename extension is the hint). Only blob: is resolved (the client-generated case);
+     data:/http: DownloadURL flows are still ignored (data_url_blob/http would be a separate slice).
+     Verified mb_smoke 0m2 (`fn=data.csv body=hello,world`), count 133->134.
    - [DONE] **`mbSetFileForSelector(css_selector, paths_newline)`**: the privileged host op a
      page's own script is forbidden to do. Reaches the core `HTMLInputElement`, reads each
      path's bytes into an **in-memory `BlobData` registered with our BlobRegistry** (via
