@@ -1265,7 +1265,7 @@ class MbBrowserInterfaceBroker
     // Worker BroadcastChannel (the worker path asks its broker; windows use the
     // nav-associated provider instead). Same process-wide registry as windows.
     if (auto r = receiver.As<blink::mojom::blink::BroadcastChannelProvider>()) {
-      BindBroadcastChannelProviderPipe(std::move(r));
+      BindBroadcastChannelProviderPipe(std::move(r), frame_key_);  // origin-scoped
       return;
     }
     // Notification API — permission granted; new Notification() fires onshow.

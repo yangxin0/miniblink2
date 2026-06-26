@@ -34,8 +34,8 @@ void BindBroadcastChannelProvider(mojo::ScopedInterfaceEndpointHandle handle,
 // one process-wide registry (both run on the service thread), so window and worker channels
 // of the same name interoperate.
 void BindBroadcastChannelProviderPipe(
-    mojo::PendingReceiver<blink::mojom::blink::BroadcastChannelProvider>
-        receiver);
+    mojo::PendingReceiver<blink::mojom::blink::BroadcastChannelProvider> receiver,
+    uint64_t frame_key);
 
 }  // namespace mb
 

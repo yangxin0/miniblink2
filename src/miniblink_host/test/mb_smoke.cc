@@ -1343,6 +1343,32 @@ int main() {
            "xw=[" + xw + "]");
   }
 
+  // 23i2. Same-origin HTTP worker BroadcastChannel exercises the origin-scoped path:
+  // unlike the data: worker above (opaque "null" -> wildcard), an http(s) worker
+  // scopes its channel by its REAL origin (published under its synthetic worker
+  // frame_key). The worker script is MOCKED at the WINDOW's origin, so the worker's
+  // channel origin == the window's -> they bridge (proving the http-worker scoping
+  // delivers same-origin; a cross-origin worker would be withheld).
+  {
+    mbMockResponse("bcw.test/bcw.js",
+                   "var c=new BroadcastChannel('hch');var n=0;"
+                   "var t=setInterval(function(){c.postMessage('http-worker');"
+                   "if(++n>40)clearInterval(t);},20);",
+                   "application/javascript", 200);
+    mbLoadHTML(v, "<body>x</body>", "https://bcw.test/");
+    Eval(v,
+         "window.__hw='';"
+         "var __hc=new BroadcastChannel('hch');"
+         "__hc.onmessage=function(e){window.__hw=e.data;};"
+         "window.__hworker=new Worker('https://bcw.test/bcw.js');");
+    mbWaitForFunction(v, "window.__hw!==''", 4000);
+    const std::string hw = Eval(v, "window.__hw");
+    Expect(hw == "http-worker",
+           "same-origin http Worker BroadcastChannel bridges the window (origin-scoped)",
+           "hw=[" + hw + "]");
+    mbClearMocks();
+  }
+
   // 23j. Notification API (broker #8): the in-process NotificationService grants the
   // permission (Notification.permission == 'granted', a [Sync] call) and "shows" a
   // non-persistent notification by firing the listener's OnShow -> the page's

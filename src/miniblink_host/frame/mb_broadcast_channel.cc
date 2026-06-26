@@ -83,14 +83,22 @@ class MbBroadcastChannel : public BroadcastChannelClient {
     auto it = BcRegistry().find(name_);
     if (it == BcRegistry().end())
       return;
+    // A CONCRETE origin is a known, non-opaque one. "" = unknown (no frame_key);
+    // "null" = an opaque origin (a data:/blob: worker's). Both act as WILDCARDS so
+    // window<->worker bridging is preserved (a data: worker is opaque-by-URL but
+    // same-origin as its creator) — we withhold only between two concrete, DIFFERENT
+    // origins (e.g. two same-named channels in different http(s) origins).
+    auto concrete = [](const std::string& o) {
+      return !o.empty() && o != "null";
+    };
     const std::string sender_origin = MbGetFrameOrigin(frame_key_);
     for (MbBroadcastChannel* ch : it->second) {
       if (ch == this)
         continue;
       const std::string recv_origin = MbGetFrameOrigin(ch->frame_key_);
-      if (!sender_origin.empty() && !recv_origin.empty() &&
+      if (concrete(sender_origin) && concrete(recv_origin) &&
           sender_origin != recv_origin) {
-        continue;  // both known and cross-origin -> isolate
+        continue;  // both concrete and cross-origin -> isolate
       }
       ch->client_->OnMessage(CloneMessage(message));
     }
@@ -149,10 +157,14 @@ void BindBroadcastChannelProvider(mojo::ScopedInterfaceEndpointHandle handle,
 }
 
 void BindBroadcastChannelProviderPipe(
-    mojo::PendingReceiver<BroadcastChannelProvider> receiver) {
-  // Worker path (no frame id available) -> origin unknown -> wildcard delivery.
+    mojo::PendingReceiver<BroadcastChannelProvider> receiver,
+    uint64_t frame_key) {
+  // Worker path (via the frame interface broker, which now carries the worker's
+  // synthetic frame_key -> its origin). For an http(s) worker that scopes the
+  // channel by the worker's real origin; a data:/blob: worker is opaque ("null")
+  // -> wildcard (so same-origin window<->worker still bridges).
   mojo::MakeSelfOwnedReceiver(
-      std::make_unique<MbBroadcastChannelProvider>(/*frame_key=*/0),
+      std::make_unique<MbBroadcastChannelProvider>(frame_key),
       std::move(receiver));
 }
 

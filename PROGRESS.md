@@ -1038,9 +1038,19 @@ process-wide state confirmed two real cross-origin data-isolation gaps, both ins
     sender's and receiver's origins are KNOWN and DIFFER; an unknown origin (a worker, bound via the broker
     pipe with no frame_key) acts as a wildcard, so same-origin window<->worker communication is preserved
     (strict improvement, no regression). Verified mb_smoke_render 78d (two views, cross-origin, same channel
-    name -> isolated) + 23h (same-origin delivery) + 23i (window<->worker bridge). RESIDUAL: worker<->worker
-    and opaque-origin ("null") channels not isolated (niche). The frame_key->origin map is now available to
-    fix IDB the same way once the broker carries frame_key (the remaining, heavier half).
+    name -> isolated) + 23h (same-origin delivery) + 23i (window<->worker bridge).
+    [DONE this session: WORKER BroadcastChannel origin-scoping] Now that workers publish their origin under a
+    synthetic frame_key (MbAllocWorkerFrameKey, from the IDB worker-scoping work), the worker BroadcastChannel
+    path is scoped too: the broker passes its frame_key to `BindBroadcastChannelProviderPipe(receiver,
+    frame_key)`, so an http(s) worker's channel scopes by its real origin (cross-origin http workers no longer
+    cross-talk). The KEY fix that made this safe (vs the earlier revert): the fan-out rule now treats BOTH ""
+    (unknown) AND "null" (opaque, a data:/blob: worker's origin) as WILDCARDS — withholding only between two
+    CONCRETE, differing origins. So a data: worker (opaque-by-URL but same-origin as its creator) still bridges
+    its window (23i preserved), while http workers gain real isolation. Verified mb_smoke 23i2 (a same-origin
+    http worker, script mocked at the window's origin, BroadcastChannels through to the window: hw=http-worker)
+    + 23i (data: worker bridge) + 78d (cross-origin windows isolated) all green; mb_smoke 140->141. RESIDUAL:
+    two cross-origin http WORKERS can't be set up from one page (workers are same-origin), so that exact case
+    isn't directly tested; worker<->worker + opaque-origin channels remain wildcard (niche).
     [WORKER-SCOPING ATTEMPTED + REVERTED] Tried to scope worker channels too (thread frame_key through the
     broker, publish the worker's origin, key the worker BroadcastChannelProvider). It broke 23i and was
     reverted. KEY FINDING for the future fix: a dedicated worker's origin is its PARENT document's origin
