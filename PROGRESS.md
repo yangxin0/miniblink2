@@ -924,7 +924,15 @@ constraints, atomic abort, and compound keys — the whole object-store/index AP
    'persist-blob')}, mbSaveIndexedDB, indexedDB.deleteDatabase (drops the in-session blob), mbLoadIndexedDB,
    reopen, get(1).f.text() -> 'persist-blob' — the bytes came from DISK. Stable over 4 reruns; full battery
    green (mb_smoke 154, platform 46, render 122->123, shot 66, wke 114), no leaks. A Blob/File stored in
-   IndexedDB now survives save/load across sessions. [REMAINING:
+   IndexedDB now survives save/load across sessions.
+   [HARDENED — File metadata + LARGE (>256KB) blobs persist too (2026-06)]: the first test only covered a
+   small Blob; added mb_smoke_render 37n3 for the two untested branches — a FILE (is_file=true, name +
+   lastModified + type, the metadata serialization path) AND a 300000-byte payload (a >256KB BytesProvider
+   blob — the same size class as the open cache-body large-blob bug). Round-trip (put -> save ->
+   deleteDatabase -> load -> reopen): isFile=true, name=doc.txt, lastModified=1700000000000,
+   type=text/plain, len=300000, and the body's last char intact. So the large-blob cache bug does NOT
+   affect IDB — MbReadBlobRemoteBytes drains a large IDB blob fully. render 123->124, stable over reruns,
+   no leaks. [REMAINING:
    per-origin IDB partitioning — DONE separately (see the per-origin isolation entries).] 10. Blob-from-file
 + ranged blob reads + DataPipeGetter uploads. 11. **GPU content path** — [CHARACTERIZED] the gap is
 NARROWER than "all GPU content blank": 2D `<canvas>` FULLY works — draw + getImageData + toDataURL (tests

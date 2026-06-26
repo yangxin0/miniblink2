@@ -470,6 +470,65 @@ static void RunCases(mbView* v, int W, int H) {
                " final=[" + s + "]");
   }
 
+  // 37n3. The two UNTESTED paths of blob-IDB persistence: a FILE (name + lastModified +
+  // type, the is_file serialization branch) AND a LARGE >256KB payload (a BytesProvider
+  // blob, the async-read path at scale — the same size class as the cache-body bug). Store
+  // a 300000-byte File, persist, DELETE the db, reload, and verify name + lastModified +
+  // type + full byte length + content all survive a disk round-trip.
+  {
+    const char* idb_path = "/tmp/mb_fileidb_persist.bin";
+    mbLoadHTML(v, "<body>filepersist</body>", "https://filepersist.test/");
+    mbRunJS(v,
+      "window.__s='';"
+      "var big='Q'.repeat(300000);"
+      "var f=new File([big],'doc.txt',{type:'text/plain',lastModified:1700000000000});"
+      "var q=indexedDB.open('fp',1);q.onupgradeneeded=function(e){"
+      "e.target.result.createObjectStore('s',{keyPath:'id'});};"
+      "q.onsuccess=function(e){window.__db=e.target.result;"
+      "var t=window.__db.transaction('s','readwrite');t.objectStore('s').put({id:1,f:f});"
+      "t.oncomplete=function(){window.__s='put';};};");
+    std::string s;
+    for (int i = 0; i < 200 && s != "put"; ++i) { mbWait(v, 25); s = Eval(v, "window.__s"); }
+    const bool put_ok = (s == "put");
+    mbSaveIndexedDB(idb_path);
+    mbRunJS(v,
+      "window.__s='';window.__db.close();"
+      "var d=indexedDB.deleteDatabase('fp');d.onsuccess=function(){window.__s='del';};");
+    s.clear();
+    for (int i = 0; i < 200 && s != "del"; ++i) { mbWait(v, 25); s = Eval(v, "window.__s"); }
+    const bool del_ok = (s == "del");
+    mbLoadIndexedDB(idb_path);
+    mbRunJS(v,
+      "window.__s='';var q2=indexedDB.open('fp',1);"
+      "q2.onsuccess=function(e){var db=e.target.result;"
+      "var g=db.transaction('s').objectStore('s').get(1);"
+      "g.onsuccess=function(){var r=g.result;"
+      "if(!r||!r.f){window.__s='norec';return;}var f=r.f;"
+      // Report file metadata; then verify content length + a sentinel char from the body.
+      "f.text().then(function(t){"
+      "window.__s='isFile='+(f instanceof File)+' name='+f.name+' lm='+f.lastModified"
+      "+' type='+f.type+' len='+t.length+' ok='+(t.length===300000&&t[299999]==='Q');});};};"
+      "q2.onerror=function(){window.__s='openerr';};");
+    s.clear();
+    for (int i = 0; i < 400 && s.rfind("isFile=", 0) != 0 && s != "norec" &&
+                    s != "openerr"; ++i) {
+      mbWait(v, 25);
+      s = Eval(v, "window.__s");
+    }
+    const bool all_ok =
+        put_ok && del_ok &&
+        s.find("isFile=true") != std::string::npos &&
+        s.find("name=doc.txt") != std::string::npos &&
+        s.find("lm=1700000000000") != std::string::npos &&
+        s.find("type=text/plain") != std::string::npos &&
+        s.find("len=300000") != std::string::npos &&
+        s.find("ok=true") != std::string::npos;
+    Expect(all_ok,
+           "a large File (300KB, name+lastModified) persists to disk intact",
+           "put=" + std::string(put_ok ? "1" : "0") + " del=" + (del_ok ? "1" : "0") +
+               " final=[" + s + "]");
+  }
+
   // 38. ServiceWorker spawn must be crash-safe. (SharedWorker now runs — see 37g.)
   // navigator.serviceWorker.register() either rejects cleanly or, on a
   // real origin where we have no provider, is null-guarded (pending promise,
