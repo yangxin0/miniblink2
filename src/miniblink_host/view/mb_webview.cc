@@ -1169,6 +1169,17 @@ void SerializeAXNode(const blink::WebAXObject& obj, std::string* out) {
   }
   if (obj.IsFocused())
     *out += ",\"focused\":true";
+  // A link's / image's destination URL — so an agent reading the tree knows where a link
+  // goes (and an image's src) without a separate DOM query. Empty for non-URL nodes.
+  blink::WebURL url = obj.Url();
+  if (!url.IsEmpty()) {
+    *out += ",\"url\":\"";
+    AppendJsonEscaped(url.GetString().Utf8(), out);
+    *out += '"';
+  }
+  // Heading level (h1..h6) for document-structure extraction (role "heading" + level).
+  if (int level = obj.HeadingLevel(); level > 0)
+    *out += ",\"level\":" + std::to_string(level);
   // Frame-relative bounds (x,y,w,h), emitted only when the node has a non-empty box.
   // These are widget/page coordinates for the main frame, so an automation caller can
   // click a node's center via mbSendMouseClick — turning the snapshot into actions.

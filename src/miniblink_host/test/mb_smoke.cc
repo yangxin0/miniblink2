@@ -2765,6 +2765,7 @@ int main() {
     mbLoadHTML(v,
                "<body><h1>Hello AX</h1>"
                "<button>Click me</button>"
+               "<a href='https://example.com/docs'>Docs</a>"
                "<label>Email <input type='text' value='a@b.com'></label>"
                "</body>",
                "about:blank");
@@ -2783,12 +2784,16 @@ int main() {
     const bool value_ok = tree.find("a@b.com") != std::string::npos;
     const bool roles_ok = tree.find("\"role\":\"heading\"") != std::string::npos &&
                           tree.find("\"role\":\"button\"") != std::string::npos;
-    Expect(well_formed && names_ok && value_ok && roles_ok,
-           "mbGetAXTree: a11y snapshot has heading/button roles + accessible names + value",
+    // A link node carries its destination URL; a heading carries its level (h1 -> 1).
+    const bool url_ok =
+        tree.find("\"url\":\"https://example.com/docs\"") != std::string::npos;
+    const bool level_ok = tree.find("\"level\":1") != std::string::npos;
+    Expect(well_formed && names_ok && value_ok && roles_ok && url_ok && level_ok,
+           "mbGetAXTree: a11y snapshot has roles + names + value + link URL + heading level",
            "len=" + std::to_string((int)tree.size()) + " wf=" +
                (well_formed ? "1" : "0") + " names=" + (names_ok ? "1" : "0") +
                " val=" + (value_ok ? "1" : "0") + " roles=" + (roles_ok ? "1" : "0") +
-               " head=[" + tree.substr(0, 140) + "]");
+               " url=" + (url_ok ? "1" : "0") + " level=" + (level_ok ? "1" : "0"));
   }
 
   // 30b (a11y). The AX snapshot is ACTIONABLE: each node carries frame-relative bounds

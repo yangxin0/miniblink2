@@ -1207,6 +1207,16 @@ find is now count -> navigate -> LOCATE -> act, mirroring the AX-tree see->act l
 page is fully complete: mbFindText (count + highlight + scroll-to-first), mbFindNext (step +
 wrap), mbGetFindActiveRect (locate in clickable coords), mbStopFind (clear).
 
+[DONE - AX snapshot nodes carry link URL + heading level]. Filled two real data gaps in
+mbGetAXTree for scraping/automation: a link's (or image's) destination "url" (WebAXObject::
+Url) and a heading's "level" 1..6 (HeadingLevel) - so an agent reading the tree knows where
+each link goes and the document's heading structure WITHOUT a separate DOM query. Emitted
+only where non-empty/applicable. Verified mb_smoke 30a (extended): an <a href='https://
+example.com/docs'> -> node has "url":"https://example.com/docs"; the <h1> -> "level":1
+(alongside the existing roles/names/value checks). mb_smoke battery green (154, platform 46,
+render 122, shot 66, wke 114), no leaks. The AX node is now role + name + value + checked +
+focused + url + level + bounds - a rich, self-contained semantic+actionable record per node.
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),
