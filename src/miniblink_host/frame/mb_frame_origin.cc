@@ -1,6 +1,7 @@
 // mb_frame_origin.cc — see header.
 #include "miniblink_host/frame/mb_frame_origin.h"
 
+#include <atomic>
 #include <map>
 
 #include "base/no_destructor.h"
@@ -38,6 +39,14 @@ std::string MbGetFrameOrigin(uint64_t frame_key) {
   base::AutoLock guard(m.lock);
   auto it = m.by_frame.find(frame_key);
   return it == m.by_frame.end() ? std::string() : it->second;
+}
+
+uint64_t MbAllocWorkerFrameKey() {
+  // High bit set -> disjoint from window keys (small ++counter values from
+  // MbFrameClient), which never approach 2^63. Atomic: workers can be created
+  // from different threads.
+  static std::atomic<uint64_t> counter{0};
+  return (uint64_t{1} << 63) | (++counter);
 }
 
 }  // namespace mb

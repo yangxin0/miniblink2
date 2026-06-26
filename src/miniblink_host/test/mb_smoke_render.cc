@@ -350,6 +350,42 @@ static void RunCases(mbView* v, int W, int H) {
            "r1=[" + r1 + "] r2=[" + r2 + "]");
   }
 
+  // 37l. Window<->worker IndexedDB SHARING (same origin): a worker's IDB is its
+  // ORIGIN's, so a same-origin worker opens the SAME backend the window did and
+  // sees its data. The per-origin isolation (73b) must NOT break this — the worker
+  // scopes by its script origin, which equals the window's origin here. The worker
+  // script is MOCKED at the window's origin (offline + same-origin). If the worker
+  // were unscoped ("",name) it'd get a fresh empty db -> 'nostore'.
+  mbMockResponse(
+      "idbw.test/w.js",
+      "onmessage=function(){var q=indexedDB.open('wshare',1);"
+      "q.onsuccess=function(e){try{var g=e.target.result.transaction('s')."
+      "objectStore('s').get(1);g.onsuccess=function(){postMessage(g.result?"
+      "g.result.val:'none');};}catch(ex){postMessage('nostore');}};};",
+      "application/javascript", 200);
+  mbLoadHTML(v, "<body>idbw</body>", "https://idbw.test/");
+  mbRunJS(v,
+    "window.__wr='';var q=indexedDB.open('wshare',1);"
+    "q.onupgradeneeded=function(e){e.target.result.createObjectStore('s',"
+    "{keyPath:'id'});};q.onsuccess=function(e){var db=e.target.result;"
+    "var t=db.transaction('s','readwrite');t.objectStore('s').put("
+    "{id:1,val:'fromwin'});t.oncomplete=function(){var w=new Worker("
+    "'https://idbw.test/w.js');w.onmessage=function(ev){window.__wr="
+    "String(ev.data);};w.postMessage(0);};};");
+  {
+    std::string wr;
+    for (int i = 0; i < 200; ++i) {
+      mbWait(v, 25);
+      wr = Eval(v, "window.__wr");
+      if (!wr.empty())
+        break;
+    }
+    Expect(wr == "fromwin",
+           "a same-origin Worker shares its window's IndexedDB (per-origin, not per-frame)",
+           "wr=[" + wr + "]");
+    mbClearMocks();
+  }
+
   // 38. ServiceWorker spawn must be crash-safe. (SharedWorker now runs — see 37g.)
   // navigator.serviceWorker.register() either rejects cleanly or, on a
   // real origin where we have no provider, is null-guarded (pending promise,

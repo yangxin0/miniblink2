@@ -35,6 +35,7 @@
 #include "third_party/blink/public/web/web_shared_worker_client.h"
 
 #include "miniblink_host/frame/mb_frame_broker.h"
+#include "miniblink_host/frame/mb_frame_origin.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/worker/mb_worker_fetch_context.h"
 #include "miniblink_host/worker/mb_worker_script.h"
@@ -120,6 +121,11 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
 
     blink::WebSecurityOrigin origin =
         blink::WebSecurityOrigin::Create(blink::WebURL(info->url));
+    // Scope this shared worker's per-origin storage (IndexedDB) by its origin,
+    // published under a synthetic worker frame_key, so same-origin documents +
+    // the worker share IDB and cross-origin ones are isolated.
+    worker_frame_key_ = MbAllocWorkerFrameKey();
+    MbSetFrameOrigin(worker_frame_key_, origin.ToString().Utf8());
 
     mojo::PendingRemote<blink::mojom::WorkerContentSettingsProxy> content_settings;
     mojo::MakeSelfOwnedReceiver(
@@ -144,7 +150,8 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
             blink::WebPolicyContainerPolicies(), blink::WebURL(),
             blink::mojom::InsecureRequestsPolicy::kDoNotUpgrade),
         base::UnguessableToken::Create(), std::move(content_settings),
-        MakeFrameInterfaceBroker(0), /*pause_worker_context_on_start=*/false,
+        MakeFrameInterfaceBroker(worker_frame_key_),
+        /*pause_worker_context_on_start=*/false,
         std::move(params),
         std::make_unique<blink::WebPolicyContainer>(
             blink::WebPolicyContainerPolicies(), policy_host_.BindRemote()),
@@ -182,6 +189,8 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
 
   // blink::WebSharedWorkerClient:
   void WorkerContextDestroyed() override {
+    if (worker_frame_key_)
+      MbClearFrameOrigin(worker_frame_key_);  // forget the worker's origin entry
     SwRegistry().erase(key_);
     delete this;
   }
@@ -192,6 +201,7 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
   std::unique_ptr<blink::WebSharedWorker> worker_;
   mojo::RemoteSet<blink::mojom::blink::SharedWorkerClient> clients_;
   int next_connection_id_ = 0;
+  uint64_t worker_frame_key_ = 0;  // this worker's origin-map key (0 = unset)
 };
 
 class MbSharedWorkerConnector

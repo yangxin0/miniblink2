@@ -32,6 +32,7 @@
 #include "third_party/blink/public/platform/web_url.h"
 
 #include "miniblink_host/frame/mb_frame_broker.h"
+#include "miniblink_host/frame/mb_frame_origin.h"
 #include "miniblink_host/worker/mb_worker_fetch_context.h"
 #include "miniblink_host/worker/mb_worker_script.h"
 
@@ -60,6 +61,10 @@ class MbWorkerHostFactoryClient
  public:
   explicit MbWorkerHostFactoryClient(blink::WebDedicatedWorker* worker)
       : worker_(worker) {}
+  ~MbWorkerHostFactoryClient() override {
+    if (worker_frame_key_)
+      MbClearFrameOrigin(worker_frame_key_);  // forget the worker's origin entry
+  }
 
   void CreateWorkerHost(
       const blink::DedicatedWorkerToken&,
@@ -74,9 +79,18 @@ class MbWorkerHostFactoryClient
     mojo::MakeSelfOwnedReceiver(
         std::make_unique<MbDedicatedWorkerHost>(),
         host_remote.InitWithNewPipeAndPassReceiver());
-    worker_->OnWorkerHostCreated(
-        MakeFrameInterfaceBroker(0), std::move(host_remote),
-        blink::WebSecurityOrigin::Create(script_url));
+    // Scope the worker's per-origin storage (IndexedDB) by its origin, published
+    // under a synthetic worker frame_key, so a same-origin worker SHARES its
+    // window's IDB (and a cross-origin worker is isolated). The script origin is
+    // the worker's origin for the common http(s) case; a data:/blob: worker is
+    // opaque-by-URL ("null") -> its own bucket (the documented worker residual,
+    // since the true parent origin isn't carried here).
+    blink::WebSecurityOrigin origin =
+        blink::WebSecurityOrigin::Create(script_url);
+    worker_frame_key_ = MbAllocWorkerFrameKey();
+    MbSetFrameOrigin(worker_frame_key_, origin.ToString().Utf8());
+    worker_->OnWorkerHostCreated(MakeFrameInterfaceBroker(worker_frame_key_),
+                                 std::move(host_remote), origin);
 
     // 2-3. Fetch the top-level script (file://, http(s)://, or data:) and synthesize the
     //      browser-fetched-script load parameters (shared with shared workers).
@@ -107,6 +121,7 @@ class MbWorkerHostFactoryClient
 
  private:
   blink::WebDedicatedWorker* worker_;  // owns this factory client
+  uint64_t worker_frame_key_ = 0;      // this worker's origin-map key (0 = unset)
 };
 
 }  // namespace

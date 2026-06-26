@@ -23,6 +23,13 @@ void MbClearFrameOrigin(uint64_t frame_key);
 // that doesn't publish its origin — e.g. a worker bound without a frame_key).
 std::string MbGetFrameOrigin(uint64_t frame_key);
 
+// Allocate a synthetic frame_key for a WORKER, in a high range disjoint from the
+// small sequential keys MbFrameClient mints for windows — so a worker can publish
+// its origin (MbSetFrameOrigin) and have origin-scoped services (IndexedDB) treat
+// it like a frame, WITHOUT colliding with any window's key. Each worker gets its
+// own key (so different-origin workers don't clobber each other's origin entry).
+uint64_t MbAllocWorkerFrameKey();
+
 }  // namespace mb
 
 #endif  // MINIBLINK_HOST_FRAME_MB_FRAME_ORIGIN_H_

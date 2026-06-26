@@ -1073,10 +1073,21 @@ Registry` splits the composite key on '\n' to recover the real name (an OLD save
 unscoped). Verified: all 14 single-origin IDB tests unchanged (one consistent origin -> same effective
 key), incl. persistence 23m2; NEW mb_smoke_render 73b (two views at https://a-idb.test vs https://b-idb.test
 open db 'shared' -> A writes fromA, B writes fromB, A re-reads fromA = ISOLATED; pre-fix it'd read fromB).
-render 95->96, no leaks. RESIDUALS (documented, niche): workers + Storage Buckets pass frame_key 0 -> a
-shared ("",name) bucket (not origin-isolated — same gotcha as the BroadcastChannel worker residual; needs
-parent-origin threading); opaque "null" origins aren't uniquely isolated; an OLD pre-origin save file
-won't restore (key-format change, no version field — acceptable, we own both ends).
+render 95->96, no leaks.
+[DONE — WORKER IDB origin-scoping (next half)] Extended the isolation to workers, which ALSO fixes the
+window<->worker sharing that the window-only slice had inadvertently broken (a same-origin worker was
+landing in the unscoped ("",name) bucket, separate from its window). Each worker now publishes its ORIGIN
+under a SYNTHETIC frame_key — `MbAllocWorkerFrameKey()` (mb_frame_origin: high-bit range, disjoint from
+windows' small `++counter` keys) + `MbSetFrameOrigin(worker_fk, origin)` — and passes worker_fk to
+`MakeFrameInterfaceBroker`, so its IDB scopes by that origin with NO broker/IDB signature changes (reuses
+the frame_key->origin map). Dedicated workers use the SCRIPT origin (= the parent origin for the common
+http(s) case); shared workers use their script-URL origin. The key is cleared on worker teardown (factory-
+client dtor / WorkerContextDestroyed). Verified mb_smoke_render 37l: a same-origin worker (mocked http
+script at the window's origin) opens the window's db 'wshare' and reads its 'fromwin' record -> SHARED
+(unscoped it'd get a fresh db -> 'nostore'). render 96->97, no leaks. REMAINING RESIDUALS (niche): a
+data:/blob: worker is opaque-by-URL ("null") so it gets its own bucket rather than the true parent origin's
+(the parent origin isn't carried to the host here); Storage Buckets still pass 0; an OLD pre-origin save
+file won't restore (key-format change — acceptable, we own both ends).
 [SCOPED — a WINDOW-ONLY IDB isolation slice is feasible/bounded (next)] Re-assessment: the "not a single-
 tick fix" verdict assumed the FULL worker-inclusive fix. A window-only slice is much smaller because (a)
 the backend already stores its db name SEPARATELY from the registry key (`b->metadata.name = name`, mb_
