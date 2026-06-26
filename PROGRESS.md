@@ -522,6 +522,15 @@ net, no leaked threads/processes. Offline 23k (`.test` loopback) unchanged: 138/
 (Note: echo.websocket.events failed a TLS handshake with OpenSSL 3.6 — server-specific; echo.websocket.org
 + plain HTTPS work fine.) Follow-ups: real subprotocol/headers in the handshake response (currently a
 synthesized 101); bundle openssl@3 dylibs for portability.
+[PARTIAL: EventSource / Server-Sent Events] `new EventSource(url)` IS wired through our loader and PARSES
+a `text/event-stream` body into `message` events — verified offline (mb_smoke 23k3: a mocked
+`data: ev1\n\ndata: ev2\n\n` -> two onmessage with .data=ev1/ev2, no error). So the common SSE shape
+(server sends a batch of events then the response completes) works, correcting the earlier "SSE entirely
+deferred" assumption. REMAINING (deferred): true INCREMENTAL streaming over a long-lived connection — the
+libcurl loader is buffered (waits for EOF / a complete response), so a never-closing SSE stream that
+trickles events would hang. That needs a streaming loader path (curl write-callback delivering chunks on
+a worker thread -> incremental URLLoaderClient delivery), the same threading shape as the WebSocket
+transport. Bounded follow-up, but verifying it needs a live streaming endpoint.
 [SUPERSEDED: WebSocket — step 1 curl foundation] The macOS SYSTEM libcurl (8.7.1)
 is compiled WITHOUT ws/wss (Apple disables it), so curl_ws_send/recv are unusable. Built our own
 WebSocket-enabled libcurl and vendored it: `tools/build-curl-macos.sh` downloads curl 8.21.0 and

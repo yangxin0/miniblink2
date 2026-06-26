@@ -1414,6 +1414,39 @@ int main() {
     mbWait(v, 150);  // let the close frame + worker teardown settle
   }
 
+  // 23k3. EventSource (SSE): the page's EventSource is wired through our loader and
+  // PARSES a text/event-stream body into `message` events (data: ev1 / data: ev2 ->
+  // two onmessage with .data). Verified offline via a mock (a response that
+  // completes). NOTE: true incremental streaming over a LONG-LIVED connection (the
+  // server trickling events while the socket stays open) is NOT yet supported — the
+  // libcurl loader is buffered (waits for EOF), so a never-closing SSE stream would
+  // hang; that needs a streaming/worker-thread loader path (deferred). The common
+  // "send a batch of events then close" case + the parsing both work here.
+  {
+    mbMockResponse("sse.test/stream", "data: ev1\n\ndata: ev2\n\n",
+                   "text/event-stream", 200);
+    mbLoadHTML(v, "<body>sse</body>", "https://sse.test/");
+    mbRunJS(v,
+            "window.__sse=[];window.__sseerr=0;"
+            "var es=new EventSource('https://sse.test/stream');"
+            "es.onmessage=function(e){window.__sse.push(e.data);"
+            "if(window.__sse.length>=2)es.close();};"
+            "es.onerror=function(){window.__sseerr++;};");
+    std::string got;
+    for (int i = 0; i < 60; ++i) {
+      mbWait(v, 50);
+      got = Eval(v, "JSON.stringify(window.__sse)");
+      if (got.find("ev2") != std::string::npos)
+        break;
+    }
+    Expect(got.find("ev1") != std::string::npos &&
+               got.find("ev2") != std::string::npos,
+           "EventSource (SSE) delivers data: events from text/event-stream",
+           "sse=" + got + " err=" + Eval(v, "''+window.__sseerr"));
+    mbRunJS(v, "try{es.close()}catch(e){}");
+    mbClearMocks();
+  }
+
   // 23l. navigator.storage.estimate() (broker #8): the in-process QuotaManagerHost
   // reports a generous quota + zero usage, so storage.estimate() resolves with a usable
   // quota instead of hanging (the QuotaManagerHost was dropped before). Apps that gate
