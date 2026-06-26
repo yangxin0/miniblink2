@@ -330,6 +330,39 @@ bool MbWidget::SendTouchTap(int x, int y) {
   return true;
 }
 
+bool MbWidget::SendTouchSwipe(int x1, int y1, int x2, int y2) {
+  if (!widget_)
+    return false;
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  auto make = [&](blink::WebInputEvent::Type type, int x, int y, bool start) {
+    blink::WebPointerEvent e(
+        type,
+        blink::WebPointerProperties(
+            /*id=*/1, blink::WebPointerProperties::PointerType::kTouch,
+            blink::WebPointerProperties::Button::kLeft),
+        /*width=*/24.0f, /*height=*/24.0f);
+    e.SetPositionInWidget(x, y);
+    e.SetPositionInScreen(x, y);
+    e.hovering = false;
+    e.touch_start_or_first_touch_move = start;
+    e.dispatch_type = blink::WebInputEvent::DispatchType::kBlocking;
+    return e;
+  };
+  using T = blink::WebInputEvent::Type;
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+      make(T::kPointerDown, x1, y1, /*start=*/true), ui::LatencyInfo()));
+  constexpr int kSteps = 6;
+  for (int i = 1; i <= kSteps; ++i) {
+    const int x = x1 + (x2 - x1) * i / kSteps;
+    const int y = y1 + (y2 - y1) * i / kSteps;
+    impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+        make(T::kPointerMove, x, y, /*start=*/i == 1), ui::LatencyInfo()));
+  }
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+      make(T::kPointerUp, x2, y2, /*start=*/false), ui::LatencyInfo()));
+  return true;
+}
+
 void MbWidget::SendText(const char* utf8) {
   if (!widget_ || !utf8)
     return;

@@ -946,13 +946,15 @@ int main() {
                " pointer=" + (pointer ? "1" : "0") + " trusted=" + (trusted ? "1" : "0"));
   }
 
-  // 12d. mbSendTouchSwipe drives touchmove: a handler sees the moves and the final
-  // touches[0].clientX equals the swipe end x.
+  // 12d. mbSendTouchSwipe drives a swipe: JS touchmoves (final touches[0].clientX == end
+  // x) AND trusted pointermove events (isTrusted) for Pointer-Events drag UIs.
   {
     mbLoadHTML(v,
         "<body style='margin:0'><div id='s' style='width:300px;height:100px'></div>"
-        "<script>window.__mv=0;window.__mx=-1;window.__se=0;"
+        "<script>window.__mv=0;window.__mx=-1;window.__se=0;window.__pm=0;window.__ptr=0;"
         "var s=document.getElementById('s');"
+        "s.addEventListener('pointermove',function(e){window.__pm++;"
+        "window.__ptr=e.isTrusted?1:0;});"
         "s.addEventListener('touchmove',function(e){window.__mv++;"
         "if(e.touches[0])window.__mx=Math.round(e.touches[0].clientX);});"
         "s.addEventListener('touchend',function(){window.__se=1;});"
@@ -962,13 +964,21 @@ int main() {
       mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // layout for hit-testing
     }
     mbSendTouchSwipe(v, 50, 50, 200, 50);
+    for (int i = 0; i < 80; ++i) {  // trusted pointermoves dispatch asynchronously
+      mbWait(v, 25);
+      if (Eval(v, "String(window.__pm>0)") == "true")
+        break;
+    }
     const bool moved = Eval(v, "String(window.__mv>0)") == "true";
     const bool endx = Eval(v, "String(window.__mx)") == "200";
     const bool ended = Eval(v, "String(window.__se)") == "1";
-    Expect(moved && endx && ended,
-           "mbSendTouchSwipe fires touchmoves ending at the swipe end x",
+    const bool ptrmove = Eval(v, "String(window.__pm>0)") == "true";
+    const bool ptrust = Eval(v, "String(window.__ptr)") == "1";
+    Expect(moved && endx && ended && ptrmove && ptrust,
+           "mbSendTouchSwipe fires touchmoves + TRUSTED pointermoves ending at the swipe x",
            std::string("moved=") + (moved ? "1" : "0") + " endx=" +
-               Eval(v, "String(window.__mx)") + " end=" + (ended ? "1" : "0"));
+               Eval(v, "String(window.__mx)") + " end=" + (ended ? "1" : "0") +
+               " ptrmove=" + (ptrmove ? "1" : "0") + " ptrust=" + (ptrust ? "1" : "0"));
   }
 
   // 13. Body with an embedded NUL byte must not truncate the document (the host

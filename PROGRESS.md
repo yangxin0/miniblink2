@@ -1214,6 +1214,17 @@ touchend + pointerdown with isTrusted=true. wke touch tests + 12d swipe unchange
 path is preserved). mb_smoke still 147, full battery green, no leaks. (Touch events themselves
 remain JS-synthesized/untrusted - a fully-trusted WebTouchEvent needs the touch-queue/compositor
 path that DCHECKs here; the trusted POINTER events are the valuable modern-standard part.)
+[DONE - mbSendTouchSwipe also fires TRUSTED pointermove events]. Extended the touch-tap
+pointer-event work to swipes/drags: MbWidget::SendTouchSwipe sends a WebPointerEvent(kTouch)
+pointerdown -> 6 interpolated pointermoves -> pointerup (touch_start_or_first_touch_move set
+on the down + first move), and MbWebView::SendTouchSwipe calls it THEN the existing JS-
+synthesized touchmoves. So a swipe now fires trusted pointerdown/pointermove/pointerup
+(isTrusted) for Pointer-Events drag UIs (carousels, pull-to-refresh, sliders) AND
+touchstart/touchmove/touchend for Touch-Events UIs. Verified mb_smoke 12d: swipe (50,50)->
+(200,50) -> touchmoves (final clientX 200) + trusted pointermoves (isTrusted=true). wke swipe
+unchanged, mb_smoke 147, full battery green, no leaks. So both touch primitives (tap + swipe)
+now deliver trusted Pointer Events - the modern standard for mobile/touch interaction
+(complements mbEmulateDevice for mobile testing).
 
 [SCOPED — WebGL (biggest remaining gap): feasibility CONFIRMED, implementation is multi-
 session]. Investigated this tick. (1) The donor out/Release already SHIPS the GL stack:

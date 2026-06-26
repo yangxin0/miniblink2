@@ -537,10 +537,12 @@ void MbWebView::SendTouchTap(int x, int y) {
 }
 
 void MbWebView::SendTouchSwipe(int x1, int y1, int x2, int y2) {
-  // A one-finger swipe: touchstart at (x1,y1), interpolated touchmoves, touchend
-  // at (x2,y2) — drives touch scroll / swipe gestures (carousels, pull-to-refresh).
-  // Synthetic, like SendTouchTap; the moves stay on the start element (touch
-  // capture). No-op if no element is under the start point.
+  // A one-finger swipe fires BOTH trusted pointer events (real WebPointerEvent down ->
+  // moves -> up, isTrusted) for Pointer-Events drag UIs AND JS-synthesized touchstart/
+  // touchmove/touchend for Touch-Events UIs (a raw WebTouchEvent DCHECKs here). Pointer
+  // events dispatch async (the touch queue) — callers pump before reading.
+  if (widget_)
+    widget_->SendTouchSwipe(x1, y1, x2, y2);
   const std::string sx1 = std::to_string(x1), sy1 = std::to_string(y1);
   const std::string sx2 = std::to_string(x2), sy2 = std::to_string(y2);
   std::string js =

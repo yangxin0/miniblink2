@@ -49,6 +49,10 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   // so blink fires pointerdown/up + touchstart/end with isTrusted=true. Returns false if
   // no widget. (Dispatch may be async — the element's handlers run on the next pump.)
   bool SendTouchTap(int x, int y);
+  // Trusted one-finger swipe (x1,y1)->(x2,y2): a WebPointerEvent(kTouch) down ->
+  // interpolated moves -> up, so pointerdown/pointermove/pointerup fire isTrusted=true
+  // (touch-drag UIs use Pointer Events). Returns false if no widget. Dispatch is async.
+  bool SendTouchSwipe(int x1, int y1, int x2, int y2);
   void SendText(const char* utf8);    // type ASCII text into the focused element
   // Press a named non-text key ("Enter", "Tab", "Escape", "Backspace", "Delete",
   // "Arrow{Left,Up,Right,Down}", "Home", "End", "PageUp", "PageDown") as a real
