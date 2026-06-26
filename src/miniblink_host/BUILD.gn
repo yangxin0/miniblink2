@@ -175,3 +175,17 @@ executable("wke_demo") {
   include_dirs = [ "//third_party/blink/renderer" ]
   deps = [ ":miniblink_host" ]
 }
+
+# mb_gl_probe: WebGL bring-up milestone A — initializes ANGLE/SwiftShader GL
+# IN-PROCESS and makes an offscreen context current. Blink-free: links only the GL
+# stack, so a green run isolates "the in-process GL foundation works" ahead of the
+# (heavier) in-process command buffer + blink WebGL provider.
+executable("mb_gl_probe") {
+  sources = [ "tools/mb_gl_probe.cc" ]
+  deps = [
+    "//base",
+    "//ui/gfx/geometry",
+    "//ui/gl",
+    "//ui/gl/init",
+  ]
+}

@@ -1003,6 +1003,23 @@ PLAN (multi-tick): A = GL one-off init, confirm ANGLE/SwiftShader loads in-proce
 (verifiable); B = in-process command buffer + context provider; C = wire the MbPlatform
 override + a getContext('webgl') smoke test. Shares the GPU path with device emulation +
 accelerated video.
+[DONE — milestone A] mb_gl_probe (tools/mb_gl_probe.cc, a blink-FREE executable linking
+only //ui/gl + //ui/gl/init + //base + //ui/gfx/geometry) initializes GL IN-PROCESS in the
+standalone tree and makes an offscreen context current. It forces the headless software
+path via command-line switches (--use-gl=angle --use-angle=swiftshader
+--enable-unsafe-swiftshader = gl::kGLImplementationANGLEName /
+gl::kANGLEImplementationSwiftShaderName / switches::kEnableUnsafeSwiftShader), then
+gl::init::InitializeGLOneOff(kDefault) -> GLDisplay, CreateOffscreenGLSurface(1x1),
+CreateGLContext, MakeCurrent, and queries the GL strings. VERIFIED (exit 0, wired into
+build.sh after the shot smoke):
+  GL_RENDERER = ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (LLVM 10.0.0)), SwiftShader
+                driver-5.0.0)
+  GL_VERSION  = OpenGL ES 3.0 (ANGLE 2.1)
+So the in-process GL foundation works (ANGLE over Vulkan over SwiftShader, GLES 3.0) — the
+brick the in-process command buffer (milestone B) sits on. No GPU/display required; runs on
+a headless box. Battery unaffected (mb_smoke 145, platform 46, render 102, shot 66, wke 114),
+no leaks. NEXT: milestone B — stand up gpu::CommandBufferTaskExecutor + a SingleTaskSequence
++ an in-process command buffer over this GL context, exposing a gpu::gles2::GLES2Interface.
 13. [DONE] PDF options. `mbSavePdfEx(path, width_pt, height_pt, landscape, scale, margin_pt)`
 (mbSavePdf kept = Letter default) + `mb_shot --pdf-size letter|a4|legal|a3|tabloid|WxH
 --landscape --pdf-scale N --pdf-margin PT`. Page size in points; landscape swaps w/h; content
