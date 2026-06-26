@@ -295,6 +295,13 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      Verified offline: mb_smoke 0m3 (http via mock: `mime=text/csv fn=r.csv body=a,b,c`) + 0m4 (data:
      `fn=note.txt body=inline-bytes`). Count 134->136. Remaining nuance: cross-origin http download-link
      filename stripping (browser security) is unhandled — same-origin links keep the name.
+   - [DONE] **download filename fallback**: when the `<a download>` attribute has no value, or blink
+     strips the attr-provided name for a cross-origin link, `suggested_name` arrives EMPTY and the
+     browser is expected to derive one from the URL. We were passing "" straight through; now
+     `DownloadFilenameFor(url, suggested)` falls back to the URL's last path segment (GURL::Extract
+     FileName, percent-decoded), then a generic "download" (blob:/data:/no-path). Applied in both
+     page-download paths (OnPageDownload + OnPageDownloadFetch). Verified mb_smoke 0m5 (empty
+     `a.download=''` on .../files/report.csv -> fn=report.csv), 137->138.
    - [DONE] **`mbSetFileForSelector(css_selector, paths_newline)`**: the privileged host op a
      page's own script is forbidden to do. Reaches the core `HTMLInputElement`, reads each
      path's bytes into an **in-memory `BlobData` registered with our BlobRegistry** (via

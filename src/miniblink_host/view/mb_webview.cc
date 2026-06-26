@@ -84,6 +84,7 @@
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
+#include "url/gurl.h"
 #include "ui/gfx/geometry/size_f.h"
 #include "v8/include/v8-context.h"
 #include "v8/include/v8-external.h"
@@ -130,6 +131,19 @@ std::string BuildFillJs(const char* css_selector, const char* text) {
 std::string BuildGetTextJs(const char* css_selector) {
   return "(function(){var e=document.querySelector(\"" + JsEscape(css_selector) +
          "\");if(!e)return '';return '1'+(e.innerText||'');})()";
+}
+
+// Pick the download filename. blink leaves suggested_name EMPTY when the <a
+// download> attribute has no value, or strips it for a cross-origin link — in
+// which case the browser is expected to derive a name from the URL. We were
+// passing the empty string straight through; now we fall back to the URL's last
+// path segment (percent-decoded by GURL::ExtractFileName), then a generic name.
+std::string DownloadFilenameFor(const std::string& url,
+                                const std::string& suggested) {
+  if (!suggested.empty())
+    return suggested;
+  std::string from_url = GURL(url).ExtractFileName();  // "" for data:/blob:/no path
+  return from_url.empty() ? "download" : from_url;
 }
 }  // namespace
 
@@ -1469,7 +1483,8 @@ void MbWebView::OnPageDownload(const std::string& url,
   // download. We don't carry the blob's MIME (DownloadURLParams omits it), so
   // report a generic type — the suggested filename's extension is the real hint.
   if (on_download_)
-    on_download_(url, "application/octet-stream", suggested_name, body);
+    on_download_(url, "application/octet-stream",
+                 DownloadFilenameFor(url, suggested_name), body);
 }
 
 void MbWebView::OnPageDownloadFetch(const std::string& url,
@@ -1484,7 +1499,8 @@ void MbWebView::OnPageDownloadFetch(const std::string& url,
   std::string body, content_type;
   if (!FetchDownloadBody(url, &body, &content_type))
     return;
-  on_download_(url, content_type, suggested_name, body);
+  on_download_(url, content_type, DownloadFilenameFor(url, suggested_name),
+               body);
 }
 
 void MbWebView::OnCreateNewWindow(const std::string& url,

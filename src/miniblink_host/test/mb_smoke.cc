@@ -503,6 +503,37 @@ int main() {
     mbOnDownload(v, nullptr, nullptr);
   }
 
+  // 0m5. Empty <a download> attribute (no filename): blink leaves the suggested
+  // name EMPTY and expects the browser to derive one from the URL (same as the
+  // cross-origin case, where it strips the attr-provided name). The download path
+  // now falls back to the URL's last path segment ("report.csv") instead of "".
+  {
+    static std::string* dl = new std::string();  // -Wexit-time-destructors
+    dl->clear();
+    mbMockResponse("dlhost.test/page", "<body>HOST</body>", "text/html", 200);
+    mbMockResponse("dlhost.test/files/report.csv", "x,y", "text/csv", 200);
+    mbLoadURL(v, "https://dlhost.test/page");  // same origin as the download URL
+    mbOnDownload(
+        v,
+        [](mbView*, void*, const char* /*url*/, const char* /*mime*/,
+           const char* fn, const char* data, int len) {
+          *dl = std::string("fn=") + (fn ? fn : "") + " body=" +
+                std::string(data ? data : "", data ? len : 0);
+        },
+        nullptr);
+    // download attribute present but with NO value -> empty suggested_name.
+    Eval(v,
+         "(function(){var a=document.createElement('a');"
+         "a.href='https://dlhost.test/files/report.csv';a.download='';"
+         "document.body.appendChild(a);a.click();return 1;})()");
+    mbWaitForFunction(v, "window.__mbNever===1", 1500);  // pump the async fetch
+    Expect(*dl == "fn=report.csv body=x,y",
+           "page download with empty <a download> derives the filename from the URL",
+           "dl=[" + *dl + "]");
+    mbOnDownload(v, nullptr, nullptr);
+    mbClearMocks();
+  }
+
   // 0n. Failed-load finish (#4 tail): a top-level load that never commits (a file that
   // can't be read) still ENDS — mbOnLoadFinish must fire and mbIsLoadFinished must read
   // true, so a caller awaiting completion isn't stuck on a 404/missing file forever.
