@@ -1030,6 +1030,17 @@ bg). NO regressions: the WebGL-composite (41z3) + 2D-canvas-composite (41b) scre
 still pass, mb_shot_smoke 66/66, full battery green (mb_smoke 145, platform 46, wke 114), no
 leaks. (This generalizes screenshot compositing; the earlier WebGL IsComposited patch 0008 is
 now belt-and-suspenders - WebGL paints inline either way.)
+[DONE - media loads from file:// URLs (real binary, not just data:)]. Verified the media
+player's URL path beyond data: URLs: mb_smoke_render 41l writes a small WAV to /tmp and loads
+it into an <audio> from a file:// URL (page also at file:// = same-origin); the player fetches
+it via MbFetchUrl (file://) and decodes it (FFmpeg) -> audio.duration 0.10. Confirms the common
+real-world <audio src="...file/http"> works (data:/file:/http all via MbFetchUrl). render
+116->117, full battery green (mb_smoke 145, platform 46, shot 66, wke 114), no leaks. MEDIA is
+now feature-complete for the headless use case: <audio> (load/metadata/play/timeline/seek/error,
+from data:/file:/http) + <video> (metadata + first-frame decode + drawImage + in-page screenshot
+capture). Remaining polish (deferred, lower value): per-currentTime video frame STEPPING (only
+the first frame decodes today - seeking/playing doesn't update the picture), and real audio
+OUTPUT (the sink is silent; untestable headless).
 **Tier 3 — input & rendering refinements:**
 [DEFERRED: device emulation] `WebView::EnableDeviceEmulation` (the DevTools device-mode path —
 mobile viewport + coarse-pointer/no-hover) was attempted and REVERTED: it builds a

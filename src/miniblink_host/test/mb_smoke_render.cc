@@ -4,6 +4,10 @@
 // selector automation, navigation, charset, reload, host-driven history.
 #include "miniblink_host/test/mb_smoke_harness.h"
 
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+
 using mbsmoke::Eval;
 using mbsmoke::EvalIso;
 using mbsmoke::Expect;
@@ -1025,6 +1029,49 @@ static void RunCases(mbView* v, int W, int H) {
            "ready=[" + pv + "] B=" + std::to_string(cv[ci]) + " G=" +
                std::to_string(cv[ci + 1]) + " R=" + std::to_string(cv[ci + 2]) +
                " A=" + std::to_string(cv[ci + 3]));
+  }
+
+  // 41l. Media loads from a file:// URL (real binary, not a data: URL): write a small
+  // WAV to disk and load it into an <audio>; the player fetches it (MbFetchUrl file://)
+  // and decodes it (FFmpeg) -> duration. The page is also at file:// so it is same-origin
+  // with the media. Confirms media isn't data:-only (the common <audio src="...file">).
+  {
+    const char* wav_path = "/tmp/mb_media_test.wav";
+    if (FILE* f = std::fopen(wav_path, "wb")) {
+      const uint32_t sr = 8000, n = 800, datalen = n * 2;
+      auto w32 = [&](uint32_t x) {
+        uint8_t b[4] = {uint8_t(x), uint8_t(x >> 8), uint8_t(x >> 16),
+                        uint8_t(x >> 24)};
+        std::fwrite(b, 1, 4, f);
+      };
+      auto w16 = [&](uint16_t x) {
+        uint8_t b[2] = {uint8_t(x), uint8_t(x >> 8)};
+        std::fwrite(b, 1, 2, f);
+      };
+      std::fwrite("RIFF", 1, 4, f); w32(36 + datalen); std::fwrite("WAVE", 1, 4, f);
+      std::fwrite("fmt ", 1, 4, f); w32(16); w16(1); w16(1);
+      w32(sr); w32(sr * 2); w16(2); w16(16);
+      std::fwrite("data", 1, 4, f); w32(datalen);
+      for (uint32_t i = 0; i < n; ++i)
+        w16(static_cast<uint16_t>(static_cast<int16_t>(std::sin(i / 10.0) * 10000)));
+      std::fclose(f);
+    }
+    mbLoadHTML(v, "<body>fau</body>", "file:///tmp/mb_media_page.html");
+    mbRunJS(v,
+      "window.__fa='';var a=document.createElement('audio');"
+      "a.addEventListener('loadedmetadata',function(){window.__fa='dur:'+a.duration.toFixed(2);});"
+      "a.addEventListener('error',function(){window.__fa='err:'+(a.error?a.error.code:'?');});"
+      "a.src='file:///tmp/mb_media_test.wav';a.load();");
+    std::string fa;
+    for (int i = 0; i < 200; ++i) {
+      mbWait(v, 25);
+      fa = Eval(v, "window.__fa");
+      if (!fa.empty())
+        break;
+    }
+    Expect(fa == "dur:0.10",
+           "an <audio> element loads + decodes from a file:// URL (real binary, not data:)",
+           "fa=[" + fa + "]");
   }
 
   // 42. Drawing to a canvas via mbEvalJS (not just mbRunJS) must also be
