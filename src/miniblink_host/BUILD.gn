@@ -17,7 +17,12 @@ component("miniblink_host") {
 
   # Donor-tree sandbox lives at //third_party/blink/renderer/miniblink_host; this
   # makes `#include "miniblink_host/..."` resolve from there.
-  include_dirs = [ "//third_party/blink/renderer" ]
+  # Vendored WebSocket-enabled libcurl (third_party/curl) FIRST, so <curl/curl.h>
+  # and <curl/websockets.h> resolve to it rather than the SDK's WS-less system curl.
+  include_dirs = [
+    "/Users/yangxin/dennis/chrome/miniblink-modern/third_party/curl/include",
+    "//third_party/blink/renderer",
+  ]
 
   sources = [
     "blob/mb_blob_registry.cc",
@@ -113,7 +118,11 @@ component("miniblink_host") {
     "//v8:external_startup_data",  # defines V8_USE_EXTERNAL_STARTUP_DATA -> gin snapshot API
   ]
 
-  libs = [ "curl" ]  # system libcurl (macOS SDK) for HTTP(S) loading
+  # Vendored WebSocket-enabled libcurl (tools/build-curl-macos.sh): a dylib so its
+  # OpenSSL TLS stays isolated from BoringSSL (two-level namespace). Its absolute
+  # install_name lets the linked binaries find it at runtime without an rpath.
+  lib_dirs = [ "/Users/yangxin/dennis/chrome/miniblink-modern/third_party/curl/lib" ]
+  libs = [ "curl" ]  # -> third_party/curl/lib/libcurl.dylib (HTTP(S) + ws/wss)
 }
 
 # Runtime smoke test: exercises mbInitialize() against the real engine.

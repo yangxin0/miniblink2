@@ -493,6 +493,22 @@ backpressure-honest), and `StartClosingHandshake` -> `OnDropChannel` drives `onc
 -> onmessage 'hello-ws', `close()` -> onclose. This is a LOOPBACK echo (proves the entire mojo
 data plane offline); a real network backend over libcurl's WebSocket support can replace the echo
 later with identical plumbing.
+[IN PROGRESS: WebSocket REAL backend — step 1 of N, curl foundation] The macOS SYSTEM libcurl (8.7.1)
+is compiled WITHOUT ws/wss (Apple disables it), so curl_ws_send/recv are unusable. Built our own
+WebSocket-enabled libcurl and vendored it: `tools/build-curl-macos.sh` downloads curl 8.21.0 and
+builds it `--enable-websockets --with-openssl` (curl 8.21 removed SecureTransport) as a DYLIB —
+shared so its OpenSSL TLS stays isolated from Chromium's static BoringSSL via macOS two-level
+namespace (the same reason the old system libcurl+LibreSSL coexisted). Vendored to
+`third_party/curl/{lib/libcurl.4.dylib,include/curl}` with an absolute install_name (binaries find
+it at runtime, no rpath). BUILD.gn now links the vendored curl (lib_dirs + include_dirs FIRST) instead
+of `libs=["curl"]`. Verified the swap is transparent: offline mb_smoke 138 / platform 46 / render 92 /
+shot 66 green, AND real HTTPS still works through the new OpenSSL-backed curl (MB_NET_TESTS mb_smoke
+153/0 — httpbin header echo, real 404 status, redirect-to-final-URL, real-TLS load). `libcurl.4.dylib`
+exports curl_ws_send/curl_ws_recv (ws/wss in protocols). NEXT: implement the real WS data plane in
+MbWebSocket (CONNECT to the server via curl_ws_*, replace the loopback echo), verified vs a public echo
+server. Two follow-ups noted: (a) the dylib still depends on /opt/homebrew/opt/openssl@3 dylibs at
+runtime — bundle+repath for full portability; (b) a benign `ld` deployment-target warning (curl built
+for the host SDK, linked at macOS-12.0) — pin MACOSX_DEPLOYMENT_TARGET when rebuilding curl.
 [DONE: Wake Lock] `navigator.wakeLock.request('screen')` — `MbWakeLockService.GetWakeLock` binds a
 no-op `device::mojom::WakeLock` (headless: no real screen) and the permission service grants
 SCREEN_WAKE_LOCK, so request('screen') resolves with a live sentinel (mb_smoke 23u: released==false).
