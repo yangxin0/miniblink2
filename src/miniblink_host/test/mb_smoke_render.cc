@@ -1428,6 +1428,40 @@ static void RunCases(mbView* v, int W, int H) {
     if (b) mbDestroyView(b);
   }
 
+  // 73c. Cross-origin OPFS ISOLATION: navigator.storage.getDirectory() is a per-
+  // ORIGIN private file system (a process-wide root would let one origin read
+  // another's private files). View A (origin X) writes f.txt; view B (origin Y)
+  // must NOT find it (NotFoundError) — its OPFS root is a different origin's.
+  {
+    mbView* a = mbCreateView(W, H);
+    mbView* b = mbCreateView(W, H);
+    if (a && b) {
+      mbLoadHTML(a, "<body>A</body>", "https://a-opfs.test/");
+      mbLoadHTML(b, "<body>B</body>", "https://b-opfs.test/");
+      mbRunJS(a,
+        "window.__oa='';navigator.storage.getDirectory().then(function(r){"
+        "return r.getFileHandle('f.txt',{create:true}).then(function(fh){"
+        "return fh.createWritable().then(function(w){return w.write('fromA')."
+        "then(function(){return w.close();});});});}).then(function(){"
+        "window.__oa='wrote';}).catch(function(e){window.__oa='err:'+e.name;});");
+      for (int i = 0; i < 120 && Eval(a, "window.__oa") == ""; ++i)
+        mbWait(a, 25);
+      mbRunJS(b,
+        "window.__ob='';navigator.storage.getDirectory().then(function(r){"
+        "return r.getFileHandle('f.txt').then(function(fh){return fh.getFile()."
+        "then(function(f){return f.text();});});}).then(function(t){"
+        "window.__ob='got:'+t;}).catch(function(e){window.__ob='err:'+e.name;});");
+      for (int i = 0; i < 120 && Eval(b, "window.__ob") == ""; ++i)
+        mbWait(b, 25);
+      const std::string oa = Eval(a, "window.__oa"), ob = Eval(b, "window.__ob");
+      Expect(oa == "wrote" && ob == "err:NotFoundError",
+             "cross-origin OPFS is isolated (one origin can't see another's files)",
+             "oa=" + oa + " ob(isolated)=" + ob);
+    }
+    if (a) mbDestroyView(a);
+    if (b) mbDestroyView(b);
+  }
+
   // 78b. Storage partitioning across views: two views are independent top-level browsing
   // contexts, so their sessionStorage is ISOLATED (each view mints a unique session-namespace
   // id), while localStorage is per-ORIGIN and therefore SHARED process-wide. Same origin in both.

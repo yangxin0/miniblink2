@@ -719,7 +719,15 @@ Worker-only) — an in-memory `FileSystemAccessFileDelegateHost` (`Read` returns
 per file_system_access_incognito_file_delegate.cc — then splices at offset), returned as the union's
 `incognito_file_delegate` + a no-op `FileSystemAccessAccessHandleHost`. Verified (mb_smoke 23ah) via a
 mocked SAME-ORIGIN worker (a data: worker is opaque-origin -> OPFS SecurityError; see the MbFetchUrl
-mock support below). STILL DEFERRED: per-origin isolation (single process-wide root).
+mock support below). [DONE: per-origin OPFS isolation] OPFS is no longer a single process-wide root —
+`OpfsRoot(scope)` keys roots by storage scope, so `navigator.storage.getDirectory()` is ISOLATED per
+origin (a process-wide root let any origin read another's private files — the same security gap fixed for
+IndexedDB). `BindFileSystemAccessManager(receiver, frame_key)` (broker passes the frame's key) scopes the
+default OPFS by `MbGetFrameOrigin(frame_key)`; a bucket's OPFS uses (origin, bucket) like its IDB. Verified
+mb_smoke_render 73c (view A at https://a-opfs.test writes f.txt; view B at https://b-opfs.test gets
+NotFoundError — isolated). All single-origin OPFS tests unchanged (consistent origin -> same root). render
+99->100, no leaks. (Cache Storage in a bucket remains process-wide — the lone non-origin-scoped storage,
+niche + entangled with the known cache-body bug.)
 [DONE: mockable worker scripts] `MbFetchUrl` now consults the response-mock table (MbFindMock) before
 any scheme fetch, matching the async loader. So worker scripts / iframes / top-level navs can be
 served by `mbMockResponse` — and a worker from a mocked https URL is SAME-ORIGIN with the page (a

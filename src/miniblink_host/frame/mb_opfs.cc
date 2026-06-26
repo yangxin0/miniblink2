@@ -12,6 +12,7 @@
 #include "base/containers/span.h"
 #include "base/files/file.h"
 #include "miniblink_host/blob/mb_blob_registry.h"
+#include "miniblink_host/frame/mb_frame_origin.h"
 #include "mojo/public/cpp/base/big_buffer.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
@@ -35,18 +36,24 @@ namespace {
 
 namespace m = blink::mojom::blink;
 
-// An in-memory OPFS node: a directory (named children) or a file (raw bytes). The root is
-// process-wide (a headless host is effectively single-origin) and persists across
-// getDirectory() calls within a run, so files created earlier are seen again.
+// An in-memory OPFS node: a directory (named children) or a file (raw bytes). Roots
+// persist across getDirectory() calls within a run (files created earlier are seen
+// again), keyed by a storage scope (origin, or origin+bucket) so OPFS is ISOLATED
+// per origin — the same per-origin requirement as IndexedDB; a process-wide root
+// would let different origins read/write each other's private files.
 struct FsNode {
   bool is_dir = true;
   std::map<std::string, std::unique_ptr<FsNode>> children;  // when is_dir
   std::string bytes;                                        // when !is_dir
 };
 
-FsNode* OpfsRoot() {
-  static FsNode* root = new FsNode();  // is_dir = true
-  return root;
+FsNode* OpfsRoot(const std::string& scope) {
+  static auto* roots =
+      new std::map<std::string, std::unique_ptr<FsNode>>();  // scope -> root
+  auto it = roots->find(scope);
+  if (it == roots->end())
+    it = roots->emplace(scope, std::make_unique<FsNode>()).first;
+  return it->second.get();
 }
 
 m::FileSystemAccessErrorPtr Ok() {
@@ -403,13 +410,16 @@ mojo::PendingRemote<m::FileSystemAccessDirectoryHandle> BindDir(FsNode* node) {
 // ------------------------------- manager -------------------------------
 class MbFileSystemAccessManager : public m::FileSystemAccessManager {
  public:
+  explicit MbFileSystemAccessManager(uint64_t frame_key)
+      : frame_key_(frame_key) {}
+
   void GetSandboxedFileSystem(GetSandboxedFileSystemCallback cb) override {
-    std::move(cb).Run(Ok(), BindDir(OpfsRoot()));
+    std::move(cb).Run(Ok(), BindDir(OpfsRoot(MbGetFrameOrigin(frame_key_))));
   }
   void GetSandboxedFileSystemForDevtools(
       const blink::Vector<blink::String>&,
       GetSandboxedFileSystemForDevtoolsCallback cb) override {
-    std::move(cb).Run(Ok(), BindDir(OpfsRoot()));
+    std::move(cb).Run(Ok(), BindDir(OpfsRoot(MbGetFrameOrigin(frame_key_))));
   }
   void ChooseEntries(m::FilePickerOptionsPtr,
                      ChooseEntriesCallback cb) override {
@@ -428,20 +438,24 @@ class MbFileSystemAccessManager : public m::FileSystemAccessManager {
   }
   void BindObserverHost(
       mojo::PendingReceiver<m::FileSystemAccessObserverHost>) override {}
+
+ private:
+  uint64_t frame_key_ = 0;  // -> the frame's origin, scoping the OPFS root
 };
 
 }  // namespace
 
 void BindFileSystemAccessManager(
-    mojo::PendingReceiver<blink::mojom::blink::FileSystemAccessManager>
-        receiver) {
-  mojo::MakeSelfOwnedReceiver(std::make_unique<MbFileSystemAccessManager>(),
-                              std::move(receiver));
+    mojo::PendingReceiver<blink::mojom::blink::FileSystemAccessManager> receiver,
+    uint64_t frame_key) {
+  mojo::MakeSelfOwnedReceiver(
+      std::make_unique<MbFileSystemAccessManager>(frame_key),
+      std::move(receiver));
 }
 
 mojo::PendingRemote<blink::mojom::blink::FileSystemAccessDirectoryHandle>
-MbBindOpfsRootDirectory() {
-  return BindDir(OpfsRoot());
+MbBindOpfsRootDirectory(const std::string& scope) {
+  return BindDir(OpfsRoot(scope));
 }
 
 }  // namespace mb

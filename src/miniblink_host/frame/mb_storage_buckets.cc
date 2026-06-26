@@ -92,12 +92,17 @@ class MbBucketHost : public m::BucketHost {
     BindCacheStorage(std::move(r));
   }
   void GetDirectory(GetDirectoryCallback cb) override {
-    std::move(cb).Run(FsOk(), MbBindOpfsRootDirectory());
+    // Scope the bucket's OPFS to (origin, bucket) — same scope string as its IDB.
+    std::move(cb).Run(FsOk(),
+                      MbBindOpfsRootDirectory(MbGetFrameOrigin(frame_key_) +
+                                              "\x01" + "bucket:" + bucket_name_));
   }
   void GetDirectoryForDevtools(
       const blink::Vector<blink::String>&,
       GetDirectoryForDevtoolsCallback cb) override {
-    std::move(cb).Run(FsOk(), MbBindOpfsRootDirectory());
+    std::move(cb).Run(FsOk(),
+                      MbBindOpfsRootDirectory(MbGetFrameOrigin(frame_key_) +
+                                              "\x01" + "bucket:" + bucket_name_));
   }
 
  private:

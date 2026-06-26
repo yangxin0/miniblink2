@@ -1400,7 +1400,7 @@ class MbBrowserInterfaceBroker
     // navigator.storage.getDirectory() (OPFS) — in-memory directory/file tree.
     if (auto r =
             receiver.As<blink::mojom::blink::FileSystemAccessManager>()) {
-      BindFileSystemAccessManager(std::move(r));
+      BindFileSystemAccessManager(std::move(r), frame_key_);  // per-origin OPFS
       return;
     }
     // navigator.storageBuckets — named partitions re-exposing IDB/Cache/Locks/OPFS.
