@@ -178,6 +178,8 @@ class MbWebView {
   // Select a <select> option by value or visible text, firing input+change.
   bool SelectOption(const char* css_selector, const char* value);
   void SendMouseMove(int x, int y);
+  // Trusted mouse-wheel at (x,y); DOM-convention pixel deltas (deltaY>0 scrolls down).
+  void SendWheel(int x, int y, int delta_x, int delta_y, int modifiers);
   void SendText(const char* utf8);
   void SendKey(const char* key_name);  // press a named non-text key (Enter, Tab, ...)
   void SendKeyUp(int windows_key_code);  // standalone key release (fires `keyup`)

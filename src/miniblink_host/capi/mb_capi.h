@@ -303,6 +303,16 @@ MB_EXPORT int mbSelectOption(mbView*, const char* css_selector, const char* valu
 // Move the mouse pointer to (x,y): updates :hover state, fires mouseover/mousemove.
 MB_EXPORT void mbSendMouseMove(mbView*, int x, int y);
 
+// Dispatch a TRUSTED mouse-wheel at (x,y) with DOM-convention pixel deltas
+// (deltaY>0 = scroll down, deltaX>0 = right). Fires the page's `wheel` handlers with
+// event.isTrusted == true and the correct deltaX/deltaY — for wheel-driven UIs
+// (map/canvas zoom, scroll hijacking, "load more on scroll"). `modifiers` bitmask:
+// 1=ctrl 2=shift 4=alt 8=meta (ctrl+wheel = pinch-zoom intent).
+// NOTE: the wheel's NATIVE document scroll is compositor-gated and does not occur in
+// this non-compositing widget — to scroll programmatically use JS (window.scrollBy).
+// Pages that handle the wheel event themselves are unaffected.
+MB_EXPORT void mbSendWheel(mbView*, int x, int y, int deltaX, int deltaY, int modifiers);
+
 // Set the device pixel ratio (HiDPI / retina). The view keeps laying out in CSS px
 // but window.devicePixelRatio reports `scale` and paint output is rasterized at
 // `scale`x. Allocate paint/PNG buffers at logical_width*scale x logical_height*scale.

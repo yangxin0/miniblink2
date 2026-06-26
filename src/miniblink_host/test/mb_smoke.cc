@@ -297,6 +297,28 @@ int main() {
            "c=[" + c + "] a=[" + a + "] x=[" + x + "]");
   }
 
+  // 0i4. Trusted mouse-wheel (#12 input): mbSendWheel dispatches a real wheel event so a
+  // page `wheel` handler sees DOM-convention deltas (deltaY>0 = down, deltaX>0 = right)
+  // with isTrusted=true — what wheel-driven UIs (map/canvas zoom, scroll hijacking,
+  // "load more on scroll") listen for. Both axes + both signs are checked. (A wheel's
+  // NATIVE document scroll is compositor-gated and absent in this non-compositing
+  // widget — see PROGRESS; apps that handle the wheel event themselves are unaffected.)
+  {
+    mbLoadHTML(v,
+        "<body style='margin:0;height:5000px'><script>window.w='';"
+        "addEventListener('wheel',function(e){"
+        "window.w=e.deltaY+','+e.deltaX+','+e.isTrusted;});"
+        "</script></body>",
+        "about:blank");
+    mbSendWheel(v, 50, 50, 0, 120, 0);     // wheel down
+    const std::string w1 = Eval(v, "window.w");
+    mbSendWheel(v, 50, 50, 40, -120, 0);   // wheel up + right
+    const std::string w2 = Eval(v, "window.w");
+    Expect(w1 == "120,0,true" && w2 == "-120,40,true",
+           "mbSendWheel fires a trusted wheel event with DOM-convention deltas (both axes)",
+           "w1=[" + w1 + "] w2=[" + w2 + "]");
+  }
+
   // 0i2. IME composition (#12 input): mbSendIme drives the focused input through a
   // composition preview + commit — the committed text lands and the composition events
   // fire (CJK / accented input via an input method).

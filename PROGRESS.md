@@ -965,7 +965,22 @@ fires, letting pages pause timers/video/polling/rAF when hidden. Verified mb_smo
     them). Done in JS (events are isTrusted=false — app handlers fire; a few trusted-gesture-only
     behaviors won't; the native drag controller would be needed for those). Verified mb_smoke 12b2
     (drag #src -> #tgt: payload 'PKG-7' arrives via the target's getData; no-match -> 0), 138->139.
-    [REMAINING: trusted touch/wheel.]
+    [DONE: trusted WHEEL event] `mbSendWheel(view, x, y, deltaX, deltaY, modifiers)` ->
+    MbWidget::SendWheel dispatches a real WebMouseWheelEvent through the widget's
+    HandleInputEvent, so a page's `wheel` handler sees DOM-convention deltas (deltaY>0 =
+    down, deltaX>0 = right; blink's delta_y sign is the negative of the DOM event's, so
+    the API negates) with isTrusted=true — for wheel-driven UIs (map/canvas zoom, scroll
+    hijacking, "load more on scroll"). modifiers bitmask 1=ctrl 2=shift 4=alt 8=meta
+    (ctrl+wheel = pinch-zoom intent). Verified mb_smoke 0i4: wheel down -> deltaY 120;
+    wheel up+right -> -120,40; isTrusted true (mb_smoke 143->144). COMPLEMENTS the
+    existing mbSendScroll (which moves the viewport via scrollByForTesting + fires
+    `scroll`, but NO `wheel` event) — the two cover the wheel event vs. the actual scroll.
+    LIMITATION (documented in mb_capi.h): a wheel's NATIVE document scroll is
+    compositor-gated — modern blink routes wheel/gesture scrolls through the compositor
+    input pipeline (main-thread HandleGestureEvent CHECKs they never reach it), absent in
+    our non-compositing widget; the phase is set kPhaseNone but the scroll still won't
+    apply, so hosts scroll programmatically via mbSendScroll/JS. Trusted TOUCH already
+    exists (mbSendTouchTap/mbSendTouchSwipe via wke). [REMAINING: none in this item.]
 13. [DONE] PDF options. `mbSavePdfEx(path, width_pt, height_pt, landscape, scale, margin_pt)`
 (mbSavePdf kept = Letter default) + `mb_shot --pdf-size letter|a4|legal|a3|tabloid|WxH
 --landscape --pdf-scale N --pdf-margin PT`. Page size in points; landscape swaps w/h; content

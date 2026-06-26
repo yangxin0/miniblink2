@@ -375,6 +375,11 @@ void mbSendMouseMove(mbView* v, int x, int y) {
     v->impl->SendMouseMove(x, y);
 }
 
+void mbSendWheel(mbView* v, int x, int y, int deltaX, int deltaY, int modifiers) {
+  if (v && v->impl)
+    v->impl->SendWheel(x, y, deltaX, deltaY, modifiers);
+}
+
 void mbSetDeviceScaleFactor(mbView* v, float scale) {
   if (v && v->impl)
     v->impl->SetDeviceScaleFactor(scale);

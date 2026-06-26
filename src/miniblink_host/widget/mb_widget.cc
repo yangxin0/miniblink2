@@ -14,6 +14,8 @@
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/common/input/web_keyboard_event.h"
 #include "third_party/blink/public/common/input/web_mouse_event.h"
+#include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
+#include "ui/events/types/scroll_types.h"
 #include "third_party/blink/public/mojom/page/widget.mojom-blink.h"
 #include "third_party/blink/public/mojom/widget/platform_widget.mojom-blink.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
@@ -254,6 +256,41 @@ void MbWidget::SendMouseMove(int x, int y) {
   // event handler, so this updates hover state and fires mouseover/mousemove
   // without a compositor.
   impl->HandleInputEvent(blink::WebCoalescedInputEvent(e, ui::LatencyInfo()));
+}
+
+void MbWidget::SendWheel(int x, int y, int delta_x, int delta_y, int modifiers) {
+  if (!widget_)
+    return;
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  int mods = 0;
+  if (modifiers & 1)
+    mods |= blink::WebInputEvent::kControlKey;  // ctrl+wheel = pinch-zoom intent
+  if (modifiers & 2)
+    mods |= blink::WebInputEvent::kShiftKey;
+  if (modifiers & 4)
+    mods |= blink::WebInputEvent::kAltKey;
+  if (modifiers & 8)
+    mods |= blink::WebInputEvent::kMetaKey;
+  // blink's delta sign is the NEGATIVE of the DOM `wheel` event's: DOM deltaY>0 means
+  // "scroll content down", which is WebMouseWheelEvent.delta_y<0. Negate so the API
+  // takes DOM-convention deltas.
+  blink::WebMouseWheelEvent e(blink::WebInputEvent::Type::kMouseWheel, mods,
+                              base::TimeTicks::Now());
+  e.SetPositionInWidget(x, y);
+  e.SetPositionInScreen(x, y);
+  e.delta_x = -static_cast<float>(delta_x);
+  e.delta_y = -static_cast<float>(delta_y);
+  e.wheel_ticks_x = -static_cast<float>(delta_x) / 120.0f;
+  e.wheel_ticks_y = -static_cast<float>(delta_y) / 120.0f;
+  e.delta_units = ui::ScrollGranularity::kScrollByPixel;
+  // A NON-phased wheel (kPhaseNone, the classic mouse-wheel style): blink's
+  // main-thread EventHandler scrolls it directly. A PHASED wheel (kPhaseBegan)
+  // would instead be routed to the compositor's gesture-scroll generator, which is
+  // absent in our non-compositing widget -> the event would fire but not scroll.
+  e.phase = blink::WebMouseWheelEvent::kPhaseNone;
+  e.dispatch_type = blink::WebInputEvent::DispatchType::kBlocking;
+  impl->HandleInputEvent(
+      blink::WebCoalescedInputEvent(e, ui::LatencyInfo()));
 }
 
 void MbWidget::SendText(const char* utf8) {

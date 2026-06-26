@@ -40,6 +40,10 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   // 4=alt 8=meta — covers ctrl/shift-click, middle-click (auxclick), etc.
   void SendMouseClickEx(int x, int y, int button, int modifiers);
   void SendMouseMove(int x, int y);   // move pointer to (x,y): hover + mousemove
+  // Dispatch a TRUSTED mouse-wheel at (x,y): delta_x/delta_y are pixel deltas with
+  // DOM `wheel` sign (positive deltaY = scroll content DOWN). Fires the page's
+  // `wheel` handlers (isTrusted=true) and scrolls the document (main-thread scroll).
+  void SendWheel(int x, int y, int delta_x, int delta_y, int modifiers);
   void SendText(const char* utf8);    // type ASCII text into the focused element
   // Press a named non-text key ("Enter", "Tab", "Escape", "Backspace", "Delete",
   // "Arrow{Left,Up,Right,Down}", "Home", "End", "PageUp", "PageDown") as a real

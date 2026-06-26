@@ -901,6 +901,11 @@ void MbWebView::SendMouseMove(int x, int y) {
     widget_->SendMouseMove(x, y);
 }
 
+void MbWebView::SendWheel(int x, int y, int delta_x, int delta_y, int modifiers) {
+  if (widget_)
+    widget_->SendWheel(x, y, delta_x, delta_y, modifiers);
+}
+
 void MbWebView::SetUserAgent(const char* utf8_ua) {
   if (frame_client_)
     frame_client_->SetUserAgent(utf8_ua ? utf8_ua : "");
