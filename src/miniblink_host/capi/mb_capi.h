@@ -102,6 +102,13 @@ typedef void (*mbLoadFinishCallback)(mbView*, void* userdata);
 MB_EXPORT void mbOnLoadFinish(mbView*, mbLoadFinishCallback, void* userdata);
 MB_EXPORT int  mbIsLoadFinished(mbView*);
 
+// Fires when the main document's DOMContentLoaded event dispatches — the DOM is parsed and
+// deferred scripts have run, but subresources/images may still be loading. This is the
+// "page interactive" signal and is EARLIER than mbOnLoadFinish (which waits for `load` /
+// all subresources), matching Puppeteer/Playwright's 'domcontentloaded' wait. NULL clears.
+typedef void (*mbDOMContentLoadedCallback)(mbView*, void* userdata);
+MB_EXPORT void mbOnDOMContentLoaded(mbView*, mbDOMContentLoadedCallback, void* userdata);
+
 // Navigation policy/notification: the callback fires for each PAGE-initiated main-frame
 // navigation (link click, location= assignment, form submit, JS redirect) with its
 // target `url`, BEFORE it commits. Return 1 to allow, 0 to BLOCK it — so you can stop

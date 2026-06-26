@@ -1708,6 +1708,15 @@ void MbWebView::SetLoadFinishCallback(std::function<void()> cb) {
   on_load_finish_ = std::move(cb);
 }
 
+void MbWebView::OnDOMContentLoaded() {
+  if (on_dom_content_loaded_)
+    on_dom_content_loaded_();
+}
+
+void MbWebView::SetDOMContentLoadedCallback(std::function<void()> cb) {
+  on_dom_content_loaded_ = std::move(cb);
+}
+
 void MbWebView::OnConsoleMessage(const std::string& level,
                                  const std::string& message,
                                  const std::string& source, int line,

@@ -65,6 +65,23 @@ int main() {
     mbOnLoadFinish(v, nullptr, nullptr);  // clear before `fin` leaves scope
   }
 
+  // 0b2. mbOnDOMContentLoaded fires when the DOM is parsed (deferred scripts run, before
+  // subresources) — the "page interactive" signal, EARLIER than load-finish/onload. Record
+  // both signals into one sequence: DOMContentLoaded ('D') must fire AND precede load ('L').
+  {
+    static std::string* seq = new std::string();  // -Wexit-time-destructors
+    seq->clear();
+    mbOnDOMContentLoaded(v, [](mbView*, void*) { *seq += "D"; }, nullptr);
+    mbOnLoadFinish(v, [](mbView*, void*) { *seq += "L"; }, nullptr);
+    mbLoadHTML(v, "<body>dcl<script>document.title='x';</script></body>",
+               "about:blank");
+    Expect(*seq == "DL",
+           "mbOnDOMContentLoaded fires before load-finish (DOM-ready signal)",
+           "seq=[" + *seq + "]");
+    mbOnDOMContentLoaded(v, nullptr, nullptr);
+    mbOnLoadFinish(v, nullptr, nullptr);
+  }
+
   // 0c. Dynamic per-request hook: mbSetRequestCallback is consulted for EVERY request
   // the loader handles and can block per-URL at runtime (vs the static substring
   // tables). Two same-origin fetch()es — one served by a mock (allowed), one whose URL

@@ -153,6 +153,9 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // subresources done). Pushes the signal to MbWebView so embedders can react to
   // real completion instead of polling / a fixed settle timer. Child frames ignored.
   void DidFinishLoad() override;
+  // Main frame DOMContentLoaded (DOM parsed + deferred scripts run, before subresources) —
+  // the "page interactive" signal, earlier than DidFinishLoad/onload. Pushed to MbWebView.
+  void DidDispatchDOMContentLoadedEvent() override;
 
   // Frame lifecycle. A child client self-destructs on detach; the main frame is
   // owned by MbWebView so it does nothing here.

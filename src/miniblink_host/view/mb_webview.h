@@ -388,6 +388,11 @@ class MbWebView {
   void NotifyLoadFailed();
   // Register a callback fired on each main-frame load finish. Pass {} to clear.
   void SetLoadFinishCallback(std::function<void()> cb);
+  // Called by MbFrameClient when the main frame fires DOMContentLoaded (DOM parsed +
+  // deferred scripts run, BEFORE subresources/images — the "page interactive" signal,
+  // earlier than load-finish/onload). Fires the registered callback.
+  void OnDOMContentLoaded();
+  void SetDOMContentLoadedCallback(std::function<void()> cb);  // {} clears
   // Called by MbFrameClient for each page console message (console.log/warn/error, AND
   // uncaught exceptions / unhandled promise rejections, which blink reports as console
   // errors). A live push (vs. polling DrainConsole). `source`/`line` locate the message
@@ -581,6 +586,7 @@ class MbWebView {
 
   bool load_finished_ = false;        // main-frame load event has fired (DidFinishLoad)
   std::function<void()> on_load_finish_;  // optional embedder finish callback
+  std::function<void()> on_dom_content_loaded_;  // optional DOMContentLoaded callback
   ConsoleFn on_console_;  // optional live console-message callback
   NavigationFn on_navigation_;  // optional page-initiated navigation policy callback
   UrlChangedFn on_url_changed_;  // optional per-commit URL-changed notification

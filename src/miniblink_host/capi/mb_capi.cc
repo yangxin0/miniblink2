@@ -137,6 +137,15 @@ void mbOnLoadFinish(mbView* v, mbLoadFinishCallback cb, void* userdata) {
     v->impl->SetLoadFinishCallback({});
 }
 
+void mbOnDOMContentLoaded(mbView* v, mbDOMContentLoadedCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetDOMContentLoadedCallback([v, cb, userdata]() { cb(v, userdata); });
+  else
+    v->impl->SetDOMContentLoadedCallback({});
+}
+
 int mbIsLoadFinished(mbView* v) {
   return (v && v->impl && v->impl->load_finished()) ? 1 : 0;
 }

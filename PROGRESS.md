@@ -1291,6 +1291,18 @@ documented honestly in the capi. So page error MONITORING now works: message + s
 every error/exception, + full stacks for console.* . mb_smoke 154->155, full battery green
 (platform 46, render 126, shot 66, wke 114), no leaks.
 
+[DONE - mbOnDOMContentLoaded: the DOM-ready lifecycle signal]. The embedder pushed load-FINISH
+(onload, all subresources) but not DOMContentLoaded (DOM parsed + deferred scripts run, before
+images/subresources) — the earlier "page interactive" signal automation usually wants (Puppeteer/
+Playwright's 'domcontentloaded' wait state). WebLocalFrameClient exposes
+DidDispatchDOMContentLoadedEvent (a clean main-thread callback, unlike the host-channel
+DidChangeLoadProgress), so MbFrameClient overrides it (main-frame only, child clients ignored) ->
+MbWebView::OnDOMContentLoaded -> the new mbOnDOMContentLoaded(view, cb, userdata) callback (modeled
+on mbOnLoadFinish). Verified mb_smoke 0b2: both signals recorded into one sequence -> 'DL'
+(DOMContentLoaded fires AND precedes load-finish). mb_smoke 155->156, full battery green (platform
+46, render 126, shot 66, wke 114), no leaks. (Load PROGRESS / DidFailLoadWithError remain on the
+host channel - a heavier frame_key-sink wiring - deferred; DOMContentLoaded was the clean win.)
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

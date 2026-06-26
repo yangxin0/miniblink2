@@ -462,6 +462,14 @@ void MbFrameClient::DidFinishLoad() {
   owner_->OnDidFinishLoad();
 }
 
+void MbFrameClient::DidDispatchDOMContentLoadedEvent() {
+  // Main frame only — DOMContentLoaded fires when the DOM is parsed and deferred scripts
+  // have run (before subresources/images), the earliest "interactive" signal.
+  if (self_owned_ || !owner_)
+    return;
+  owner_->OnDOMContentLoaded();
+}
+
 void MbFrameClient::FrameDetached(blink::DetachReason reason) {
   if (!self_owned_)
     return;  // main frame: MbWebView owns teardown
