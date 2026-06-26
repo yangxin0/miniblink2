@@ -421,6 +421,55 @@ static void RunCases(mbView* v, int W, int H) {
            "br=[" + br + "]");
   }
 
+  // 37n2. A Blob value stored in IndexedDB PERSISTS TO DISK across a save/reload. The
+  // serializer reads each record blob's bytes asynchronously (MbReadBlobRemoteBytes — a
+  // blob is only readable via its remote, and its stored UUID != the serving MbBlob's) and
+  // writes them; the loader re-mints a fresh inline blob. We put a blob, mbSaveIndexedDB,
+  // DELETE the db (dropping the in-memory record + its blob), mbLoadIndexedDB, reopen, and
+  // read the blob back — proving the bytes came from DISK, not the in-session handle.
+  {
+    const char* idb_path = "/tmp/mb_blobidb_persist.bin";
+    mbLoadHTML(v, "<body>blobpersist</body>", "https://blobpersist.test/");
+    mbRunJS(v,
+      "window.__s='';var blob=new Blob(['persist-blob'],{type:'text/plain'});"
+      "var q=indexedDB.open('bp',1);q.onupgradeneeded=function(e){"
+      "e.target.result.createObjectStore('s',{keyPath:'id'});};"
+      "q.onsuccess=function(e){window.__db=e.target.result;"
+      "var t=window.__db.transaction('s','readwrite');t.objectStore('s').put({id:1,f:blob});"
+      "t.oncomplete=function(){window.__s='put';};};");
+    std::string s;
+    for (int i = 0; i < 200 && s != "put"; ++i) { mbWait(v, 25); s = Eval(v, "window.__s"); }
+    const bool put_ok = (s == "put");
+    mbSaveIndexedDB(idb_path);
+    mbRunJS(v,
+      "window.__s='';window.__db.close();"
+      "var d=indexedDB.deleteDatabase('bp');"
+      "d.onsuccess=function(){window.__s='del';};d.onerror=function(){window.__s='delerr';};");
+    s.clear();
+    for (int i = 0; i < 200 && s != "del"; ++i) { mbWait(v, 25); s = Eval(v, "window.__s"); }
+    const bool del_ok = (s == "del");
+    mbLoadIndexedDB(idb_path);  // restore from disk
+    mbRunJS(v,
+      "window.__s='';var q2=indexedDB.open('bp',1);"
+      "q2.onupgradeneeded=function(e){window.__s='upgrade';};"  // should NOT fire if loaded
+      "q2.onsuccess=function(e){var db=e.target.result;"
+      "var g=db.transaction('s').objectStore('s').get(1);"
+      "g.onsuccess=function(){var rec=g.result;if(!rec||!rec.f){window.__s='norec';return;}"
+      "rec.f.text().then(function(t){window.__s='got:'+t;});};"
+      "g.onerror=function(){window.__s='geterr';};};"
+      "q2.onerror=function(){window.__s='openerr';};");
+    s.clear();
+    for (int i = 0; i < 240 && s.rfind("got:", 0) != 0 && s != "norec" &&
+                    s != "upgrade" && s != "openerr"; ++i) {
+      mbWait(v, 25);
+      s = Eval(v, "window.__s");
+    }
+    Expect(put_ok && del_ok && s == "got:persist-blob",
+           "a Blob value in IndexedDB persists to disk (save/delete/load round-trip)",
+           "put=" + std::string(put_ok ? "1" : "0") + " del=" + (del_ok ? "1" : "0") +
+               " final=[" + s + "]");
+  }
+
   // 38. ServiceWorker spawn must be crash-safe. (SharedWorker now runs — see 37g.)
   // navigator.serviceWorker.register() either rejects cleanly or, on a
   // real origin where we have no provider, is null-guarded (pending promise,

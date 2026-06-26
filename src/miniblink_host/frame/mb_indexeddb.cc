@@ -25,13 +25,18 @@
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/self_owned_associated_receiver.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_key.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_key_range.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_metadata.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_value.h"
+#include "base/barrier_closure.h"
+#include "base/time/time.h"
+#include "miniblink_host/blob/mb_blob_registry.h"
 #include "third_party/blink/public/platform/web_blob_info.h"
+#include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace mb {
@@ -996,9 +1001,16 @@ struct Reader {
   }
 };
 
-constexpr char kIdbMagic[] = "MBIDB001";
+constexpr char kIdbMagicV1[] = "MBIDB001";  // records only (no blob payloads)
+constexpr char kIdbMagic[] = "MBIDB002";    // + per-record Blob/File bytes
 
-std::string SerializeRegistry() {
+// SerializeRegistry reads each record blob's bytes from this map (keyed by the WebBlobInfo's
+// address in the record, stable for the duration of a save). The save gathers the bytes
+// asynchronously first (blobs are only readable via an async remote read), then serializes.
+// Set/cleared around a single save on the service thread, so a bare pointer is safe.
+using BlobByteMap = std::map<const blink::WebBlobInfo*, std::string>;
+
+std::string SerializeRegistry(const BlobByteMap* blob_bytes) {
   std::string o;
   o.append(kIdbMagic, 8);
   WU32(&o, Registry().size());  // all databases (secondary indexes now persisted)
@@ -1032,6 +1044,24 @@ std::string SerializeRegistry() {
       for (const auto& [ekey, rec] : recs) {
         WStr(&o, ekey);
         WStr(&o, rec.bytes);
+        // Attached Blob/File payloads (v2). The SSV bytes reference these by INDEX, so we
+        // persist them in order; the bytes were gathered (async) into `blob_bytes` before
+        // this serialize. On load each is re-minted as a fresh inline blob.
+        WU32(&o, rec.blob_info.size());
+        for (const blink::WebBlobInfo& bi : rec.blob_info) {
+          WU8(&o, bi.IsFile() ? 1 : 0);
+          WStr(&o, bi.GetType().Utf8());
+          WStr(&o, bi.IsFile() ? bi.FileName().Utf8() : std::string());
+          std::optional<base::Time> lm = bi.LastModified();
+          WI64(&o, lm ? lm->ToDeltaSinceWindowsEpoch().InMicroseconds() : -1);
+          std::string bb;
+          if (blob_bytes) {
+            auto it = blob_bytes->find(&bi);
+            if (it != blob_bytes->end())
+              bb = it->second;
+          }
+          WStr(&o, bb);
+        }
       }
     }
     // Key generators.
@@ -1062,7 +1092,9 @@ std::string SerializeRegistry() {
 
 bool DeserializeRegistry(const std::string& buf) {
   Reader r(buf);
-  if (buf.size() < 8 || buf.compare(0, 8, kIdbMagic, 8) != 0)
+  const bool v2 = buf.size() >= 8 && buf.compare(0, 8, kIdbMagic, 8) == 0;
+  const bool v1 = buf.size() >= 8 && buf.compare(0, 8, kIdbMagicV1, 8) == 0;
+  if (!v1 && !v2)
     return false;
   r.pos = 8;
   uint32_t db_count = r.U32();
@@ -1109,7 +1141,34 @@ bool DeserializeRegistry(const std::string& buf) {
       for (uint32_t k = 0; k < rec_count && r.ok; ++k) {
         std::string ekey = r.Str();
         std::string bytes = r.Str();
-        recs[ekey] = MbRecord{DecodeKey(ekey), std::move(bytes)};
+        blink::Vector<blink::WebBlobInfo> blob_info;
+        if (v2) {
+          uint32_t bcount = r.U32();
+          for (uint32_t bi = 0; bi < bcount && r.ok; ++bi) {
+            bool is_file = r.U8() != 0;
+            std::string type = r.Str();
+            std::string fname = r.Str();
+            int64_t lm_us = r.I64();
+            std::string blob_bytes = r.Str();
+            // Re-mint a fresh in-process blob serving the persisted bytes, and rebuild the
+            // WebBlobInfo (UUID is fresh — the SSV references blobs by index, not UUID).
+            scoped_refptr<blink::BlobDataHandle> handle =
+                MbCreateInlineBlob(blob_bytes, blink::String::FromUtf8(type));
+            if (is_file) {
+              std::optional<base::Time> lm;
+              if (lm_us >= 0)
+                lm = base::Time::FromDeltaSinceWindowsEpoch(base::Microseconds(lm_us));
+              blob_info.emplace_back(handle, blink::String::FromUtf8(fname),
+                                     blink::String::FromUtf8(type), lm,
+                                     blob_bytes.size());
+            } else {
+              blob_info.emplace_back(handle, blink::String::FromUtf8(type),
+                                     blob_bytes.size());
+            }
+          }
+        }
+        recs[ekey] =
+            MbRecord{DecodeKey(ekey), std::move(bytes), std::move(blob_info)};
       }
     }
     uint32_t keygen_count = r.U32();
@@ -1177,12 +1236,65 @@ void RunOnServiceSync(base::OnceClosure task) {
                        std::move(task), &done));
   done.Wait();
 }
+
+// Save on the service thread. Blob bytes are only readable via an async remote read, so we
+// FIRST read every record blob (concurrently), gather the bytes keyed by the WebBlobInfo's
+// stable address, THEN serialize (which reads that map) and signal the waiting main thread.
+// Runs entirely on the service thread; the main thread is blocked on `done`, but the service
+// thread stays free to drive the async reads — no deadlock. Records are immutable for the
+// duration (no IDB op runs while the caller blocks), so the &bi pointers stay valid.
+void SerializeWithBlobsOnService(std::string* out, base::WaitableEvent* done) {
+  auto byte_map = std::make_unique<BlobByteMap>();
+  std::vector<const blink::WebBlobInfo*> blobs;
+  for (const auto& [name, b] : Registry())
+    for (const auto& [sid, recs] : b->data)
+      for (const auto& [ekey, rec] : recs)
+        for (const blink::WebBlobInfo& bi : rec.blob_info)
+          blobs.push_back(&bi);
+  if (blobs.empty()) {
+    *out = SerializeRegistry(byte_map.get());
+    done->Signal();
+    return;
+  }
+  BlobByteMap* raw_map = byte_map.get();
+  base::RepeatingClosure barrier = base::BarrierClosure(
+      blobs.size(),
+      base::BindOnce(
+          [](std::string* out, base::WaitableEvent* done,
+             std::unique_ptr<BlobByteMap> map) {
+            *out = SerializeRegistry(map.get());
+            done->Signal();
+          },
+          out, done, std::move(byte_map)));
+  for (const blink::WebBlobInfo* bi : blobs) {
+    mojo::PendingRemote<blink::mojom::blink::Blob> remote = bi->CloneBlobRemote();
+    MbReadBlobRemoteBytes(
+        std::move(remote),
+        base::BindOnce(
+            [](BlobByteMap* map, const blink::WebBlobInfo* key,
+               base::RepeatingClosure barrier, std::vector<uint8_t> bytes) {
+              (*map)[key] = std::string(bytes.begin(), bytes.end());
+              barrier.Run();
+            },
+            raw_map, bi, barrier));
+  }
+}
 }  // namespace
 
 bool MbSaveIndexedDB(const std::string& path) {
   std::string blob;
-  RunOnServiceSync(base::BindOnce(
-      [](std::string* out) { *out = SerializeRegistry(); }, &blob));
+  scoped_refptr<base::SingleThreadTaskRunner> runner =
+      MbRuntime::ServiceTaskRunner();
+  if (!runner || runner->RunsTasksInCurrentSequence()) {
+    // Pre-init or already on the service thread: we can't block on the async blob reads
+    // here, so fall back to a record-only serialize (blob payloads empty).
+    blob = SerializeRegistry(nullptr);
+  } else {
+    base::WaitableEvent done;
+    runner->PostTask(
+        FROM_HERE, base::BindOnce(&SerializeWithBlobsOnService, &blob, &done));
+    done.Wait();
+  }
   return base::WriteFile(base::FilePath(path), blob);
 }
 

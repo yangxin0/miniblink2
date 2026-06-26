@@ -910,11 +910,21 @@ constraints, atomic abort, and compound keys — the whole object-store/index AP
    WebBlobInfo.Uuid() was `7bb2e785` (blink mints a fresh handle uuid when the value is stored/cloned;
    MbBlob::Clone keeps the ORIGINAL uuid_, so the serving MbBlob registered under `e2a3ea5a` while the
    lookup key is `7bb2e785` -> always misses). So a uuid-keyed mirror is a DEAD END: WebBlobInfo.Uuid()
-   is not the serving MbBlob's id. The only viable path is the documented async read — at save, clone
-   each record blob's remote (WebBlobInfo::CloneBlobRemote) and MbReadBlobRemoteBytes it, gathering all
-   bytes BEFORE serialize (the save's main-thread WaitableEvent can't block on a same-thread async read,
-   so the reads must complete on the service thread first, then serialize). Reverted the sync attempt
-   clean. [REMAINING:
+   is not the serving MbBlob's id.
+   [DONE — blob IDB DISK persistence via the async read (2026-06)]: implemented the documented async path
+   and it WORKS. MbSaveIndexedDB now, on the service thread, walks every record's blob_info, clones each
+   blob's remote (WebBlobInfo::CloneBlobRemote) and reads its bytes via MbReadBlobRemoteBytes CONCURRENTLY,
+   gathering them into a map keyed by the WebBlobInfo's stable address (&bi); a base::BarrierClosure fires
+   once all reads finish, THEN SerializeRegistry writes each blob's {isFile,type,fileName,lastModified,
+   bytes} after the record's SSV bytes (format bumped MBIDB001 -> MBIDB002; v1 still loads). No deadlock:
+   the main thread blocks on a WaitableEvent while the service thread stays free to drive the reads.
+   DeserializeRegistry re-mints each blob via MbCreateInlineBlob (fresh UUID — the SSV references blobs by
+   INDEX, order preserved) and rebuilds the WebBlobInfo. Keying by the live WebBlobInfo ADDRESS sidesteps
+   the uuid mismatch that killed the sync attempt. Verified mb_smoke_render 37n2: put {id:1,f:Blob(
+   'persist-blob')}, mbSaveIndexedDB, indexedDB.deleteDatabase (drops the in-session blob), mbLoadIndexedDB,
+   reopen, get(1).f.text() -> 'persist-blob' — the bytes came from DISK. Stable over 4 reruns; full battery
+   green (mb_smoke 154, platform 46, render 122->123, shot 66, wke 114), no leaks. A Blob/File stored in
+   IndexedDB now survives save/load across sessions. [REMAINING:
    per-origin IDB partitioning — DONE separately (see the per-origin isolation entries).] 10. Blob-from-file
 + ranged blob reads + DataPipeGetter uploads. 11. **GPU content path** — [CHARACTERIZED] the gap is
 NARROWER than "all GPU content blank": 2D `<canvas>` FULLY works — draw + getImageData + toDataURL (tests
