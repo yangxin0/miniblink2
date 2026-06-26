@@ -189,3 +189,22 @@ executable("mb_gl_probe") {
     "//ui/gl/init",
   ]
 }
+
+# mb_gpu_probe: WebGL bring-up milestone B — an in-process GPU command buffer over the
+# milestone-A GL, driven through a real gpu::gles2::GLES2Interface (what blink's WebGL
+# provider consumes). Blink-free.
+executable("mb_gpu_probe") {
+  testonly = true  # //gpu/ipc:gl_in_process_context + :gpu_thread_holder are testonly
+  sources = [ "tools/mb_gpu_probe.cc" ]
+  deps = [
+    "//base",
+    "//gpu/command_buffer/client:gles2_implementation",
+    "//gpu/command_buffer/client:gles2_interface",
+    "//gpu/command_buffer/common",
+    "//gpu/config",
+    "//gpu/ipc:gl_in_process_context",
+    "//gpu/ipc:gpu_thread_holder",
+    "//ui/gl",
+    "//ui/gl/init",
+  ]
+}

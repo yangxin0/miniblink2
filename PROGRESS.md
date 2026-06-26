@@ -1018,8 +1018,34 @@ build.sh after the shot smoke):
 So the in-process GL foundation works (ANGLE over Vulkan over SwiftShader, GLES 3.0) — the
 brick the in-process command buffer (milestone B) sits on. No GPU/display required; runs on
 a headless box. Battery unaffected (mb_smoke 145, platform 46, render 102, shot 66, wke 114),
-no leaks. NEXT: milestone B — stand up gpu::CommandBufferTaskExecutor + a SingleTaskSequence
-+ an in-process command buffer over this GL context, exposing a gpu::gles2::GLES2Interface.
+no leaks.
+[DONE — milestone B] mb_gpu_probe (tools/mb_gpu_probe.cc, blink-free, testonly) stands up
+an IN-PROCESS GPU COMMAND BUFFER over the milestone-A GL and drives it through a real
+gpu::gles2::GLES2Implementation (a GLES2Interface — exactly what blink's WebGL provider
+consumes). Path: gpu::InProcessGpuThreadHolder spins a "GpuThread" (own SyncPointManager +
+Scheduler + CommandBufferTaskExecutor); gpu::GLInProcessContext::Initialize(task_executor)
+wires the client command buffer + GLES2Implementation. Issues real GL through the buffer
+(ClearColor/Clear/GetIntegerv/GetString/Finish) -> glGetError 0, GL_MAX_TEXTURE_SIZE 8192.
+THREE non-obvious requirements found + encoded (each was a fatal until fixed):
+  1. The in-process GL targets (//gpu/ipc:gl_in_process_context, :gpu_thread_holder) are
+     testonly -> the probe target must set `testonly = true`.
+  2. The GPU thread's own gl::init::InitializeGLOneOff hit a Mac NOTREACHED
+     (gl_factory_mac.cc CreateOffscreenGLSurface default case) because GetGLImplementation()
+     wasn't ANGLE on that thread -> call InitializeGLOneOff on the MAIN thread FIRST to set
+     the process-wide GL implementation (the global the GPU thread reads).
+  3. This Chromium is built with Graphite+Dawn, so the GPU service defaulted its Skia
+     backend to kGraphiteDawn and CHECK-failed on a null dawn_context_provider_ -> set
+     GpuPreferences.gr_context_type = gpu::GrContextType::kGL (Ganesh-over-GL) +
+     use_passthrough_cmd_decoder = true (ANGLE requires passthrough).
+Client side needs a base::SingleThreadTaskExecutor + base::ThreadPoolInstance. Verified
+(mb_gpu_probe exit 0, wired into build.sh after mb_gl_probe); battery unaffected (mb_smoke
+145, platform 46, render 102, shot 66, wke 114), both probes leak-free.
+NEXT: milestone C — override MbPlatform::CreateWebGLGraphicsContextProvider to return a
+blink::WebGraphicsContext3DProvider wrapping this in-process context (the
+WebGraphicsContext3DProviderWrapper around a viz::ContextProviderCommandBuffer, or a
+direct provider over GLInProcessContext's GLES2Interface + GrDirectContext), then a
+getContext('webgl') smoke test. The two hard unknowns (in-process GL + command buffer)
+are now both proven to work in this tree.
 13. [DONE] PDF options. `mbSavePdfEx(path, width_pt, height_pt, landscape, scale, margin_pt)`
 (mbSavePdf kept = Letter default) + `mb_shot --pdf-size letter|a4|legal|a3|tabloid|WxH
 --landscape --pdf-scale N --pdf-margin PT`. Page size in points; landscape swaps w/h; content
