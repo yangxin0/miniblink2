@@ -1,0 +1,31 @@
+diff --git a/third_party/blink/renderer/core/view_transition/view_transition_supplement.cc b/third_party/blink/renderer/core/view_transition/view_transition_supplement.cc
+index 498caaa..d07a503 100644
+--- a/third_party/blink/renderer/core/view_transition/view_transition_supplement.cc
++++ b/third_party/blink/renderer/core/view_transition/view_transition_supplement.cc
+@@ -15,6 +15,7 @@
+ #include "third_party/blink/renderer/core/dom/pseudo_element.h"
+ #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+ #include "third_party/blink/renderer/core/frame/local_frame.h"
++#include "third_party/blink/renderer/platform/widget/frame_widget.h"
+ #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+ #include "third_party/blink/renderer/core/layout/layout_object.h"
+ #include "third_party/blink/renderer/core/page/page.h"
+@@ -137,6 +138,18 @@ DOMViewTransition* ViewTransitionSupplement::StartTransition(
+         ->GetScriptDelegate();
+   }
+ 
++  // A non-compositing embedder (no LayerTreeHost, hence no AnimationHost) cannot capture
++  // or animate a view transition: the compositor snapshot request never completes and the
++  // ready/finished promises hang FOREVER. Degrade gracefully exactly like the no-view
++  // case above — a skipped transition still runs the DOM-update callback and settles the
++  // promises, so the page proceeds (just without the animation it couldn't render anyway).
++  FrameWidget* root_widget =
++      document.GetFrame() ? document.GetFrame()->GetWidgetForLocalRoot() : nullptr;
++  if (!root_widget || !root_widget->AnimationHost()) {
++    return ViewTransition::CreateSkipped(&element, callback, types)
++        ->GetScriptDelegate();
++  }
++
+   ViewTransition* transition = ViewTransition::CreateFromScript(
+       &element, callback, types, this, active_transition);
+   DCHECK(transition);

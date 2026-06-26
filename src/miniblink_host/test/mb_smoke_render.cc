@@ -1272,6 +1272,36 @@ static void RunCases(mbView* v, int W, int H) {
            "wg=[" + wg + "]");
   }
 
+  // 41o0. View Transitions DEGRADE GRACEFULLY (patch 0009): document.startViewTransition()
+  // needs the compositor to capture/animate snapshots; with our non-compositing widget the
+  // capture never completes, so ready/finished hung FOREVER (probed: neither settled in 5s).
+  // The patch makes blink skip the transition when the frame can't composite (no
+  // AnimationHost) — like its existing no-View skip — so the DOM-update callback STILL RUNS
+  // and the promises settle promptly. A page using View Transitions no longer hangs.
+  {
+    mbLoadHTML(v,
+      "<body><h1 id='t'>before</h1><script>"
+      "window.__vt='';window.__upd='';"
+      "if(document.startViewTransition){"
+      "var tr=document.startViewTransition(function(){"
+      "document.getElementById('t').textContent='after';window.__upd='ran';});"
+      "tr.finished.then(function(){window.__vt='finished';},"
+      "function(e){window.__vt='rej:'+(e&&e.name?e.name:e);});"
+      "tr.updateCallbackDone.then(function(){window.__ucb='1';},function(){window.__ucb='rej';});"
+      "}else{window.__vt='absent';}"
+      "</script></body>","https://vt.test/");
+    std::string vt;
+    for (int i = 0; i < 120 && vt.empty(); ++i) { mbWait(v, 25); vt = Eval(v, "String(window.__vt)"); }
+    const std::string upd = Eval(v, "String(window.__upd)");
+    const std::string txt = Eval(v, "document.getElementById('t').textContent");
+    // The promise settles (finished or a clean rejection — NOT a hang), the DOM update ran,
+    // and the new content is live. (We accept either 'finished' or a 'rej:' skip outcome.)
+    const bool settled = vt == "finished" || vt.rfind("rej:", 0) == 0;
+    Expect(settled && upd == "ran" && txt == "after",
+           "View Transitions degrade gracefully (no hang): callback runs, promise settles",
+           "vt=[" + vt + "] upd=[" + upd + "] txt=[" + txt + "]");
+  }
+
   // 41o. Browser-service-backed promise APIs DEGRADE GRACEFULLY — they SETTLE (resolve
   // or reject), never HANG. With no browser process these must not leave a page awaiting
   // forever (the worst failure mode — cf. the WebGPU requestAdapter hang fixed in 41n).

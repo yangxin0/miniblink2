@@ -1327,6 +1327,23 @@ url>. mb_smoke 156->157, full battery green (platform 46, render 127, shot 66, w
 leaks. (Same "discarded data" pattern as the console source/line/stack + DOMContentLoaded
 ticks - blink/the service already had the data, the embedder just wasn't given it.)
 
+[DONE - View Transitions no longer HANG (graceful degradation, patch 0009)]. Probing modern
+features found document.startViewTransition() HUNG forever (like the old WebGPU requestAdapter
+bug): it needs the compositor to capture/animate before+after snapshots, but our non-compositing
+widget never completes the capture, so transition.ready/finished never settled (confirmed: neither
+resolved in 5.5s; the 4s long-callback timeout doesn't even fire because it stalls earlier, in the
+capture). A page doing `await document.startViewTransition(update).finished` (increasingly common
+in SPAs / cross-doc nav) would hang. ROOT CAUSE + FIX: blink's ViewTransitionSupplement::Start-
+Transition already CreateSkipped()s (runs the DOM callback + settles the promises, no animation)
+when there's no View or the doc is hidden; patch 0009 adds the analogous no-compositor case -
+skip when the local-root FrameWidget has no AnimationHost (null exactly when there's no
+LayerTreeHost, i.e. our non-compositing widget). So the update callback still runs and the
+promises settle promptly instead of hanging. Verified mb_smoke_render 41o0: startViewTransition
+(h1 'before'->'after') -> finished settles, the callback ran, textContent is 'after' (no hang).
+render 127->128, full battery green (mb_smoke 157, platform 46, shot 66, wke 114), no leaks.
+(patches/0009; same graceful-degradation principle as the WebGPU-hang fix. :has()/popover were
+probed too - both already work.)
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),
