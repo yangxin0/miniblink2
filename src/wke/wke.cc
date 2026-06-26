@@ -1687,6 +1687,39 @@ jsValue StoreEval(wkeWebView wv, const std::string& script) {
       JsRecord{std::string(value.data()), std::string(type), std::move(literal)};
   return handle;
 }
+
+// Frame handles are opaque pointers carrying a frame index: main frame == 1
+// (mb index -1), child i == i+2 (mb index i). 0/null is invalid. This keeps a
+// stable, comparable handle without tracking blink frame objects across loads.
+int FrameIndexOf(void* h) {
+  intptr_t v = reinterpret_cast<intptr_t>(h);
+  if (v == 1)
+    return -1;  // main frame
+  if (v >= 2)
+    return static_cast<int>(v - 2);  // child index
+  return -2;                         // invalid
+}
+void* FrameHandleOf(int frame_index) {  // frame_index -1 => main
+  return reinterpret_cast<void*>(
+      static_cast<intptr_t>(frame_index < 0 ? 1 : frame_index + 2));
+}
+
+// Eval `script` in the frame_index-th frame (-1 = main) and register a string-
+// typed jsValue for its result. Unlike StoreEval there is no __mbslots slot — a
+// frame's result isn't navigable/callable from the main world — so the handle
+// carries only the coerced string value (read via jsToString/jsToInt/...).
+jsValue StoreEvalInFrame(wkeWebView wv, int frame_index,
+                         const std::string& script) {
+  auto& reg = JsRegistry();
+  if (reg.size() >= 4096)
+    reg.clear();  // bound the registry; old handles expire to ""
+  const jsValue handle = g_next_js_value++;
+  std::vector<char> value(1 << 16, 0);  // 64 KiB result cap
+  mbEvalJSInFrame(wv->view, frame_index, script.c_str(), value.data(),
+                  static_cast<int>(value.size()));
+  reg[handle] = JsRecord{std::string(value.data()), "string", std::string()};
+  return handle;
+}
 }  // namespace
 
 jsValue wkeRunJS(wkeWebView webView, const utf8* script) {
@@ -1730,6 +1763,48 @@ jsExecState wkeGlobalExec(wkeWebView webView) {
   // No real exec state is needed — the jsValue handle carries the result. Return
   // a non-null token so callers' null checks pass.
   return reinterpret_cast<jsExecState>(webView);
+}
+
+// --- Sub-frame scripting (wkeRunJsByFrame) -------------------------------------
+wkeWebFrameHandle wkeWebFrameGetMainFrame(wkeWebView webView) {
+  if (!webView || !webView->view)
+    return nullptr;
+  return FrameHandleOf(-1);
+}
+
+int wkeWebFrameGetSubFrameCount(wkeWebView webView) {
+  if (!webView || !webView->view)
+    return 0;
+  return mbGetFrameCount(webView->view);
+}
+
+wkeWebFrameHandle wkeWebFrameGetSubFrame(wkeWebView webView, int index) {
+  if (!webView || !webView->view || index < 0 ||
+      index >= mbGetFrameCount(webView->view))
+    return nullptr;
+  return FrameHandleOf(index);
+}
+
+bool wkeIsMainFrame(wkeWebView webView, wkeWebFrameHandle frameId) {
+  return webView && webView->view && FrameIndexOf(frameId) == -1;
+}
+
+jsValue wkeRunJsByFrame(wkeWebView webView, wkeWebFrameHandle frameId,
+                        const utf8* script, bool isInClosure) {
+  if (!webView || !webView->view || !script)
+    return 0;
+  const int idx = FrameIndexOf(frameId);
+  if (idx == -2)
+    return 0;  // invalid handle
+  // isInClosure: run the script as a function body (its `return` is the result),
+  // mirroring upstream; otherwise eval it as a bare expression.
+  const std::string src =
+      isInClosure ? ("(function(){" + std::string(script) + "})()")
+                  : std::string(script);
+  const jsValue handle = StoreEvalInFrame(webView, idx, src);
+  DrainConsoleToCallback(webView);  // deliver console output the script logged
+  DrainBridgeToCallback(webView);   // deliver any window.mbBridge calls it made
+  return handle;
 }
 
 // --- Native function binding (wkeJsBindFunction): JS -> C synchronously --------

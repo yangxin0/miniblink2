@@ -135,6 +135,42 @@ int main() {
                     "JSDoc") == 0,
         "wkeRunJS reads the DOM (document.title)");
 
+  // Sub-frame scripting: wkeRunJsByFrame reaches into a frame host-privileged —
+  // so it reads a CROSS-ORIGIN iframe's content the page itself can't (a data:
+  // child under the about: parent gets an opaque origin). The frame-handle model
+  // (main frame + sub-frame by index) is backed by mbGetFrameCount/mbEvalJSInFrame.
+  {
+    wkeLoadHTML(wv,
+        "<body>parent<iframe src='data:text/html,<body>WKE-FRAME</body>' "
+        "width='80' height='40'></iframe></body>");
+    wkeWaitForFunction(wv, "window.__never12345===1", 400);  // pump child commit
+    wkeWebFrameHandle mf = wkeWebFrameGetMainFrame(wv);
+    check(mf && wkeIsMainFrame(wv, mf),
+          "wkeWebFrameGetMainFrame returns the main frame");
+    check(wkeWebFrameGetSubFrameCount(wv) == 1,
+          "wkeWebFrameGetSubFrameCount counts the child iframe");
+    wkeWebFrameHandle cf = wkeWebFrameGetSubFrame(wv, 0);
+    check(cf && !wkeIsMainFrame(wv, cf),
+          "wkeWebFrameGetSubFrame(0) is a non-main child frame");
+    check(wkeWebFrameGetSubFrame(wv, 1) == nullptr,
+          "wkeWebFrameGetSubFrame out-of-range returns NULL");
+    check(std::strcmp(jsToTempString(es,
+                          wkeRunJsByFrame(wv, cf, "document.body.textContent",
+                                          false)),
+                      "WKE-FRAME") == 0,
+          "wkeRunJsByFrame reads a cross-origin iframe's content");
+    check(jsToInt(es, wkeRunJsByFrame(wv, cf, "return 6*7;", true)) == 42,
+          "wkeRunJsByFrame isInClosure runs a function body (return 42)");
+    check(std::strcmp(jsToTempString(es,
+                          wkeRunJsByFrame(wv, mf,
+                                          "document.querySelector('iframe')?"
+                                          "'has':'no'",
+                                          false)),
+                      "has") == 0,
+          "wkeRunJsByFrame on the main frame sees the parent DOM");
+  }
+  wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore for later cases
+
   // localStorage persists across a same-origin navigation and is isolated by
   // origin (real apps keep tokens/prefs there). Uses real origins via base URLs.
   {

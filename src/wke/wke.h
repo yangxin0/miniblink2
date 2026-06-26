@@ -477,6 +477,27 @@ WKE_API const utf8* wkeRunJsInIsolatedWorld(wkeWebView webView,
 // slice the result is carried by the jsValue handle, so the state is a token).
 WKE_API jsExecState wkeGlobalExec(wkeWebView webView);
 
+// --- Sub-frame scripting -------------------------------------------------------
+// Address a specific frame, then run JS inside it host-privileged — so automation
+// reaches a CROSS-ORIGIN iframe's content the page itself can't (the miniblink
+// frame API, backed here by mbEvalJSInFrame). A frame handle is opaque; obtain
+// the main frame, or a sub-frame by index (0-based, document order). The handle
+// is only valid for `webView` and only while that frame exists.
+typedef void* wkeWebFrameHandle;
+WKE_API wkeWebFrameHandle wkeWebFrameGetMainFrame(wkeWebView webView);
+// Number of direct child frames (top-level iframes) of the main document.
+WKE_API int wkeWebFrameGetSubFrameCount(wkeWebView webView);
+// The index-th direct child frame, or NULL if out of range. (Port ext: upstream
+// hands frame handles out via load callbacks; we expose them by index instead.)
+WKE_API wkeWebFrameHandle wkeWebFrameGetSubFrame(wkeWebView webView, int index);
+WKE_API bool wkeIsMainFrame(wkeWebView webView, wkeWebFrameHandle frameId);
+// Run `script` in `frameId` and return a handle to its (string) result, read via
+// the jsToXxx coercions. `isInClosure` runs the script as a function body (its
+// `return` value becomes the result) instead of as a bare expression. The result
+// is a plain string value (a frame result is not slot-navigable across frames).
+WKE_API jsValue wkeRunJsByFrame(wkeWebView webView, wkeWebFrameHandle frameId,
+                                const utf8* script, bool isInClosure);
+
 // Native function binding: expose a C function to JS as window[name](...), called
 // synchronously (JS gets the return value inline). The callback reads its args
 // with jsArg(es, i) / jsArgCount(es) and returns a jsValue. Installed into each

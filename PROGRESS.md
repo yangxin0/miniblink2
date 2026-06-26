@@ -189,7 +189,16 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      the non-compositing single-process widget). An eval-based `element.click()` in the frame would dodge it
      but is pure sugar over mbEvalJSInFrame (no real gesture), so it's NOT worth a typed op. Prototype was
      reverted (tree stays green); revisit only with the sub-frame input/hit-test path, not the coord math.
-     A wke `wkeRunJsByFrame` peer also still pending (needs the wke frame-handle model first).
+   - [DONE] wke `wkeRunJsByFrame` peer + a minimal wke frame-handle model: `wkeWebFrameGetMainFrame`,
+     `wkeWebFrameGetSubFrameCount`, `wkeWebFrameGetSubFrame(index)` (port ext — upstream hands frame
+     handles out via load callbacks; we expose them by index), `wkeIsMainFrame`, and `wkeRunJsByFrame
+     (view, frame, script, isInClosure)`. A frame handle is an opaque pointer carrying a frame index
+     (main==1 -> mb idx -1; child i==i+2 -> mb idx i; 0/null invalid). `wkeRunJsByFrame` routes to
+     `mbEvalJSInFrame` and registers a STRING-typed jsValue (a frame result isn't __mbslots-navigable
+     across frames); `isInClosure` wraps the script as a function body. Verified (wke_smoke 107->114):
+     a data: iframe under the about: parent (cross-origin) — main/sub handles resolve, out-of-range is
+     NULL, `wkeRunJsByFrame` reads the child's `document.body.textContent`=WKE-FRAME the parent can't,
+     isInClosure `return 6*7`->42, and a main-frame eval sees the parent DOM.
 4. **Push callback model** — replace poll-only readiness with real engine signals.
    - [DONE] **live console push** — `mbOnConsoleMessage(view, cb, userdata)`: cb fires for each
      page console message (console.log/warn/error) with level + text as it happens (vs polling
