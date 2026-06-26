@@ -1062,3 +1062,16 @@ persistence format to store metadata.name separately from the now-origin-qualifi
 the central broker + the whole (heavily-tested) IDB subsystem + the on-disk format. Deferred as the
 deliberate "per-origin storage isolation" refactor. IMPACT TODAY: none for the common SINGLE-origin
 embedder; only multi-origin processes that reuse db/channel names across origins are affected.
+[SCOPED — a WINDOW-ONLY IDB isolation slice is feasible/bounded (next)] Re-assessment: the "not a single-
+tick fix" verdict assumed the FULL worker-inclusive fix. A window-only slice is much smaller because (a)
+the backend already stores its db name SEPARATELY from the registry key (`b->metadata.name = name`, mb_
+indexeddb.cc:314) — so rekeying the Registry to (origin,name) does NOT change the page-visible name, and
+the audit's "store metadata.name separately" precondition is ALREADY met; (b) there is NO window<->worker
+IDB test to regress (grep confirms). Plan: thread frame_key through `MakeFrameInterfaceBroker(frame_key)`
+(3 callers: mb_webview passes the frame's key, the 2 worker hosts pass 0) -> `MbBrowserInterfaceBroker` ->
+`BindIDBFactory(receiver, frame_key)` -> `MbIDBFactory(frame_key)`; `GetOrCreate`/`DeleteDatabase` key by
+`MbGetFrameOrigin(frame_key) + "\n" + name`. Existing single-origin IDB tests keep one consistent origin
+-> same effective key -> unchanged. RESIDUALS (documented, niche): workers get origin="" (a shared
+("",name) bucket — not parent-origin-shared, same gotcha as the BroadcastChannel worker residual); opaque
+"null" origins aren't uniquely isolated; the persistence key format gains the origin prefix (self-
+consistent for single-origin; a cross-version load of an OLD save won't match — bump/accept).
