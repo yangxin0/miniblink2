@@ -631,6 +631,18 @@ void MbResolveBlobUrlBytes(
       /*length=*/std::numeric_limits<uint64_t>::max(), std::move(done));
 }
 
+void MbReadBlobRemoteBytes(
+    mojo::PendingRemote<blink::mojom::blink::Blob> blob,
+    base::OnceCallback<void(std::vector<uint8_t>)> done) {
+  if (!blob) {
+    std::move(done).Run({});
+    return;
+  }
+  BlobRefReader::Read(
+      mojo::Remote<blink::mojom::blink::Blob>(std::move(blob)), /*offset=*/0,
+      /*length=*/std::numeric_limits<uint64_t>::max(), std::move(done));
+}
+
 scoped_refptr<blink::BlobDataHandle> MbCreateInlineBlob(
     const std::string& bytes,
     const blink::String& content_type) {

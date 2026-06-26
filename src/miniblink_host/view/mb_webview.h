@@ -383,6 +383,11 @@ class MbWebView {
   void OnPageDownload(const std::string& url,
                       const std::string& suggested_name,
                       const std::string& body);
+  // Called by MbFrameClient when the page initiates a download of a data: or
+  // http(s) URL (a <a download href="..."> link). Fetches the bytes through the
+  // engine and fires on_download_ with the response MIME + the resolved body.
+  void OnPageDownloadFetch(const std::string& url,
+                           const std::string& suggested_name);
   // Called by MbFrameClient when the page requests a new window (window.open /
   // target=_blank). A notification only — the popup itself is denied (returns null).
   void OnCreateNewWindow(const std::string& url, const std::string& name);
@@ -467,6 +472,13 @@ class MbWebView {
 
  private:
   MbWebView();
+  // Fetch a URL's bytes through the engine network stack + interception layer (no
+  // document commit) — the shared core of host-initiated (DownloadURL, to disk)
+  // and page-initiated (OnPageDownloadFetch, to the callback) downloads. Returns
+  // false if blocked/vetoed/failed; otherwise fills body + content_type.
+  bool FetchDownloadBody(const std::string& orig_url,
+                         std::string* body,
+                         std::string* content_type);
   // Commit an in-memory document (any bytes, including embedded NULs) as the main
   // frame's content and drive parsing to quiescence. Both LoadHTML and the network
   // LoadURL funnel through here so neither truncates the body at a NUL.

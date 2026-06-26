@@ -388,29 +388,30 @@ void MbWebView::NotifyLoadFailed() {
     on_load_finish_();
 }
 
-bool MbWebView::DownloadURL(const char* url_in, const char* dest_path) {
-  if (!url_in || !dest_path)
-    return false;
-  // Fetch a URL through the engine's network stack and write the body to disk WITHOUT
-  // committing it as a document — a real download. Honors the same interception layer
-  // as page loads: rewrite the URL, let a block rule / the request hook veto it, serve
-  // a mock with no fetch, and let the response hook inspect/rewrite the bytes. http(s)
-  // also carries the view's UA + extra headers + per-URL headers + cookies + proxy.
-  const std::string orig(url_in);
+bool MbWebView::FetchDownloadBody(const std::string& orig,
+                                  std::string* body,
+                                  std::string* content_type) {
+  // Fetch a URL through the engine's network stack WITHOUT committing it as a
+  // document — the shared core of a download. Honors the same interception layer
+  // as page loads: rewrite the URL, let a block rule / the request hook veto it,
+  // serve a mock with no fetch, and let the response hook inspect/rewrite the
+  // bytes. http(s) also carries the view's UA + extra headers + per-URL headers
+  // + cookies + proxy; data: is decoded inline by the loader.
   const std::string url = MbApplyUrlRewrites(orig);
   if (MbIsUrlBlocked(url) || MbRequestHookBlocks(orig))
     return false;
-  std::string body, content_type, final_url, headers;
+  std::string final_url, headers;
   int status = 0;
   bool ok = false;
   std::string mock_body, mock_ct;
   int mock_status = 0;
   if (MbFindMock(url, &mock_body, &mock_ct, &mock_status)) {
-    body = std::move(mock_body);
+    *body = std::move(mock_body);
+    *content_type = std::move(mock_ct);
     status = mock_status > 0 ? mock_status : 200;
     ok = true;
   } else {
-    ok = MbFetchUrl(url, &body, &content_type,
+    ok = MbFetchUrl(url, body, content_type,
                     frame_client_ ? frame_client_->user_agent() : std::string(),
                     frame_client_ ? frame_client_->extra_headers() : std::string(),
                     /*post_body=*/std::string(), /*post_content_type=*/std::string(),
@@ -418,7 +419,17 @@ bool MbWebView::DownloadURL(const char* url_in, const char* dest_path) {
   }
   if (!ok)
     return false;
-  MbInvokeResponseHook(orig, status, &body);  // inspect/rewrite before writing
+  MbInvokeResponseHook(orig, status, body);  // inspect/rewrite before delivery
+  return true;
+}
+
+bool MbWebView::DownloadURL(const char* url_in, const char* dest_path) {
+  if (!url_in || !dest_path)
+    return false;
+  // A host-initiated download: fetch the URL and write the body to disk.
+  std::string body, content_type;
+  if (!FetchDownloadBody(url_in, &body, &content_type))
+    return false;
   return base::WriteFile(base::FilePath(dest_path), body);
 }
 
@@ -1409,6 +1420,21 @@ void MbWebView::OnPageDownload(const std::string& url,
   // report a generic type — the suggested filename's extension is the real hint.
   if (on_download_)
     on_download_(url, "application/octet-stream", suggested_name, body);
+}
+
+void MbWebView::OnPageDownloadFetch(const std::string& url,
+                                    const std::string& suggested_name) {
+  // A page-initiated download of a data: or http(s) URL (a download-attributed
+  // link: <a download href="...">, or saving a data: URL). Unlike a blob: URL,
+  // the bytes aren't in the in-process blob store — fetch them through the engine
+  // (which decodes data: and fetches http(s), honoring the interception layer and
+  // the view's cookies/headers) and surface them through the same callback.
+  if (!on_download_)
+    return;
+  std::string body, content_type;
+  if (!FetchDownloadBody(url, &body, &content_type))
+    return;
+  on_download_(url, content_type, suggested_name, body);
 }
 
 void MbWebView::OnCreateNewWindow(const std::string& url,

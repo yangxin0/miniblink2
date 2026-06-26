@@ -52,7 +52,10 @@ void MbSetHistoryGoToHandler(
     base::RepeatingCallback<void(const std::string& url,
                                  const std::string& suggested_name,
                                  const std::string& body)>
-        download_handler);
+        download_handler,
+    base::RepeatingCallback<void(const std::string& url,
+                                 const std::string& suggested_name)>
+        download_url_handler);
 void MbClearHistoryGoToHandler(uint64_t frame_key);
 
 // Bind a self-owned MbLocalFrameHost to `handle` (called from the frame's

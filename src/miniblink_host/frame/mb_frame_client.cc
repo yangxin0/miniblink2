@@ -82,6 +82,8 @@ void MbFrameClient::SetFrame(blink::WebLocalFrame* frame) {
       base::BindRepeating(&MbFrameClient::OnFaviconUrls,
                           weak_factory_.GetWeakPtr()),
       base::BindRepeating(&MbFrameClient::OnPageDownload,
+                          weak_factory_.GetWeakPtr()),
+      base::BindRepeating(&MbFrameClient::OnPageDownloadFetch,
                           weak_factory_.GetWeakPtr()));
 }
 
@@ -92,6 +94,14 @@ void MbFrameClient::OnPageDownload(const std::string& url,
   // (main) thread. Hand it to the view's download callback.
   if (!self_owned_ && owner_)
     owner_->OnPageDownload(url, suggested_name, body);
+}
+
+void MbFrameClient::OnPageDownloadFetch(const std::string& url,
+                                        const std::string& suggested_name) {
+  // A page-initiated data:/http(s) download routed by MbLocalFrameHost. The view
+  // fetches the bytes through the engine and fires the download callback.
+  if (!self_owned_ && owner_)
+    owner_->OnPageDownloadFetch(url, suggested_name);
 }
 
 void MbFrameClient::OnFaviconUrls(const std::string& favicon_urls) {

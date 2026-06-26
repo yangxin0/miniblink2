@@ -40,6 +40,8 @@ struct SinkEntry {
   base::RepeatingCallback<void(const std::string&, const std::string&,
                                const std::string&)>
       download_handler;
+  base::RepeatingCallback<void(const std::string&, const std::string&)>
+      download_url_handler;
 };
 
 // Per-frame registry keyed by a frame id, so multiple views each route their own
@@ -77,12 +79,15 @@ void MbSetHistoryGoToHandler(
     base::RepeatingCallback<void(const std::string&)> favicon_handler,
     base::RepeatingCallback<void(const std::string&, const std::string&,
                                  const std::string&)>
-        download_handler) {
+        download_handler,
+    base::RepeatingCallback<void(const std::string&, const std::string&)>
+        download_url_handler) {
   SinkRegistry& s = Sinks();
   base::AutoLock guard(s.lock);
   s.by_frame[frame_key] = SinkEntry{
       std::move(runner), std::move(handler), std::move(key_handler),
-      std::move(favicon_handler), std::move(download_handler)};
+      std::move(favicon_handler), std::move(download_handler),
+      std::move(download_url_handler)};
 }
 
 void MbClearHistoryGoToHandler(uint64_t frame_key) {
@@ -236,29 +241,65 @@ void MbLocalFrameHost::DownloadURL(
   // CSV/PDF/etc. built in JS) surfaces through the same callback as a
   // server-driven download. Only blob: is resolved — that's the client-
   // generated case; data:/http: flow through other paths and are ignored here.
-  if (!params || !params->url.ProtocolIs("blob"))
+  if (!params)
     return;
-  std::string url = params->url.GetString().Utf8();
   std::string name =
       params->suggested_name.IsNull() ? std::string()
                                       : params->suggested_name.Utf8();
   const uint64_t fk = frame_key_;
-  // Service thread: read the blob's bytes, then hop to the frame's main thread.
-  MbResolveBlobUrlBytes(
-      url,
-      base::BindOnce(
-          [](std::string url, std::string name, uint64_t fk,
-             std::vector<uint8_t> bytes) {
-            SinkEntry e;
-            if (!LookupSink(fk, &e) || !e.runner || !e.download_handler)
-              return;
-            std::string body(bytes.begin(), bytes.end());
-            e.runner->PostTask(
-                FROM_HERE,
-                base::BindOnce(e.download_handler, std::move(url),
-                               std::move(name), std::move(body)));
-          },
-          url, name, fk));
+  // data: download — blink leaves params->url empty and packs the *raw data: URL
+  // string* as the bytes of params->data_url_blob (LocalFrame::DataURLToBlob; the
+  // real browser decodes it download-side). So: drain the Blob to recover the
+  // data: URL, then route it to the main thread's fetch path, which decodes data:
+  // (net::DataURL) into the actual bytes + MIME — same path as an http download.
+  if (params->data_url_blob) {
+    MbReadBlobRemoteBytes(
+        std::move(params->data_url_blob),
+        base::BindOnce(
+            [](std::string name, uint64_t fk, std::vector<uint8_t> bytes) {
+              std::string data_url(bytes.begin(), bytes.end());
+              SinkEntry e;
+              if (!LookupSink(fk, &e) || !e.runner || !e.download_url_handler)
+                return;
+              e.runner->PostTask(
+                  FROM_HERE, base::BindOnce(e.download_url_handler,
+                                            std::move(data_url),
+                                            std::move(name)));
+            },
+            name, fk));
+    return;
+  }
+  std::string url = params->url.GetString().Utf8();
+  if (params->url.ProtocolIs("blob")) {
+    // Service thread: read the blob's bytes, then hop to the frame's main thread.
+    MbResolveBlobUrlBytes(
+        url,
+        base::BindOnce(
+            [](std::string url, std::string name, uint64_t fk,
+               std::vector<uint8_t> bytes) {
+              SinkEntry e;
+              if (!LookupSink(fk, &e) || !e.runner || !e.download_handler)
+                return;
+              std::string body(bytes.begin(), bytes.end());
+              e.runner->PostTask(
+                  FROM_HERE,
+                  base::BindOnce(e.download_handler, std::move(url),
+                                 std::move(name), std::move(body)));
+            },
+            url, name, fk));
+    return;
+  }
+  if (params->url.ProtocolIs("http") || params->url.ProtocolIs("https")) {
+    // http(s) bytes aren't in the in-process blob store — hand the URL to the
+    // frame's main thread, which fetches it through the engine (honoring the
+    // interception layer + the view's cookies/headers) and fires the callback.
+    SinkEntry e;
+    if (LookupSink(fk, &e) && e.runner && e.download_url_handler) {
+      e.runner->PostTask(FROM_HERE, base::BindOnce(e.download_url_handler,
+                                                   std::move(url),
+                                                   std::move(name)));
+    }
+  }
 }
 void MbLocalFrameHost::FocusedElementChanged(bool,
                                              bool,

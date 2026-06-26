@@ -260,9 +260,20 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      Blob fully via `MbResolveBlobUrlBytes` (reuses `BlobRefReader`) -> hop the bytes to the frame's
      main thread through the per-frame download sink (added to `SinkEntry`) -> `MbFrameClient::OnPage
      Download` -> `MbWebView::OnPageDownload` fires `on_download_` (generic MIME — DownloadURLParams
-     omits it; the filename extension is the hint). Only blob: is resolved (the client-generated case);
-     data:/http: DownloadURL flows are still ignored (data_url_blob/http would be a separate slice).
-     Verified mb_smoke 0m2 (`fn=data.csv body=hello,world`), count 133->134.
+     omits it; the filename extension is the hint). Verified mb_smoke 0m2 (`fn=data.csv body=hello,world`).
+   - [DONE] **page-initiated http(s) + data: download links**: `<a download href="https://...">` and
+     `<a download href="data:...">` now reach mbOnDownload too, completing DownloadURL capture.
+     blink routes both to `LocalFrameHost.DownloadURL`: http(s) carries the URL in `params->url`; data:
+     leaves `params->url` EMPTY and packs the *raw data: URL string* as the bytes of `params->data_url_blob`
+     (LocalFrame::DataURLToBlob — the real browser decodes it download-side). Both resolve on the frame's
+     MAIN thread via a new per-frame `download_url_handler` sink + `MbWebView::OnPageDownloadFetch`, which
+     calls the engine fetch (refactored out of `DownloadURL` as `FetchDownloadBody`): http(s) is fetched
+     (honoring the interception layer + the view's cookies/headers/UA), data: is decoded by `MbFetchUrl`
+     (net::DataURL). For data: we first drain `data_url_blob` (via `MbReadBlobRemoteBytes`) to recover the
+     data: URL, then feed it to that same fetch path. These get the REAL response MIME (vs blob:'s generic).
+     Verified offline: mb_smoke 0m3 (http via mock: `mime=text/csv fn=r.csv body=a,b,c`) + 0m4 (data:
+     `fn=note.txt body=inline-bytes`). Count 134->136. Remaining nuance: cross-origin http download-link
+     filename stripping (browser security) is unhandled — same-origin links keep the name.
    - [DONE] **`mbSetFileForSelector(css_selector, paths_newline)`**: the privileged host op a
      page's own script is forbidden to do. Reaches the core `HTMLInputElement`, reads each
      path's bytes into an **in-memory `BlobData` registered with our BlobRegistry** (via

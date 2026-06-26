@@ -20,6 +20,8 @@
 #include "base/functional/callback.h"
 #include "base/memory/scoped_refptr.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "third_party/blink/public/mojom/blob/blob.mojom-blink.h"
 #include "third_party/blink/public/mojom/blob/blob_registry.mojom-blink.h"
 
 namespace blink {
@@ -57,6 +59,14 @@ scoped_refptr<blink::BlobDataHandle> MbCreateInlineBlob(
 // blob: URL through LocalFrameHost.DownloadURL, and we read out the bytes here.
 void MbResolveBlobUrlBytes(
     const std::string& url,
+    base::OnceCallback<void(std::vector<uint8_t>)> done);
+
+// Read a Blob remote to its full bytes, asynchronously, on the service thread.
+// Runs `done` with the bytes (empty if the remote is null). Used by download
+// capture for data: URLs: blink passes the decoded bytes as a Blob (params
+// .data_url_blob) with an empty url, so there's nothing to look up — just drain.
+void MbReadBlobRemoteBytes(
+    mojo::PendingRemote<blink::mojom::blink::Blob> blob,
     base::OnceCallback<void(std::vector<uint8_t>)> done);
 
 }  // namespace mb

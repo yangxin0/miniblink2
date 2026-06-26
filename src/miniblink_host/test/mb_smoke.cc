@@ -446,6 +446,63 @@ int main() {
     mbOnDownload(v, nullptr, nullptr);
   }
 
+  // 0m3. Page-initiated http(s) download link: a same-origin <a download
+  // href="https://..."> click reaches mbOnDownload with the response MIME + the
+  // fetched bytes, through LocalFrameHost.DownloadURL -> the engine fetch (here a
+  // mock, so it's offline). The download attribute also carries the filename.
+  {
+    static std::string* dl = new std::string();  // -Wexit-time-destructors
+    dl->clear();
+    mbMockResponse("host.test/page", "<body>HOST</body>", "text/html", 200);
+    mbMockResponse("host.test/report.csv", "a,b,c", "text/csv", 200);
+    mbLoadURL(v, "https://host.test/page");  // same origin as the download URL
+    mbOnDownload(
+        v,
+        [](mbView*, void*, const char* /*url*/, const char* mime,
+           const char* fn, const char* data, int len) {
+          *dl = std::string("mime=") + mime + " fn=" + (fn ? fn : "") +
+                " body=" + std::string(data ? data : "", data ? len : 0);
+        },
+        nullptr);
+    Eval(v,
+         "(function(){var a=document.createElement('a');"
+         "a.href='https://host.test/report.csv';a.download='r.csv';"
+         "document.body.appendChild(a);a.click();return 1;})()");
+    mbWaitForFunction(v, "window.__mbNever===1", 1500);  // pump the async fetch
+    Expect(*dl == "mime=text/csv fn=r.csv body=a,b,c",
+           "mbOnDownload captures a page-initiated http download link (<a download>)",
+           "dl=[" + *dl + "]");
+    mbOnDownload(v, nullptr, nullptr);
+    mbClearMocks();
+  }
+
+  // 0m4. Page-initiated data: download: a <a download href="data:..."> click
+  // reaches mbOnDownload with the decoded bytes (the engine fetch decodes data:
+  // inline — no blob store, no network). Small client-generated files often ship
+  // as a data: URI rather than a Blob.
+  {
+    static std::string* dl = new std::string();  // -Wexit-time-destructors
+    dl->clear();
+    mbLoadHTML(v, "<body>HOST</body>", "about:blank");
+    mbOnDownload(
+        v,
+        [](mbView*, void*, const char* /*url*/, const char* /*mime*/,
+           const char* fn, const char* data, int len) {
+          *dl = std::string("fn=") + (fn ? fn : "") + " body=" +
+                std::string(data ? data : "", data ? len : 0);
+        },
+        nullptr);
+    Eval(v,
+         "(function(){var a=document.createElement('a');"
+         "a.href='data:text/plain,inline-bytes';a.download='note.txt';"
+         "document.body.appendChild(a);a.click();return 1;})()");
+    mbWaitForFunction(v, "window.__mbNever===1", 1500);  // pump the async decode
+    Expect(*dl == "fn=note.txt body=inline-bytes",
+           "mbOnDownload captures a page-initiated data: download (<a download>)",
+           "dl=[" + *dl + "]");
+    mbOnDownload(v, nullptr, nullptr);
+  }
+
   // 0n. Failed-load finish (#4 tail): a top-level load that never commits (a file that
   // can't be read) still ENDS — mbOnLoadFinish must fire and mbIsLoadFinished must read
   // true, so a caller awaiting completion isn't stuck on a 404/missing file forever.

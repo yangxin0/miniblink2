@@ -228,6 +228,11 @@ class MbFrameClient : public blink::WebLocalFrameClient {
                       const std::string& suggested_name,
                       const std::string& body);
 
+  // A page-initiated data:/http(s) download (a <a download href="..."> link)
+  // routed by MbLocalFrameHost; forwarded to MbWebView, which fetches the bytes.
+  void OnPageDownloadFetch(const std::string& url,
+                           const std::string& suggested_name);
+
   // Shared traversal: commit the session-history entry at `target` (same-document
   // via CommitSameDocumentNavigation, else a cross-document re-navigation).
   void GoToHistoryTarget(int target, bool has_user_gesture);
