@@ -305,12 +305,13 @@ MB_EXPORT void mbSendMouseMove(mbView*, int x, int y);
 
 // Dispatch a TRUSTED mouse-wheel at (x,y) with DOM-convention pixel deltas
 // (deltaY>0 = scroll down, deltaX>0 = right). Fires the page's `wheel` handlers with
-// event.isTrusted == true and the correct deltaX/deltaY — for wheel-driven UIs
-// (map/canvas zoom, scroll hijacking, "load more on scroll"). `modifiers` bitmask:
-// 1=ctrl 2=shift 4=alt 8=meta (ctrl+wheel = pinch-zoom intent).
-// NOTE: the wheel's NATIVE document scroll is compositor-gated and does not occur in
-// this non-compositing widget — to scroll programmatically use JS (window.scrollBy).
-// Pages that handle the wheel event themselves are unaffected.
+// event.isTrusted == true and the correct deltaX/deltaY, THEN scrolls the document
+// viewport by the deltas — UNLESS a (non-passive) handler calls preventDefault, which
+// suppresses the scroll, exactly like a real browser. Covers both wheel-driven UIs
+// (map/canvas zoom, scroll hijacking, "load more on scroll") and plain page scrolling.
+// `modifiers` bitmask: 1=ctrl 2=shift 4=alt 8=meta (ctrl+wheel = pinch-zoom intent).
+// (The native compositor wheel->scroll path is absent in this non-compositing widget,
+// so the scroll is applied programmatically to the document viewport.)
 MB_EXPORT void mbSendWheel(mbView*, int x, int y, int deltaX, int deltaY, int modifiers);
 
 // Set the device pixel ratio (HiDPI / retina). The view keeps laying out in CSS px

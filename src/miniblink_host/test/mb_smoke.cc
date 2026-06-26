@@ -300,9 +300,9 @@ int main() {
   // 0i4. Trusted mouse-wheel (#12 input): mbSendWheel dispatches a real wheel event so a
   // page `wheel` handler sees DOM-convention deltas (deltaY>0 = down, deltaX>0 = right)
   // with isTrusted=true — what wheel-driven UIs (map/canvas zoom, scroll hijacking,
-  // "load more on scroll") listen for. Both axes + both signs are checked. (A wheel's
-  // NATIVE document scroll is compositor-gated and absent in this non-compositing
-  // widget — see PROGRESS; apps that handle the wheel event themselves are unaffected.)
+  // "load more on scroll") listen for — AND scrolls the document viewport by the deltas
+  // (here scrollY -> ~120). A wheel handler that calls preventDefault SUPPRESSES the
+  // scroll, exactly like a real browser (checked below).
   {
     mbLoadHTML(v,
         "<body style='margin:0;height:5000px'><script>window.w='';"
@@ -310,13 +310,30 @@ int main() {
         "window.w=e.deltaY+','+e.deltaX+','+e.isTrusted;});"
         "</script></body>",
         "about:blank");
-    mbSendWheel(v, 50, 50, 0, 120, 0);     // wheel down
+    mbSendWheel(v, 50, 50, 0, 120, 0);     // wheel down -> event + scroll
     const std::string w1 = Eval(v, "window.w");
+    const std::string sy = Eval(v, "''+Math.round(window.scrollY)");
     mbSendWheel(v, 50, 50, 40, -120, 0);   // wheel up + right
     const std::string w2 = Eval(v, "window.w");
-    Expect(w1 == "120,0,true" && w2 == "-120,40,true",
-           "mbSendWheel fires a trusted wheel event with DOM-convention deltas (both axes)",
-           "w1=[" + w1 + "] w2=[" + w2 + "]");
+    Expect(w1 == "120,0,true" && w2 == "-120,40,true" && sy == "120",
+           "mbSendWheel fires a trusted wheel event (both axes) AND scrolls the document",
+           "w1=[" + w1 + "] w2=[" + w2 + "] scrollY=[" + sy + "]");
+  }
+
+  // 0i5. A wheel handler that calls preventDefault SUPPRESSES the default scroll
+  // (browser-accurate): the event still fires but window.scrollY stays 0.
+  {
+    mbLoadHTML(v,
+        "<body style='margin:0;height:5000px'><script>window.pd=0;"
+        "addEventListener('wheel',function(e){window.pd=1;e.preventDefault();},"
+        "{passive:false});</script></body>",
+        "about:blank");
+    mbSendWheel(v, 50, 50, 0, 200, 0);
+    const std::string pd = Eval(v, "''+window.pd");
+    const std::string sy = Eval(v, "''+Math.round(window.scrollY)");
+    Expect(pd == "1" && sy == "0",
+           "mbSendWheel: a preventDefault wheel handler suppresses the scroll",
+           "pd=[" + pd + "] scrollY=[" + sy + "]");
   }
 
   // 0i2. IME composition (#12 input): mbSendIme drives the focused input through a

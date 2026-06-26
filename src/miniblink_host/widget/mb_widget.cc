@@ -15,6 +15,7 @@
 #include "third_party/blink/public/common/input/web_keyboard_event.h"
 #include "third_party/blink/public/common/input/web_mouse_event.h"
 #include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
+#include "third_party/blink/public/platform/web_input_event_result.h"
 #include "ui/events/types/scroll_types.h"
 #include "third_party/blink/public/mojom/page/widget.mojom-blink.h"
 #include "third_party/blink/public/mojom/widget/platform_widget.mojom-blink.h"
@@ -258,9 +259,9 @@ void MbWidget::SendMouseMove(int x, int y) {
   impl->HandleInputEvent(blink::WebCoalescedInputEvent(e, ui::LatencyInfo()));
 }
 
-void MbWidget::SendWheel(int x, int y, int delta_x, int delta_y, int modifiers) {
+bool MbWidget::SendWheel(int x, int y, int delta_x, int delta_y, int modifiers) {
   if (!widget_)
-    return;
+    return false;
   auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
   int mods = 0;
   if (modifiers & 1)
@@ -289,8 +290,12 @@ void MbWidget::SendWheel(int x, int y, int delta_x, int delta_y, int modifiers) 
   // absent in our non-compositing widget -> the event would fire but not scroll.
   e.phase = blink::WebMouseWheelEvent::kPhaseNone;
   e.dispatch_type = blink::WebInputEvent::DispatchType::kBlocking;
-  impl->HandleInputEvent(
+  blink::WebInputEventResult r = impl->HandleInputEvent(
       blink::WebCoalescedInputEvent(e, ui::LatencyInfo()));
+  // Consumed only if a blocking listener called preventDefault. A passive listener
+  // (or none) leaves it kNotHandled -> the caller applies the default scroll.
+  return r == blink::WebInputEventResult::kHandledApplication ||
+         r == blink::WebInputEventResult::kHandledSystem;
 }
 
 void MbWidget::SendText(const char* utf8) {

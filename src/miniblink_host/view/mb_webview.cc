@@ -902,8 +902,22 @@ void MbWebView::SendMouseMove(int x, int y) {
 }
 
 void MbWebView::SendWheel(int x, int y, int delta_x, int delta_y, int modifiers) {
-  if (widget_)
-    widget_->SendWheel(x, y, delta_x, delta_y, modifiers);
+  if (!widget_)
+    return;
+  // 1. Deliver the trusted `wheel` event. 2. Unless a blocking listener consumed it
+  // (preventDefault), apply the default scroll. The native compositor wheel->scroll
+  // path is absent in this non-compositing widget, so we scroll the viewport
+  // programmatically (same path as SendScroll) with the DOM-convention deltas
+  // (deltaY>0 = down) — so mbSendWheel both fires the event AND scrolls, matching a
+  // real browser (a passive/absent listener scrolls; preventDefault suppresses it).
+  const bool consumed = widget_->SendWheel(x, y, delta_x, delta_y, modifiers);
+  if (consumed || !main_frame_)
+    return;
+  auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
+  blink::LocalFrame* frame = impl->GetFrame();
+  if (frame && frame->DomWindow())
+    frame->DomWindow()->scrollByForTesting(static_cast<double>(delta_x),
+                                           static_cast<double>(delta_y));
 }
 
 void MbWebView::SetUserAgent(const char* utf8_ua) {

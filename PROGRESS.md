@@ -971,16 +971,38 @@ fires, letting pages pause timers/video/polling/rAF when hidden. Verified mb_smo
     down, deltaX>0 = right; blink's delta_y sign is the negative of the DOM event's, so
     the API negates) with isTrusted=true — for wheel-driven UIs (map/canvas zoom, scroll
     hijacking, "load more on scroll"). modifiers bitmask 1=ctrl 2=shift 4=alt 8=meta
-    (ctrl+wheel = pinch-zoom intent). Verified mb_smoke 0i4: wheel down -> deltaY 120;
-    wheel up+right -> -120,40; isTrusted true (mb_smoke 143->144). COMPLEMENTS the
-    existing mbSendScroll (which moves the viewport via scrollByForTesting + fires
-    `scroll`, but NO `wheel` event) — the two cover the wheel event vs. the actual scroll.
-    LIMITATION (documented in mb_capi.h): a wheel's NATIVE document scroll is
-    compositor-gated — modern blink routes wheel/gesture scrolls through the compositor
-    input pipeline (main-thread HandleGestureEvent CHECKs they never reach it), absent in
-    our non-compositing widget; the phase is set kPhaseNone but the scroll still won't
-    apply, so hosts scroll programmatically via mbSendScroll/JS. Trusted TOUCH already
-    exists (mbSendTouchTap/mbSendTouchSwipe via wke). [REMAINING: none in this item.]
+    (ctrl+wheel = pinch-zoom intent). Verified mb_smoke 0i4. NOW ALSO SCROLLS: mbSendWheel
+    reads HandleInputEvent's WebInputEventResult and, unless a non-passive listener called
+    preventDefault (kHandledApplication), applies the default scroll to the document
+    viewport via scrollByForTesting (the native compositor wheel->scroll path is absent in
+    our non-compositing widget, so it is programmatic). Browser-accurate: event + scroll,
+    preventDefault suppresses the scroll. Verified mb_smoke 0i4 (wheel down -> deltaY 120,
+    scrollY 120; up+right -> -120,40) + 0i5 (preventDefault -> event fires, scrollY 0);
+    mb_smoke 143->145. Distinct from mbSendScroll (pure programmatic viewport move that
+    fires only the scroll event, NO wheel event). Trusted TOUCH is still SYNTHESIZED
+    (mbSendTouchTap/Swipe dispatch untrusted TouchEvents in JS): a real WebPointerEvent
+    (kTouch) path was assessed but deferred this tick — blink routes real touch through an
+    async queue (the widget code notes HandleInputEvent guards against raw touch), and
+    touch handlers already work synthesized, so the marginal isTrusted/pointer-event gain
+    didn't justify destabilizing the working path. [REMAINING: trusted touch (low value).]
+
+[SCOPED — WebGL (biggest remaining gap): feasibility CONFIRMED, implementation is multi-
+session]. Investigated this tick. (1) The donor out/Release already SHIPS the GL stack:
+libEGL.dylib + libGLESv2.dylib (ANGLE), libvk_swiftshader.dylib (software Vulkan backend
+for headless GL), and the GPU command-buffer client libs. (2) The blink hook is
+Platform::CreateWebGLGraphicsContextProvider(...) (platform.h:511) — MbPlatform does NOT
+override it, so it returns null -> getContext('webgl') is null. (3) The standalone target
+(src/miniblink_host/BUILD.gn) builds INSIDE the donor tree, so it can add the GPU GN deps
+(//gpu/command_buffer/client:gles2_implementation, //ui/gl, //components/viz/...). WHY NOT
+ONE TICK: the override must return a WebGraphicsContext3DProvider backed by an in-process
+command buffer (gpu::CommandBufferTaskExecutor + a SingleTaskSequence + viz::Context-
+ProviderCommandBuffer) over a real ANGLE GL context (gl::init::InitializeGLOneOff selecting
+SwiftShader) + a Skia Ganesh GrDirectContext — thousands of lines of GPU bring-up that
+can't land verified in one 5-min tick and can't be left half-wired (each tick ends clean).
+PLAN (multi-tick): A = GL one-off init, confirm ANGLE/SwiftShader loads in-process
+(verifiable); B = in-process command buffer + context provider; C = wire the MbPlatform
+override + a getContext('webgl') smoke test. Shares the GPU path with device emulation +
+accelerated video.
 13. [DONE] PDF options. `mbSavePdfEx(path, width_pt, height_pt, landscape, scale, margin_pt)`
 (mbSavePdf kept = Letter default) + `mb_shot --pdf-size letter|a4|legal|a3|tabloid|WxH
 --landscape --pdf-scale N --pdf-margin PT`. Page size in points; landscape swaps w/h; content
