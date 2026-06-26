@@ -176,10 +176,20 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      cross-origin form/widget is fillable + scrapable with NO cross-frame coordinate mapping. Verified
      mb_smoke_render 78b2 (data: iframe under an https parent: fill `#f`->value read back `typed-in-frame`,
      read `#t`->`FRAME-TEXT`, miss->-1), count 91->92.
-   - [NEXT] per-frame *gesture* click (`ClickSelectorInFrame`): deferred — unlike fill/get-text it needs
-     cross-frame coordinate mapping (child element rect in child-viewport coords -> the iframe element's
-     offset in the parent -> root widget coords) to land a real SendMouseClick; fiddly with scroll/borders/
-     nesting. A wke `wkeRunJsByFrame` peer also still pending (needs the wke frame-handle model first).
+   - [DEFERRED — blink crash] per-frame *gesture* click (`ClickSelectorInFrame`): the coordinate mapping
+     itself is SOLVED and cheap (frame_index only ever names a DIRECT child of the main frame, so it's a
+     single-level map: the Nth `<iframe>`'s content-box origin in the parent + the element's center in the
+     child viewport — both from getBoundingClientRect, so margins/borders are handled). A prototype computed
+     the right root coords (origin=0,18 center=42,41 -> root=42,59, dead-on the target). BUT dispatching the
+     synthesized `SendMouseClick` at those coords SIGSEGVs *inside blink's input pipeline* when the event
+     hit-tests INTO a sub-frame (WebFrameWidgetImpl::HandleInputEvent -> EventHandler -> child-frame
+     targeting) — "after SendMouseClick" never prints. Main-frame coordinate clicks are fine; only a click
+     that LANDS on an iframe crashes. lldb can't attach under the sandbox, so no deeper frame yet; this is
+     the same class as the deferred device-emulation crash (a compositor/hit-test path that isn't wired in
+     the non-compositing single-process widget). An eval-based `element.click()` in the frame would dodge it
+     but is pure sugar over mbEvalJSInFrame (no real gesture), so it's NOT worth a typed op. Prototype was
+     reverted (tree stays green); revisit only with the sub-frame input/hit-test path, not the coord math.
+     A wke `wkeRunJsByFrame` peer also still pending (needs the wke frame-handle model first).
 4. **Push callback model** — replace poll-only readiness with real engine signals.
    - [DONE] **live console push** — `mbOnConsoleMessage(view, cb, userdata)`: cb fires for each
      page console message (console.log/warn/error) with level + text as it happens (vs polling
