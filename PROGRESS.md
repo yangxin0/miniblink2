@@ -1303,6 +1303,17 @@ on mbOnLoadFinish). Verified mb_smoke 0b2: both signals recorded into one sequen
 46, render 126, shot 66, wke 114), no leaks. (Load PROGRESS / DidFailLoadWithError remain on the
 host channel - a heavier frame_key-sink wiring - deferred; DOMContentLoaded was the clean win.)
 
+[VERIFIED - WebAssembly works end to end (a major modern feature, previously 0 coverage)].
+Confirmed WASM compiles + runs by BOTH paths: WebAssembly.instantiate(bytes) (raw bytes, pure
+V8) AND WebAssembly.instantiateStreaming(fetch(...)) - the latter is the non-trivial one: it
+streaming-compiles from a Response, so it exercises our in-process loader serving an
+application/wasm MIME to V8's streaming compiler. Verified mb_smoke_render 41q: the canonical
+add(i32,i32) module -> instantiate add(2,3)=5, instantiateStreaming(fetch('data:application/
+wasm;base64,...')) add(20,22)=42 (wasm=[inst=5 stream=42]). So a WASM-heavy app (and the
+streaming-instantiate fast path most use) runs here. render 126->127, full battery green
+(mb_smoke 156, platform 46, shot 66, wke 114), no leaks. (No wiring was needed - WASM is V8 +
+the existing fetch/loader; this locks in a major capability that had never been exercised.)
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

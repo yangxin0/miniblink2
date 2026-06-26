@@ -1327,6 +1327,31 @@ static void RunCases(mbView* v, int W, int H) {
            "rtc=[" + rtc + "]");
   }
 
+  // 41q. WebAssembly works end to end (a major modern feature, previously untested): the
+  // canonical `add(i32,i32)` module compiles + instantiates via BOTH WebAssembly.instantiate
+  // (raw bytes, pure V8) AND instantiateStreaming (fetch of an application/wasm Response —
+  // exercises the streaming-compile + MIME path), and the exported function computes.
+  {
+    mbLoadHTML(v, "<body>wasm</body>", "https://wasm.test/");
+    mbRunJS(v,
+      "window.__wasm='';(async function(){try{"
+      // (module (func (export \"add\") (param i32 i32) (result i32) local.get 0 local.get 1 i32.add))
+      "var bytes=new Uint8Array([0,97,115,109,1,0,0,0,1,7,1,96,2,127,127,1,127,3,2,1,0,"
+      "7,7,1,3,97,100,100,0,0,10,9,1,7,0,32,0,32,1,106,11]);"
+      "var m=await WebAssembly.instantiate(bytes);var r1=m.instance.exports.add(2,3);"
+      "var b64=btoa(String.fromCharCode.apply(null,bytes));"
+      "var m2=await WebAssembly.instantiateStreaming("
+      "fetch('data:application/wasm;base64,'+b64));"
+      "var r2=m2.instance.exports.add(20,22);"
+      "window.__wasm='inst='+r1+' stream='+r2;"
+      "}catch(e){window.__wasm='err:'+(e&&e.message?e.message:e);}})();");
+    std::string w;
+    for (int i = 0; i < 200 && w.empty(); ++i) { mbWait(v, 25); w = Eval(v, "window.__wasm"); }
+    Expect(w == "inst=5 stream=42",
+           "WebAssembly: instantiate + instantiateStreaming compile and run an exported func",
+           "wasm=[" + w + "]");
+  }
+
   // 42. Drawing to a canvas via mbEvalJS (not just mbRunJS) must also be
   // crash-safe. EvalToString/EvalIsolated used to run ExecuteScript
   // synchronously, so a draw inside an eval expression hit the same
