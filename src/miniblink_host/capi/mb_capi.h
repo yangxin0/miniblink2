@@ -498,9 +498,17 @@ MB_EXPORT int mbLoadCookies(const char* path);
 // private binary file — the IndexedDB peer of mbSaveCookies/mbSaveLocalStorage, for carrying
 // app state (auth tokens, offline caches) across process runs. Process-wide (no view param).
 // Return 1 on success, 0 on failure. Call mbLoadIndexedDB BEFORE the page opens its databases.
-// Blob-valued records are not captured (the backend stores only the value byte payload).
+// Blob/File-valued records ARE captured (their bytes + metadata round-trip).
 MB_EXPORT int mbSaveIndexedDB(const char* path);
 MB_EXPORT int mbLoadIndexedDB(const char* path);
+
+// Persist / restore the WHOLE in-memory OPFS tree (navigator.storage.getDirectory() — every
+// origin/bucket scope, directories + file bytes) to/from a private binary file. The peer of
+// mbSaveIndexedDB for the modern file-storage API. Process-wide (no view param). mbLoadOPFS
+// MERGES onto the live tree (existing handles stay valid), so it can be called any time.
+// Return 1 on success, 0 on failure.
+MB_EXPORT int mbSaveOPFS(const char* path);
+MB_EXPORT int mbLoadOPFS(const char* path);
 
 // Network observability: the loader records every subresource URL it fetches
 // (img, css, fetch/XHR, …). mbGetRequestLog writes them newline-separated,

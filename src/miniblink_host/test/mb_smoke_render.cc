@@ -2240,6 +2240,49 @@ static void RunCases(mbView* v, int W, int H) {
     if (b) mbDestroyView(b);
   }
 
+  // 73c2. OPFS PERSISTS TO DISK: write a file, mbSaveOPFS, removeEntry it (gone from
+  // memory), mbLoadOPFS, read it back — proving the bytes were restored from DISK, not the
+  // in-memory tree. The peer of the IndexedDB disk persistence for the file-storage API.
+  {
+    const char* opfs_path = "/tmp/mb_opfs_persist.bin";
+    mbLoadHTML(v, "<body>opfspersist</body>", "https://opfspersist.test/");
+    mbRunJS(v,
+      "window.__o='';navigator.storage.getDirectory().then(function(r){"
+      "return r.getFileHandle('persist.txt',{create:true}).then(function(fh){"
+      "return fh.createWritable().then(function(w){return w.write('OPFSDISK')."
+      "then(function(){return w.close();});});});}).then(function(){"
+      "window.__o='wrote';}).catch(function(e){window.__o='err:'+e.name;});");
+    std::string o;
+    for (int i = 0; i < 160 && o != "wrote"; ++i) { mbWait(v, 25); o = Eval(v, "window.__o"); }
+    const bool wrote = (o == "wrote");
+    mbSaveOPFS(opfs_path);
+    mbRunJS(v,
+      "window.__o='';navigator.storage.getDirectory().then(function(r){"
+      "return r.removeEntry('persist.txt');}).then(function(){"
+      "return navigator.storage.getDirectory().then(function(r){"
+      "return r.getFileHandle('persist.txt').then(function(){return 'still';},"
+      "function(e){return 'gone:'+e.name;});});}).then(function(s){"
+      "window.__o=s;}).catch(function(e){window.__o='err:'+e.name;});");
+    o.clear();
+    for (int i = 0; i < 160 && o.empty(); ++i) { mbWait(v, 25); o = Eval(v, "window.__o"); }
+    const bool removed = (o.rfind("gone:", 0) == 0);  // confirmed gone from memory
+    mbLoadOPFS(opfs_path);  // restore from disk
+    mbRunJS(v,
+      "window.__o='';navigator.storage.getDirectory().then(function(r){"
+      "return r.getFileHandle('persist.txt').then(function(fh){return fh.getFile()."
+      "then(function(f){return f.text();});});}).then(function(t){"
+      "window.__o='got:'+t;}).catch(function(e){window.__o='err:'+e.name;});");
+    o.clear();
+    for (int i = 0; i < 200 && o.rfind("got:", 0) != 0 && o.rfind("err", 0) != 0; ++i) {
+      mbWait(v, 25);
+      o = Eval(v, "window.__o");
+    }
+    Expect(wrote && removed && o == "got:OPFSDISK",
+           "OPFS files persist to disk (write/save/remove/load round-trip)",
+           "wrote=" + std::string(wrote ? "1" : "0") + " removed=" +
+               (removed ? "1" : "0") + " final=[" + o + "]");
+  }
+
   // 73d. Cross-origin Cache Storage ISOLATION: caches.open(name) is per-ORIGIN (the
   // registry was keyed by bare cache name -> cross-origin cache sharing). View A
   // (origin X) puts an entry; view B (origin Y) opening the same-named cache must

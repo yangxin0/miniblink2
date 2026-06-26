@@ -1249,6 +1249,24 @@ example.com/docs'> -> node has "url":"https://example.com/docs"; the <h1> -> "le
 render 122, shot 66, wke 114), no leaks. The AX node is now role + name + value + checked +
 focused + url + level + bounds - a rich, self-contained semantic+actionable record per node.
 
+[DONE - OPFS DISK persistence (mbSaveOPFS/mbLoadOPFS)]. The file-storage peer of the IDB
+disk persistence: navigator.storage.getDirectory() (OPFS) files now survive a save/load
+across sessions. The OPFS tree is fully in-process + synchronous (FsNode = is_dir + named
+children OR raw bytes, per-origin/bucket scope roots), so no async blob read is needed -
+mbSaveOPFS walks every scope's tree and writes it (recursive: is_dir byte; dir -> child
+count + (name,node)*; file -> bytes; magic MBOPFS01), mbLoadOPFS reads it back. Load MERGES
+onto the live tree (ReadNodeInto updates existing FsNodes in place / creates missing ones,
+never deletes) so bound directory/file handles stay valid and it is safe to call any time
+(unlike a replace, which would dangle handles). Hoisted the scope->root map into a shared
+OpfsRoots() accessor. Runs on the main thread (where OPFS lives - the frame broker), so the
+C-ABI calls it directly, no thread hop. Verified mb_smoke_render 73c2: write persist.txt=
+'OPFSDISK', mbSaveOPFS, removeEntry it (confirmed gone: getFileHandle -> NotFoundError),
+mbLoadOPFS, getFileHandle.getFile().text() -> 'OPFSDISK' - restored from DISK (it was
+deleted from memory first). render 124->125, full battery green (mb_smoke 154, platform 46,
+shot 66, wke 114), no leaks. Persistence parity is now broad: cookies + localStorage + IDB
+(incl. Blob/File) + OPFS all save/load to disk. (Also corrected a now-stale capi comment that
+claimed IDB blob records aren't captured - they are, since last tick.)
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

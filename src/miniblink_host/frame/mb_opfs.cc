@@ -11,6 +11,8 @@
 
 #include "base/containers/span.h"
 #include "base/files/file.h"
+#include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "miniblink_host/blob/mb_blob_registry.h"
 #include "miniblink_host/frame/mb_frame_origin.h"
 #include "mojo/public/cpp/base/big_buffer.h"
@@ -47,12 +49,19 @@ struct FsNode {
   std::string bytes;                                        // when !is_dir
 };
 
-FsNode* OpfsRoot(const std::string& scope) {
+// Process-wide scope -> root tree (origin / origin+bucket isolated). Shared by OpfsRoot
+// and the persistence (save/load) below.
+std::map<std::string, std::unique_ptr<FsNode>>& OpfsRoots() {
   static auto* roots =
       new std::map<std::string, std::unique_ptr<FsNode>>();  // scope -> root
-  auto it = roots->find(scope);
-  if (it == roots->end())
-    it = roots->emplace(scope, std::make_unique<FsNode>()).first;
+  return *roots;
+}
+
+FsNode* OpfsRoot(const std::string& scope) {
+  auto& roots = OpfsRoots();
+  auto it = roots.find(scope);
+  if (it == roots.end())
+    it = roots.emplace(scope, std::make_unique<FsNode>()).first;
   return it->second.get();
 }
 
@@ -456,6 +465,112 @@ void BindFileSystemAccessManager(
 mojo::PendingRemote<blink::mojom::blink::FileSystemAccessDirectoryHandle>
 MbBindOpfsRootDirectory(const std::string& scope) {
   return BindDir(OpfsRoot(scope));
+}
+
+namespace {
+
+// --- OPFS persistence (binary, recursive tree) ---
+constexpr char kOpfsMagic[] = "MBOPFS01";
+
+void WLen(std::string* o, uint32_t v) {
+  for (int i = 0; i < 4; ++i)
+    o->push_back(static_cast<char>((v >> (8 * i)) & 0xFF));
+}
+void WBlob(std::string* o, const std::string& s) {
+  WLen(o, static_cast<uint32_t>(s.size()));
+  o->append(s);
+}
+// Serialize one node: is_dir byte; dir -> child count + (name, child)*; file -> bytes.
+void WNode(std::string* o, const FsNode* n) {
+  o->push_back(n->is_dir ? 1 : 0);
+  if (n->is_dir) {
+    WLen(o, static_cast<uint32_t>(n->children.size()));
+    for (const auto& [name, child] : n->children) {
+      WBlob(o, name);
+      WNode(o, child.get());
+    }
+  } else {
+    WBlob(o, n->bytes);
+  }
+}
+
+struct OpfsReader {
+  const std::string& buf;
+  size_t pos = 0;
+  bool ok = true;
+  uint32_t Len() {
+    if (pos + 4 > buf.size()) { ok = false; return 0; }
+    uint32_t v = 0;
+    for (int i = 0; i < 4; ++i)
+      v |= static_cast<uint32_t>(static_cast<uint8_t>(buf[pos++])) << (8 * i);
+    return v;
+  }
+  uint8_t Byte() {
+    if (pos >= buf.size()) { ok = false; return 0; }
+    return static_cast<uint8_t>(buf[pos++]);
+  }
+  std::string Blob() {
+    uint32_t n = Len();
+    if (!ok || pos + n > buf.size()) { ok = false; return std::string(); }
+    std::string s = buf.substr(pos, n);
+    pos += n;
+    return s;
+  }
+};
+
+// Apply a serialized node ONTO a live FsNode (merge: update bytes / recurse into existing
+// children, create missing ones; never deletes). Keeps existing FsNode* pointers valid so
+// any bound directory/file handles survive a load.
+void ReadNodeInto(OpfsReader* r, FsNode* dst) {
+  bool is_dir = r->Byte() != 0;
+  if (!r->ok)
+    return;
+  dst->is_dir = is_dir;
+  if (is_dir) {
+    uint32_t count = r->Len();
+    for (uint32_t i = 0; i < count && r->ok; ++i) {
+      std::string name = r->Blob();
+      if (!r->ok)
+        return;
+      auto it = dst->children.find(name);
+      if (it == dst->children.end())
+        it = dst->children.emplace(name, std::make_unique<FsNode>()).first;
+      ReadNodeInto(r, it->second.get());
+    }
+  } else {
+    dst->bytes = r->Blob();
+  }
+}
+
+}  // namespace
+
+bool MbSaveOPFS(const std::string& path) {
+  std::string o;
+  o.append(kOpfsMagic, 8);
+  const auto& roots = OpfsRoots();
+  WLen(&o, static_cast<uint32_t>(roots.size()));
+  for (const auto& [scope, root] : roots) {
+    WBlob(&o, scope);
+    WNode(&o, root.get());
+  }
+  return base::WriteFile(base::FilePath(path), o);
+}
+
+bool MbLoadOPFS(const std::string& path) {
+  std::string buf;
+  if (!base::ReadFileToString(base::FilePath(path), &buf))
+    return false;
+  if (buf.size() < 8 || buf.compare(0, 8, kOpfsMagic, 8) != 0)
+    return false;
+  OpfsReader r{buf, 8};
+  uint32_t scope_count = r.Len();
+  for (uint32_t i = 0; i < scope_count && r.ok; ++i) {
+    std::string scope = r.Blob();
+    if (!r.ok)
+      return false;
+    ReadNodeInto(&r, OpfsRoot(scope));  // merge onto the live (or fresh) scope root
+  }
+  return r.ok;
 }
 
 }  // namespace mb

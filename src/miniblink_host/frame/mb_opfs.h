@@ -29,6 +29,14 @@ void BindFileSystemAccessManager(
 mojo::PendingRemote<blink::mojom::blink::FileSystemAccessDirectoryHandle>
 MbBindOpfsRootDirectory(const std::string& scope);
 
+// Persist the WHOLE in-memory OPFS tree (every origin/bucket scope, directories + file
+// bytes) to a private binary file, and restore it. Load MERGES onto the live tree (updates
+// existing nodes in place / creates missing ones, never deletes), so it is safe to call at
+// any time — existing directory/file handles stay valid. Returns false on I/O / format
+// error. (navigator.storage.getDirectory() files survive a save/load across sessions.)
+bool MbSaveOPFS(const std::string& path);
+bool MbLoadOPFS(const std::string& path);
+
 }  // namespace mb
 
 #endif  // MINIBLINK_HOST_FRAME_MB_OPFS_H_

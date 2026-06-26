@@ -11,6 +11,7 @@
 
 #include "miniblink_host/frame/mb_frame_broker.h"
 #include "miniblink_host/frame/mb_indexeddb.h"
+#include "miniblink_host/frame/mb_opfs.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/runtime/mb_runtime.h"
 #include "miniblink_host/view/mb_webview.h"
@@ -569,6 +570,16 @@ int mbSaveIndexedDB(const char* path) {
 int mbLoadIndexedDB(const char* path) {
   // Process-wide: restore IndexedDB databases from `path` (call before open()).
   return (path && mb::MbLoadIndexedDB(path)) ? 1 : 0;
+}
+
+int mbSaveOPFS(const char* path) {
+  // Process-wide: snapshot the whole OPFS tree (all origins/buckets) to `path`.
+  return (path && mb::MbSaveOPFS(path)) ? 1 : 0;
+}
+
+int mbLoadOPFS(const char* path) {
+  // Process-wide: restore the OPFS tree from `path` (merges onto the live tree).
+  return (path && mb::MbLoadOPFS(path)) ? 1 : 0;
 }
 
 int mbGetRequestLog(char* out, int out_cap) {
