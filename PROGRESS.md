@@ -1065,6 +1065,18 @@ back to WebGL), no hang. Verified mb_smoke_render 41n: requestAdapter() -> null 
 hang). render 118->119, full battery green (mb_smoke 145, platform 46, shot 66, wke 114), no
 leaks. (Real WebGPU support would need a Dawn device + the WebGPU context provider - heavy,
 the dawn_context_provider the GPU service CHECKed for in WebGL milestone B; deferred.)
+[VERIFIED + LOCKED IN - browser-backed promise APIs degrade gracefully (no hangs)]. Probed
+the remaining browser-service-backed promise APIs for the worst failure mode (a promise that
+never settles -> the page hangs forever, like the WebGPU bug). ALL settle cleanly with no
+browser process: getUserMedia -> NotFoundError, showOpenFilePicker -> SecurityError,
+serviceWorker.register -> InvalidStateError, RTCPeerConnection.createOffer -> RESOLVES (SDP
+offer generation works), WebTransport -> WebTransportError, navigator.storage.estimate ->
+resolves. None hang. Locked in as a regression test (mb_smoke_render 41o: all six settle,
+asserts no 'HANG'), so a future change can't silently reintroduce a hang in these. render
+119->120, full battery green (mb_smoke 145, platform 46, shot 66, wke 114), no leaks. (Net
+from the API survey across these ticks: WebCodecs encode/decode works, geolocation/permissions
+are fully wired, the one real hang - WebGPU requestAdapter - is fixed, and the rest degrade
+gracefully. The embedder is robust against browser-absence across the modern promise APIs.)
 **Tier 3 — input & rendering refinements:**
 [DEFERRED: device emulation] `WebView::EnableDeviceEmulation` (the DevTools device-mode path —
 mobile viewport + coarse-pointer/no-hover) was attempted and REVERTED: it builds a

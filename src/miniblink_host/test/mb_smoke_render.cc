@@ -1131,6 +1131,37 @@ static void RunCases(mbView* v, int W, int H) {
            "wg=[" + wg + "]");
   }
 
+  // 41o. Browser-service-backed promise APIs DEGRADE GRACEFULLY — they SETTLE (resolve
+  // or reject), never HANG. With no browser process these must not leave a page awaiting
+  // forever (the worst failure mode — cf. the WebGPU requestAdapter hang fixed in 41n).
+  // getUserMedia (no camera), showOpenFilePicker (no dialog), serviceWorker.register,
+  // RTCPeerConnection.createOffer, WebTransport, and storage.estimate all settle.
+  {
+    mbLoadHTML(v, "<body>hp</body>", "https://hp.test/");
+    mbRunJS(v,
+      "window.__hp='';var names=['gum','ofp','sw','rtc','wt','est'];var r={};"
+      "names.forEach(n=>r[n]='HANG');"
+      "function s(n,v){if(r[n]==='HANG')r[n]=v;}"
+      "function P(n,p){try{p.then(x=>s(n,'ok'),e=>s(n,'rej'));}catch(e){s(n,'throw');}}"
+      "try{P('gum',navigator.mediaDevices.getUserMedia({video:true}));}catch(e){s('gum','throw');}"
+      "try{P('ofp',window.showOpenFilePicker());}catch(e){s('ofp','throw');}"
+      "try{P('sw',navigator.serviceWorker.register('/sw.js'));}catch(e){s('sw','throw');}"
+      "try{P('rtc',new RTCPeerConnection().createOffer());}catch(e){s('rtc','throw');}"
+      "try{P('wt',new WebTransport('https://hp.test/wt').ready);}catch(e){s('wt','throw');}"
+      "try{P('est',navigator.storage.estimate());}catch(e){s('est','throw');}"
+      "setTimeout(function(){window.__hp=names.map(n=>r[n]).join(',');},2000);");
+    std::string hp;
+    for (int i = 0; i < 200; ++i) {
+      mbWait(v, 25);
+      hp = Eval(v, "window.__hp");
+      if (!hp.empty())
+        break;
+    }
+    Expect(hp.find("HANG") == std::string::npos && !hp.empty(),
+           "browser-backed promise APIs settle, never hang (graceful degradation)",
+           "hp=[" + hp + "]");
+  }
+
   // 42. Drawing to a canvas via mbEvalJS (not just mbRunJS) must also be
   // crash-safe. EvalToString/EvalIsolated used to run ExecuteScript
   // synchronously, so a draw inside an eval expression hit the same
