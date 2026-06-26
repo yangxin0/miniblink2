@@ -8,13 +8,19 @@
 #ifndef MINIBLINK_HOST_FRAME_MB_STORAGE_BUCKETS_H_
 #define MINIBLINK_HOST_FRAME_MB_STORAGE_BUCKETS_H_
 
+#include <cstdint>
+
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "third_party/blink/public/mojom/buckets/bucket_manager_host.mojom-blink-forward.h"
 
 namespace mb {
 
+// `frame_key` identifies the owning frame so each bucket's IndexedDB is scoped to
+// (the frame's origin, bucket name) — isolated cross-origin + per-bucket. 0 leaves
+// buckets unscoped (no frame).
 void BindBucketManagerHost(
-    mojo::PendingReceiver<blink::mojom::blink::BucketManagerHost> receiver);
+    mojo::PendingReceiver<blink::mojom::blink::BucketManagerHost> receiver,
+    uint64_t frame_key);
 
 }  // namespace mb
 

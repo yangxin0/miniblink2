@@ -2061,6 +2061,38 @@ int main() {
            "bk=[" + r + "]");
   }
 
+  // 23ae2. A Storage Bucket's IndexedDB is PARTITIONED from the default partition at
+  // the SAME origin: open db 'shared' (key id:1) in BOTH the default and bucket 'p',
+  // writing different values -> each keeps its own ('D' vs 'B'), not clobbered. The
+  // bucket IDB is keyed by (origin, bucket) vs the default's (origin) alone, so they
+  // don't collide (and the same keying isolates buckets cross-origin, like 73b).
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://bkidb.test/");
+    Eval(v,
+         "window.__bki='';"
+         "function openDb(idb){return new Promise(function(res){"
+         "var q=idb.open('shared',1);q.onupgradeneeded=function(e){"
+         "e.target.result.createObjectStore('s',{keyPath:'id'});};"
+         "q.onsuccess=function(e){res(e.target.result);};});}"
+         "function put(db,v){return new Promise(function(res){"
+         "var t=db.transaction('s','readwrite');t.objectStore('s').put("
+         "{id:1,val:v});t.oncomplete=res;});}"
+         "function get(db){return new Promise(function(res){var g=db."
+         "transaction('s').objectStore('s').get(1);g.onsuccess=function(){"
+         "res(g.result?g.result.val:'none');};});}"
+         "(async function(){try{"
+         "var ddb=await openDb(indexedDB);await put(ddb,'D');"
+         "var bk=await navigator.storageBuckets.open('p');"
+         "var bdb=await openDb(bk.indexedDB);await put(bdb,'B');"
+         "window.__bki=(await get(ddb))+'/'+(await get(bdb));"
+         "}catch(e){window.__bki='err:'+e.name;}})();");
+    mbWaitForFunction(v, "window.__bki!==''", 4000);
+    const std::string r = Eval(v, "window.__bki");
+    Expect(r == "D/B",
+           "a Storage Bucket's IndexedDB is partitioned from the default partition (same origin)",
+           "bki=[" + r + "]");
+  }
+
   // 23af. Cache Storage query options (ignoreSearch): cache.match(url,{ignoreSearch:true})
   // matches a stored entry regardless of its query string, while a plain match with a different
   // query misses. Store '/data?v=1', miss on '/data?v=2', then hit with ignoreSearch.

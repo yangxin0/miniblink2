@@ -730,8 +730,13 @@ bucket re-exposes the existing in-process backends — `GetIdbFactory`/`GetLockM
 delegate to BindIDBFactory/BindLockManager/BindCacheStorage, `GetDirectory` to the OPFS root
 (`MbBindOpfsRootDirectory`), with persist/estimate(2GB)/durability(relaxed)/expiry metadata. So
 `navigator.storageBuckets.open('x')` gives a working bucket with indexedDB/caches/locks/getDirectory.
-Verified (mb_smoke 23ae: open + keys + bucket.caches round-trip). NOTE: buckets are NOT yet isolated
-from the default partition (the backing IDB/Cache/OPFS stores are process-wide, keyed by name).
+Verified (mb_smoke 23ae: open + keys + bucket.caches round-trip). [UPDATED] A bucket's IndexedDB is now
+ISOLATED: GetIdbFactory scopes it to (origin, bucket) via a synthetic frame_key mapping to
+origin+SEP+"bucket:"+name (BindBucketManagerHost now carries the frame_key from the broker; lazily
+allocated, freed in the bucket host dtor) — so it's separate from the default partition AND other buckets
+AND isolated cross-origin. Verified mb_smoke 23ae2 (default db 'shared' vs bucket 'p' db 'shared', same
+key -> 'D'/'B', not clobbered). Cache Storage + OPFS in a bucket remain process-wide (not bucket-
+partitioned yet — niche).
 [DONE: Cache Storage] `frame/mb_cache_storage.{h,cc}` (`MbCacheStorage` + `MbCacheStorageCache`,
 bound from the frame broker). `caches.open/has/delete/keys`, `caches.match`, `cache.put`/`delete`
 (via `Batch`), and `cache.match`. Stores Request URL -> FetchAPIResponse in a process-wide
@@ -1096,7 +1101,8 @@ client dtor / WorkerContextDestroyed). Verified mb_smoke_render 37l: a same-orig
 script at the window's origin) opens the window's db 'wshare' and reads its 'fromwin' record -> SHARED
 (unscoped it'd get a fresh db -> 'nostore'). render 96->97, no leaks. REMAINING RESIDUALS (niche): a
 data:/blob: worker is opaque-by-URL ("null") so it gets its own bucket rather than the true parent origin's
-(the parent origin isn't carried to the host here); Storage Buckets still pass 0; an OLD pre-origin save
+(the parent origin isn't carried to the host here); [Storage Bucket IDB now scoped — see the Buckets
+entry]; an OLD pre-origin save
 file won't restore (key-format change — acceptable, we own both ends).
 [SCOPED — a WINDOW-ONLY IDB isolation slice is feasible/bounded (next)] Re-assessment: the "not a single-
 tick fix" verdict assumed the FULL worker-inclusive fix. A window-only slice is much smaller because (a)

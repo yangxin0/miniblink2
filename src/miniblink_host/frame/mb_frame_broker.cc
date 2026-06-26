@@ -1405,7 +1405,7 @@ class MbBrowserInterfaceBroker
     }
     // navigator.storageBuckets — named partitions re-exposing IDB/Cache/Locks/OPFS.
     if (auto r = receiver.As<blink::mojom::blink::BucketManagerHost>()) {
-      BindBucketManagerHost(std::move(r));
+      BindBucketManagerHost(std::move(r), frame_key_);  // per-origin bucket IDB
       return;
     }
     // Drop everything else (no browser process).

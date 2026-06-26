@@ -8,6 +8,7 @@
 #include "base/files/file.h"
 #include "base/time/time.h"
 #include "miniblink_host/frame/mb_cache_storage.h"
+#include "miniblink_host/frame/mb_frame_origin.h"
 #include "miniblink_host/frame/mb_indexeddb.h"
 #include "miniblink_host/frame/mb_lock_manager.h"
 #include "miniblink_host/frame/mb_opfs.h"
@@ -36,10 +37,22 @@ m::FileSystemAccessErrorPtr FsOk() {
 }
 
 // One storage bucket. Storage APIs delegate to the existing in-process backends; metadata
-// (persist/estimate/durability/expiry) is reported for a headless host. Not yet isolated from
-// the default partition — the backing IDB/Cache/OPFS stores are process-wide.
+// (persist/estimate/durability/expiry) is reported for a headless host. Its IndexedDB is
+// now origin+bucket scoped (isolated cross-origin + from the default partition); Cache/OPFS
+// remain process-wide (not yet bucket-partitioned).
 class MbBucketHost : public m::BucketHost {
  public:
+  // `frame_key` -> the opening frame's origin; `bucket_name` partitions storage
+  // WITHIN that origin. The bucket's IndexedDB is scoped to (origin, bucket) so it
+  // is isolated cross-origin AND kept separate from the default partition + other
+  // buckets — via a synthetic frame_key whose "origin" is origin + SEP + bucket.
+  MbBucketHost(uint64_t frame_key, std::string bucket_name)
+      : frame_key_(frame_key), bucket_name_(std::move(bucket_name)) {}
+  ~MbBucketHost() override {
+    if (idb_frame_key_)
+      MbClearFrameOrigin(idb_frame_key_);
+  }
+
   void Persist(PersistCallback cb) override {
     std::move(cb).Run(/*persisted=*/true, /*success=*/true);
   }
@@ -61,9 +74,16 @@ class MbBucketHost : public m::BucketHost {
     std::move(cb).Run(expires_, /*success=*/true);
   }
   void GetIdbFactory(mojo::PendingReceiver<m::IDBFactory> r) override {
-    // frame_key 0 -> unscoped origin: a Storage Bucket's IDB isn't origin-isolated
-    // yet (buckets carry no frame_key here; consistent with their existing state).
-    BindIDBFactory(std::move(r), 0);
+    // Scope the bucket's IDB to (origin, bucket) via a synthetic frame_key whose
+    // mapped origin is origin + SEP + bucket — distinct from the default partition
+    // ("origin") and from other buckets, and isolated cross-origin. Allocated
+    // lazily (first IDB request) and freed in the dtor.
+    if (!idb_frame_key_) {
+      const std::string origin = MbGetFrameOrigin(frame_key_);
+      idb_frame_key_ = MbAllocWorkerFrameKey();
+      MbSetFrameOrigin(idb_frame_key_, origin + "\x01" + "bucket:" + bucket_name_);
+    }
+    BindIDBFactory(std::move(r), idb_frame_key_);
   }
   void GetLockManager(mojo::PendingReceiver<m::LockManager> r) override {
     BindLockManager(std::move(r));
@@ -82,24 +102,31 @@ class MbBucketHost : public m::BucketHost {
 
  private:
   std::optional<base::Time> expires_;
+  uint64_t frame_key_ = 0;       // the opening frame's key (-> its origin)
+  std::string bucket_name_;      // partitions storage within the origin
+  uint64_t idb_frame_key_ = 0;   // synthetic key for this bucket's IDB (0 = unset)
 };
 
 class MbBucketManagerHost : public m::BucketManagerHost {
  public:
+  explicit MbBucketManagerHost(uint64_t frame_key) : frame_key_(frame_key) {}
+
   void OpenBucket(const blink::String& name, m::BucketPoliciesPtr,
                   OpenBucketCallback cb) override {
     BucketNames().insert(name.Utf8());
     mojo::PendingRemote<m::BucketHost> remote;
-    mojo::MakeSelfOwnedReceiver(std::make_unique<MbBucketHost>(),
-                                remote.InitWithNewPipeAndPassReceiver());
+    mojo::MakeSelfOwnedReceiver(
+        std::make_unique<MbBucketHost>(frame_key_, name.Utf8()),
+        remote.InitWithNewPipeAndPassReceiver());
     std::move(cb).Run(std::move(remote), m::BucketError::kUnknown);
   }
   void GetBucketForDevtools(
       const blink::String& name,
       mojo::PendingReceiver<m::BucketHost> receiver) override {
     BucketNames().insert(name.Utf8());
-    mojo::MakeSelfOwnedReceiver(std::make_unique<MbBucketHost>(),
-                                std::move(receiver));
+    mojo::MakeSelfOwnedReceiver(
+        std::make_unique<MbBucketHost>(frame_key_, name.Utf8()),
+        std::move(receiver));
   }
   void Keys(KeysCallback cb) override {
     blink::Vector<blink::String> out;
@@ -112,13 +139,17 @@ class MbBucketManagerHost : public m::BucketManagerHost {
     BucketNames().erase(name.Utf8());
     std::move(cb).Run(/*success=*/true);
   }
+
+ private:
+  uint64_t frame_key_ = 0;  // the owning frame's key (-> origin), passed to buckets
 };
 
 }  // namespace
 
 void BindBucketManagerHost(
-    mojo::PendingReceiver<blink::mojom::blink::BucketManagerHost> receiver) {
-  mojo::MakeSelfOwnedReceiver(std::make_unique<MbBucketManagerHost>(),
+    mojo::PendingReceiver<blink::mojom::blink::BucketManagerHost> receiver,
+    uint64_t frame_key) {
+  mojo::MakeSelfOwnedReceiver(std::make_unique<MbBucketManagerHost>(frame_key),
                               std::move(receiver));
 }
 
