@@ -202,7 +202,8 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
   //    (frame_test_helpers.cc:489).
   v->main_frame_ = blink::WebLocalFrame::CreateMainFrame(
       v->web_view_, v->frame_client_.get(), /*previous_sibling=*/nullptr,
-      MakeFrameInterfaceBroker(), blink::LocalFrameToken(), blink::DocumentToken(),
+      MakeFrameInterfaceBroker(v->frame_client_->frame_key()),
+      blink::LocalFrameToken(), blink::DocumentToken(),
       /*policy_container=*/nullptr, /*opener=*/nullptr,
       /*name=*/blink::WebString(), network::mojom::WebSandboxFlags::kNone);
   // Let the frame client know its frame so it can parent child frames (iframes).

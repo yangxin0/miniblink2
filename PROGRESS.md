@@ -1062,6 +1062,21 @@ persistence format to store metadata.name separately from the now-origin-qualifi
 the central broker + the whole (heavily-tested) IDB subsystem + the on-disk format. Deferred as the
 deliberate "per-origin storage isolation" refactor. IMPACT TODAY: none for the common SINGLE-origin
 embedder; only multi-origin processes that reuse db/channel names across origins are affected.
+[DONE — WINDOW per-origin IndexedDB isolation] Implemented the window-only slice. The IDB Registry is now
+keyed by (origin, name) — `GetOrCreate`/`DeleteDatabase` build the key as `MbGetFrameOrigin(frame_key) +
+"\n" + name`, so two different origins opening the SAME db name get SEPARATE backends (IDB is per-origin).
+`frame_key` is threaded broker-side: `MakeFrameInterfaceBroker(frame_key)` (mb_webview passes the frame's
+key via `MbFrameClient::frame_key()`; the 2 worker hosts + Storage Buckets pass 0) -> `MbBrowserInterface
+Broker` -> `BindIDBFactory(receiver, frame_key)` -> `MbIDBFactory(frame_key)`. The page-visible db name is
+untouched (`metadata.name` stays the bare name); persistence needed no format change — `Deserialize
+Registry` splits the composite key on '\n' to recover the real name (an OLD save with bare-name keys loads
+unscoped). Verified: all 14 single-origin IDB tests unchanged (one consistent origin -> same effective
+key), incl. persistence 23m2; NEW mb_smoke_render 73b (two views at https://a-idb.test vs https://b-idb.test
+open db 'shared' -> A writes fromA, B writes fromB, A re-reads fromA = ISOLATED; pre-fix it'd read fromB).
+render 95->96, no leaks. RESIDUALS (documented, niche): workers + Storage Buckets pass frame_key 0 -> a
+shared ("",name) bucket (not origin-isolated — same gotcha as the BroadcastChannel worker residual; needs
+parent-origin threading); opaque "null" origins aren't uniquely isolated; an OLD pre-origin save file
+won't restore (key-format change, no version field — acceptable, we own both ends).
 [SCOPED — a WINDOW-ONLY IDB isolation slice is feasible/bounded (next)] Re-assessment: the "not a single-
 tick fix" verdict assumed the FULL worker-inclusive fix. A window-only slice is much smaller because (a)
 the backend already stores its db name SEPARATELY from the registry key (`b->metadata.name = name`, mb_

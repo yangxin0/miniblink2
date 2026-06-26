@@ -75,7 +75,7 @@ class MbWorkerHostFactoryClient
         std::make_unique<MbDedicatedWorkerHost>(),
         host_remote.InitWithNewPipeAndPassReceiver());
     worker_->OnWorkerHostCreated(
-        MakeFrameInterfaceBroker(), std::move(host_remote),
+        MakeFrameInterfaceBroker(0), std::move(host_remote),
         blink::WebSecurityOrigin::Create(script_url));
 
     // 2-3. Fetch the top-level script (file://, http(s)://, or data:) and synthesize the

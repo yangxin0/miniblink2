@@ -12,13 +12,18 @@
 
 #include <string>
 
+#include <cstdint>
+
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/mojom/browser_interface_broker.mojom-blink.h"
 
 namespace mb {
 
+// `frame_key` identifies the owning frame so per-origin storage (IndexedDB) can
+// scope by the frame's current document origin (via MbGetFrameOrigin). Pass 0 for
+// workers / when no frame is associated (origin unknown -> unscoped bucket).
 mojo::PendingRemote<blink::mojom::blink::BrowserInterfaceBroker>
-MakeFrameInterfaceBroker();
+MakeFrameInterfaceBroker(uint64_t frame_key);
 
 // Configure the geolocation fix served to navigator.geolocation (process-wide). Once
 // set, getCurrentPosition/watchPosition resolve to (lat,lng) with `accuracy` metres

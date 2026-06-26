@@ -148,6 +148,9 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // Associate this client with its frame. SetFrame: main frame (MbWebView-owned).
   // Bind: child frame (takes ownership of itself, freed on FrameDetached).
   void SetFrame(blink::WebLocalFrame* frame);
+  // This frame's unique id — used to scope per-origin storage (the broker passes
+  // it so IndexedDB keys by the frame's current document origin).
+  uint64_t frame_key() const { return frame_key_; }
   void Bind(blink::WebLocalFrame* frame,
             std::unique_ptr<MbFrameClient> self_owned) {
     web_frame_ = frame;

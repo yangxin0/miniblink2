@@ -19,6 +19,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/single_thread_task_runner.h"
+#include "miniblink_host/frame/mb_frame_origin.h"
 #include "miniblink_host/runtime/mb_runtime.h"
 #include "mojo/public/cpp/base/big_buffer.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
@@ -305,8 +306,17 @@ std::map<std::string, std::unique_ptr<MbIDBBackend>>& Registry() {
   return *r;
 }
 
-MbIDBBackend* GetOrCreate(const blink::String& name) {
-  std::string key = name.Utf8();
+// The Registry key qualifies the database name with the opening frame's ORIGIN,
+// so two different origins that open the same db name get SEPARATE backends (IDB
+// is strictly per-origin). `origin` is "" for an unknown origin (worker): all
+// such share one unscoped bucket (a documented residual). The page-visible name
+// stays `b->metadata.name` (set below), independent of this composite key.
+std::string IDBKey(const std::string& origin, const blink::String& name) {
+  return origin + "\n" + name.Utf8();
+}
+
+MbIDBBackend* GetOrCreate(const std::string& origin, const blink::String& name) {
+  std::string key = IDBKey(origin, name);
   auto it = Registry().find(key);
   if (it != Registry().end())
     return it->second.get();
@@ -836,6 +846,8 @@ void MbIDBDatabase::CreateTransaction(
 
 class MbIDBFactory : public m::IDBFactory {
  public:
+  explicit MbIDBFactory(uint64_t frame_key) : frame_key_(frame_key) {}
+
   void GetDatabaseInfo(GetDatabaseInfoCallback callback) override {
     std::move(callback).Run({}, nullptr);
   }
@@ -847,7 +859,7 @@ class MbIDBFactory : public m::IDBFactory {
             mojo::PendingAssociatedReceiver<IDBTransaction> vc_txn_receiver,
             int64_t transaction_id,
             int32_t /*priority*/) override {
-    MbIDBBackend* backend = GetOrCreate(name);
+    MbIDBBackend* backend = GetOrCreate(MbGetFrameOrigin(frame_key_), name);
     mojo::AssociatedRemote<IDBFactoryClient> client(std::move(client_pending));
     // This connection's transaction-completion sink (shared by all its transactions).
     backend->db_callbacks.reset();
@@ -878,10 +890,13 @@ class MbIDBFactory : public m::IDBFactory {
       mojo::PendingAssociatedRemote<IDBFactoryClient> client_pending,
       const blink::String& name,
       bool /*force_close*/) override {
-    Registry().erase(name.Utf8());
+    Registry().erase(IDBKey(MbGetFrameOrigin(frame_key_), name));
     mojo::AssociatedRemote<IDBFactoryClient> client(std::move(client_pending));
     client->DeleteSuccess(0);
   }
+
+ private:
+  uint64_t frame_key_ = 0;  // -> the frame's current origin via MbGetFrameOrigin
 };
 
 // ---- Persistence: serialize the whole Registry to a flat byte buffer ----------
@@ -1030,8 +1045,13 @@ bool DeserializeRegistry(const std::string& buf) {
   std::map<std::string, std::unique_ptr<MbIDBBackend>> loaded;
   for (uint32_t d = 0; d < db_count && r.ok; ++d) {
     auto b = std::make_unique<MbIDBBackend>();
-    std::string name = r.Str();
-    b->metadata.name = blink::String::FromUtf8(name);
+    std::string key = r.Str();  // the Registry key: "origin\nname" (composite)
+    // Recover the page-visible db name from the composite key (the part after the
+    // origin separator). An OLD save (key == bare name, no '\n') loads unscoped.
+    std::string real_name = key;
+    if (auto nl = key.find('\n'); nl != std::string::npos)
+      real_name = key.substr(nl + 1);
+    b->metadata.name = blink::String::FromUtf8(real_name);
     b->metadata.version = r.I64();
     b->metadata.max_object_store_id = r.I64();
     uint32_t store_count = r.U32();
@@ -1062,7 +1082,7 @@ bool DeserializeRegistry(const std::string& buf) {
       b->key_generator[sid] = r.I64();
     }
     if (r.ok)
-      loaded[name] = std::move(b);
+      loaded[key] = std::move(b);
   }
   if (!r.ok)
     return false;
@@ -1074,8 +1094,9 @@ bool DeserializeRegistry(const std::string& buf) {
 }  // namespace
 
 void BindIDBFactory(
-    mojo::PendingReceiver<blink::mojom::blink::IDBFactory> receiver) {
-  mojo::MakeSelfOwnedReceiver(std::make_unique<MbIDBFactory>(),
+    mojo::PendingReceiver<blink::mojom::blink::IDBFactory> receiver,
+    uint64_t frame_key) {
+  mojo::MakeSelfOwnedReceiver(std::make_unique<MbIDBFactory>(frame_key),
                               std::move(receiver));
 }
 

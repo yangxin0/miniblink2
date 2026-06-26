@@ -13,6 +13,7 @@
 #ifndef MINIBLINK_HOST_FRAME_MB_INDEXEDDB_H_
 #define MINIBLINK_HOST_FRAME_MB_INDEXEDDB_H_
 
+#include <cstdint>
 #include <string>
 
 #include "mojo/public/cpp/bindings/pending_receiver.h"
@@ -21,9 +22,12 @@
 namespace mb {
 
 // Bind an IDBFactory receiver to the in-process backend (self-owned). Bound on the broker's
-// service thread.
+// service thread. `frame_key` scopes the databases to the frame's current document origin
+// (per the IndexedDB spec, IDB is strictly per-origin); 0 = unknown origin (worker), which
+// shares one unscoped bucket.
 void BindIDBFactory(
-    mojo::PendingReceiver<blink::mojom::blink::IDBFactory> receiver);
+    mojo::PendingReceiver<blink::mojom::blink::IDBFactory> receiver,
+    uint64_t frame_key);
 
 // Persist / restore the whole in-memory IndexedDB store (every database, by name) to/from
 // `path` as a private binary file — the IndexedDB peer of the cookie/localStorage jars, for

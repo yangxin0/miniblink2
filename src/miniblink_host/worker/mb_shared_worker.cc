@@ -144,7 +144,7 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
             blink::WebPolicyContainerPolicies(), blink::WebURL(),
             blink::mojom::InsecureRequestsPolicy::kDoNotUpgrade),
         base::UnguessableToken::Create(), std::move(content_settings),
-        MakeFrameInterfaceBroker(), /*pause_worker_context_on_start=*/false,
+        MakeFrameInterfaceBroker(0), /*pause_worker_context_on_start=*/false,
         std::move(params),
         std::make_unique<blink::WebPolicyContainer>(
             blink::WebPolicyContainerPolicies(), policy_host_.BindRemote()),

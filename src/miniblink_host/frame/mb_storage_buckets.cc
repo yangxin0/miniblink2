@@ -61,7 +61,9 @@ class MbBucketHost : public m::BucketHost {
     std::move(cb).Run(expires_, /*success=*/true);
   }
   void GetIdbFactory(mojo::PendingReceiver<m::IDBFactory> r) override {
-    BindIDBFactory(std::move(r));
+    // frame_key 0 -> unscoped origin: a Storage Bucket's IDB isn't origin-isolated
+    // yet (buckets carry no frame_key here; consistent with their existing state).
+    BindIDBFactory(std::move(r), 0);
   }
   void GetLockManager(mojo::PendingReceiver<m::LockManager> r) override {
     BindLockManager(std::move(r));

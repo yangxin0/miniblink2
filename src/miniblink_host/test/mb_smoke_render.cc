@@ -1301,6 +1301,48 @@ static void RunCases(mbView* v, int W, int H) {
     }
   }
 
+  // 73b. Cross-origin IndexedDB ISOLATION: two views at DIFFERENT origins that open
+  // the SAME db name + key must NOT see each other's data (IDB is strictly per-origin).
+  // Previously the backend Registry was keyed by db name only -> cross-origin read/write
+  // of persistent data; now it's keyed by (origin, name). view A writes 'fromA', view B
+  // writes 'fromB' to "shared"; A re-reading still sees 'fromA' (B's write was isolated).
+  {
+    mbView* a = mbCreateView(W, H);
+    mbView* b = mbCreateView(W, H);
+    if (a && b) {
+      const std::string kPut =
+          "function P(val,done){var q=indexedDB.open('shared',1);"
+          "q.onupgradeneeded=function(e){e.target.result.createObjectStore('s',"
+          "{keyPath:'id'});};q.onsuccess=function(e){var db=e.target.result;"
+          "var t=db.transaction('s','readwrite');t.objectStore('s').put("
+          "{id:1,val:val});t.oncomplete=function(){var g=db.transaction('s')."
+          "objectStore('s').get(1);g.onsuccess=function(){window[done]="
+          "g.result?g.result.val:'none';};};};}";
+      mbLoadHTML(a, "<body>A</body>", "https://a-idb.test/");
+      mbLoadHTML(b, "<body>B</body>", "https://b-idb.test/");
+      mbRunJS(a, (kPut + "P('fromA','__ra');").c_str());
+      for (int i = 0; i < 80 && Eval(a, "''+window.__ra") == "undefined"; ++i)
+        mbWait(a, 25);
+      mbRunJS(b, (kPut + "P('fromB','__rb');").c_str());
+      for (int i = 0; i < 80 && Eval(b, "''+window.__rb") == "undefined"; ++i)
+        mbWait(b, 25);
+      // A re-reads AFTER B wrote 'fromB' to the same db name at a different origin.
+      mbRunJS(a,
+              "var q=indexedDB.open('shared',1);q.onsuccess=function(e){var g="
+              "e.target.result.transaction('s').objectStore('s').get(1);"
+              "g.onsuccess=function(){window.__ra2=g.result?g.result.val:'none';};};");
+      for (int i = 0; i < 80 && Eval(a, "''+window.__ra2") == "undefined"; ++i)
+        mbWait(a, 25);
+      const std::string ra = Eval(a, "window.__ra"), rb = Eval(b, "window.__rb"),
+                        ra2 = Eval(a, "window.__ra2");
+      Expect(ra == "fromA" && rb == "fromB" && ra2 == "fromA",
+             "cross-origin IndexedDB is isolated (same db name, different origins)",
+             "ra=" + ra + " rb=" + rb + " ra2(isolated)=" + ra2);
+    }
+    if (a) mbDestroyView(a);
+    if (b) mbDestroyView(b);
+  }
+
   // 78b. Storage partitioning across views: two views are independent top-level browsing
   // contexts, so their sessionStorage is ISOLATED (each view mints a unique session-namespace
   // id), while localStorage is per-ORIGIN and therefore SHARED process-wide. Same origin in both.

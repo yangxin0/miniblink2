@@ -1215,9 +1215,12 @@ class MbBrowserInterfaceBroker
   // `main_runner` is the renderer main-thread runner. This broker is bound on the SERVICE
   // thread, so any interface that must run on the main thread (SharedWorkerConnector ->
   // WebSharedWorker::CreateAndStart) is posted there.
-  explicit MbBrowserInterfaceBroker(
-      scoped_refptr<base::SingleThreadTaskRunner> main_runner)
-      : main_runner_(std::move(main_runner)) {}
+  // `frame_key` identifies the owning frame; its current document origin (looked
+  // up via MbGetFrameOrigin at use time) scopes per-origin storage (IndexedDB).
+  // 0 for workers (origin unknown -> a shared unscoped bucket).
+  MbBrowserInterfaceBroker(scoped_refptr<base::SingleThreadTaskRunner> main_runner,
+                           uint64_t frame_key)
+      : main_runner_(std::move(main_runner)), frame_key_(frame_key) {}
 
   void GetInterface(mojo::GenericPendingReceiver receiver) override {
     // new SharedWorker(): run the connector on the main thread (CreateAndStart is
@@ -1283,7 +1286,7 @@ class MbBrowserInterfaceBroker
     }
     // IndexedDB — in-memory backend (open + object stores; reads/writes in step 2).
     if (auto r = receiver.As<blink::mojom::blink::IDBFactory>()) {
-      BindIDBFactory(std::move(r));
+      BindIDBFactory(std::move(r), frame_key_);  // origin-scoped per frame
       return;
     }
     // navigator.wakeLock — headless no-op (permission granted below).
@@ -1410,6 +1413,7 @@ class MbBrowserInterfaceBroker
 
  private:
   scoped_refptr<base::SingleThreadTaskRunner> main_runner_;
+  uint64_t frame_key_ = 0;
 };
 
 }  // namespace
@@ -1433,7 +1437,7 @@ std::string MbGetClipboardText() {
 }
 
 mojo::PendingRemote<blink::mojom::blink::BrowserInterfaceBroker>
-MakeFrameInterfaceBroker() {
+MakeFrameInterfaceBroker(uint64_t frame_key) {
   mojo::PendingRemote<blink::mojom::blink::BrowserInterfaceBroker> remote;
   auto receiver = remote.InitWithNewPipeAndPassReceiver();
   // Bind the broker (and therefore the RestrictedCookieManager it hands out) on
@@ -1458,15 +1462,18 @@ MakeFrameInterfaceBroker() {
         base::BindOnce(
             [](mojo::PendingReceiver<
                    blink::mojom::blink::BrowserInterfaceBroker> r,
-               scoped_refptr<base::SingleThreadTaskRunner> main) {
+               scoped_refptr<base::SingleThreadTaskRunner> main,
+               uint64_t fk) {
               mojo::MakeSelfOwnedReceiver(
-                  std::make_unique<MbBrowserInterfaceBroker>(std::move(main)),
+                  std::make_unique<MbBrowserInterfaceBroker>(std::move(main),
+                                                             fk),
                   std::move(r));
             },
-            std::move(receiver), std::move(main_runner)));
+            std::move(receiver), std::move(main_runner), frame_key));
   } else {
     mojo::MakeSelfOwnedReceiver(
-        std::make_unique<MbBrowserInterfaceBroker>(std::move(main_runner)),
+        std::make_unique<MbBrowserInterfaceBroker>(std::move(main_runner),
+                                                   frame_key),
         std::move(receiver));
   }
   return remote;
