@@ -343,6 +343,13 @@ MB_EXPORT void mbSetDeviceScaleFactor(mbView*, float scale);
 MB_EXPORT void mbSetZoomFactor(mbView*, float factor);
 MB_EXPORT float mbGetZoomFactor(mbView*);
 
+// Run a blink EDITING command on the focused frame — the classic webview editor ops for
+// hosting editable content (contenteditable / inputs): "SelectAll", "Copy", "Cut",
+// "Paste", "Undo", "Redo", "Delete", "Bold", "Italic", "Unselect", "InsertText", etc.
+// Copy/Cut write the in-process clipboard (mbGetClipboard); Paste reads it. Returns 1 if
+// the command applied, 0 otherwise. DOM/editing layer (no compositor).
+MB_EXPORT int mbExecuteEditCommand(mbView*, const char* command);
+
 // Override the User-Agent (navigator.userAgent + outgoing HTTP requests). Call
 // before mbLoadURL/mbLoadHTML so it applies to that navigation. Pass NULL/empty to
 // restore the built-in default.

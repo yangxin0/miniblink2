@@ -198,6 +198,11 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
   settings->SetAllowFileAccessFromFileURLs(true);
   settings->SetAllowUniversalAccessFromFileURLs(true);
   settings->SetLocalStorageEnabled(true);  // else window.localStorage is null (TypeError)
+  // Let editor Cut/Copy/Paste (mbExecuteEditCommand) and execCommand reach the clipboard —
+  // blink gates these behind these flags (off by default), so without them Copy returns
+  // false and never writes the (in-process) clipboard.
+  settings->SetJavaScriptCanAccessClipboard(true);
+  settings->SetDOMPasteAllowed(true);
   settings->SetStandardFontFamily(blink::WebString::FromUtf8("Times"),
                                   USCRIPT_COMMON);
   settings->SetSerifFontFamily(blink::WebString::FromUtf8("Times"),
@@ -1869,6 +1874,12 @@ void MbWebView::EmulateDevice(int width, int height, float device_scale_factor,
     Resize(width, height);
   // SetDeviceScaleFactor also nudges media queries (covers the pointer/hover change).
   SetDeviceScaleFactor(device_scale_factor > 0.0f ? device_scale_factor : dsf_);
+}
+
+bool MbWebView::ExecuteEditCommand(const char* command) {
+  if (!command || !main_frame_)
+    return false;
+  return main_frame_->ExecuteCommand(blink::WebString::FromUtf8(command));
 }
 
 void MbWebView::SetZoomFactor(float factor) {

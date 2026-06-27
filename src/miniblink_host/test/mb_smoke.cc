@@ -1520,6 +1520,31 @@ int main() {
            "w=[" + w + "] host=[" + std::string(hb) + "] r=[" + r + "]");
   }
 
+  // 23e2. Edit commands (mbExecuteEditCommand): the classic webview editor ops on the
+  // focused editable. A contenteditable with text -> focus, SelectAll + Copy puts it on the
+  // clipboard (mbGetClipboard), then SelectAll + Delete empties it. End-to-end proof that
+  // ExecuteCommand drives blink's editor + integrates with the in-process clipboard.
+  {
+    mbLoadHTML(v,
+               "<body><div id='e' contenteditable>hello-edit</div></body>",
+               "https://edit.test/");
+    mbWait(v, 50);
+    mbRunJS(v, "document.getElementById('e').focus();");
+    mbWait(v, 30);
+    const bool sel = mbExecuteEditCommand(v, "SelectAll") != 0;
+    const bool cop = mbExecuteEditCommand(v, "Copy") != 0;
+    mbWait(v, 80);  // ClipboardHost.WriteText is an async mojo call to the service thread
+    char cb[64] = {0};
+    mbGetClipboard(cb, sizeof(cb));
+    const bool del = mbExecuteEditCommand(v, "Delete") != 0;
+    mbWait(v, 30);
+    const std::string after = Eval(v, "document.getElementById('e').textContent");
+    Expect(sel && cop && std::string(cb) == "hello-edit" && del && after.empty(),
+           "mbExecuteEditCommand: SelectAll+Copy->clipboard, Delete empties the editable",
+           "sel=" + std::string(sel ? "1" : "0") + " cop=" + (cop ? "1" : "0") +
+               " clip=[" + std::string(cb) + "] after=[" + after + "]");
+  }
+
   // 23f. Web Locks (navigator.locks, broker #8): the in-process LockManager grants with
   // real EXCLUSIVE serialization. Two requests for the same name: the first holds the lock
   // across an async (timer) callback; the second must WAIT until the first's promise

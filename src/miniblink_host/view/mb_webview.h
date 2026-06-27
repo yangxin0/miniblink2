@@ -195,6 +195,11 @@ class MbWebView {
   // raster crispness, same CSS layout). GetZoomFactor returns the current factor.
   void SetZoomFactor(float factor);
   float GetZoomFactor() const { return zoom_factor_; }
+  // Run a blink editing command on the focused frame ("SelectAll", "Copy", "Cut",
+  // "Paste", "Undo", "Redo", "Delete", "Bold", "Italic", "Unselect", ...) — the classic
+  // webview editor operations, at the DOM/editing layer (no compositor). Returns whether
+  // the command applied (false for an unknown command or nothing to act on).
+  bool ExecuteEditCommand(const char* command);
   // Device/mobile emulation WITHOUT the compositor (EnableDeviceEmulation drives a null
   // LayerTreeHost -> SIGSEGV). Drives the layout-visible part via WebSettings: mobile ->
   // coarse pointer + no hover + viewport-meta/mobile-viewport, desktop -> fine pointer +

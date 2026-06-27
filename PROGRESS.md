@@ -1423,6 +1423,20 @@ zoom genuinely re-lays out + screenshots. render 130->131, full battery green (m
 platform 46, shot 66, wke 114), no leaks. (Distinct from mbSetDeviceScaleFactor, which keeps the
 CSS layout and only raises raster crispness.)
 
+[DONE - EDITOR COMMANDS (mbExecuteEditCommand) + clipboard-access settings fix]. A missing
+classic webview capability: programmatic editing commands on the focused editable
+(contenteditable/inputs). mbExecuteEditCommand(view, command) -> WebLocalFrame::ExecuteCommand
+for "SelectAll"/"Copy"/"Cut"/"Paste"/"Undo"/"Redo"/"Delete"/"Bold"/... (DOM/editing layer, no
+compositor). REAL FIX found while wiring it: Cut/Copy/Paste were silently FAILING (ExecuteCommand
+returned false, never touching the clipboard) because blink gates them behind WebSettings::
+SetJavaScriptCanAccessClipboard + SetDOMPasteAllowed, both off by default and never set here -
+now enabled in MbWebView::Create. (Also: the editor Copy -> ClipboardHost.WriteText is an async
+mojo hop to the service thread, so a host reading mbGetClipboard must pump first.) Verified
+mb_smoke 23e2: a contenteditable 'hello-edit' -> focus, SelectAll + Copy -> mbGetClipboard reads
+'hello-edit' (Copy returned 1, integrates with the in-process clipboard), SelectAll + Delete ->
+the editable is empty. mb_smoke 159->160, full battery green (platform 46, render 131, shot 66,
+wke 114), no leaks. So a webview hosting editable content now has the full editor command set.
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

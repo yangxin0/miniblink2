@@ -401,6 +401,10 @@ void mbSetZoomFactor(mbView* v, float factor) {
     v->impl->SetZoomFactor(factor);
 }
 
+int mbExecuteEditCommand(mbView* v, const char* command) {
+  return (v && v->impl && v->impl->ExecuteEditCommand(command)) ? 1 : 0;
+}
+
 float mbGetZoomFactor(mbView* v) {
   return (v && v->impl) ? v->impl->GetZoomFactor() : 1.0f;
 }
