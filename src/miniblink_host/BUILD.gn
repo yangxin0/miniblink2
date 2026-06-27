@@ -358,3 +358,27 @@ executable("mb_compositor2_probe") {
     "//ui/gl/init",
   ]
 }
+
+# mb_compositor3_probe: SOFTWARE COMPOSITOR bring-up milestone C — drive the REAL in-process
+# frame sink (viz::DirectLayerTreeFrameSink) over the milestone-B Display with a stub
+# cc::LayerTreeFrameSinkClient; submit a frame THROUGH the sink and read back the bitmap.
+# Proves cc's frame-sink contract -> Display -> pixels (the artifact blink returns). testonly.
+executable("mb_compositor3_probe") {
+  testonly = true
+  sources = [ "tools/mb_compositor3_probe.cc" ]
+  deps = [
+    "//base",
+    "//base/test:test_support",
+    "//cc",
+    "//components/viz/common",
+    "//components/viz/service",
+    "//components/viz/test:test_support",
+    "//mojo/core/embedder",
+    "//skia",
+    "//ui/compositor:test_support",
+    "//ui/gfx",
+    "//ui/gfx/geometry",
+    "//ui/gl",
+    "//ui/gl/init",
+  ]
+}

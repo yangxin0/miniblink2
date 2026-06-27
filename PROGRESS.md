@@ -2248,3 +2248,26 @@ REVISED remaining milestones:
       software-paint screenshot path. The risky live-widget step.
 This tick: cc-side investigation (delegate sizes, DirectLayerTreeFrameSink discovered) — no new
 probe code; A + B remain the built/verified slices. Tree clean (doc-only). Milestone C builds next.
+
+[DONE — compositor milestone C: REAL cc frame sink -> viz::Display -> bitmap]. tools/
+mb_compositor3_probe.cc (blink-free, testonly) drives the REAL in-process frame sink —
+ui::DirectLayerTreeFrameSink (//ui/compositor:test_support), a cc::LayerTreeFrameSink that
+submits its client's frame as the ROOT surface of an in-process viz::Display — and confirms
+cc's frame-sink contract composites to a bitmap. This is the artifact blink's WebFrameWidgetImpl::
+AllocateNewLayerTreeFrameSink will return (milestone D). A STUB cc::LayerTreeFrameSinkClient (11
+pure virtuals) stands in for cc::LayerTreeHostImpl, avoiding the 37-virtual cc HOST delegates
+(which blink's LayerTreeView provides in the integration). Flow: build the milestone-B Display
+(software output surface + capturing device); ui::DirectLayerTreeFrameSink(frame_sink_id,
+&manager, display, ctx=null, worker=null, task_runner); sink->BindToClient(stub) — the sink then
+creates its own CompositorFrameSinkSupport (root) + Initializes the Display; SetVisible +
+Resize(100x100); build a CompositorFrame (one yellow SolidColorDrawQuad) with a valid
+BeginFrameAck::CreateManualAckWithDamage(); sink->SubmitCompositorFrame routes it to the root
+surface; display->DrawAndSwap forces the composite (we bypass the begin-frame scheduler); the
+SoftwareOutputDevice subclass captures the bitmap. VERIFIED (exit 0, wired into build.sh after
+mb_compositor2_probe): sink-routed center pixel = R255 G255 B0 (yellow). KEY non-obvious fix:
+the sink does NOT Resize the Display (cc normally drives that via the frame-sink flow), so a
+direct DrawAndSwap needs an explicit display->Resize or it draws an empty 0x0 viewport ("no
+captured bitmap"). Nine probes; full battery green (mb_smoke 165, platform 46, render 133, shot
+66), no leaks. NEXT (milestone D): blink integration — a PRODUCTION viz::Display + DirectLayer
+TreeFrameSink returned from AllocateNewLayerTreeFrameSink + WidgetBase::InitializeCompositing in
+MbWebView's widget; drive BeginFrame; confirm a page composites. The risky live-widget step.
