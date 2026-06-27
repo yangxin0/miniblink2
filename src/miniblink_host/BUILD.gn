@@ -227,3 +227,15 @@ executable("mb_gpu_probe") {
     "//ui/gl/init",
   ]
 }
+
+# mb_dawn_probe: WebGPU bring-up milestone A — an in-process Dawn native instance that
+# enumerates adapters and creates a real WebGPU device (SwiftShader fallback preferred).
+# Blink-free, so a green run isolates "the in-process Dawn foundation works" ahead of the
+# heavier blink WebGPU provider wiring. Mirrors mb_gl_probe's role for the GL stack.
+executable("mb_dawn_probe") {
+  sources = [ "tools/mb_dawn_probe.cc" ]
+  deps = [
+    "//base",
+    "//third_party/dawn/src/dawn/native",
+  ]
+}

@@ -1693,6 +1693,29 @@ THREE non-obvious requirements found + encoded (each was a fatal until fixed):
 Client side needs a base::SingleThreadTaskExecutor + base::ThreadPoolInstance. Verified
 (mb_gpu_probe exit 0, wired into build.sh after mb_gl_probe); battery unaffected (mb_smoke
 145, platform 46, render 102, shot 66, wke 114), both probes leak-free.
+[DONE — WebGPU milestone A: in-process DAWN device]. Opened the deferred "full WebGPU"
+arc (gap #2 in the deep-arc list) with its foundation step, mirroring the proven
+mb_gl_probe (GL milestone A) -> mb_gpu_probe (B) -> blink-provider (C) ladder. NEW
+tools/mb_dawn_probe.cc (blink-FREE, deps = //base + //third_party/dawn/src/dawn/native,
+NON-testonly so the host library can later link the same path): stands up a
+dawn::native::Instance IN-PROCESS, EnumerateAdapters (forceFallbackAdapter=true +
+--enable-unsafe-swiftshader -> the SwiftShader/Vulkan CPU adapter, headless-reproducible
+like the GL probe; falls back to enumerating all backends so it still passes on a real-GPU
+box), prints each adapter via the C proc table (procs.adapterGetInfo -> WGPUAdapterInfo),
+CreateDevice() on the preferred CPU adapter, and confirms a default queue. VERIFIED (exit
+0, wired into build.sh after mb_gpu_probe):
+  adapter[0] backend=Vulkan type=CPU device=SwiftShader Device (LLVM 10.0.0)
+  device created on adapter[0], default queue OK
+So the in-process Dawn/WebGPU foundation works headlessly (Dawn native over SwiftShader
+Vulkan) — the brick that blink's WebGPU context provider (the still-deferred milestones B/C:
+an in-process WebGPU command/wire path + MbPlatform::CreateWebGPUGraphicsContext3DProvider-
+Async returning a real provider instead of today's graceful null) will sit on. Donor tree
+already ships the needed artifacts (libdawn_native.dylib, libvk_swiftshader.dylib,
+vk_swiftshader_icd.json). NOTE: this is the same Dawn the GPU service wanted in WebGL
+milestone B (we forced gr_context_type=kGL there to dodge a null dawn_context_provider);
+that provider is what milestone B/C here will supply. Three probes now (gl/gpu/dawn) all
+exit 0; full battery green (mb_smoke 145, platform 46, render 102, shot 66, wke 114), no
+leaks. (Benign Dawn stderr "No device lost callback was set" — dev warning, not an error.)
 [DONE — milestone C: WEBGL WORKS END-TO-END]. getContext('webgl') now returns a real,
 rendering context in the actual blink process. Verified mb_smoke_render 41z: a WebGL
 canvas clearColor(green)+clear+readPixels(0,0,1,1) -> [0,255,0,255], and
