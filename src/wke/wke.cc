@@ -2346,6 +2346,43 @@ void wkeNetSetMIMEType(void* job, const char* type) {
     mbResponseSetHeader(static_cast<mbResponse*>(job), "Content-Type", type);
 }
 
+namespace {
+// Encode a wchar_t string (UTF-32 on this platform) to UTF-8 (header names/values are
+// ASCII in practice, but encode the general case).
+std::string WkeWideToUtf8(const wchar_t* s) {
+  std::string out;
+  for (; s && *s; ++s) {
+    unsigned cp = static_cast<unsigned>(*s);
+    if (cp < 0x80) {
+      out.push_back(static_cast<char>(cp));
+    } else if (cp < 0x800) {
+      out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+      out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else if (cp < 0x10000) {
+      out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+      out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+      out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else {
+      out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+      out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+      out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+      out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    }
+  }
+  return out;
+}
+}  // namespace
+
+// Inject/override an arbitrary response header from a wkeOnLoadUrlEnd callback (job ==
+// mbResponse*). Only `response`==true is wired (request-side header mutation needs the
+// request-job model). key/value are wide strings (UTF-32 on this platform) per the
+// miniblink49 signature; converted to UTF-8.
+void wkeNetSetHTTPHeaderField(void* job, wchar_t* key, wchar_t* value, bool response) {
+  if (job && response && key && value)
+    mbResponseSetHeader(static_cast<mbResponse*>(job), WkeWideToUtf8(key).c_str(),
+                        WkeWideToUtf8(value).c_str());
+}
+
 void wkeOnConsole(wkeWebView webView, wkeConsoleCallback callback, void* param) {
   if (!webView)
     return;

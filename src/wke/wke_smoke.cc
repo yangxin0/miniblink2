@@ -2133,6 +2133,42 @@ int main() {
           "wkeOnLoadUrlEnd + wkeNetSetData rewrite a response body (page applies it)");
   }
 
+  // wkeNetSetHTTPHeaderField overrides a response Content-Type (miniblink49 parity). Module
+  // scripts enforce STRICT MIME regardless of origin: a text/plain module (a .txt file) is
+  // rejected and does NOT run; forcing its Content-Type to a JS type makes it run.
+  {
+    if (FILE* f = std::fopen("/tmp/wke_mod.txt", "wb")) {
+      const char* js = "window.__wkemod=42;";
+      std::fwrite(js, 1, std::strlen(js), f);
+      std::fclose(f);
+    }
+    const char* kPage =
+        "<body><script type='module' src='file:///tmp/wke_mod.txt'></script></body>";
+    // Control: text/plain module is rejected -> flag stays unset.
+    wkeLoadHtmlWithBaseUrl(wv, kPage, "file:///tmp/p.html");
+    for (int i = 0; i < 12; ++i)
+      wkeRunJS(wv, "0");  // pump async module evaluation
+    const int ctrl = jsToInt(es, wkeRunJS(wv, "window.__wkemod||0"));
+    // Override to a JS MIME -> the module is accepted and runs.
+    wkeOnLoadUrlEnd(
+        wv,
+        [](wkeWebView, void*, const utf8* url, void* job, void*, int) {
+          if (std::strstr(url, "wke_mod.txt")) {
+            wchar_t k[] = L"Content-Type";
+            wchar_t val[] = L"text/javascript";
+            wkeNetSetHTTPHeaderField(job, k, val, true);
+          }
+        },
+        nullptr);
+    wkeLoadHtmlWithBaseUrl(wv, kPage, "file:///tmp/p.html");
+    for (int i = 0; i < 12; ++i)
+      wkeRunJS(wv, "0");
+    const int got = jsToInt(es, wkeRunJS(wv, "window.__wkemod||0"));
+    wkeOnLoadUrlEnd(wv, nullptr, nullptr);
+    check(ctrl == 0 && got == 42,
+          "wkeNetSetHTTPHeaderField overrides a module script's Content-Type (it runs)");
+  }
+
   wkeDestroyWebView(wv);
   wkeFinalize();
 

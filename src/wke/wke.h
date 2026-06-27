@@ -768,5 +768,8 @@ WKE_API void wkeOnLoadUrlEnd(wkeWebView webView, wkeLoadUrlEndCallback callback,
 WKE_API void wkeNetSetData(void* job, void* buf, int len);
 // Override the response Content-Type from a wkeOnLoadUrlEnd callback (job == the response).
 WKE_API void wkeNetSetMIMEType(void* job, const char* type);
+// Inject/override an arbitrary response header (response==true) from a wkeOnLoadUrlEnd
+// callback. key/value are wide strings per miniblink49; only the response side is wired.
+WKE_API void wkeNetSetHTTPHeaderField(void* job, wchar_t* key, wchar_t* value, bool response);
 
 #endif  // MINIBLINK_WKE_WKE_H_
