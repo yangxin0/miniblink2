@@ -153,6 +153,32 @@ int main() {
            "[" + *cap + "]");
   }
 
+  // 0c3. Block by RESOURCE TYPE (mbBlockResourceType): block "image" -> an <img> fails to
+  // load (onerror, ERR_BLOCKED_BY_CLIENT); unblocking it -> the same image loads. Lets a
+  // scrape skip heavy classes (images/fonts/media) for speed without listing URLs. Offline.
+  {
+    // Mock an http image so the request flows through the loader (data: images are decoded
+    // inline by blink and never reach the loader's per-request type check).
+    mbMockResponse("imgtype.test/pic.svg",
+                   "<svg xmlns='http://www.w3.org/2000/svg' width='5' height='5'></svg>",
+                   "image/svg+xml", 200);
+    const char* page =
+        "<body><img id='im' src='/pic.svg' "
+        "onload=\"window.__im='loaded'\" onerror=\"window.__im='error'\"></body>";
+    mbBlockResourceType("image", 1);
+    mbLoadHTML(v, page, "https://imgtype.test/");
+    mbWaitForFunction(v, "window.__im!==undefined", 2000);
+    const std::string blocked = Eval(v, "window.__im");
+    mbBlockResourceType("image", 0);  // unblock
+    mbLoadHTML(v, page, "https://imgtype.test/");
+    mbWaitForFunction(v, "window.__im!==undefined", 2000);
+    const std::string allowed = Eval(v, "window.__im");
+    mbClearMocks();
+    Expect(blocked == "error" && allowed == "loaded",
+           "mbBlockResourceType: block 'image' fails <img>, unblock loads it",
+           "blocked=[" + blocked + "] allowed=[" + allowed + "]");
+  }
+
   // 0d. Response hook: mbSetResponseCallback sees every response BEFORE the page and can
   // REPLACE the body. A mock serves {"v":1}; the hook inspects it (records the original)
   // and rewrites it to {"v":99}; the page's fetch() must observe the rewritten 99, and

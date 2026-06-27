@@ -547,6 +547,13 @@ MB_EXPORT void mbClearRequestLog(void);
 MB_EXPORT void mbBlockUrl(const char* substring);
 MB_EXPORT void mbClearUrlBlocks(void);
 
+// Block (or unblock) a whole RESOURCE TYPE by its fetch destination string: "image",
+// "font", "style", "script", "media"/"audio"/"video", "iframe", "track", ... A scrape can
+// skip heavy classes (block "image"+"font"+"media") to load text-only pages fast without
+// listing URLs. blocked!=0 blocks, 0 unblocks. Process-wide. Blocked requests fail with
+// ERR_BLOCKED_BY_CLIENT, like mbBlockUrl.
+MB_EXPORT void mbBlockResourceType(const char* type, int blocked);
+
 // Dynamic per-request hook: a process-wide callback invoked for EVERY request URL
 // the loader handles (alongside the static block/mock/rewrite tables), so you can
 // inspect and decide at runtime instead of pre-registering substrings. Return nonzero

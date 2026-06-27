@@ -625,6 +625,11 @@ void mbClearUrlBlocks(void) {
   mb::MbClearUrlBlocks();
 }
 
+void mbBlockResourceType(const char* type, int blocked) {
+  if (type)
+    mb::MbSetResourceTypeBlocked(type, blocked != 0);
+}
+
 void mbSetRequestCallback(mbRequestCallback cb, void* userdata) {
   if (cb) {
     mb::MbSetRequestHook([cb, userdata](const std::string& url, const std::string&,

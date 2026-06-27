@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -30,6 +31,7 @@
 #include "net/http/http_request_headers.h"
 #include "services/network/public/mojom/referrer_policy.mojom-shared.h"
 #include "services/network/public/cpp/data_element.h"
+#include "services/network/public/cpp/request_destination.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/resource_request_body.h"
 #include "third_party/blink/public/platform/web_string.h"
@@ -667,6 +669,29 @@ bool MbIsUrlBlocked(const std::string& url) {
   return false;
 }
 
+// --- Block by resource TYPE (fetch destination: image/font/style/script/media/...) ---
+// Lets a scrape skip whole resource classes (block "image"+"font"+"media" to load text-only
+// pages fast) without enumerating URLs. Keyed by the standard fetch destination string.
+namespace {
+std::set<std::string>& BlockedTypes() {
+  static std::set<std::string>* t = new std::set<std::string>();
+  return *t;
+}
+}  // namespace
+
+void MbSetResourceTypeBlocked(const std::string& type, bool blocked) {
+  if (type.empty())
+    return;
+  if (blocked)
+    BlockedTypes().insert(type);
+  else
+    BlockedTypes().erase(type);
+}
+
+bool MbIsResourceTypeBlocked(const std::string& type) {
+  return !type.empty() && BlockedTypes().count(type) != 0;
+}
+
 // --- Dynamic per-request hook ------------------------------------------------
 namespace {
 MbRequestHook& RequestHook() {
@@ -1030,6 +1055,8 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
       }
   }
   if (MbIsUrlBlocked(fetch_url.spec()) ||
+      MbIsResourceTypeBlocked(
+          network::RequestDestinationToString(request->destination)) ||
       MbRequestHookBlocks(url.spec(), request->method, hook_headers, hook_body)) {
     client_->DidFail(
         blink::WebURLError(net::ERR_BLOCKED_BY_CLIENT, ToWebURL(url)),

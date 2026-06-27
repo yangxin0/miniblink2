@@ -87,6 +87,14 @@ void MbBlockUrl(const std::string& substring);
 void MbClearUrlBlocks();
 bool MbIsUrlBlocked(const std::string& url);
 
+// Block by RESOURCE TYPE (the fetch destination string: "image", "font", "style",
+// "script", "media"/"audio"/"video", "iframe", ...). A scrape can skip whole classes of
+// heavy resources (e.g. block "image" + "font" + "media") to load text-only pages fast,
+// without listing URLs. MbSetResourceTypeBlocked toggles a type; MbIsResourceTypeBlocked
+// is the loader's check (against network::RequestDestinationToString of each request).
+void MbSetResourceTypeBlocked(const std::string& type, bool blocked);
+bool MbIsResourceTypeBlocked(const std::string& type);
+
 // Dynamic per-request hook: a process-wide callback consulted for EVERY request
 // (alongside the static block/mock/rewrite tables), so an embedder can inspect the
 // request — URL, method, request headers, and POST/PUT body — and decide at runtime

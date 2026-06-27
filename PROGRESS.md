@@ -1437,6 +1437,19 @@ mb_smoke 23e2: a contenteditable 'hello-edit' -> focus, SelectAll + Copy -> mbGe
 the editable is empty. mb_smoke 159->160, full battery green (platform 46, render 131, shot 66,
 wke 114), no leaks. So a webview hosting editable content now has the full editor command set.
 
+[DONE - block by RESOURCE TYPE (mbBlockResourceType)]. The signature scrape-speed feature
+that URL blocking couldn't do: skip a whole resource CLASS without enumerating URLs.
+mbBlockResourceType("image"|"font"|"style"|"script"|"media"/"audio"/"video"|"iframe"|..., 1)
+toggles a process-wide blocked-type set; the loader checks each request's fetch destination
+(network::RequestDestinationToString(request->destination)) in Deliver alongside the URL
+blocklist and fails matches with ERR_BLOCKED_BY_CLIENT. So a text-only fast scrape =
+block image+font+media. Verified mb_smoke 0c3: a MOCKED http <img> -> with "image" blocked it
+onerrors (blocked), unblock -> onload (loads). (Note: data: images are decoded inline by blink
+and never hit the loader, so the test mocks an http image — the real subresource path.) New dep
+include services/network/public/cpp/request_destination.h. mb_smoke 160->161, full battery green
+(platform 46, render 131, shot 66, wke 114), no leaks. Resource interception now covers: by URL
+(block/mock/rewrite), by dynamic hook (method/headers/body), and by TYPE.
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),
