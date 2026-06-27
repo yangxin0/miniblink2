@@ -63,6 +63,8 @@ component("miniblink_host") {
     "media/mb_audio_player.h",
     "platform/mb_gpu_thread.cc",
     "platform/mb_gpu_thread.h",
+    "platform/mb_compositor.cc",
+    "platform/mb_compositor.h",
     "platform/mb_platform.cc",
     "platform/mb_platform.h",
     "platform/mb_webgl.cc",
@@ -99,6 +101,12 @@ component("miniblink_host") {
     # Substrate.
     "//base",
     "//cc",
+    # In-process software compositor (platform/mb_compositor.cc): a production viz::Display
+    # over a SoftwareOutputSurface + a port of ui::DirectLayerTreeFrameSink, the frame sink
+    # blink's WebFrameWidgetImpl returns from AllocateNewLayerTreeFrameSink.
+    "//components/viz/common",
+    "//components/viz/service",
+    "//services/viz/public/mojom",
     "//components/language_detection/content/common:common_blink",  # LanguageDetector broker stub
     "//components/webcrypto",  # WebCrypto impl for Platform::Crypto() (SubtleCrypto)
     "//media",  # media::AudioRendererSink / OutputDeviceStatus for CreateAudioDevice
@@ -401,6 +409,36 @@ executable("mb_compositor4_probe") {
     "//mojo/core/embedder",
     "//skia",
     "//ui/compositor:test_support",
+    "//ui/gfx",
+    "//ui/gfx/geometry",
+    "//ui/gl",
+    "//ui/gl/init",
+  ]
+}
+
+# mb_compositor5_probe: SOFTWARE COMPOSITOR bring-up milestone D2a — drive the host-library
+# component mb::SoftwareCompositor (platform/mb_compositor.{h,cc}) end to end. Compiles the
+# component .cc into the probe (it also ships in miniblink_host) + a stub frame-sink client;
+# proves the real component composites a frame to a bitmap. testonly.
+executable("mb_compositor5_probe") {
+  testonly = true
+  sources = [
+    "platform/mb_compositor.cc",
+    "platform/mb_compositor.h",
+    "tools/mb_compositor5_probe.cc",
+  ]
+  include_dirs = [ "//third_party/blink/renderer" ]
+  deps = [
+    "//base",
+    "//base/test:test_support",
+    "//cc",
+    "//components/viz/common",
+    "//components/viz/service",
+    "//components/viz/test:test_support",
+    "//gpu/command_buffer/service",
+    "//mojo/core/embedder",
+    "//services/viz/public/mojom",
+    "//skia",
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/gl",

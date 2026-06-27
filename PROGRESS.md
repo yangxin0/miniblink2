@@ -2291,3 +2291,32 @@ R255 G255 B0, exit 0, no leaked process; full battery green (mb_smoke 165, platf
 Sink into a host-library component mb_compositor.{h,cc}, then wire MbWebView's WebFrameWidgetImpl to
 return it from AllocateNewLayerTreeFrameSink + call WidgetBase::InitializeCompositing; drive
 BeginFrame; confirm a real page composites through cc. The live-widget integration.
+
+[DONE — compositor milestone D2a: the production software compositor is now a HOST-LIBRARY
+component]. platform/mb_compositor.{h,cc} (namespace mb), compiled into libminiblink_host.dylib (NOT
+testonly). Two classes:
+  * mb::MbDirectLayerTreeFrameSink — a verbatim port of ui::DirectLayerTreeFrameSink (testonly
+    upstream in //ui/compositor:test_support; copied so the production lib can own it, no tree
+    patch), software-simplified: no context provider, no widget/CALayer path. The cc::Layer
+    TreeFrameSink blink's WebFrameWidgetImpl will return from AllocateNewLayerTreeFrameSink. It
+    submits the client's frame as the ROOT surface of the in-process Display; BindToClient creates
+    its CompositorFrameSinkSupport + ExternalBeginFrameSource and calls display->Initialize. (The
+    one testonly-named call it keeps, display->ResetDisplayClientForTesting in the dtor, is a plain
+    public viz::Display method compiled into //components/viz/service — linkable in production.)
+  * mb::SoftwareCompositor — owns the D1 production stack (standalone gpu::SyncPointManager/Scheduler
+    /SharedImageManager + FrameSinkManagerImpl + viz::Display over a viz::SoftwareOutputSurface whose
+    device snapshots the composited SkBitmap). CreateFrameSink() hands out the frame sink;
+    DrawAndCapture() forces a Display draw (headless; the in-process scheduler is begin-frame-driven)
+    and returns the captured bitmap. Lifetime: debug_settings_ + the StubBeginFrameSource keepalive
+    are members declared before display_ (the Display stores them by pointer/via its scheduler).
+BUILD: host lib gains //components/viz/common + //components/viz/service + //services/viz/public/
+mojom; sources gain platform/mb_compositor.{cc,h}. VERIFY: tools/mb_compositor5_probe.cc compiles the
+component .cc standalone (also shipped in the host lib — the lib build proves it links, the probe
+proves it runs) + a stub cc::LayerTreeFrameSinkClient; creates the compositor, gets a sink, binds,
+submits a yellow-quad frame THROUGH the sink, DrawAndCapture -> center pixel R255 G255 B0, exit 0, no
+leak; libminiblink_host.dylib links clean. Full battery green (mb_smoke 165, platform 46, render 133,
+shot 66, wke 117; probes gl/gpu/dawn/webgpu/webgpu2/compositor/2/3/4/5 all PASS). NEXT (milestone
+D2b): wire MbWebView's WebFrameWidgetImpl to own a mb::SoftwareCompositor + return its frame sink
+from AllocateNewLayerTreeFrameSink + call WidgetBase::InitializeCompositing instead of Initialize
+NonCompositing; drive a BeginFrame; confirm a real loaded page composites through cc into the
+captured bitmap. The live-widget integration (riskiest; mb_widget.cc / mb_webview.cc).
