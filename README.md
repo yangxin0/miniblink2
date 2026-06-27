@@ -202,6 +202,11 @@ The output format follows the file extension: `.png` (lossless, alpha), `.jpg`/`
 (quality 90, much smaller), or `.pdf` (a paginated US-Letter PDF via Blink's print path) —
 e.g. `mb_shot https://example.com out.jpg` or `mb_shot article.html article.pdf`.
 
+PDF page geometry is customizable: `--pdf-size letter|a4|legal|a3|tabloid|WxH` (page size in
+points; `WxH` for a custom size), `--landscape` (swap width/height), `--pdf-scale N` (content
+scale, 0.1–5), and `--pdf-margin PT` (uniform margin in points) — e.g.
+`mb_shot article.html out.pdf --pdf-size a4 --landscape --pdf-margin 36`.
+
 Rendered by `mb_shot` from an HTML file (gradient, CSS grid, translucent cards, a
 rotated card, and JS-injected text — all modern Blink, headless, no CEF):
 
