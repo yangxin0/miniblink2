@@ -203,6 +203,9 @@ class MbWebView {
   // Editor command that takes a VALUE: "InsertText"/"InsertHTML" (insert at the caret /
   // over the selection), "FontName", "FontSize", "ForeColor", "CreateLink", etc.
   bool ExecuteEditCommandValue(const char* command, const char* value);
+  // Whether mbSavePdf/Ex prints background colors/images (Puppeteer's printBackground).
+  // Off by default (the "save ink" print look); enable to make the PDF match the screen.
+  void SetPrintBackground(bool enabled);
   // Device/mobile emulation WITHOUT the compositor (EnableDeviceEmulation drives a null
   // LayerTreeHost -> SIGSEGV). Drives the layout-visible part via WebSettings: mobile ->
   // coarse pointer + no hover + viewport-meta/mobile-viewport, desktop -> fine pointer +
@@ -584,6 +587,7 @@ class MbWebView {
   [[maybe_unused]] blink::WebLocalFrame* main_frame_ = nullptr; // owned by blink
   float dsf_ = 1.0f;  // device pixel ratio; PaintInto scales the canvas by it
   float zoom_factor_ = 1.0f;  // page zoom (SetZoomFactor); 1.0 = 100%
+  bool print_background_ = false;  // SetPrintBackground: include bg in mbSavePdf
   int find_id_ = 0;   // find-in-page session identifier (stable across FindText/FindNext)
   std::string find_text_;     // last mbFindText needle (for FindNext)
   bool find_match_case_ = false;  // last search's case sensitivity

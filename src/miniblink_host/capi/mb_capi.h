@@ -960,6 +960,11 @@ MB_EXPORT int mbEncodePng(mbView*, int width, int height,
 
 // Print the document to a multi-page PDF (US Letter) at `path`. Returns 1 on success.
 MB_EXPORT int mbSavePdf(mbView*, const char* path);
+
+// Whether mbSavePdf/mbSavePdfEx include background colors/images (Puppeteer's
+// printBackground). Off by default (blink's "save ink" print look drops backgrounds);
+// enable so the PDF matches the screen. Applies to subsequent mbSavePdf* calls.
+MB_EXPORT void mbSetPrintBackground(mbView*, int enabled);
 // Like mbSavePdf with an explicit page geometry. `width_pt`/`height_pt` are the page size
 // in POINTS (72/in) — e.g. Letter 612x792, A4 595x842; <=0 falls back to Letter. `landscape`
 // (nonzero) swaps width/height. `scale` is the content scale (1.0 = 100%, clamped 0.1–5;

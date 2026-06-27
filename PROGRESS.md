@@ -1459,8 +1459,17 @@ command set: the value-taking ExecuteCommand(name, value) variant, for "InsertTe
 innerHTML is '<b>ins</b>', textContent 'ins'. mb_smoke 161 (extended existing test), full battery
 green (platform 46, render 131, shot 66, wke 114), no leaks. So a webview hosting a rich editor
 has both editor command forms (no-value: SelectAll/Copy/Cut/Paste/Undo/Delete; value: Insert*/
-formatting). [NOTE: PDF print-background (Settings::SetShouldPrintBackgrounds) is a known gap -
-skipped this tick because it can't be cleanly verified from the binary SkPDF output.]
+formatting).
+[DONE - PDF print-background (mbSetPrintBackground)]. The print-background gap from the previous
+tick — blink's print path drops background colors/images by default ("save ink"), so mbSavePdf
+PDFs didn't match the screen. mbSetPrintBackground(view, enabled) stores a flag that SaveToPdf
+applies via Settings::SetShouldPrintBackgrounds before the print lifecycle (Puppeteer's
+printBackground). The verification I'd dismissed last tick DOES work with a GRADIENT background:
+a full-page linear-gradient -> the PDF with backgrounds ON embeds the gradient shading and is
+measurably + DETERMINISTICALLY larger. Verified mb_smoke 39c: off=6750 bytes, on=7312 (stable
+across reruns). mb_smoke 161->162, full battery green (platform 46, render 131, shot 66, wke 114),
+no leaks. So PDF export is now print-fidelity-configurable (size/orientation/scale/margin +
+background).
 
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),

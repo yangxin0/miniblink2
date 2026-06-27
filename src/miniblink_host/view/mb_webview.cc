@@ -1882,6 +1882,10 @@ bool MbWebView::ExecuteEditCommand(const char* command) {
   return main_frame_->ExecuteCommand(blink::WebString::FromUtf8(command));
 }
 
+void MbWebView::SetPrintBackground(bool enabled) {
+  print_background_ = enabled;  // applied in SaveToPdf before the print lifecycle
+}
+
 bool MbWebView::ExecuteEditCommandValue(const char* command, const char* value) {
   if (!command || !main_frame_)
     return false;
@@ -2783,6 +2787,11 @@ bool MbWebView::SavePdfEx(const char* path, double width_pt, double height_pt,
   const double content_w_pt = width_pt - 2.0 * margin_pt;
   const double content_h_pt = height_pt - 2.0 * margin_pt;
 
+  // Whether to print background colors/images (Puppeteer's printBackground). blink's print
+  // path drops them by default (the "save ink" look); this setting includes them so the PDF
+  // matches the screen. Applied before the lifecycle update so layout/paint honor it.
+  if (web_view_ && web_view_->GetSettings())
+    web_view_->GetSettings()->SetShouldPrintBackgrounds(print_background_);
   // Settle the document, then drive Blink's print path into a Skia PDF document.
   for (int round = 0; round < 5; ++round) {
     widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);

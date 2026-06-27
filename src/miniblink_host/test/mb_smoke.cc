@@ -3771,6 +3771,33 @@ int main() {
            std::string("a4=") + std::to_string(a4ok) + " ls=" + std::to_string(lsok));
   }
 
+  // 39c. mbSetPrintBackground: blink's print path drops backgrounds by default ("save ink");
+  // enabling printBackground includes them. A page with a full-page gradient background ->
+  // the PDF with backgrounds ON is LARGER (it embeds the gradient shading) than with OFF.
+  {
+    auto fsz = [](const char* p) -> long {
+      long n = 0;
+      if (FILE* f = std::fopen(p, "rb")) { std::fseek(f, 0, SEEK_END); n = std::ftell(f); std::fclose(f); }
+      return n;
+    };
+    mbLoadHTML(v,
+               "<body style='margin:0;height:1000px;"
+               "background:linear-gradient(45deg,red,blue,green,yellow)'>"
+               "<p>page</p></body>",
+               "https://pdfbg.test/");
+    mbWait(v, 60);
+    mbSetPrintBackground(v, 0);
+    const bool ok_off = mbSavePdf(v, "/tmp/mb_pdf_nobg.pdf") != 0;
+    const long s_off = fsz("/tmp/mb_pdf_nobg.pdf");
+    mbSetPrintBackground(v, 1);
+    const bool ok_on = mbSavePdf(v, "/tmp/mb_pdf_bg.pdf") != 0;
+    const long s_on = fsz("/tmp/mb_pdf_bg.pdf");
+    mbSetPrintBackground(v, 0);  // restore default
+    Expect(ok_off && ok_on && s_on > s_off,
+           "mbSetPrintBackground: PDF includes the page background when enabled (larger)",
+           "off=" + std::to_string(s_off) + " on=" + std::to_string(s_on));
+  }
+
   // 107. Native function binding: a C function bound via mbJsBindFunction is
   // callable from JS synchronously — window[name](args) returns the C result
   // inline — receiving string args and the userdata pointer. Installed into each

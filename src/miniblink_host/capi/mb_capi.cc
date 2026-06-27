@@ -1190,6 +1190,11 @@ int mbSavePdf(mbView* v, const char* path) {
   return v->impl->SavePdf(path) ? 1 : 0;
 }
 
+void mbSetPrintBackground(mbView* v, int enabled) {
+  if (v && v->impl)
+    v->impl->SetPrintBackground(enabled != 0);
+}
+
 int mbSavePdfEx(mbView* v, const char* path, double width_pt, double height_pt,
                 int landscape, double scale, double margin_pt) {
   if (!v || !v->impl || !path)
