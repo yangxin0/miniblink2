@@ -2374,3 +2374,35 @@ single-process embedder + the frame-sink hook FIRES]. Wired the opt-in compositi
   and read the composited page out of the SoftwareCompositor's captured bitmap — the first real cc->viz
   ->bitmap of a live page. Likely de-testonly gpu::TestSharedImageInterface (patch, like 0006) or stand
   up SharedImageInterfaceInProcess over the existing in-process GPU thread holder.
+
+[SCOPED — compositor milestone D2b-3 (cc raster -> pixels): a deep cross-thread sub-arc; design pinned,
+implementation deferred]. Investigated the SII options this tick; no code committed (tree stays clean at
+D2b-2) because the remaining work is genuinely multi-tick + threading-fraught and a half-wired SII would
+be misleading. FINDINGS that refine the plan:
+  * gpu::TestSharedImageInterface is RULED OUT for the host library: it uses gmock MOCK_METHOD (in
+    cc::FakeLayerTreeFrameSink's path), so de-testonly'ing it would drag gtest/gmock into the production
+    dylib. Dead end.
+  * The clean PRODUCTION SII source already exists in-tree and is already linked: gpu::GLInProcessContext
+    ::GetSharedImageInterface() — exactly what platform/mb_webgl.cc uses (an in-process GL context over
+    GetSharedGpuThreadHolder()->GetTaskExecutor()). cc::LayerTreeFrameSink's base ctor takes a
+    scoped_refptr<gpu::SharedImageInterface>, so MbDirectLayerTreeFrameSink just needs a new ctor arg
+    plumbed through SoftwareCompositor::CreateFrameSink.
+  * THE KEY CONSTRAINT (why D1's design must change): cc rasters tiles THROUGH that SII into a
+    SharedImageManager, and the viz::Display's SoftwareRenderer/DisplayResourceProviderSoftware must
+    READ from the SAME SharedImageManager. So SoftwareCompositor can NO LONGER use its D1 standalone
+    gpu::SharedImageManager — it must use the in-process GPU service's, reachable via
+    GetSharedGpuThreadHolder()->GetTaskExecutor()->shared_image_manager() (public accessor confirmed;
+    the holder also exposes GetSharedContextState()/GetGpuPreferences()/GetGpuFeatureInfo()). The
+    holder's gpu::Scheduler is NOT publicly exposed (CommandBufferTaskExecutor has shared_image_manager()
+    + gpu_feature_info() but no scheduler() accessor) — the Display ctor's gpu_scheduler arg likely can
+    stay a standalone one since software resources schedule no GPU work, but that's unverified.
+  * REMAINING RISK: the in-process GPU service runs on its OWN thread (InProcessGpuThreadHolder spins a
+    GPU thread); cc raster posts tile work there while the Display + SoftwareRenderer + our synchronous
+    Composite() run on the main thread. That cross-thread resource hand-off (SharedImageManager must be
+    thread-safe; CompositeForTest must actually flush raster) is the crux and the reason this is >1 tick.
+  D2b-3 PLAN (next ticks): (1) SoftwareCompositor: create a GLInProcessContext (holder-backed), use the
+  holder's SharedImageManager for the Display, hold the context's SII; (2) plumb scoped_refptr<gpu::
+  SharedImageInterface> through CreateFrameSink -> MbDirectLayerTreeFrameSink base ctor; (3) re-enable
+  Composite() + drive it in mb_compositor_widget_smoke; (4) iterate on the cross-thread raster flush
+  until the SoftwareCompositor's captured bitmap shows the page. Verify each step empirically; revert if
+  a step doesn't verify (the prior compositor stages set the pattern).
