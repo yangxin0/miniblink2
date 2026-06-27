@@ -2201,3 +2201,20 @@ pattern, since TestGpuServiceHolder's GPU service reads the process-wide GL impl
 seven; full battery green (mb_smoke 165, platform 46, render 133, shot 66), no leaks. NEXT
 (milestone B): stand up a full viz::Display (FrameSinkManagerImpl + BeginFrameSource + a
 software OutputSurface) and submit a CompositorFrame through it.
+
+[DONE — compositor milestone B: in-process viz::Display -> bitmap]. tools/mb_compositor2_probe.cc
+(blink-free, testonly) stands up a FULL in-process viz::Display and composites a SUBMITTED
+CompositorFrame to a bitmap — the surface-aggregation + display-compositing path between a
+LayerTreeFrameSink and pixels (milestone A only had the raw SoftwareRenderer). Mirrors viz
+DisplayTest::SetUpSoftwareDisplay: FrameSinkManagerImpl + a CompositorFrameSinkSupport (root) +
+a software OutputSurface (FakeSoftwareOutputSurface over a bitmap-capturing SoftwareOutputDevice
+subclass) + OverlayProcessorStub + a real DisplayScheduler(StubBeginFrameSource, NullTaskRunner,
+PendingSwapParams(1)) + viz::Display (built with the TestGpuServiceHolder's shared_image_manager
++ gpu_scheduler). display->Initialize(client, surface_manager) + SetVisible + SetLocalSurfaceId +
+Resize(100x100); submit a CompositorFrame (one yellow SolidColorDrawQuad) via support->Submit
+CompositorFrame; display->DrawAndSwap(viz::DrawAndSwapParams) composites it; the SoftwareOutput
+Device subclass captures the SkBitmap off surface_ in EndPaint. VERIFIED (exit 0, wired into
+build.sh after mb_compositor_probe): center pixel = R255 G255 B0 (yellow). Eight probes; full
+battery green (mb_smoke 165, platform 46, render 133, shot 66), no leaks. NEXT (milestone C): a
+software cc::LayerTreeFrameSink wrapping this Display + a standalone single-threaded cc::Layer
+TreeHost with a solid-color layer -> composite -> readback (cc -> framesink -> bitmap end to end).

@@ -336,3 +336,25 @@ executable("mb_compositor_probe") {
     "//ui/gl/init",
   ]
 }
+
+# mb_compositor2_probe: SOFTWARE COMPOSITOR bring-up milestone B — a full in-process
+# viz::Display (FrameSinkManager + CompositorFrameSinkSupport + scheduler + software output
+# surface) composites a SUBMITTED CompositorFrame to a bitmap. Blink-free; the surface-
+# aggregation + display path between a LayerTreeFrameSink and pixels. testonly.
+executable("mb_compositor2_probe") {
+  testonly = true
+  sources = [ "tools/mb_compositor2_probe.cc" ]
+  deps = [
+    "//base",
+    "//base/test:test_support",
+    "//components/viz/common",
+    "//components/viz/service",
+    "//components/viz/test:test_support",
+    "//mojo/core/embedder",
+    "//skia",
+    "//ui/gfx",
+    "//ui/gfx/geometry",
+    "//ui/gl",
+    "//ui/gl/init",
+  ]
+}
