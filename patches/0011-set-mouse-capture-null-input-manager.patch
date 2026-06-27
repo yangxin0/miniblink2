@@ -1,0 +1,27 @@
+WebFrameWidgetImpl::SetMouseCapture: guard a null widget_input_handler_manager().
+
+In a single-process embedder with no browser-side input-handler host, WidgetBase's
+widget_input_handler_manager() is null. SetPanAction / UpdateBrowserControlsState and the
+other input-host callers in this file already early-return on that null, but SetMouseCapture
+did not — it called ->GetWidgetInputHandlerHost() on the null manager. A mousedown that
+triggers mouse capture (EventHandler::CaptureMouseEventsToWidget), notably one a SUB-FRAME
+takes the press for, therefore SIGSEGV'd (read at this+0x48 of the null manager). Add the
+same guard the sibling methods use. Real (browser-backed) path is unchanged.
+
+diff --git a/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc b/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
+index a536e2d..6d1c360 100644
+--- a/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
++++ b/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
+@@ -4136,6 +4143,12 @@ void WebFrameWidgetImpl::FlushInputForTesting(base::OnceClosure done_callback) {
+ }
+ 
+ void WebFrameWidgetImpl::SetMouseCapture(bool capture) {
++  // The widget_input_handler_manager() is null when no browser-side input-handler host is
++  // wired (e.g. a single-process embedder). SetPanAction/SetBrowserControlsState and other
++  // methods in this file already guard this; SetMouseCapture did not, so a mousedown that
++  // triggers mouse capture (notably one handled by a sub-frame) dereferenced null.
++  if (!widget_base_->widget_input_handler_manager())
++    return;
+   if (mojom::blink::WidgetInputHandlerHost* host =
+           widget_base_->widget_input_handler_manager()
+               ->GetWidgetInputHandlerHost()) {

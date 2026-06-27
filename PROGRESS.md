@@ -189,6 +189,19 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      the non-compositing single-process widget). An eval-based `element.click()` in the frame would dodge it
      but is pure sugar over mbEvalJSInFrame (no real gesture), so it's NOT worth a typed op. Prototype was
      reverted (tree stays green); revisit only with the sub-frame input/hit-test path, not the coord math.
+   - [DONE — the sub-frame click crash is FIXED] The SIGSEGV was NOT a hit-test/compositor gap after all.
+     macOS crash report (the technique from the WebGPU work; lldb still can't attach): a mousedown that a
+     SUB-FRAME takes the press for reaches EventHandler::CaptureMouseEventsToWidget -> WebFrameWidgetImpl::
+     SetMouseCapture, which called widget_base_->widget_input_handler_manager()->GetWidgetInputHandlerHost()
+     — but widget_input_handler_manager() is NULL in our single-process embedder (no browser input host), so
+     the call ran with this==null and faulted at this+0x48 reading host_. SetPanAction/UpdateBrowserControls
+     State et al. in the SAME file already early-return on that null; SetMouseCapture just forgot the guard.
+     patches/0011 adds it (upstream-robustness; real browser path unchanged). Now a root-coordinate
+     mbSendMouseClick that lands on an iframe routes INTO the sub-frame and fires its handler — verified
+     mb_smoke_render 35z: a click at (100,40) on a button filling a 300x120 srcdoc iframe sets the child
+     window's flag (mbEvalJSInFrame frame 0 -> clk=1). render 131->132, full battery green, no leaks. (So
+     trusted gesture clicks into sub-frames work WITHOUT the compositor; the "same class as device emulation"
+     guess was wrong — this was a one-line missing null guard, not a compositor dependency.)
    - [DONE] wke `wkeRunJsByFrame` peer + a minimal wke frame-handle model: `wkeWebFrameGetMainFrame`,
      `wkeWebFrameGetSubFrameCount`, `wkeWebFrameGetSubFrame(index)` (port ext — upstream hands frame
      handles out via load callbacks; we expose them by index), `wkeIsMainFrame`, and `wkeRunJsByFrame

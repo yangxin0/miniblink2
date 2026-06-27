@@ -13,6 +13,31 @@ using mbsmoke::EvalIso;
 using mbsmoke::Expect;
 
 static void RunCases(mbView* v, int W, int H) {
+  // 35z. A synthetic mouse click that LANDS ON AN IFRAME routes into the sub-frame and
+  // fires its handler — instead of SIGSEGV. blink's WebFrameWidgetImpl::SetMouseCapture
+  // (reached on mousedown via EventHandler::CaptureMouseEventsToWidget when a sub-frame
+  // takes the press) dereferenced a null widget_input_handler_manager() (no browser-side
+  // input host in our single-process embedder); patches/0011 guards it (the same null
+  // check SetPanAction et al. in that file already use). The button fills the iframe, so a
+  // root-coordinate click at (100,40) lands on it; we read the child frame's flag back.
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0'>"
+      "<iframe srcdoc=\"<body style='margin:0'><button id='b' "
+      "style='width:300px;height:120px'>X</button><script>"
+      "document.getElementById('b').onclick=function(){window.__clk=1;};"
+      "</script></body>\" style='border:0;width:300px;height:120px'></iframe>"
+      "</body>", "https://frameclick.test/");
+    mbWait(v, 300);
+    mbSendMouseClick(v, 100, 40);   // lands inside the iframe's button
+    mbWait(v, 100);
+    char buf[64] = {0};
+    mbEvalJSInFrame(v, 0, "String(window.__clk||0)", buf, sizeof(buf));
+    const std::string clk(buf);
+    Expect(clk == "1",
+           "a synthetic click landing on an iframe routes into the sub-frame (no crash)",
+           "clk=[" + clk + "]");
+  }
   // 35. Cutting-edge modern CSS — the M150-vs-M47 selling points, none of which the
   // frozen ~2015 engine could do. Each rule colors an element only if the feature works.
   mbLoadHTML(v,
