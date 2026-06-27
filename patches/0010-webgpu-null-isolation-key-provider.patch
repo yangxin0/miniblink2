@@ -1,0 +1,43 @@
+WebGPU in-process: tolerate a null IsolationKeyProvider in the WebGPU decoder.
+
+The in-process command buffer (gpu/ipc/in_process_command_buffer.cc) creates the
+WebGPUDecoder with NO IsolationKeyProvider — only the browser-side GpuChannel supplies one,
+and a single-process embedder has no browser. blink's GPU::EnsureDawnControlClientInitialized
+calls WebGPUInterface::SetWebGPUExecutionContextToken on every navigator.gpu context, whose
+decoder handler unconditionally dereferenced isolation_key_provider_ -> SIGSEGV. Guard it:
+with no provider, fall back to an empty isolation key (which still runs the deferred
+requestAdapter callbacks), set only once (OnGetIsolationKey DCHECKs the key is unset and a
+page may send the token more than once). A standalone-embedder adaptation; the real GPU
+process path (provider non-null) is unchanged.
+
+diff --git a/gpu/command_buffer/service/webgpu_decoder_impl.cc b/gpu/command_buffer/service/webgpu_decoder_impl.cc
+index 39bdfc9..b54f3ec 100644
+--- a/gpu/command_buffer/service/webgpu_decoder_impl.cc
++++ b/gpu/command_buffer/service/webgpu_decoder_impl.cc
+@@ -2567,11 +2567,21 @@ error::Error WebGPUDecoderImpl::HandleSetWebGPUExecutionContextToken(
+     default:
+       NOTREACHED();
+   }
+-  isolation_key_provider_->GetIsolationKey(
+-      execution_context_token,
+-      base::BindPostTask(base::SingleThreadTaskRunner::GetCurrentDefault(),
+-                         base::BindOnce(&WebGPUDecoderImpl::OnGetIsolationKey,
+-                                        weak_ptr_factory_.GetWeakPtr())));
++  // The in-process command buffer (single-process embedders) creates this decoder with NO
++  // IsolationKeyProvider (only the browser-side GpuChannel supplies one). Without a guard,
++  // a page's SetWebGPUExecutionContextToken would dereference null here. Fall back to an
++  // empty isolation key, which still runs the deferred requestAdapter callbacks.
++  if (isolation_key_provider_) {
++    isolation_key_provider_->GetIsolationKey(
++        execution_context_token,
++        base::BindPostTask(base::SingleThreadTaskRunner::GetCurrentDefault(),
++                           base::BindOnce(&WebGPUDecoderImpl::OnGetIsolationKey,
++                                          weak_ptr_factory_.GetWeakPtr())));
++  } else if (!isolation_key_.has_value()) {
++    // Set the empty key only once (OnGetIsolationKey DCHECKs it is unset, and a page may
++    // send SetWebGPUExecutionContextToken more than once per context).
++    OnGetIsolationKey(std::string());
++  }
+   return error::kNoError;
+ }
+ 

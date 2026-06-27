@@ -19,8 +19,10 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "base/task/single_thread_task_runner.h"
+#include "gpu/command_buffer/common/capabilities.h"
 #include "gpu/command_buffer/common/context_result.h"
 #include "gpu/command_buffer/service/command_buffer_task_executor.h"
+#include "gpu/config/gpu_feature_info.h"
 
 namespace gpu {
 class CommandBufferHelper;
@@ -47,6 +49,8 @@ class MbWebGPUInProcessContext {
   // WebGPU provider consumes.
   gpu::webgpu::WebGPUImplementation* GetImplementation();
   gpu::InProcessCommandBuffer* GetCommandBuffer();
+  const gpu::Capabilities& GetCapabilities() const;
+  const gpu::GpuFeatureInfo& GetGpuFeatureInfo() const;
 
  private:
   scoped_refptr<base::SingleThreadTaskRunner> client_task_runner_;

@@ -74,4 +74,12 @@ gpu::InProcessCommandBuffer* MbWebGPUInProcessContext::GetCommandBuffer() {
   return command_buffer_.get();
 }
 
+const gpu::Capabilities& MbWebGPUInProcessContext::GetCapabilities() const {
+  return command_buffer_->GetCapabilities();
+}
+
+const gpu::GpuFeatureInfo& MbWebGPUInProcessContext::GetGpuFeatureInfo() const {
+  return command_buffer_->GetGpuFeatureInfo();
+}
+
 }  // namespace miniblink

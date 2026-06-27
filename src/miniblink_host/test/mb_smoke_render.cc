@@ -1249,27 +1249,37 @@ static void RunCases(mbView* v, int W, int H) {
            "wc=[" + wc + "]");
   }
 
-  // 41n. navigator.gpu.requestAdapter() resolves to null (graceful "WebGPU unavailable")
-  // instead of HANGING. We have no Dawn/WebGPU backend; without the Platform override the
-  // async provider-creation callback is dropped and the promise never settles, so a page
-  // that `await`s requestAdapter() (then falls back to WebGL) would hang forever. The
-  // override settles it null so feature-detection works.
+  // 41n. navigator.gpu WORKS end to end (WebGPU bring-up milestone C2): requestAdapter()
+  // resolves to a REAL adapter and requestDevice() to a real device, backed by the
+  // in-process Dawn-over-SwiftShader provider (MbPlatform::CreateWebGPUGraphicsContext3D-
+  // ProviderAsync -> mb_webgpu.cc). Before C2 this settled to null (graceful degradation);
+  // now a page's WebGPU path runs for real. The adapter info reports the SwiftShader CPU
+  // device. (Both requestAdapter and requestDevice are awaited, so this also guards against
+  // a regression to the old hang.)
   {
     mbLoadHTML(v, "<body>wg</body>", "https://wg.test/");
     mbRunJS(v,
-      "window.__wg='';navigator.gpu.requestAdapter().then("
-      "function(a){window.__wg=(a===null)?'null':'adapter';},"
-      "function(e){window.__wg='reject';});");
+      "window.__wg='pending';(async function(){try{"
+      "var a=await navigator.gpu.requestAdapter();"
+      "if(!a){window.__wg='null';return;}"
+      "var d=await a.requestDevice();"
+      "var info=a.info||{};"
+      "window.__wgvendor=String(info.vendor||'');"
+      "window.__wgarch=String(info.architecture||'');"
+      "window.__wg=d?'device':'adapter-only';"
+      "}catch(e){window.__wg='err:'+e.name;}})();");
     std::string wg;
-    for (int i = 0; i < 200; ++i) {
+    for (int i = 0; i < 240; ++i) {
       mbWait(v, 25);
       wg = Eval(v, "window.__wg");
-      if (!wg.empty())
+      if (wg != "pending" && !wg.empty())
         break;
     }
-    Expect(wg == "null" || wg == "adapter",
-           "navigator.gpu.requestAdapter() settles (no hang) -> null when WebGPU absent",
-           "wg=[" + wg + "]");
+    const std::string vendor = Eval(v, "window.__wgvendor");
+    const std::string arch = Eval(v, "window.__wgarch");
+    Expect(wg == "device",
+           "navigator.gpu.requestAdapter()+requestDevice() return a real adapter+device",
+           "wg=[" + wg + "] vendor=[" + vendor + "] arch=[" + arch + "]");
   }
 
   // 41n2. Compositor-ADJACENT CSS/animation features work (no crash/hang) without the

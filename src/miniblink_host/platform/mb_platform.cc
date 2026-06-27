@@ -34,9 +34,11 @@
 #include "miniblink_host/blob/mb_blob_registry.h"
 #include "miniblink_host/frame/mb_dom_storage.h"
 #include "miniblink_host/platform/mb_webgl.h"
+#include "miniblink_host/platform/mb_webgpu.h"
 #include "miniblink_host/worker/mb_dedicated_worker_host.h"
 #include "third_party/blink/public/mojom/blob/blob_registry.mojom-blink.h"
 #include "third_party/blink/public/mojom/dom_storage/dom_storage.mojom-blink.h"
+#include "third_party/blink/public/mojom/gpu/gpu.mojom-blink.h"
 #include "third_party/blink/public/mojom/mime/mime_registry.mojom-blink.h"
 #include "third_party/blink/public/platform/web_data.h"
 #include "third_party/blink/public/platform/web_dedicated_worker_host_factory_client.h"
@@ -71,6 +73,19 @@ class MbMimeRegistry : public blink::mojom::blink::MimeRegistry {
   }
 };
 
+// In-process GpuDataManager. blink's GPU::CheckContextProvider (modules/webgpu/gpu.cc) does
+// a [Sync] Are3DAPIsBlockedForUrl before using a WebGPU/WebGL context provider, with
+// `blocked` defaulting to TRUE — so an UNBOUND interface (the call fails, leaves blocked
+// true) silently blocks WebGPU. We serve GPU in-process and never block.
+class MbGpuDataManager : public blink::mojom::blink::GpuDataManager {
+ public:
+  void Are3DAPIsBlockedForUrl(
+      const blink::KURL& /*url*/,
+      Are3DAPIsBlockedForUrlCallback callback) override {
+    std::move(callback).Run(/*blocked=*/false);
+  }
+};
+
 // A broker that binds the few in-process services we provide (MimeRegistry) and drops
 // the rest (no browser process).
 class MbEmptyBroker : public blink::ThreadSafeBrowserInterfaceBrokerProxy {
@@ -80,6 +95,13 @@ class MbEmptyBroker : public blink::ThreadSafeBrowserInterfaceBrokerProxy {
   void GetInterfaceImpl(mojo::GenericPendingReceiver receiver) override {
     if (auto r = receiver.As<blink::mojom::blink::MimeRegistry>()) {
       mojo::MakeSelfOwnedReceiver(std::make_unique<MbMimeRegistry>(),
+                                  std::move(r));
+      return;
+    }
+    // GpuDataManager: answer "not blocked" so the in-process WebGPU/WebGL provider is used
+    // (the [Sync] call defaults blocked=true when unbound -> would block GPU).
+    if (auto r = receiver.As<blink::mojom::blink::GpuDataManager>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbGpuDataManager>(),
                                   std::move(r));
       return;
     }
@@ -233,11 +255,15 @@ void MbPlatform::CreateWebGPUGraphicsContext3DProviderAsync(
     blink::Platform::WebGPUReplyThread /*reply_thread*/,
     base::OnceCallback<void(
         std::unique_ptr<blink::WebGraphicsContext3DProvider>)> callback) {
-  // No WebGPU backend -> hand back NO provider (posted, not reentrant). blink then
-  // resolves requestAdapter() to a null adapter instead of hanging on a callback the
-  // base Platform never runs.
+  // Build the in-process WebGPU provider (Dawn over SwiftShader on the shared GPU thread)
+  // on THIS thread — it installs this thread's dawn wire-client procs, and the context's
+  // command-buffer client binds to this thread, which is where blink builds its
+  // DawnControlClientHolder and makes wgpu calls. Hand it back posted (not reentrant).
+  // Null on GPU-init failure -> blink resolves requestAdapter() to null (degrades).
+  std::unique_ptr<blink::WebGraphicsContext3DProvider> provider =
+      MakeWebGPUContextProvider();
   base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), nullptr));
+      FROM_HERE, base::BindOnce(std::move(callback), std::move(provider)));
 }
 
 std::unique_ptr<blink::WebGraphicsContext3DProvider>

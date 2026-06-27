@@ -1789,6 +1789,46 @@ from MbPlatform::CreateWebGPUGraphicsContext3DProviderAsync (instead of today's 
 and verify a PAGE's navigator.gpu.requestAdapter() resolves. Five probes now (gl/gpu/dawn/
 webgpu/webgpu2) all exit 0; full battery green (mb_smoke 145, platform 46, render 102, shot 66,
 wke 114), no leaks.
+[DONE — WebGPU milestone C2: navigator.gpu WORKS IN A PAGE]. A page's
+navigator.gpu.requestAdapter()+requestDevice() now resolve to a REAL adapter+device, backed
+by in-process Dawn-over-SwiftShader. The full client path (blink WebGPU module -> Dawn wire
+-> in-process command buffer -> WebGPU decoder -> Dawn native) runs in the live host library.
+PIECES:
+ - platform/mb_gpu_thread.{h,cc} — extracted the process-wide InProcessGpuThreadHolder out of
+   mb_webgl.cc into GetSharedGpuThreadHolder(), now enabling BOTH GL and WebGPU on ONE GPU
+   service (enable_webgpu + enable_unsafe_webgpu + adapter_blocklist disabled, additive to the
+   GL prefs; WebGL ES2/ES3 path unaffected). mb_webgl.cc uses it (WebGL re-verified green).
+ - platform/mb_webgpu.{h,cc} — MakeWebGPUContextProvider() returns an MbWebGPUContextProvider
+   (a blink::WebGraphicsContext3DProvider, the analog of mb_webgl.cc's MbWebGLContextProvider)
+   wrapping the C1 MbWebGPUInProcessContext. WebGPUInterface()/InterfaceBase()/ContextSupport()
+   all return the one WebGPUImplementation (it is all three); GL/raster/image-decode return
+   null. Installs the dawn proc tables (global=dispatch + default=native + this-thread=wire, the
+   C1 finding) since blink doesn't in our embedder. Worker-safe teardown (DeleteSoon to the
+   creation sequence, like the WebGL provider).
+ - MbPlatform::CreateWebGPUGraphicsContext3DProviderAsync now builds + posts that provider
+   (was: posts null). Built on the calling (blink) thread so the wire procs + command-buffer
+   client bind where blink makes wgpu calls.
+ - MbGpuDataManager (mb_platform.cc) bound in the platform broker: blink's CheckContextProvider
+   does a [Sync] Are3DAPIsBlockedForUrl with blocked defaulting TRUE, so an UNBOUND interface
+   silently blocks GPU; we answer not-blocked.
+ - patches/0010-webgpu-null-isolation-key-provider.patch — the in-process command buffer creates
+   the WebGPU decoder with a NULL IsolationKeyProvider (only the browser GpuChannel supplies
+   one). blink calls SetWebGPUExecutionContextToken on every navigator.gpu context, whose handler
+   dereferenced it -> SIGSEGV (found via the macOS crash report: WebGPUDecoderImpl::HandleSet
+   WebGPUExecutionContextToken). The patch falls back to an empty isolation key (set once — the
+   token may be sent more than once and OnGetIsolationKey DCHECKs it unset), which still runs the
+   deferred requestAdapter callbacks. Real GPU-process path (provider non-null) unchanged.
+ - mb_webgpu_context now also exposes GetCapabilities()/GetGpuFeatureInfo() (the provider needs
+   them) and is compiled into the host LIBRARY (was probe-only).
+VERIFIED mb_smoke_render 41n (was the WebGPU-degrades-to-null test, now the real-WebGPU test):
+"requestAdapter()+requestDevice() return a real adapter+device -> wg=[device] vendor=[google]
+arch=[swiftshader]". Full battery green (mb_smoke 145, platform 46, render 102->131-count
+unchanged at 131/0, shot 66, wke 114; six probes exit 0), no leaks, no process-wide regression
+to WebGL/2D-canvas/video. WebGPU is now COMPLETE for headless use end to end: adapter + device
++ (the GPU foundation under it supports real compute/render — the decoder runs Dawn native over
+SwiftShader). REMAINING (niche, deferred): multithreaded-worker WebGPU (the IO-thread reply
+path — provider is built on the calling thread, fine for window + dedicated-worker main use);
+real GPU acceleration (this is SwiftShader software, by design for headless reproducibility).
 [DONE — milestone C: WEBGL WORKS END-TO-END]. getContext('webgl') now returns a real,
 rendering context in the actual blink process. Verified mb_smoke_render 41z: a WebGL
 canvas clearColor(green)+clear+readPixels(0,0,1,1) -> [0,255,0,255], and

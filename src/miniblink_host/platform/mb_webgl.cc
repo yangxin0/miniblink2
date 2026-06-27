@@ -1,6 +1,5 @@
 #include "miniblink_host/platform/mb_webgl.h"
 
-#include "base/command_line.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/task/sequenced_task_runner.h"
@@ -10,40 +9,11 @@
 #include "gpu/config/gpu_feature_info.h"
 #include "gpu/ipc/gl_in_process_context.h"
 #include "gpu/ipc/in_process_gpu_thread_holder.h"
+#include "miniblink_host/platform/mb_gpu_thread.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
-#include "ui/gl/gl_switches.h"
-#include "ui/gl/init/gl_factory.h"
 
 namespace mb {
 namespace {
-
-// One process-wide in-process GPU thread (ANGLE/SwiftShader), created lazily on the
-// first WebGL request. Persists for the process lifetime (workers + windows share it).
-// Returns null if GL init fails. The three settings encode the milestone-B findings:
-// passthrough decoder (ANGLE requires it), Ganesh-over-GL Skia (this build defaults to
-// Graphite+Dawn), and a process-wide ANGLE GL implementation set on the main thread
-// (the GPU thread reads that global; without it its surface factory NOTREACHEs on Mac).
-gpu::InProcessGpuThreadHolder* GetGpuThreadHolder() {
-  static gpu::InProcessGpuThreadHolder* const holder =
-      []() -> gpu::InProcessGpuThreadHolder* {
-    base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
-    if (!cmd->HasSwitch(switches::kUseGL))
-      cmd->AppendSwitchASCII(switches::kUseGL, gl::kGLImplementationANGLEName);
-    if (!cmd->HasSwitch(switches::kUseANGLE)) {
-      cmd->AppendSwitchASCII(switches::kUseANGLE,
-                             gl::kANGLEImplementationSwiftShaderName);
-    }
-    if (!cmd->HasSwitch(switches::kEnableUnsafeSwiftShader))
-      cmd->AppendSwitch(switches::kEnableUnsafeSwiftShader);
-    if (!gl::init::InitializeGLOneOff(gl::GpuPreference::kDefault))
-      return nullptr;
-    auto* h = new gpu::InProcessGpuThreadHolder();
-    h->GetGpuPreferences()->use_passthrough_cmd_decoder = true;
-    h->GetGpuPreferences()->gr_context_type = gpu::GrContextType::kGL;
-    return h;
-  }();
-  return holder;
-}
 
 // blink::WebGraphicsContext3DProvider over a gpu::GLInProcessContext. The GLES2
 // implementation IS the gpu::gles2::GLES2Interface (via GLES2Interface) AND the
@@ -53,7 +23,7 @@ gpu::InProcessGpuThreadHolder* GetGpuThreadHolder() {
 class MbWebGLContextProvider : public blink::WebGraphicsContext3DProvider {
  public:
   static std::unique_ptr<MbWebGLContextProvider> Create(bool want_webgl2) {
-    gpu::InProcessGpuThreadHolder* holder = GetGpuThreadHolder();
+    gpu::InProcessGpuThreadHolder* holder = GetSharedGpuThreadHolder();
     if (!holder)
       return nullptr;
     auto context = std::make_unique<gpu::GLInProcessContext>();
