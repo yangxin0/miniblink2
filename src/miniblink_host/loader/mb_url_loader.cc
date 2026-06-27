@@ -701,9 +701,10 @@ void MbSetResponseHook(MbResponseHook hook) {
   ResponseHook() = std::move(hook);
 }
 
-void MbInvokeResponseHook(const std::string& url, int status, std::string* body) {
+void MbInvokeResponseHook(const std::string& url, int status,
+                          const std::string& headers, std::string* body) {
   if (ResponseHook())
-    ResponseHook()(url, status, body);
+    ResponseHook()(url, status, headers, body);
 }
 
 // --- Response mocking --------------------------------------------------------
@@ -1168,10 +1169,11 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
     return;
   }
 
-  // Response hook: let an embedder inspect or rewrite the body before delivery (given
-  // the page's original URL + status). Any replacement flows into the mime/header/
-  // content-length build below — SetExpectedContentLength uses contents.size().
-  MbInvokeResponseHook(url.spec(), http_status, &contents);
+  // Response hook: let an embedder inspect the headers / rewrite the body before delivery
+  // (given the page's original URL + status + raw response header block). Any replacement
+  // flows into the mime/header/content-length build below (SetExpectedContentLength uses
+  // contents.size()). resp_headers is the final response's header lines (empty for non-http).
+  MbInvokeResponseHook(url.spec(), http_status, resp_headers, &contents);
 
   // Response mime: from the server's Content-Type (http), else the file extension.
   std::string mime_str;

@@ -543,15 +543,20 @@ MB_EXPORT void mbSetRequestCallback(mbRequestCallback cb, void* userdata);
 
 // Response hook: a process-wide callback invoked after a successful load (fetch / mock /
 // file / data) with an opaque mbResponse handle, BEFORE the body reaches the page — so
-// you can inspect or REPLACE the response bytes (inject a script, strip content, rewrite
-// a JSON payload). The handle is valid only for the duration of the callback; query it
-// with mbResponseURL/Status/Body and replace the body with mbResponseSetBody (which
-// updates the delivered length). Runs on the main thread inside the load. NULL clears it.
+// you can inspect the headers / status or REPLACE the response bytes (inject a script,
+// strip content, rewrite a JSON payload). The handle is valid only for the duration of the
+// callback; query it with mbResponseURL/Status/Headers/Body and replace the body with
+// mbResponseSetBody (which updates the delivered length). Runs on the main thread inside
+// the load. NULL clears it.
 typedef struct mbResponse mbResponse;
 typedef void (*mbResponseCallback)(mbResponse*, void* userdata);
 MB_EXPORT void mbSetResponseCallback(mbResponseCallback cb, void* userdata);
 MB_EXPORT const char* mbResponseURL(mbResponse*);
 MB_EXPORT int mbResponseStatus(mbResponse*);
+// The raw response HEADER block (final response's header lines, "\r\n"-separated). Empty
+// for non-http loads (data:/file:/mock). Read Content-Type, Set-Cookie, rate-limit, or any
+// custom API header an app cares about. Valid only during the callback.
+MB_EXPORT const char* mbResponseHeaders(mbResponse*);
 // Returns the body bytes (NOT NUL-terminated; may contain NULs). *out_len gets the length.
 MB_EXPORT const char* mbResponseBody(mbResponse*, int* out_len);
 MB_EXPORT void mbResponseSetBody(mbResponse*, const char* body, int len);

@@ -3068,6 +3068,34 @@ int main() {
   // is degraded (e.g. returning 503 for everything) rather than misbehaving.
   mbLoadURL(v, (host + "/get").c_str());
   const bool hb_ok = mbGetHttpStatus(v) == 200;
+
+  // 31r. The response hook exposes the raw RESPONSE HEADERS (mbResponseHeaders) for http
+  // loads — so an embedder can read Content-Type / Set-Cookie / rate-limit / custom API
+  // headers, not just the body. A page fetch()es the host over http; the response hook
+  // captures that response's header block and must carry the status line + a content-type.
+  // (Net-gated: data:/file:/mock loads have no header block.)
+  if (hb_ok) {
+    static std::string* rh = new std::string();  // -Wexit-time-destructors
+    rh->clear();
+    mbLoadURL(v, (host + "/get").c_str());  // same-origin page for the fetch()
+    mbWait(v, 300);
+    mbSetResponseCallback(
+        [](mbResponse* r, void*) {
+          const char* h = mbResponseHeaders(r);
+          if (h && *h && rh->empty())  // first response carrying headers (the fetch)
+            *rh = h;
+        },
+        nullptr);
+    mbRunJS(v, "fetch('/get').then(function(r){return r.text();});");
+    mbWait(v, 500);
+    mbSetResponseCallback(nullptr, nullptr);
+    std::string low = *rh;
+    for (char& c : low) c = static_cast<char>(std::tolower((unsigned char)c));
+    Expect(!rh->empty() && low.find("http/") != std::string::npos &&
+               low.find("content-type") != std::string::npos,
+           "mbResponseHeaders exposes the raw response header block (status + content-type)",
+           "len=" + std::to_string((int)rh->size()) + " head=[" + rh->substr(0, 60) + "]");
+  }
   // 31. Cookie jar: set a cookie via a redirecting endpoint, then a SEPARATE request
   // must still send it — Set-Cookie survives the redirect and the jar is shared.
   mbLoadURL(v, (host + "/cookies/set?mbck=val99").c_str());  // 302 -> /cookies

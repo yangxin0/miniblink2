@@ -622,6 +622,7 @@ void mbSetRequestCallback(mbRequestCallback cb, void* userdata) {
 struct mbResponse {
   const std::string& url;
   int status;
+  const std::string& headers;
   std::string* body;
 };
 
@@ -635,8 +636,9 @@ void mbSetResponseCallback(mbResponseCallback cb, void* userdata) {
   g_response_ud = userdata;
   if (cb) {
     mb::MbSetResponseHook(
-        [](const std::string& url, int status, std::string* body) {
-          mbResponse r{url, status, body};
+        [](const std::string& url, int status, const std::string& headers,
+           std::string* body) {
+          mbResponse r{url, status, headers, body};
           if (g_response_cb)
             g_response_cb(&r, g_response_ud);
         });
@@ -672,6 +674,10 @@ const char* mbResponseURL(mbResponse* r) {
 
 int mbResponseStatus(mbResponse* r) {
   return r ? r->status : 0;
+}
+
+const char* mbResponseHeaders(mbResponse* r) {
+  return r ? r->headers.c_str() : "";
 }
 
 const char* mbResponseBody(mbResponse* r, int* out_len) {

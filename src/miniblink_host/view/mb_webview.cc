@@ -462,7 +462,7 @@ bool MbWebView::FetchDownloadBody(const std::string& orig,
   }
   if (!ok)
     return false;
-  MbInvokeResponseHook(orig, status, body);  // inspect/rewrite before delivery
+  MbInvokeResponseHook(orig, status, headers, body);  // inspect/rewrite before delivery
   return true;
 }
 

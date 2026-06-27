@@ -1358,6 +1358,19 @@ our serviceWorker.register already rejects). Making it reject would be non-spec,
 documented. render 128->129, full battery green (mb_smoke 157, platform 46, shot 66, wke 114), no
 leaks.
 
+[DONE - response hook exposes RESPONSE HEADERS (mbResponseHeaders)]. The network response hook
+(mbSetResponseCallback) gave url+status+body but DISCARDED the response header block — so an
+embedder intercepting/monitoring responses couldn't read Content-Type, Set-Cookie, rate-limit,
+or any custom API header. The loader already HAS them (FetchHttp captures the raw header lines
+into resp_headers). Threaded them through: MbResponseHook gains a `headers` param, both call
+sites pass it (loader Deliver -> resp_headers; top-level FetchUrl -> MbFetchUrl out_headers),
+and the capi mbResponse handle gains mbResponseHeaders(r) (raw "\r\n"-separated block, empty for
+non-http data:/file:/mock). Verified mb_smoke 31r (MB_NET_TESTS): a page fetch()es over http ->
+the response hook's mbResponseHeaders carries the status line + content-type (len 202, head
+"HTTP/2 200..."). Offline battery green (mb_smoke 157, platform 46, render 129, shot 66, wke 114),
+no leaks. So network interception is now full-fidelity on the response side: inspect headers +
+status + body, and replace the body (mbResponseSetBody) — Playwright-route-like.
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

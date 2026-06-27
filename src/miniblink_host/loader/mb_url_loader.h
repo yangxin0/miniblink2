@@ -97,14 +97,17 @@ void MbSetRequestHook(MbRequestHookFn fn, void* userdata);
 bool MbRequestHookBlocks(const std::string& url);
 
 // Response hook: a process-wide callback invoked after a successful fetch/mock/file/data
-// load with the request URL, HTTP status, and a MUTABLE body pointer — so an embedder can
-// inspect or REPLACE the response bytes before they reach the page (inject a script, strip
-// content, rewrite a JSON payload). Runs on the main thread inside the load; replacing the
-// body updates the delivered Content-Length. MbInvokeResponseHook is the loader's call.
-using MbResponseHook =
-    std::function<void(const std::string& url, int status, std::string* body)>;
+// load with the request URL, HTTP status, the raw response HEADER block (final response's
+// header lines, empty for non-http), and a MUTABLE body pointer — so an embedder can
+// inspect headers (Content-Type, Set-Cookie, rate-limit, custom API headers) and/or
+// REPLACE the response bytes before they reach the page. Runs on the main thread inside the
+// load; replacing the body updates the delivered Content-Length.
+using MbResponseHook = std::function<void(const std::string& url, int status,
+                                          const std::string& headers,
+                                          std::string* body)>;
 void MbSetResponseHook(MbResponseHook hook);
-void MbInvokeResponseHook(const std::string& url, int status, std::string* body);
+void MbInvokeResponseHook(const std::string& url, int status,
+                          const std::string& headers, std::string* body);
 
 // Response mocking: serve a canned body for any request whose URL contains
 // `substring`, WITHOUT a real fetch (run offline, substitute an API response).
