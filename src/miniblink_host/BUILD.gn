@@ -239,3 +239,27 @@ executable("mb_dawn_probe") {
     "//third_party/dawn/src/dawn/native",
   ]
 }
+
+# mb_webgpu_probe: WebGPU bring-up milestone B — an in-process WebGPU command buffer over
+# the milestone-A Dawn device, driven through gpu::webgpu::WebGPUInterface + the dawn-wire
+# client (what blink's WebGPU provider consumes). Requests an adapter + device through the
+# wire. Blink-free; testonly because WebGPUInProcessContext lives in //gpu:test_support.
+executable("mb_webgpu_probe") {
+  testonly = true
+  sources = [ "tools/mb_webgpu_probe.cc" ]
+  deps = [
+    "//base",
+    "//base/test:test_support",
+    "//components/viz/test:test_support",
+    "//gpu:test_support",
+    "//gpu/command_buffer/client:webgpu",
+    "//gpu/command_buffer/client:webgpu_interface",
+    "//gpu/webgpu:common",
+    "//mojo/core/embedder",
+    "//third_party/dawn/include/dawn:cpp_headers",
+    "//third_party/dawn/src/dawn:proc",
+    "//third_party/dawn/src/dawn/wire",
+    "//ui/gl",
+    "//ui/gl/init",
+  ]
+}

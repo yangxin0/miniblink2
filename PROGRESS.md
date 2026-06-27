@@ -1716,6 +1716,39 @@ milestone B (we forced gr_context_type=kGL there to dodge a null dawn_context_pr
 that provider is what milestone B/C here will supply. Three probes now (gl/gpu/dawn) all
 exit 0; full battery green (mb_smoke 145, platform 46, render 102, shot 66, wke 114), no
 leaks. (Benign Dawn stderr "No device lost callback was set" — dev warning, not an error.)
+[DONE — WebGPU milestone B: in-process WebGPU COMMAND BUFFER + dawn WIRE]. Drove the
+milestone-A Dawn device through the SAME client path blink's WebGPU provider consumes — a
+gpu::webgpu::WebGPUInterface (WebGPUImplementation) over an in-process command buffer, with
+the dawn-WIRE client serializing wgpu:: calls to a wire server wrapping Dawn native. NEW
+tools/mb_webgpu_probe.cc (blink-FREE, testonly — WebGPUInProcessContext lives in
+//gpu:test_support), mirroring gpu/command_buffer/tests/webgpu_test.cc::Initialize():
+  * viz::TestGpuServiceHolder(prefs) owns the in-process GPU service. PREFS that matter:
+    enable_webgpu=true, use_passthrough_cmd_decoder=true (ANGLE), gr_context_type=
+    kGraphiteDawn (this Chromium's Skia backend — the dawn_context_provider milestone-B-for-
+    WebGL had to dodge is exactly what the WebGPU service supplies), enable_unsafe_webgpu=
+    true, disabled_dawn_features_list={"adapter_blocklist"} (so the SwiftShader fallback
+    adapter is allowed). GL forced to ANGLE/SwiftShader + main-thread InitializeGLOneOff
+    first (the milestone-A/B-for-WebGL finding: the GPU service reads the process-wide GL
+    impl; TestGpuServiceHolder calls gl::GetDefaultDisplay()).
+  * gpu::WebGPUInProcessContext::Initialize(holder->task_executor()) wires the client
+    command buffer + WebGPUImplementation; dawnProcSetPerThreadProcs(dawn::wire::client::
+    GetProcs()) installs the wire procs; wgpu::Instance wraps GetAPIChannel()->
+    GetWGPUInstance().
+  * The client task runner is a base::TestSimpleTaskRunner (manual pump), so a PumpUntil
+    helper spins: RunPendingTasks() (deliver wire replies) + holder->ScheduleGpuMainTask
+    (decoder->PerformPollingWork() — drive Dawn's async events) + FlushCommands(), 1ms/turn,
+    until the AllowSpontaneous callbacks fire.
+  * Requested an ADAPTER and a DEVICE through the wire; both returned. VERIFIED (exit 0,
+    wired into build.sh after mb_dawn_probe): "wire adapter backend=6(Vulkan) type=3(CPU)
+    device=SwiftShader Device" + "device through the wire OK".
+So the whole client->command-buffer->service->Dawn-native->wire->client round trip works
+in-process, headless — the machinery blink's CreateWebGPUGraphicsContext3DProviderAsync
+ultimately returns a provider OVER. REMAINING (milestone C, deferred): wire this same
+in-process WebGPU context into MbPlatform::CreateWebGPUGraphicsContext3DProviderAsync
+(returning a real blink WebGPUContextProvider instead of today's graceful null) so a PAGE's
+navigator.gpu.requestAdapter() resolves to a real adapter — the blink-side glue, the analog
+of WebGL milestone C. Four probes now (gl/gpu/dawn/webgpu) all exit 0; full battery green
+(mb_smoke 145, platform 46, render 102, shot 66, wke 114), no leaks.
 [DONE — milestone C: WEBGL WORKS END-TO-END]. getContext('webgl') now returns a real,
 rendering context in the actual blink process. Verified mb_smoke_render 41z: a WebGL
 canvas clearColor(green)+clear+readPixels(0,0,1,1) -> [0,255,0,255], and

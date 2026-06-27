@@ -49,8 +49,8 @@ export PATH="$TREE/buildtools/mac:$PATH"
 echo "==> gn gen"
 ( cd "$TREE" && gn gen "$OUT" >/dev/null )
 
-echo "==> ninja miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo wke_smoke wke_demo mb_gl_probe mb_gpu_probe mb_dawn_probe"
-( cd "$TREE" && ninja -C "$OUT" miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo wke_smoke wke_demo mb_gl_probe mb_gpu_probe mb_dawn_probe )
+echo "==> ninja miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo wke_smoke wke_demo mb_gl_probe mb_gpu_probe mb_dawn_probe mb_webgpu_probe"
+( cd "$TREE" && ninja -C "$OUT" miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo wke_smoke wke_demo mb_gl_probe mb_gpu_probe mb_dawn_probe mb_webgpu_probe )
 
 echo "==> vendor resource paks next to the binary"
 cp "$TREE/$OUT/gen/third_party/blink/public/resources/blink_resources.pak" \
@@ -74,5 +74,8 @@ echo "==> mb_gpu_probe (WebGL milestone B: in-process GPU command buffer + GLES2
 
 echo "==> mb_dawn_probe (WebGPU milestone A: in-process Dawn instance + WebGPU device)"
 ( cd "$TREE/$OUT" && DYLD_LIBRARY_PATH="$PWD" ./mb_dawn_probe )
+
+echo "==> mb_webgpu_probe (WebGPU milestone B: in-process WebGPU command buffer + dawn wire)"
+( cd "$TREE/$OUT" && DYLD_LIBRARY_PATH="$PWD" ./mb_webgpu_probe )
 
 echo "==> artifacts: $TREE/$OUT/libminiblink_host.dylib  +  blink_resources.pak"
