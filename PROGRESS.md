@@ -2218,3 +2218,33 @@ build.sh after mb_compositor_probe): center pixel = R255 G255 B0 (yellow). Eight
 battery green (mb_smoke 165, platform 46, render 133, shot 66), no leaks. NEXT (milestone C): a
 software cc::LayerTreeFrameSink wrapping this Display + a standalone single-threaded cc::Layer
 TreeHost with a solid-color layer -> composite -> readback (cc -> framesink -> bitmap end to end).
+
+[compositor arc — milestone C/D REPLANNED after investigation]. Investigating the cc client
+side this tick reshaped the remaining plan:
+ - A STANDALONE cc::LayerTreeHost probe is THROWAWAY: CreateSingleThreaded needs a LayerTree
+   HostDelegate (31 virtuals) + SchedulingDelegate + LayerTreeHostSingleThreadDelegate — exactly
+   the interfaces blink's LayerTreeView already implements. Re-stubbing ~37 methods for a probe
+   whose only job is "cc drives a frame sink" is wasted effort, since the real driving happens
+   through blink (LayerTreeView) in the integration step. So the old "milestone C = standalone
+   cc::LayerTreeHost" is dropped.
+ - The in-process frame sink ALREADY EXISTS: viz::DirectLayerTreeFrameSink (//ui/compositor:
+   test_support) is a cc::LayerTreeFrameSink that submits its client's frame as the ROOT surface
+   of an in-process viz::Display (the milestone-B Display). ctor(frame_sink_id, FrameSinkManager
+   Impl*, viz::Display*, context_provider=null for software, worker_ctx=null, compositor_task_
+   runner). It is the artifact blink's WebFrameWidgetImpl::AllocateNewLayerTreeFrameSink should
+   return. (cc::LayerTreeFrameSinkClient is only 13 virtuals — stubbable for a standalone sink
+   probe.)
+REVISED remaining milestones:
+  C = a probe binding a stub cc::LayerTreeFrameSinkClient to a viz::DirectLayerTreeFrameSink over
+      the milestone-B Display, submit a frame through the SINK, drive it, and read back the
+      bitmap. Proves the real frame-sink -> Display -> pixels path (de-risks D) without the
+      throwaway cc host. (May need to de-testonly DirectLayerTreeFrameSink for the production
+      library later, like patches/0006 did for the GPU in-process targets.)
+  D = blink integration: build a PRODUCTION viz::Display (non-test software OutputSurface +
+      OverlayProcessorNone + a shared_image_manager/gpu_scheduler source — likely the existing
+      InProcessGpuThreadHolder) + a DirectLayerTreeFrameSink; make MbWebView's widget call
+      WidgetBase::InitializeCompositing (vs NonCompositing); return the sink from AllocateNew
+      LayerTreeFrameSink; drive BeginFrame; confirm a page composites + reconcile with the
+      software-paint screenshot path. The risky live-widget step.
+This tick: cc-side investigation (delegate sizes, DirectLayerTreeFrameSink discovered) — no new
+probe code; A + B remain the built/verified slices. Tree clean (doc-only). Milestone C builds next.
