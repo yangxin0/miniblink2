@@ -11,7 +11,7 @@ embedding model — call straight into `WebViewImpl` — no longer exists in mod
 (everything routes through Mojo + `//content`). This project provides the *minimum* host
 that satisfies modern Blink so it runs without the full browser.
 
-## What works today (all screenshot-verified)
+## What works today (verified by a 400+ case automated test battery)
 
 | Subsystem | Status |
 |---|---|
@@ -42,9 +42,22 @@ that satisfies modern Blink so it runs without the full browser.
 | Isolated-world eval (content-script model: separate globals, shared DOM) | ✅ |
 | **Cookies**: HTTP jar + JS `document.cookie`; JS→jar bridge; jar export (`mbGetCookies`) | ✅ |
 | Custom request headers + default `Accept-Language` | ✅ |
-| On-screen window, GPU compositing | ⏳ roadmap |
-| IndexedDB (API present; `open()` degrades gracefully via `onerror` — needs an in-process `IDBFactory` backing store wired through the frame broker) | ⏳ roadmap |
-| Dedicated Web Workers (`new Worker(...)` constructs but the worker thread isn't serviced — needs worker-thread infrastructure) | ⏳ roadmap |
+| **WebGL 1 + 2** — in-process command buffer over ANGLE/SwiftShader (software, headless); shaders, buffers, draws, `readPixels`, and **composite into screenshots**; `OffscreenCanvas` + worker WebGL | ✅ |
+| **WebGPU** — `navigator.gpu.requestAdapter()`/`requestDevice()` return a real adapter+device via in-process Dawn over SwiftShader (the full blink → dawn-wire → command-buffer → Dawn-native path) | ✅ |
+| **IndexedDB** — full in-process `IDBFactory` backend: object stores, indexes, transactions, Blob/File values, **per-origin isolation**, and **save/load persistence to disk** | ✅ |
+| **Web Workers** — dedicated + shared, fully serviced (own V8 isolate + scheduler), with `fetch`, IndexedDB, and BroadcastChannel | ✅ |
+| **Service / Shared Workers + BroadcastChannel** (origin-scoped); **Notifications** (shown → host callback) | ✅ |
+| **OPFS** (Origin-Private File System) + **Cache Storage** + **Cookie Store API** — all persist to disk | ✅ |
+| **WebSocket** (connect/echo); `EventSource`/SSE; streaming `fetch` | ✅ |
+| **Media**: `<audio>`/`<video>` decode + playback (FFmpeg), frame paint into canvas/screenshot, **WebCodecs**, **Web Audio** (OfflineAudioContext DSP, `decodeAudioData`) | ✅ |
+| **History + Navigation API** — `pushState`/`replaceState`, `history.back/forward/go` (same-doc traversal + `popstate`), `navigation.navigate/back/forward` | ✅ |
+| **Network interception** — block / mock / rewrite by URL or resource-type; request hook (method+headers+body) + response hook (status+headers+body rewrite) | ✅ |
+| **Synthetic input incl. sub-frames** — click/move/wheel/drag/context-menu/keyboard route into iframes; **cross-origin iframe** load + per-frame eval/fill | ✅ |
+| **Editor commands** (`ExecuteEditCommand` + value variants) + **clipboard** read/write; **file upload** (`mbSetFileForSelector` sets `<input type=file>` files) | ✅ |
+| **Find-in-page** (highlight, next, active-match rect); **accessibility tree** export (`mbGetAXTree`) | ✅ |
+| **Screenshots**: PNG/JPEG, transparent, element/region clip, full-page; **page zoom**; mobile/device **layout emulation** (viewport + media queries) | ✅ |
+| Threaded/GPU **compositor** (`cc::LayerTreeHost`) — only needed for DevTools device-mode *visual* transform + off-main-thread animation; **not** required for headless capture (software paint already composites all layers correctly) | ⏳ roadmap |
+| Child-frame *independent* session history; full WebRTC | ⏳ roadmap |
 
 ## Tool: `mb_shot` (headless HTML → PNG)
 
