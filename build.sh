@@ -49,8 +49,8 @@ export PATH="$TREE/buildtools/mac:$PATH"
 echo "==> gn gen"
 ( cd "$TREE" && gn gen "$OUT" >/dev/null )
 
-echo "==> ninja miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo wke_smoke wke_demo mb_gl_probe mb_gpu_probe mb_dawn_probe mb_webgpu_probe mb_webgpu2_probe mb_compositor_probe mb_compositor2_probe mb_compositor3_probe"
-( cd "$TREE" && ninja -C "$OUT" miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo wke_smoke wke_demo mb_gl_probe mb_gpu_probe mb_dawn_probe mb_webgpu_probe mb_webgpu2_probe mb_compositor_probe mb_compositor2_probe mb_compositor3_probe )
+echo "==> ninja miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo wke_smoke wke_demo mb_gl_probe mb_gpu_probe mb_dawn_probe mb_webgpu_probe mb_webgpu2_probe mb_compositor_probe mb_compositor2_probe mb_compositor3_probe mb_compositor4_probe"
+( cd "$TREE" && ninja -C "$OUT" miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo wke_smoke wke_demo mb_gl_probe mb_gpu_probe mb_dawn_probe mb_webgpu_probe mb_webgpu2_probe mb_compositor_probe mb_compositor2_probe mb_compositor3_probe mb_compositor4_probe )
 
 echo "==> vendor resource paks next to the binary"
 cp "$TREE/$OUT/gen/third_party/blink/public/resources/blink_resources.pak" \
@@ -89,5 +89,8 @@ echo "==> mb_compositor2_probe (Compositor milestone B: in-process viz::Display 
 
 echo "==> mb_compositor3_probe (Compositor milestone C: cc frame sink -> viz::Display -> bitmap)"
 ( cd "$TREE/$OUT" && DYLD_LIBRARY_PATH="$PWD" ./mb_compositor3_probe )
+
+echo "==> mb_compositor4_probe (Compositor milestone D1: PRODUCTION viz::Display -> bitmap)"
+( cd "$TREE/$OUT" && DYLD_LIBRARY_PATH="$PWD" ./mb_compositor4_probe )
 
 echo "==> artifacts: $TREE/$OUT/libminiblink_host.dylib  +  blink_resources.pak"

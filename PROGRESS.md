@@ -2271,3 +2271,23 @@ captured bitmap"). Nine probes; full battery green (mb_smoke 165, platform 46, r
 66), no leaks. NEXT (milestone D): blink integration — a PRODUCTION viz::Display + DirectLayer
 TreeFrameSink returned from AllocateNewLayerTreeFrameSink + WidgetBase::InitializeCompositing in
 MbWebView's widget; drive BeginFrame; confirm a page composites. The risky live-widget step.
+
+[DONE — compositor milestone D1: PRODUCTION (non-test) viz::Display composites a cc-frame-sink-
+routed frame to a bitmap]. tools/mb_compositor4_probe.cc — milestone C's exact path (cc frame
+sink -> viz::Display -> bitmap) but the Display is now assembled from PRODUCTION gpu/viz
+components, NOT testonly helpers: standalone gpu::SyncPointManager + gpu::Scheduler +
+gpu::SharedImageManager (replacing viz::TestGpuServiceHolder::gpu_service()'s shared_image_manager
+/gpu_scheduler), and a real viz::SoftwareOutputSurface (components/viz/service/display_embedder/,
+replacing viz::FakeSoftwareOutputSurface). KEY FINDING: a SOFTWARE Display needs NO GPU service or
+GL context — the three gpu primitives are default-constructible standalone (SharedImageManager(
+thread_safe=false); Scheduler(sync_point_manager); SyncPointManager()) and suffice for the
+DisplayResourceProviderSoftware. Only the frame sink (ui::DirectLayerTreeFrameSink) + the
+CompositorFrameBuilder stay testonly (the probe itself is testonly; D2 de-testonly's the sink).
+This is the exact Display the host LIBRARY will own — D1 de-risks it. BUILD: executable(
+"mb_compositor4_probe") deps add //gpu/command_buffer/service. Verified: sink-routed center pixel
+R255 G255 B0, exit 0, no leaked process; full battery green (mb_smoke 165, platform 46, render
+133, shot 66, wke 117; probes gl/gpu/dawn/webgpu/webgpu2/compositor/2/3/4 all PASS). NEXT
+(milestone D2): lift the production gpu-primitives + Display + (de-testonly'd) DirectLayerTreeFrame
+Sink into a host-library component mb_compositor.{h,cc}, then wire MbWebView's WebFrameWidgetImpl to
+return it from AllocateNewLayerTreeFrameSink + call WidgetBase::InitializeCompositing; drive
+BeginFrame; confirm a real page composites through cc. The live-widget integration.

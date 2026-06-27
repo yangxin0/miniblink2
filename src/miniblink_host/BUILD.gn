@@ -382,3 +382,28 @@ executable("mb_compositor3_probe") {
     "//ui/gl/init",
   ]
 }
+
+# mb_compositor4_probe: SOFTWARE COMPOSITOR bring-up milestone D1 — same path as C but the
+# viz::Display is assembled from PRODUCTION (non-test) gpu/viz components: standalone
+# gpu::SyncPointManager/Scheduler/SharedImageManager + viz::SoftwareOutputSurface (no
+# TestGpuServiceHolder / FakeSoftwareOutputSurface). De-risks the host-library Display for D2.
+executable("mb_compositor4_probe") {
+  testonly = true
+  sources = [ "tools/mb_compositor4_probe.cc" ]
+  deps = [
+    "//base",
+    "//base/test:test_support",
+    "//cc",
+    "//components/viz/common",
+    "//components/viz/service",
+    "//components/viz/test:test_support",
+    "//gpu/command_buffer/service",
+    "//mojo/core/embedder",
+    "//skia",
+    "//ui/compositor:test_support",
+    "//ui/gfx",
+    "//ui/gfx/geometry",
+    "//ui/gl",
+    "//ui/gl/init",
+  ]
+}
