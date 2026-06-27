@@ -1930,6 +1930,11 @@ void MbWebView::SendKey(const char* key_name) {
     widget_->SendKey(key_name);
 }
 
+void MbWebView::SendKeyEx(const char* key, int modifiers) {
+  if (widget_)
+    widget_->SendKeyEx(key, modifiers);
+}
+
 void MbWebView::SendKeyUp(int windows_key_code) {
   if (widget_)
     widget_->SendKeyUp(windows_key_code);

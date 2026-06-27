@@ -458,6 +458,13 @@ MB_EXPORT void mbSendText(mbView*, const char* utf8_text);
 // action. No-op for an unknown key name.
 MB_EXPORT void mbSendKey(mbView*, const char* key_name);
 
+// Like mbSendKey but WITH a modifier bitmask (1=ctrl 2=shift 4=alt 8=meta), and `key` may
+// be a named key ("ArrowRight", "Home", "Enter", ...) OR a single character ("a", "1").
+// Sends a real trusted key event, so keyboard SHORTCUTS fire (Ctrl+A select-all, Ctrl+S,
+// app hotkeys) and Shift+Arrow extends a selection. No typed character is produced when a
+// command modifier (ctrl/alt/meta) is held. No-op for an unknown multi-char key name.
+MB_EXPORT void mbSendKeyEx(mbView*, const char* key, int modifiers);
+
 // Dispatch a standalone key RELEASE (a `keyup` event) for a Win32 virtual-key code,
 // so page handlers that watch for key release fire. Use when driving key down/up
 // separately rather than as one press (mbSendKey already includes the release).

@@ -182,6 +182,7 @@ class MbWebView {
   void SendWheel(int x, int y, int delta_x, int delta_y, int modifiers);
   void SendText(const char* utf8);
   void SendKey(const char* key_name);  // press a named non-text key (Enter, Tab, ...)
+  void SendKeyEx(const char* key, int modifiers);  // key (named or 1 char) + modifiers
   void SendKeyUp(int windows_key_code);  // standalone key release (fires `keyup`)
   // IME composition into the focused editable: `composing` previews, `committed` inserts.
   void SendIme(const char* composing, const char* committed);

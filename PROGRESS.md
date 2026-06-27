@@ -1471,6 +1471,20 @@ across reruns). mb_smoke 161->162, full battery green (platform 46, render 131, 
 no leaks. So PDF export is now print-fidelity-configurable (size/orientation/scale/margin +
 background).
 
+[DONE - keyboard input WITH MODIFIERS (mbSendKeyEx)]. mbSendKey sent named keys with NO
+modifiers, so keyboard SHORTCUTS (Ctrl+K app hotkey, Alt+Arrow, Shift+navigation) couldn't be
+sent — an automation gap. mbSendKeyEx(view, key, modifiers) (1=ctrl 2=shift 4=alt 8=meta) sends
+a trusted key event where `key` is a named key ("ArrowRight"/"Home"/...) OR a single character
+("a"/"1"); MbWidget::SendKeyEx threads the modifier bitmask into the WebKeyboardEvent and emits
+a kChar only when no command modifier (ctrl/alt/meta) is held (a shortcut produces no typed
+char). For a single char the VK is the uppercase ASCII + dom_key from the char. Verified mb_smoke
+23e3: Ctrl+Shift+K -> page keydown sees key 'k' ctrl+shift true; Alt+ArrowRight -> 'ArrowRight'
+alt true (both char + named key paths). mb_smoke 162->163, full battery green (platform 46, render
+131, shot 66, wke 114), no leaks. NOTE: the browser-DEFAULT editing shortcuts (Ctrl+A select-all)
+don't fire via the synthetic event (an editor key-binding needs dom_code, not set) - but those are
+covered by mbExecuteEditCommand("SelectAll"/...); mbSendKeyEx is for PAGE-handled shortcuts +
+modified navigation, which it delivers.
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

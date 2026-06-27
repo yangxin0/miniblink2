@@ -516,6 +516,11 @@ void mbSendKey(mbView* v, const char* key_name) {
     v->impl->SendKey(key_name);
 }
 
+void mbSendKeyEx(mbView* v, const char* key, int modifiers) {
+  if (v && v->impl)
+    v->impl->SendKeyEx(key, modifiers);
+}
+
 void mbSendKeyUp(mbView* v, int windows_key_code) {
   if (v && v->impl)
     v->impl->SendKeyUp(windows_key_code);

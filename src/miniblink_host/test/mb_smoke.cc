@@ -1578,6 +1578,28 @@ int main() {
                (ins ? "1" : "0") + " html=[" + html + "]");
   }
 
+  // 23e3. mbSendKeyEx: a trusted key event WITH modifiers, so keyboard SHORTCUTS a page
+  // handles (Ctrl+K, app hotkeys) and modified navigation (Alt+Arrow) reach the page's
+  // keydown handler with the right key + modifier flags — for a single CHARACTER key and a
+  // NAMED key. (Browser-default editing shortcuts like Ctrl+A are via mbExecuteEditCommand.)
+  {
+    mbLoadHTML(v,
+               "<body><input id='i'><script>window.__k='';"
+               "addEventListener('keydown',function(ev){window.__k=ev.key+':'+ev.ctrlKey+"
+               "':'+ev.shiftKey+':'+ev.altKey;});</script></body>",
+               "https://keyex.test/");
+    mbWait(v, 50);
+    mbSendKeyEx(v, "k", 1 | 2);  // Ctrl+Shift+K (a char key + two modifiers)
+    mbWait(v, 30);
+    const std::string k1 = Eval(v, "window.__k");
+    mbSendKeyEx(v, "ArrowRight", 4);  // Alt+ArrowRight (a named key + a modifier)
+    mbWait(v, 30);
+    const std::string k2 = Eval(v, "window.__k");
+    Expect(k1 == "k:true:true:false" && k2 == "ArrowRight:false:false:true",
+           "mbSendKeyEx: ctrl/shift/alt modifiers reach keydown (char + named keys)",
+           "k1=[" + k1 + "] k2=[" + k2 + "]");
+  }
+
   // 23f. Web Locks (navigator.locks, broker #8): the in-process LockManager grants with
   // real EXCLUSIVE serialization. Two requests for the same name: the first holds the lock
   // across an async (timer) callback; the second must WAIT until the first's promise
@@ -3849,6 +3871,7 @@ int main() {
     mbLoadURL(v, nullptr);
     mbSetCookie(v, nullptr, nullptr);
     mbSendKey(v, nullptr);
+    mbSendKeyEx(v, nullptr, 1);
     mbSendText(v, nullptr);
     Expect(getters_safe && actions_safe,
            "C ABI is null-arg safe (no crash; documented failure returns)",

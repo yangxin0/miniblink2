@@ -452,6 +452,54 @@ void MbWidget::SendKey(const char* key_name) {
       make(blink::WebInputEvent::Type::kKeyUp, false), ui::LatencyInfo()));
 }
 
+void MbWidget::SendKeyEx(const char* key, int modifiers) {
+  if (!widget_ || !key || !key[0])
+    return;
+  int mods = 0;
+  if (modifiers & 1) mods |= blink::WebInputEvent::kControlKey;
+  if (modifiers & 2) mods |= blink::WebInputEvent::kShiftKey;
+  if (modifiers & 4) mods |= blink::WebInputEvent::kAltKey;
+  if (modifiers & 8) mods |= blink::WebInputEvent::kMetaKey;
+  const bool has_command = (modifiers & (1 | 4 | 8)) != 0;  // ctrl/alt/meta suppress kChar
+
+  int vk;
+  ui::DomKey dom_key;
+  char ch = 0;
+  if (const KeyDef* k = FindKeyByName(key)) {
+    vk = k->vk;
+    dom_key = k->dom_key;
+    ch = k->ch;
+  } else if (!key[1]) {  // a single character (letter/digit/symbol)
+    char c = key[0];
+    char up = (c >= 'a' && c <= 'z') ? static_cast<char>(c - 32) : c;
+    vk = static_cast<unsigned char>(up);  // VK for letters/digits is the uppercase ASCII
+    dom_key = ui::DomKey::FromCharacter(static_cast<char16_t>(c));
+    ch = c;
+  } else {
+    return;  // unknown multi-char name
+  }
+
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  auto make = [&](blink::WebInputEvent::Type type, bool with_text) {
+    blink::WebKeyboardEvent e(type, mods, base::TimeTicks::Now());
+    e.windows_key_code = vk;
+    e.dom_key = static_cast<int>(dom_key);
+    if (with_text && ch) {
+      e.text[0] = ch;
+      e.unmodified_text[0] = ch;
+    }
+    return e;
+  };
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+      make(blink::WebInputEvent::Type::kRawKeyDown, false), ui::LatencyInfo()));
+  if (ch && !has_command) {  // a shortcut (Ctrl/Alt/Meta) produces no typed character
+    impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+        make(blink::WebInputEvent::Type::kChar, true), ui::LatencyInfo()));
+  }
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(
+      make(blink::WebInputEvent::Type::kKeyUp, false), ui::LatencyInfo()));
+}
+
 void MbWidget::SendKeyUp(int windows_key_code) {
   if (!widget_)
     return;

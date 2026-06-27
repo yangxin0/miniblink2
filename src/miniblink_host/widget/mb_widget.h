@@ -59,6 +59,12 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   // trusted key event, so default actions fire (Enter submits a form, Tab moves
   // focus) — unlike a JS-dispatched (untrusted) event. No-op for unknown names.
   void SendKey(const char* key_name);
+  // Like SendKey but WITH a modifier bitmask (1=ctrl 2=shift 4=alt 8=meta), and `key`
+  // may be a named key ("ArrowRight", "Home", ...) OR a single character ("a", "1", "k").
+  // Sends a real trusted key event so keyboard SHORTCUTS fire (Ctrl+A select-all, Ctrl+S,
+  // app hotkeys) and Shift+arrow extends a selection. A kChar is only emitted when no
+  // command modifier (ctrl/alt/meta) is held (a shortcut produces no typed character).
+  void SendKeyEx(const char* key, int modifiers);
   // Dispatch a standalone key RELEASE (kKeyUp) for a Win32 VK code, so page `keyup`
   // handlers fire on release. Pairs with SendKey for callers that drive down/up
   // separately (e.g. wke's wkeFireKeyUpEvent).
