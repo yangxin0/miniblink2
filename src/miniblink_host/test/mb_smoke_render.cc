@@ -13,30 +13,51 @@ using mbsmoke::EvalIso;
 using mbsmoke::Expect;
 
 static void RunCases(mbView* v, int W, int H) {
-  // 35z. A synthetic mouse click that LANDS ON AN IFRAME routes into the sub-frame and
-  // fires its handler — instead of SIGSEGV. blink's WebFrameWidgetImpl::SetMouseCapture
-  // (reached on mousedown via EventHandler::CaptureMouseEventsToWidget when a sub-frame
-  // takes the press) dereferenced a null widget_input_handler_manager() (no browser-side
-  // input host in our single-process embedder); patches/0011 guards it (the same null
-  // check SetPanAction et al. in that file already use). The button fills the iframe, so a
-  // root-coordinate click at (100,40) lands on it; we read the child frame's flag back.
+  // 35z. ALL synthetic input modalities route INTO a sub-frame (iframe) and reach its
+  // elements — instead of SIGSEGV. The bug this guards: on a mousedown a sub-frame takes
+  // the press for, EventHandler::CaptureMouseEventsToWidget -> WebFrameWidgetImpl::
+  // SetMouseCapture dereferenced a null widget_input_handler_manager() (no browser-side
+  // input host in our single-process embedder); patches/0011 guards it (the same null check
+  // SetPanAction et al. already use). Because that crash fired on ANY sub-frame-routed
+  // mouse press, this exercises the whole input surface: click, mousemove, wheel, drag,
+  // right-click(context menu), and keyboard text entry into a focused sub-frame <input>.
+  // (Keyboard chars need mbSendKeyEx — mbSendKey is for NAMED keys like Enter/Tab.)
   {
     mbLoadHTML(v,
       "<body style='margin:0'>"
-      "<iframe srcdoc=\"<body style='margin:0'><button id='b' "
-      "style='width:300px;height:120px'>X</button><script>"
-      "document.getElementById('b').onclick=function(){window.__clk=1;};"
+      "<iframe srcdoc=\"<body style='margin:0'>"
+      "<input id='i' style='width:300px;height:30px'>"
+      "<div id='d' style='width:300px;height:90px'>D</div>"
+      "<script>window.__ev={};var d=document.getElementById('d');"
+      "d.onclick=function(){window.__ev.ck=1;};"
+      "d.onmousemove=function(){window.__ev.mm=1;};"
+      "d.oncontextmenu=function(e){window.__ev.cm=1;e.preventDefault();};"
+      "d.onwheel=function(){window.__ev.wh=1;};"
       "</script></body>\" style='border:0;width:300px;height:120px'></iframe>"
-      "</body>", "https://frameclick.test/");
+      "</body>", "https://frameinput.test/");
     mbWait(v, 300);
-    mbSendMouseClick(v, 100, 40);   // lands inside the iframe's button
-    mbWait(v, 100);
-    char buf[64] = {0};
-    mbEvalJSInFrame(v, 0, "String(window.__clk||0)", buf, sizeof(buf));
-    const std::string clk(buf);
-    Expect(clk == "1",
-           "a synthetic click landing on an iframe routes into the sub-frame (no crash)",
-           "clk=[" + clk + "]");
+    mbSendMouseMove(v, 100, 80); mbSendMouseMove(v, 120, 85);   // hover the child div
+    mbSendWheel(v, 120, 80, 0, -40, 0);                          // wheel over it
+    mbSendMouseDown(v, 60, 80); mbSendMouseMove(v, 100, 80);     // drag across it
+    mbSendMouseMove(v, 140, 85); mbSendMouseUp(v, 140, 85);
+    mbSendMouseClickEx(v, 120, 80, 2 /*right*/, 0);              // context menu
+    mbSendMouseClick(v, 120, 80);                                // left click the div
+    mbSendMouseClick(v, 100, 15); mbWait(v, 60);                 // focus the child <input>
+    mbSendKeyEx(v, "A", 0); mbWait(v, 60);                       // type into it
+    char buf[200] = {0};
+    mbEvalJSInFrame(v, 0,
+      "JSON.stringify({ev:window.__ev||{},val:document.getElementById('i').value})",
+      buf, sizeof(buf));
+    const std::string st(buf);
+    const bool ok = st.find("\"ck\":1") != std::string::npos &&
+                    st.find("\"mm\":1") != std::string::npos &&
+                    st.find("\"wh\":1") != std::string::npos &&
+                    st.find("\"cm\":1") != std::string::npos &&
+                    st.find("\"val\":\"A\"") != std::string::npos;
+    Expect(ok,
+           "all synthetic input (click/move/wheel/drag/contextmenu/keyboard) routes into "
+           "a sub-frame (no crash)",
+           "child=[" + st + "]");
   }
   // 35. Cutting-edge modern CSS — the M150-vs-M47 selling points, none of which the
   // frozen ~2015 engine could do. Each rule colors an element only if the feature works.

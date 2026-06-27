@@ -197,11 +197,18 @@ a null-remote `WebPolicyContainer` already CHECK-failed). Work top-down; one at 
      the call ran with this==null and faulted at this+0x48 reading host_. SetPanAction/UpdateBrowserControls
      State et al. in the SAME file already early-return on that null; SetMouseCapture just forgot the guard.
      patches/0011 adds it (upstream-robustness; real browser path unchanged). Now a root-coordinate
-     mbSendMouseClick that lands on an iframe routes INTO the sub-frame and fires its handler — verified
-     mb_smoke_render 35z: a click at (100,40) on a button filling a 300x120 srcdoc iframe sets the child
-     window's flag (mbEvalJSInFrame frame 0 -> clk=1). render 131->132, full battery green, no leaks. (So
+     mbSendMouseClick that lands on an iframe routes INTO the sub-frame and fires its handler. (So
      trusted gesture clicks into sub-frames work WITHOUT the compositor; the "same class as device emulation"
      guess was wrong — this was a one-line missing null guard, not a compositor dependency.)
+     [FOLLOW-UP — the WHOLE sub-frame input surface verified, no further bug]. Probed every input modality
+     into a sub-frame (the SetMouseCapture crash fired on ANY sub-frame-routed mouse press, so a regression
+     could re-break a single modality): click, mousemove, wheel, drag (down/move/up), right-click (context
+     menu), AND keyboard text entry into a focused child <input> ALL route correctly — none crash, all reach
+     the child's handlers. mb_smoke_render 35z broadened from click-only to assert the full surface
+     ({mm,wh,ck,cm} fire + the child input's value becomes "A"). render 132 (unchanged slot). NOTE found while
+     probing: mbSendKey is NAMED-keys-only (FindKeyByName) — a single char like "A" is a silent no-op; chars
+     need mbSendKeyEx (this was a TEST artifact, not an engine bug — keyboard into sub-frames works). No new
+     engine bug; the sub-frame input class is fully resolved by patches/0011.
    - [DONE] wke `wkeRunJsByFrame` peer + a minimal wke frame-handle model: `wkeWebFrameGetMainFrame`,
      `wkeWebFrameGetSubFrameCount`, `wkeWebFrameGetSubFrame(index)` (port ext — upstream hands frame
      handles out via load callbacks; we expose them by index), `wkeIsMainFrame`, and `wkeRunJsByFrame
