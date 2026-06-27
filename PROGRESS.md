@@ -2406,3 +2406,33 @@ be misleading. FINDINGS that refine the plan:
   Composite() + drive it in mb_compositor_widget_smoke; (4) iterate on the cross-thread raster flush
   until the SoftwareCompositor's captured bitmap shows the page. Verify each step empirically; revert if
   a step doesn't verify (the prior compositor stages set the pattern).
+
+[D2b-3 ATTEMPT 1 — implemented steps 1-2; uncovered the NEXT precise blocker; reverted to keep the tree
+clean]. Wired the GLInProcessContext + holder SharedImageManager into SoftwareCompositor and plumbed the
+SII through the frame sink (steps 1-2). RESULTS, empirically:
+  * Steps 1-2 are CORRECT: a compositing view now constructs SoftwareCompositor -> creates the
+    GLInProcessContext (holder-backed) -> sources the SII + uses the holder's SharedImageManager, all
+    WITHOUT crashing (mb_compositor_widget_smoke init path stayed green). The D1 standalone SharedImage
+    Manager is gone; the Display uses holder->GetTaskExecutor()->shared_image_manager(). The standalone
+    gpu::Scheduler was kept for the Display ctor and caused no problem.
+  * NEXT BLOCKER (one layer past last tick's): driving a composite no longer dies in CreateRasterBuffer
+    Provider — it now dies in cc::LayerTreeFrameSink::BindToClient (layer_tree_frame_sink.cc:119-128).
+    In SOFTWARE mode (no context provider) cc calls shared_image_interface_->AddGpuChannelLostObserver
+    (this); the base gpu::SharedImageInterface NOTREACHEs it (shared_image_interface.cc:171). ONLY two
+    classes override it: gpu::ipc ClientSharedImageInterface (GPU-channel/IPC-backed) and the gmock
+    gpu::TestSharedImageInterface. The in-process GLInProcessContext SII (SharedImageInterfaceInProcess)
+    does NOT — cc's software path assumes a channel-backed SII that can lose its GPU channel.
+  * THE FIX (D2b-3 step 2.5, the real next task): a thin forwarding adapter — class wrapping the
+    in-process scoped_refptr<gpu::SharedImageInterface>, overriding AddGpuChannelLostObserver(->return
+    true) + RemoveGpuChannelLostObserver(->no-op) (an in-process SII never loses a channel) and
+    delegating the other ~19 pure virtuals (the CreateSharedImage overloads, Update/DestroySharedImage,
+    Gen/Verify/WaitSyncToken, GetCapabilities, CreateSharedImageForSoftwareCompositor, ...) straight to
+    the wrapped SII. Pass THAT to MbDirectLayerTreeFrameSink. ~19 mechanical forwards; signatures in
+    gpu/command_buffer/client/shared_image_interface.h.
+  * ALSO LEARNED: coupling SoftwareCompositor to the GPU holder breaks the standalone, blink-free
+    mb_compositor5_probe — it pre-calls InitializeGLOneOff then the holder's lazy-init calls it again ->
+    DCHECK(kGLImplementationNone == GetGLImplementation()) at gl_factory.cc:158; and even past that it
+    drives BindToClient -> the same AddGpuChannelLostObserver NOTREACHED. So D2b-3 must also either drop
+    mb_compositor5_probe's own GL init (let the holder do it) AND give it the SII adapter, or retire that
+    probe (its host-lib coverage is subsumed by mb_compositor_widget_smoke once Composite works).
+  After step 2.5, step 4's cross-thread GPU-thread raster flush remains the final unknown.
