@@ -2267,6 +2267,38 @@ struct WkeNetRespHook {
   void* param;
 };
 WkeNetRespHook g_wke_net_resp{nullptr, nullptr, nullptr};
+// The miniblink49 wkeOnLoadUrlEnd hook: like wkeNetOnResponse but passes the response JOB
+// handle (= the mbResponse*) so the callback can REWRITE the body via wkeNetSetData. Shares
+// the single process-wide mb response callback with wkeNetOnResponse via one dispatcher.
+struct WkeLoadEndHook {
+  wkeWebView wv;
+  wkeLoadUrlEndCallback cb;
+  void* param;
+};
+WkeLoadEndHook g_wke_load_end{nullptr, nullptr, nullptr};
+
+// One mb response callback fans out to both response hooks (read-only wkeNetOnResponse
+// first, then the rewrite-capable wkeOnLoadUrlEnd), so the two coexist instead of the last
+// registration clobbering the other.
+void WkeDispatchResponse(mbResponse* r, void*) {
+  int len = 0;
+  const char* body = mbResponseBody(r, &len);
+  const char* url = mbResponseURL(r);
+  if (g_wke_net_resp.cb)
+    g_wke_net_resp.cb(g_wke_net_resp.wv, g_wke_net_resp.param, url, body, len);
+  if (g_wke_load_end.cb) {
+    g_wke_load_end.cb(g_wke_load_end.wv, g_wke_load_end.param, url, r,
+                      const_cast<char*>(body), len);
+  }
+}
+
+// Register/clear the shared mb response callback based on whether EITHER hook is active.
+void WkeSyncResponseHook() {
+  if (g_wke_net_resp.cb || g_wke_load_end.cb)
+    mbSetResponseCallback(&WkeDispatchResponse, nullptr);
+  else
+    mbSetResponseCallback(nullptr, nullptr);
+}
 }  // namespace
 
 void wkeNetOnRequest(wkeWebView webView, wkeNetRequestCallback callback,
@@ -2289,20 +2321,22 @@ void wkeNetOnRequest(wkeWebView webView, wkeNetRequestCallback callback,
 void wkeNetOnResponse(wkeWebView webView, wkeNetResponseCallback callback,
                       void* param) {
   g_wke_net_resp = {webView, callback, param};
-  if (callback) {
-    mbSetResponseCallback(
-        [](mbResponse* r, void*) {
-          if (!g_wke_net_resp.cb)
-            return;
-          int len = 0;
-          const char* body = mbResponseBody(r, &len);
-          g_wke_net_resp.cb(g_wke_net_resp.wv, g_wke_net_resp.param,
-                            mbResponseURL(r), body, len);
-        },
-        nullptr);
-  } else {
-    mbSetResponseCallback(nullptr, nullptr);
-  }
+  WkeSyncResponseHook();
+}
+
+// miniblink49 parity: hook a response after its data arrives, with the JOB handle for
+// rewriting it. job == the mbResponse*; pass it to wkeNetSetData to replace the body.
+void wkeOnLoadUrlEnd(wkeWebView webView, wkeLoadUrlEndCallback callback,
+                     void* param) {
+  g_wke_load_end = {webView, callback, param};
+  WkeSyncResponseHook();
+}
+
+// Replace a response's body from inside a wkeOnLoadUrlEnd callback (job == mbResponse*).
+void wkeNetSetData(void* job, void* buf, int len) {
+  if (job && (buf || len == 0))
+    mbResponseSetBody(static_cast<mbResponse*>(job),
+                      static_cast<const char*>(buf), len);
 }
 
 void wkeOnConsole(wkeWebView webView, wkeConsoleCallback callback, void* param) {

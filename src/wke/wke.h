@@ -751,11 +751,20 @@ typedef bool (*wkeNetRequestCallback)(wkeWebView webView, void* param,
 WKE_API void wkeNetOnRequest(wkeWebView webView, wkeNetRequestCallback callback,
                              void* param);
 // wkeNetOnResponse: `callback` fires after each successful response with the URL and
-// the response body bytes (`body`, `len`) — inspection/logging (no modify here; use the
-// mb_capi response hook to rewrite). NULL clears it.
+// the response body bytes (`body`, `len`) — inspection/logging only (read-only; to REWRITE
+// a response use wkeOnLoadUrlEnd + wkeNetSetData below). NULL clears it.
 typedef void (*wkeNetResponseCallback)(wkeWebView webView, void* param,
                                        const utf8* url, const char* body, int len);
 WKE_API void wkeNetOnResponse(wkeWebView webView, wkeNetResponseCallback callback,
                               void* param);
+// miniblink49 parity: hook a response AFTER its data arrives, with a `job` handle (= the
+// underlying response) so the callback can REWRITE the body with wkeNetSetData(job, buf,
+// len). `buf`/`len` are the received body. Coexists with wkeNetOnResponse (both fire). NULL
+// clears it. (Header/MIME/URL mutation — wkeNetSetMIMEType etc. — is not yet wired.)
+typedef void (*wkeLoadUrlEndCallback)(wkeWebView webView, void* param,
+                                      const utf8* url, void* job, void* buf, int len);
+WKE_API void wkeOnLoadUrlEnd(wkeWebView webView, wkeLoadUrlEndCallback callback,
+                             void* param);
+WKE_API void wkeNetSetData(void* job, void* buf, int len);
 
 #endif  // MINIBLINK_WKE_WKE_H_

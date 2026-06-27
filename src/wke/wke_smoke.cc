@@ -2103,6 +2103,36 @@ int main() {
           "wkeEditor SelectAll/Delete/Undo drive blink editing on a contenteditable");
   }
 
+  // wkeOnLoadUrlEnd + wkeNetSetData REWRITE a response body (miniblink49 parity): the page
+  // must apply the REWRITTEN bytes, not the original. Hook a file:// CSS subresource and
+  // replace its rule; the computed body color must become the rewritten value.
+  {
+    if (FILE* f = std::fopen("/tmp/wke_rewrite.css", "wb")) {
+      const char* css = "body{color:rgb(1,2,3)}";
+      std::fwrite(css, 1, std::strlen(css), f);
+      std::fclose(f);
+    }
+    wkeOnLoadUrlEnd(
+        wv,
+        [](wkeWebView, void*, const utf8* url, void* job, void*, int) {
+          if (std::strstr(url, "wke_rewrite.css")) {
+            static const char kRep[] = "body{color:rgb(9,8,7)}";
+            wkeNetSetData(job, const_cast<char*>(kRep),
+                          static_cast<int>(std::strlen(kRep)));
+          }
+        },
+        nullptr);
+    wkeLoadHtmlWithBaseUrl(
+        wv, "<link rel='stylesheet' href='file:///tmp/wke_rewrite.css'><body>x</body>",
+        "file:///tmp/page.html");
+    const char* color =
+        jsToTempString(es, wkeRunJS(wv, "getComputedStyle(document.body).color"));
+    const bool rewritten = std::strstr(color, "9, 8, 7") != nullptr;
+    wkeOnLoadUrlEnd(wv, nullptr, nullptr);
+    check(rewritten,
+          "wkeOnLoadUrlEnd + wkeNetSetData rewrite a response body (page applies it)");
+  }
+
   wkeDestroyWebView(wv);
   wkeFinalize();
 
