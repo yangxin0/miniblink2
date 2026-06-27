@@ -1397,6 +1397,19 @@ DOM/style level even though the compositor can't visually animate). Locked in as
 platform 46, shot 66, wke 114), no leaks. (Unlike View Transitions, these needed no patch -
 blink runs them on the main thread / at style resolution; the probe confirms that.)
 
+[DONE - response hook can rewrite the STATUS (mbResponseSetStatus)]. Completed the response
+side of interception to route.fulfill parity: the hook could replace the body (mbResponseSetBody)
+but not the status, so it couldn't dynamically fabricate a response. Made the delivered HTTP
+status mutable through the hook (MbResponseHook status int -> int*, both call sites pass &status,
+the loader's response.SetHttpStatusCode uses the post-hook value); the mbResponse handle gained
+mbResponseSetStatus(r, status). Distinct from the static mbMockResponse: this rewrites a REAL
+upstream response's status conditionally (force a 503 to exercise a page's retry/error path,
+normalize an upstream 500 to 200). Verified mb_smoke 0d2: a 200 mock + a hook that sets 503 ->
+the page's fetch sees status 503, ok false; 0d (body rewrite) still passes (the int* refactor
+didn't break it). mb_smoke 158->159, full battery green (platform 46, render 130, shot 66, wke
+114), no leaks. Network interception is now route-class both ways: request (inspect method/
+headers/body, block) + response (inspect status/headers/body, rewrite status + body).
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

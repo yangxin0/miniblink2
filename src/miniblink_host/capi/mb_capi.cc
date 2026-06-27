@@ -640,7 +640,7 @@ void mbSetRequestCallbackEx(mbRequestCallbackEx cb, void* userdata) {
 // (URL + status + mutable body), valid only for the duration of one callback.
 struct mbResponse {
   const std::string& url;
-  int status;
+  int* status;  // mutable: mbResponseSetStatus rewrites the delivered HTTP status
   const std::string& headers;
   std::string* body;
 };
@@ -655,7 +655,7 @@ void mbSetResponseCallback(mbResponseCallback cb, void* userdata) {
   g_response_ud = userdata;
   if (cb) {
     mb::MbSetResponseHook(
-        [](const std::string& url, int status, const std::string& headers,
+        [](const std::string& url, int* status, const std::string& headers,
            std::string* body) {
           mbResponse r{url, status, headers, body};
           if (g_response_cb)
@@ -692,7 +692,12 @@ const char* mbResponseURL(mbResponse* r) {
 }
 
 int mbResponseStatus(mbResponse* r) {
-  return r ? r->status : 0;
+  return (r && r->status) ? *r->status : 0;
+}
+
+void mbResponseSetStatus(mbResponse* r, int status) {
+  if (r && r->status && status > 0)
+    *r->status = status;  // rewrite the HTTP status the page will see
 }
 
 const char* mbResponseHeaders(mbResponse* r) {

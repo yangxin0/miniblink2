@@ -107,11 +107,14 @@ bool MbRequestHookBlocks(const std::string& url, const std::string& method,
 // inspect headers (Content-Type, Set-Cookie, rate-limit, custom API headers) and/or
 // REPLACE the response bytes before they reach the page. Runs on the main thread inside the
 // load; replacing the body updates the delivered Content-Length.
-using MbResponseHook = std::function<void(const std::string& url, int status,
+// `status` is MUTABLE (an embedder may rewrite the delivered HTTP status — e.g. force a
+// 503 to exercise a page's retry path, or normalize an upstream 500 to 200) alongside the
+// body; the loader uses the (possibly modified) status for the response it delivers.
+using MbResponseHook = std::function<void(const std::string& url, int* status,
                                           const std::string& headers,
                                           std::string* body)>;
 void MbSetResponseHook(MbResponseHook hook);
-void MbInvokeResponseHook(const std::string& url, int status,
+void MbInvokeResponseHook(const std::string& url, int* status,
                           const std::string& headers, std::string* body);
 
 // Response mocking: serve a canned body for any request whose URL contains

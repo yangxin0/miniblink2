@@ -564,6 +564,11 @@ typedef void (*mbResponseCallback)(mbResponse*, void* userdata);
 MB_EXPORT void mbSetResponseCallback(mbResponseCallback cb, void* userdata);
 MB_EXPORT const char* mbResponseURL(mbResponse*);
 MB_EXPORT int mbResponseStatus(mbResponse*);
+// Rewrite the HTTP status the page will see for this response (e.g. force 503 to test a
+// page's retry/error path, or normalize an upstream 500 to 200). With mbResponseSetBody
+// this lets the response hook fully fabricate a response dynamically — route.fulfill-like,
+// but decided from the actual upstream response (vs the static mbMockResponse).
+MB_EXPORT void mbResponseSetStatus(mbResponse*, int status);
 // The raw response HEADER block (final response's header lines, "\r\n"-separated). Empty
 // for non-http loads (data:/file:/mock). Read Content-Type, Set-Cookie, rate-limit, or any
 // custom API header an app cares about. Valid only during the callback.

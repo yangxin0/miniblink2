@@ -186,6 +186,32 @@ int main() {
     mbClearMocks();
   }
 
+  // 0d2. Response hook can rewrite the STATUS (mbResponseSetStatus), not just the body — so
+  // an embedder can dynamically fabricate a response (route.fulfill-like, decided from the
+  // actual upstream response). A mock serves 200; the hook forces 503; the page's fetch must
+  // see response.status===503 and response.ok===false. Offline.
+  {
+    mbMockResponse("api.test/flaky", "upstream-ok", "text/plain", 200);
+    mbSetResponseCallback(
+        [](mbResponse* r, void*) {
+          if (std::strstr(mbResponseURL(r), "api.test/flaky"))
+            mbResponseSetStatus(r, 503);  // turn the 200 into a 503
+        },
+        nullptr);
+    mbLoadHTML(v,
+               "<body><div id='s'>?</div><script>"
+               "fetch('https://api.test/flaky').then(r=>{"
+               "document.getElementById('s').textContent=r.status+':'+r.ok;});</script></body>",
+               "https://api.test/");
+    mbWaitForFunction(v, "document.getElementById('s').textContent!=='?'", 2000);
+    const std::string s = Eval(v, "document.getElementById('s').textContent");
+    Expect(s == "503:false",
+           "mbResponseSetStatus: response hook rewrites the HTTP status the page sees",
+           "page=[" + s + "]");
+    mbSetResponseCallback(nullptr, nullptr);
+    mbClearMocks();
+  }
+
   // 0e. mbDownloadURL fetches a URL through the engine and writes the body to disk
   // WITHOUT rendering it. (a) a data: URL decodes to the file; (b) a mocked URL is
   // served from the interception layer (no network) AND the response hook can rewrite
