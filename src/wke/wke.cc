@@ -490,6 +490,42 @@ void wkeKillFocus(wkeWebView webView) {
     mbSetFocus(webView->view, 0);
 }
 
+// Editor clipboard/selection/history commands (miniblink49 parity). Each maps to the
+// matching blink editing command via mbExecuteEditCommand. SelectAll/Copy work on any
+// page's selection; Cut/Paste/Delete/Undo/Redo act on the focused editable.
+void wkeEditorSelectAll(wkeWebView webView) {
+  if (webView && webView->view)
+    mbExecuteEditCommand(webView->view, "SelectAll");
+}
+void wkeEditorUnSelect(wkeWebView webView) {
+  if (webView && webView->view)
+    mbExecuteEditCommand(webView->view, "Unselect");
+}
+void wkeEditorCopy(wkeWebView webView) {
+  if (webView && webView->view)
+    mbExecuteEditCommand(webView->view, "Copy");
+}
+void wkeEditorCut(wkeWebView webView) {
+  if (webView && webView->view)
+    mbExecuteEditCommand(webView->view, "Cut");
+}
+void wkeEditorPaste(wkeWebView webView) {
+  if (webView && webView->view)
+    mbExecuteEditCommand(webView->view, "Paste");
+}
+void wkeEditorDelete(wkeWebView webView) {
+  if (webView && webView->view)
+    mbExecuteEditCommand(webView->view, "Delete");
+}
+void wkeEditorUndo(wkeWebView webView) {
+  if (webView && webView->view)
+    mbExecuteEditCommand(webView->view, "Undo");
+}
+void wkeEditorRedo(wkeWebView webView) {
+  if (webView && webView->view)
+    mbExecuteEditCommand(webView->view, "Redo");
+}
+
 void wkeSetLoadImages(wkeWebView webView, bool enable) {
   // Enable (default) or disable automatic image loading — disabling speeds up
   // text/HTML scraping (no image fetch/decode). Inline data: images are

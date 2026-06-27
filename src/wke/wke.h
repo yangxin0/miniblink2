@@ -134,6 +134,17 @@ WKE_API const utf8* wkeGetUserAgent(wkeWebView webView);
 // active element) — simulate the embedding window gaining/losing focus.
 WKE_API void wkeSetFocus(wkeWebView webView);
 WKE_API void wkeKillFocus(wkeWebView webView);
+// Editor commands (miniblink49 parity) — clipboard, selection, and undo/redo on the
+// focused editable (or the page selection for SelectAll/Copy). Map to blink editing
+// commands. Clipboard ops use the in-process clipboard (wkeGetClipboard / mbGetClipboard).
+WKE_API void wkeEditorSelectAll(wkeWebView webView);
+WKE_API void wkeEditorUnSelect(wkeWebView webView);
+WKE_API void wkeEditorCopy(wkeWebView webView);
+WKE_API void wkeEditorCut(wkeWebView webView);
+WKE_API void wkeEditorPaste(wkeWebView webView);
+WKE_API void wkeEditorDelete(wkeWebView webView);
+WKE_API void wkeEditorUndo(wkeWebView webView);
+WKE_API void wkeEditorRedo(wkeWebView webView);
 // Extra HTTP request headers added to the navigation and its subresources:
 // newline-separated "Name: Value" lines (NULL/"" clears them). Set before
 // loading. Port extension — classic wke injects per-request via the net hook.

@@ -2077,6 +2077,32 @@ int main() {
     }
   }
 
+  // wke editor commands (miniblink49 parity): SelectAll -> Delete -> Undo drive blink's
+  // editing on a focused contenteditable, verified synchronously via the DOM. (Copy/Cut/
+  // Paste route through the same mbExecuteEditCommand path; clipboard write is async so
+  // this verifies the cluster via the synchronous selection/delete/undo path.)
+  {
+    wkeLoadHTML(wv, "<body><div id='e' contenteditable>ABCDEF</div></body>");
+    wkeSetFocus(wv);
+    wkeRunJS(wv, "document.getElementById('e').focus()");
+    wkeEditorSelectAll(wv);
+    const bool selected =
+        std::strstr(jsToTempString(es, wkeRunJS(wv, "''+window.getSelection()")),
+                    "ABCDEF") != nullptr;
+    wkeEditorDelete(wv);
+    const bool deleted =
+        std::strcmp(jsToTempString(
+                        es, wkeRunJS(wv, "document.getElementById('e').textContent")),
+                    "") == 0;
+    wkeEditorUndo(wv);
+    const bool undone =
+        std::strstr(jsToTempString(
+                        es, wkeRunJS(wv, "document.getElementById('e').textContent")),
+                    "ABCDEF") != nullptr;
+    check(selected && deleted && undone,
+          "wkeEditor SelectAll/Delete/Undo drive blink editing on a contenteditable");
+  }
+
   wkeDestroyWebView(wv);
   wkeFinalize();
 
