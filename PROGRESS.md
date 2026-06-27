@@ -1749,6 +1749,46 @@ in-process WebGPU context into MbPlatform::CreateWebGPUGraphicsContext3DProvider
 navigator.gpu.requestAdapter() resolves to a real adapter — the blink-side glue, the analog
 of WebGL milestone C. Four probes now (gl/gpu/dawn/webgpu) all exit 0; full battery green
 (mb_smoke 145, platform 46, render 102, shot 66, wke 114), no leaks.
+[DONE — WebGPU milestone C1: PRODUCTION (non-testonly) in-process WebGPU context]. The
+milestone-B probe used the TESTONLY gpu::WebGPUInProcessContext (it keys on a base::Test-
+SimpleTaskRunner) + viz::TestGpuServiceHolder — neither links into the non-test host
+library, so C as a whole was blocked. C1 removes that blocker. NEW platform/mb_webgpu_
+context.{h,cc} — miniblink::MbWebGPUInProcessContext, a near-verbatim copy of WebGPUInProcess
+Context with the TestSimpleTaskRunner swapped for the CURRENT thread's real SingleThread
+TaskRunner (replies arrive via the owning thread's message loop) and the unused gtest include
+dropped. It builds on ONLY non-testonly deps: InProcessCommandBuffer + InProcessGpuThread
+Holder (non-testonly via patches/0006), //gpu/command_buffer/client:client (TransferBuffer +
+CommandBufferHelper) + :webgpu (WebGPUImplementation). NEW tools/mb_webgpu2_probe.cc proves
+it end to end with a NON-testonly target: process-wide InProcessGpuThreadHolder + MbWebGPU
+InProcessContext + a base::RunLoop pump; requests an adapter AND device through the wire.
+VERIFIED (exit 0, wired into build.sh after mb_webgpu_probe): "production adapter backend=6
+type=3 device=SwiftShader" + "production device OK". THREE non-obvious requirements found +
+encoded (each was a fatal until fixed), and each is exactly what milestone C2's blink glue
+will need:
+  1. gr_context_type=kGL, NOT kGraphiteDawn. InProcessGpuThreadHolder sets up no dawn_context_
+     provider, so the default kGraphiteDawn Skia backend CHECK-fails in SharedContextState::
+     InitializeGanesh (the same null-provider the WebGL-milestone-B probe dodged). The WebGPU
+     decoder owns its OWN dawn::native::Instance, independent of Skia's GPU backend, so Ganesh-
+     over-GL for the shared context is fine and WebGPU still works.
+  2. Dawn proc-table coordination for an in-process client+service (mirrors viz::TestGpuService
+     Holder lines 198-202): dawnProcSetProcs(&dawnThreadDispatchProcTable) [global=thread
+     dispatcher] + dawnProcSetDefaultThreadProcs(dawn::native::GetProcs()) [service threads with
+     no explicit procs fall back to NATIVE] + dawnProcSetPerThreadProcs(dawn::wire::client::Get
+     Procs()) [the client thread uses WIRE procs]. Missing the global -> the wgpu:: C++ wrappers
+     dispatch through a null table and SIGSEGV at instance-wrap; missing the default -> the GPU
+     thread null-dispatches when it processes flushed commands.
+  3. No external decoder poke needed: WebGPUDecoderImpl::HandleDawnCommands calls Perform
+     PollingWork() INLINE after each wire-command batch, so the client only flushes + runs its
+     own message loop and requestAdapter/Device resolve. (mb_webgpu_probe's manual ScheduleGpu
+     MainTask poll was a TestGpuServiceHolder artifact, not a real requirement.)
+mb_webgpu_context.{cc,h} are compiled ONLY into the probe for now (NOT yet into libminiblink_
+host), so the host library + battery are unchanged. REMAINING (milestone C2): add the context
+to the host library, build a blink::WebGraphicsContext3DProvider around it (exposing WebGPU
+Interface() + the API channel, the analog of mb_webgl.cc's MbWebGLContextProvider), return it
+from MbPlatform::CreateWebGPUGraphicsContext3DProviderAsync (instead of today's graceful null),
+and verify a PAGE's navigator.gpu.requestAdapter() resolves. Five probes now (gl/gpu/dawn/
+webgpu/webgpu2) all exit 0; full battery green (mb_smoke 145, platform 46, render 102, shot 66,
+wke 114), no leaks.
 [DONE — milestone C: WEBGL WORKS END-TO-END]. getContext('webgl') now returns a real,
 rendering context in the actual blink process. Verified mb_smoke_render 41z: a WebGL
 canvas clearColor(green)+clear+readPixels(0,0,1,1) -> [0,255,0,255], and

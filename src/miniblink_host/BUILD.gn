@@ -263,3 +263,35 @@ executable("mb_webgpu_probe") {
     "//ui/gl/init",
   ]
 }
+
+# mb_webgpu2_probe: WebGPU bring-up milestone C1 — prove the PRODUCTION (non-testonly)
+# in-process WebGPU context (platform/mb_webgpu_context, our copy of WebGPUInProcessContext
+# using a real task runner) resolves requestAdapter/requestDevice. Links ONLY non-testonly
+# deps (the in-process GPU command-buffer targets are non-testonly via patches/0006), so a
+# green run means this path can be wired into the host library + MbPlatform (milestone C2).
+executable("mb_webgpu2_probe") {
+  sources = [
+    "platform/mb_webgpu_context.cc",
+    "platform/mb_webgpu_context.h",
+    "tools/mb_webgpu2_probe.cc",
+  ]
+  deps = [
+    "//base",
+    "//gpu/command_buffer/client:client",
+    "//gpu/command_buffer/client:webgpu",
+    "//gpu/command_buffer/client:webgpu_interface",
+    "//gpu/command_buffer/common",
+    "//gpu/command_buffer/service",
+    "//gpu/config",
+    "//gpu/ipc:gl_in_process_context",
+    "//gpu/ipc:gpu_thread_holder",
+    "//gpu/ipc/common",
+    "//third_party/dawn/include/dawn:cpp_headers",
+    "//third_party/dawn/src/dawn:proc",
+    "//third_party/dawn/src/dawn/native",
+    "//third_party/dawn/src/dawn/wire",
+    "//ui/gl",
+    "//ui/gl/init",
+    "//url",
+  ]
+}
