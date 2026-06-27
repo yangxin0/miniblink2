@@ -336,6 +336,13 @@ MB_EXPORT void mbEmulateDevice(mbView*, int width, int height,
 // `scale`x. Allocate paint/PNG buffers at logical_width*scale x logical_height*scale.
 MB_EXPORT void mbSetDeviceScaleFactor(mbView*, float scale);
 
+// PAGE ZOOM (Ctrl+/Ctrl- in a browser): re-lay-out the whole page at `factor` (1.0 =
+// 100%, 1.5 = 150%, 0.75 = 75%) — text AND layout scale, so screenshots capture the zoom.
+// Layout-level (no compositor). Distinct from mbSetDeviceScaleFactor (HiDPI raster
+// crispness at the same CSS layout). mbGetZoomFactor returns the current factor.
+MB_EXPORT void mbSetZoomFactor(mbView*, float factor);
+MB_EXPORT float mbGetZoomFactor(mbView*);
+
 // Override the User-Agent (navigator.userAgent + outgoing HTTP requests). Call
 // before mbLoadURL/mbLoadHTML so it applies to that navigation. Pass NULL/empty to
 // restore the built-in default.

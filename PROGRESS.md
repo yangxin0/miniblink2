@@ -1410,6 +1410,19 @@ didn't break it). mb_smoke 158->159, full battery green (platform 46, render 130
 114), no leaks. Network interception is now route-class both ways: request (inspect method/
 headers/body, block) + response (inspect status/headers/body, rewrite status + body).
 
+[DONE - PAGE ZOOM (mbSetZoomFactor / mbGetZoomFactor)]. A genuinely MISSING webview feature
+(Ctrl+/Ctrl- zoom) — the embedder had device-scale (HiDPI raster) but no page zoom (re-layout
+the whole page bigger/smaller). mbSetZoomFactor(view, factor) (1.0=100%, 1.5=150%, 0.75=75%):
+WebFrameWidget::SetZoomLevel(blink::ZoomFactorToZoomLevel(factor)) — a LAYOUT zoom (text +
+layout), so it screenshots zoomed. No compositor needed: SetZoomInternal sets the document's
+layout zoom factor (no does_composite_ DCHECK, unlike the device-scale SetZoomFactorForDevice-
+ScaleFactor path). mbGetZoomFactor returns the current factor. Verified mb_smoke_render 41z-zoom:
+a 40x40 box at the top-left -> at 100% pixel (60,60) is the white bg (outside the box); at 200%
+the box is 80x80 device px so (60,60) is INSIDE it (box color); mbGetZoomFactor reads 2.0. So
+zoom genuinely re-lays out + screenshots. render 130->131, full battery green (mb_smoke 159,
+platform 46, shot 66, wke 114), no leaks. (Distinct from mbSetDeviceScaleFactor, which keeps the
+CSS layout and only raises raster crispness.)
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

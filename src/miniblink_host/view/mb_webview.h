@@ -189,6 +189,12 @@ class MbWebView {
   // window.devicePixelRatio == scale and rasterizes at `scale`x in PaintInto, so
   // captures are retina-crisp. Caller sizes the output bitmap to logical*scale.
   void SetDeviceScaleFactor(float scale);
+  // PAGE ZOOM (Ctrl+/Ctrl- in a browser): re-lay-out the whole page at `factor` (1.0 =
+  // 100%, 1.5 = 150%, 0.75 = 75%) — text AND layout scale, so it composites/screenshots at
+  // the zoom. Layout-level (no compositor). Distinct from SetDeviceScaleFactor (HiDPI
+  // raster crispness, same CSS layout). GetZoomFactor returns the current factor.
+  void SetZoomFactor(float factor);
+  float GetZoomFactor() const { return zoom_factor_; }
   // Device/mobile emulation WITHOUT the compositor (EnableDeviceEmulation drives a null
   // LayerTreeHost -> SIGSEGV). Drives the layout-visible part via WebSettings: mobile ->
   // coarse pointer + no hover + viewport-meta/mobile-viewport, desktop -> fine pointer +
@@ -569,6 +575,7 @@ class MbWebView {
   [[maybe_unused]] blink::WebViewImpl* web_view_ = nullptr;     // owned by blink; Close() in dtor
   [[maybe_unused]] blink::WebLocalFrame* main_frame_ = nullptr; // owned by blink
   float dsf_ = 1.0f;  // device pixel ratio; PaintInto scales the canvas by it
+  float zoom_factor_ = 1.0f;  // page zoom (SetZoomFactor); 1.0 = 100%
   int find_id_ = 0;   // find-in-page session identifier (stable across FindText/FindNext)
   std::string find_text_;     // last mbFindText needle (for FindNext)
   bool find_match_case_ = false;  // last search's case sensitivity

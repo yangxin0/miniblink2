@@ -1301,6 +1301,38 @@ static void RunCases(mbView* v, int W, int H) {
            "st=[" + st + "] prop=[" + prop + "] ga=[" + ga + "]");
   }
 
+  // 41z-zoom. PAGE ZOOM (mbSetZoomFactor) re-lays out the whole page bigger and the change
+  // shows in a SCREENSHOT — the webview Ctrl+/Ctrl- feature. A 40x40 box at the top-left:
+  // at 100% the pixel (60,60) is the white background (outside the box); at 200% the box is
+  // 80x80 device px so (60,60) falls INSIDE it (box color). Verifies zoom affects rendering.
+  {
+    mbLoadHTML(v,
+        "<body style='margin:0;background:#fff'>"
+        "<div style='position:absolute;top:0;left:0;width:40px;height:40px;"
+        "background:rgb(20,180,40)'></div></body>",
+        "https://zoom.test/");
+    mbWait(v, 60);
+    auto box_at = [&](int x, int y) {
+      std::vector<uint8_t> cv(static_cast<size_t>(W) * H * 4, 0);
+      mbPaintToBitmap(v, cv.data(), W, H, W * 4);
+      size_t i = (static_cast<size_t>(y) * W + x) * 4;
+      // box is rgb(20,180,40) -> BGRA B=40,G=180,R=20 (green-ish), not white.
+      return cv[i + 1] > 120 && cv[i] < 120 && cv[i + 2] < 120;
+    };
+    mbSetZoomFactor(v, 1.0f);
+    mbWait(v, 40);
+    const bool at100 = box_at(60, 60);   // outside the 40px box -> false
+    mbSetZoomFactor(v, 2.0f);
+    mbWait(v, 60);
+    const bool at200 = box_at(60, 60);   // inside the 80px box -> true
+    const float gz = mbGetZoomFactor(v);
+    mbSetZoomFactor(v, 1.0f);            // reset
+    Expect(!at100 && at200 && gz == 2.0f,
+           "mbSetZoomFactor zooms the page (a box doubles in the screenshot at 200%)",
+           "at100=" + std::string(at100 ? "1" : "0") + " at200=" +
+               (at200 ? "1" : "0") + " gz=" + std::to_string(gz));
+  }
+
   // 41o0. View Transitions DEGRADE GRACEFULLY (patch 0009): document.startViewTransition()
   // needs the compositor to capture/animate snapshots; with our non-compositing widget the
   // capture never completes, so ready/finished hung FOREVER (probed: neither settled in 5s).

@@ -396,6 +396,15 @@ void mbSetDeviceScaleFactor(mbView* v, float scale) {
     v->impl->SetDeviceScaleFactor(scale);
 }
 
+void mbSetZoomFactor(mbView* v, float factor) {
+  if (v && v->impl)
+    v->impl->SetZoomFactor(factor);
+}
+
+float mbGetZoomFactor(mbView* v) {
+  return (v && v->impl) ? v->impl->GetZoomFactor() : 1.0f;
+}
+
 void mbEmulateDevice(mbView* v, int width, int height, float deviceScaleFactor,
                      int mobile) {
   if (v && v->impl)

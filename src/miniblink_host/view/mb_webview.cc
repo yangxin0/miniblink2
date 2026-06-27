@@ -42,6 +42,7 @@
 #include "third_party/blink/public/web/web_ax_context.h"
 #include "third_party/blink/public/web/web_ax_object.h"
 #include "third_party/blink/public/web/web_document.h"
+#include "third_party/blink/public/common/page/page_zoom.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_node.h"
@@ -1868,6 +1869,16 @@ void MbWebView::EmulateDevice(int width, int height, float device_scale_factor,
     Resize(width, height);
   // SetDeviceScaleFactor also nudges media queries (covers the pointer/hover change).
   SetDeviceScaleFactor(device_scale_factor > 0.0f ? device_scale_factor : dsf_);
+}
+
+void MbWebView::SetZoomFactor(float factor) {
+  zoom_factor_ = factor > 0.0f ? factor : 1.0f;
+  if (!widget_ || !widget_->widget())
+    return;
+  // Page zoom = a layout zoom factor on the frame widget (re-lays out the page at the
+  // zoom — text + layout — so it screenshots zoomed). No compositor needed (it sets the
+  // document's layout zoom; cf. the device-scale path which DCHECKs does_composite_).
+  widget_->widget()->SetZoomLevel(blink::ZoomFactorToZoomLevel(zoom_factor_));
 }
 
 void MbWebView::SetDeviceScaleFactor(float scale) {
