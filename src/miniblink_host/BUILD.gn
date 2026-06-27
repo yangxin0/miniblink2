@@ -312,3 +312,27 @@ executable("mb_webgpu2_probe") {
     "//url",
   ]
 }
+
+# mb_compositor_probe: SOFTWARE COMPOSITOR bring-up milestone A — an in-process viz
+# SoftwareRenderer draws a CompositorRenderPass (solid-color quad) to a bitmap and reads it
+# back. Blink-free; proves the software render-pass->pixels path the LayerTreeFrameSink wraps.
+# testonly: cc/viz test_support (PixelTestOutputSurface, TestGpuServiceHolder, render-pass
+# helpers).
+executable("mb_compositor_probe") {
+  testonly = true
+  sources = [ "tools/mb_compositor_probe.cc" ]
+  deps = [
+    "//base",
+    "//base/test:test_support",
+    "//cc:test_support",
+    "//components/viz/common",
+    "//components/viz/service",
+    "//components/viz/test:test_support",
+    "//mojo/core/embedder",
+    "//skia",
+    "//ui/gfx",
+    "//ui/gfx/geometry",
+    "//ui/gl",
+    "//ui/gl/init",
+  ]
+}

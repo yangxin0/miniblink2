@@ -2185,3 +2185,19 @@ MILESTONE PLAN (each a bounded, verifiable, committable slice):
       reconciled). The risky live-widget step, gated on A-C proving the pieces.
 This tick: approach confirmed with the user + architecture mapped + milestones defined. Builds
 start next tick (milestone A). Tree clean (doc-only).
+
+[DONE — compositor milestone A: in-process viz SOFTWARE render-pass -> bitmap]. tools/
+mb_compositor_probe.cc (blink-free, testonly) proves the software-compositing rasterization
+works in-process — the backend a software LayerTreeFrameSink will wrap. Mirrors cc::PixelTest::
+SetUpSoftwareRenderer + the SoftwareRenderer SolidColorQuad test: a viz::SoftwareRenderer over a
+cc::PixelTestOutputSurface(viz::SoftwareOutputDevice) + viz::DisplayResourceProviderSoftware
+(from a viz::TestGpuServiceHolder, for the software shared-bitmap manager) draws a hand-crafted
+AggregatedRenderPass (one yellow SolidColorDrawQuad filling a 100x100 viewport) via DrawFrame +
+SwapBuffers, then reads the result back through output_surface->ReadbackForTesting (a
+CopyOutputRequest -> SkBitmap). VERIFIED (exit 0, wired into build.sh after mb_webgpu2_probe):
+center pixel = R255 G255 B0 (yellow). No cc::LayerTreeHost or scheduler yet — just render-pass
+-> pixels. (GL forced ANGLE/SwiftShader + main-thread InitializeGLOneOff, the established probe
+pattern, since TestGpuServiceHolder's GPU service reads the process-wide GL impl.) Six probes ->
+seven; full battery green (mb_smoke 165, platform 46, render 133, shot 66), no leaks. NEXT
+(milestone B): stand up a full viz::Display (FrameSinkManagerImpl + BeginFrameSource + a
+software OutputSurface) and submit a CompositorFrame through it.
