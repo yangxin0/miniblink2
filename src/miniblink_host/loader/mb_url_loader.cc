@@ -669,24 +669,20 @@ bool MbIsUrlBlocked(const std::string& url) {
 
 // --- Dynamic per-request hook ------------------------------------------------
 namespace {
-struct RequestHook {
-  MbRequestHookFn fn = nullptr;
-  void* userdata = nullptr;
-};
-RequestHook& Hook() {
-  static RequestHook* h = new RequestHook();
+MbRequestHook& RequestHook() {
+  static base::NoDestructor<MbRequestHook> h;
   return *h;
 }
 }  // namespace
 
-void MbSetRequestHook(MbRequestHookFn fn, void* userdata) {
-  Hook().fn = fn;
-  Hook().userdata = userdata;
+void MbSetRequestHook(MbRequestHook hook) {
+  RequestHook() = std::move(hook);
 }
 
-bool MbRequestHookBlocks(const std::string& url) {
-  const RequestHook& h = Hook();
-  return h.fn && h.fn(url.c_str(), h.userdata) != 0;
+bool MbRequestHookBlocks(const std::string& url, const std::string& method,
+                         const std::string& headers, const std::string& body) {
+  const MbRequestHook& h = RequestHook();
+  return h && h(url, method, headers, body) != 0;
 }
 
 // --- Response hook -----------------------------------------------------------
@@ -1017,8 +1013,24 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   // Request blocking: fail a blocked URL up front (ERR_BLOCKED_BY_CLIENT), before
   // any fetch — the resource simply never loads (ad/tracker/image suppression).
   // Both the static blocklist (matched on the post-rewrite fetch_url) and the dynamic
-  // per-request hook (given the page's original url to inspect) can veto the request.
-  if (MbIsUrlBlocked(fetch_url.spec()) || MbRequestHookBlocks(url.spec())) {
+  // per-request hook can veto. The hook gets the full request (url + method + headers +
+  // body) so an embedder can inspect/monitor API calls, not just match URLs.
+  std::string hook_headers;
+  for (const auto& kv : request->headers.GetHeaderVector()) {
+    if (!hook_headers.empty())
+      hook_headers += "\n";
+    hook_headers += kv.key + ": " + kv.value;
+  }
+  std::string hook_body;
+  if (request->request_body) {
+    for (const auto& el : *request->request_body->elements())
+      if (el.type() == network::DataElement::Tag::kBytes) {
+        std::string_view sv = el.As<network::DataElementBytes>().AsStringView();
+        hook_body.append(sv.data(), sv.size());
+      }
+  }
+  if (MbIsUrlBlocked(fetch_url.spec()) ||
+      MbRequestHookBlocks(url.spec(), request->method, hook_headers, hook_body)) {
     client_->DidFail(
         blink::WebURLError(net::ERR_BLOCKED_BY_CLIENT, ToWebURL(url)),
         base::TimeTicks::Now(), blink::URLLoaderClient::kUnknownEncodedDataLength,

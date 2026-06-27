@@ -1371,6 +1371,21 @@ the response hook's mbResponseHeaders carries the status line + content-type (le
 no leaks. So network interception is now full-fidelity on the response side: inspect headers +
 status + body, and replace the body (mbResponseSetBody) — Playwright-route-like.
 
+[DONE - request hook exposes method + headers + body (mbSetRequestCallbackEx)]. The other half
+of full-fidelity network interception (after last tick's response headers): the request hook
+gave only the URL, so an embedder couldn't see WHAT a page POSTs (method/headers/body) - only
+match URLs. Refactored the internal MbRequestHook from a raw fn-ptr to a std::function carrying
+(url, method, headers, body); the loader Deliver site now extracts request->method, the request
+header lines, and the kBytes upload body and passes them (the download/FetchUrl site passes
+url+GET). capi gained mbSetRequestCallbackEx(cb,ud) -> cb(url, method, headers, body, body_len,
+ud) (the basic url-only mbSetRequestCallback still works - it now wraps the rich hook, ignoring
+the extra fields, instead of the old reinterpret_cast). Verified mb_smoke 0c2: a same-origin
+fetch POST {headers:{X-Tok:abc}, body:'payload-42'} -> the hook captures m=POST hdr=1
+body=payload-42; 0c (basic url-only veto) still passes. mb_smoke 157->158, full battery green
+(platform 46, render 129, shot 66, wke 114), no leaks. So request+response interception is now
+full-fidelity both ways - inspect/monitor a request's method+headers+body, block it, and on the
+response inspect status+headers+body and replace the body. Playwright-route-class.
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

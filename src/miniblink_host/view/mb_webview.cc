@@ -441,7 +441,10 @@ bool MbWebView::FetchDownloadBody(const std::string& orig,
   // bytes. http(s) also carries the view's UA + extra headers + per-URL headers
   // + cookies + proxy; data: is decoded inline by the loader.
   const std::string url = MbApplyUrlRewrites(orig);
-  if (MbIsUrlBlocked(url) || MbRequestHookBlocks(orig))
+  // A non-committing GET fetch (download core); no request body. Give the hook the URL +
+  // method so an embedder sees/vetoes it like any other request.
+  if (MbIsUrlBlocked(url) ||
+      MbRequestHookBlocks(orig, "GET", std::string(), std::string()))
     return false;
   std::string final_url, headers;
   int status = 0;

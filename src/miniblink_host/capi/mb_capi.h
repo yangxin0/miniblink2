@@ -541,6 +541,17 @@ MB_EXPORT void mbClearUrlBlocks(void);
 typedef int (*mbRequestCallback)(const char* url, void* userdata);
 MB_EXPORT void mbSetRequestCallback(mbRequestCallback cb, void* userdata);
 
+// Richer per-request hook for inspection/monitoring: like mbSetRequestCallback but the
+// callback also gets the request `method` (GET/POST/...), the request `headers`
+// ("\n"-joined "Name: value" lines), and the POST/PUT `body` (`body`/`body_len`; empty for
+// GET) — so an embedder can monitor exactly what API calls a page makes, not just URLs.
+// Return nonzero to BLOCK, zero to allow. Setting either request callback replaces the
+// other (one slot). NULL clears it.
+typedef int (*mbRequestCallbackEx)(const char* url, const char* method,
+                                   const char* headers, const char* body,
+                                   int body_len, void* userdata);
+MB_EXPORT void mbSetRequestCallbackEx(mbRequestCallbackEx cb, void* userdata);
+
 // Response hook: a process-wide callback invoked after a successful load (fetch / mock /
 // file / data) with an opaque mbResponse handle, BEFORE the body reaches the page — so
 // you can inspect the headers / status or REPLACE the response bytes (inject a script,

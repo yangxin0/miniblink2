@@ -613,8 +613,27 @@ void mbClearUrlBlocks(void) {
 }
 
 void mbSetRequestCallback(mbRequestCallback cb, void* userdata) {
-  // mbRequestCallback and MbRequestHookFn share the (const char*, void*)->int shape.
-  mb::MbSetRequestHook(reinterpret_cast<mb::MbRequestHookFn>(cb), userdata);
+  if (cb) {
+    mb::MbSetRequestHook([cb, userdata](const std::string& url, const std::string&,
+                                        const std::string&, const std::string&) {
+      return cb(url.c_str(), userdata);  // URL-only basic callback
+    });
+  } else {
+    mb::MbSetRequestHook({});
+  }
+}
+
+void mbSetRequestCallbackEx(mbRequestCallbackEx cb, void* userdata) {
+  if (cb) {
+    mb::MbSetRequestHook(
+        [cb, userdata](const std::string& url, const std::string& method,
+                       const std::string& headers, const std::string& body) {
+          return cb(url.c_str(), method.c_str(), headers.c_str(), body.data(),
+                    static_cast<int>(body.size()), userdata);
+        });
+  } else {
+    mb::MbSetRequestHook({});
+  }
 }
 
 // The opaque mbResponse handle is a transient view of the loader's per-response state

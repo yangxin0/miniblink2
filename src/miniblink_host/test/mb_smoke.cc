@@ -122,6 +122,37 @@ int main() {
     mbClearMocks();
   }
 
+  // 0c2. mbSetRequestCallbackEx: the request hook also sees the METHOD, request HEADERS,
+  // and POST BODY — so an embedder can MONITOR what API calls a page makes (a POST and its
+  // payload), not just match URLs. A same-origin fetch POST with a custom header + body ->
+  // the hook captures method=POST, the header, and the exact body. Offline (mock, no net).
+  {
+    static std::string* cap = new std::string();  // -Wexit-time-destructors
+    cap->clear();
+    mbMockResponse("api.test/submit", "{\"ok\":1}", "application/json", 200);
+    mbSetRequestCallbackEx(
+        [](const char* url, const char* method, const char* headers,
+           const char* body, int body_len, void*) -> int {
+          if (std::string(url).find("api.test/submit") != std::string::npos) {
+            const bool hdr = std::string(headers).find("X-Tok: abc") != std::string::npos;
+            *cap = std::string("m=") + method + " hdr=" + (hdr ? "1" : "0") +
+                   " body=" + std::string(body, static_cast<size_t>(body_len));
+          }
+          return 0;  // allow
+        },
+        nullptr);
+    mbLoadHTML(v, "<body>reqex</body>", "https://api.test/");
+    mbRunJS(v, "fetch('/submit',{method:'POST',headers:{'X-Tok':'abc'},"
+               "body:'payload-42'});");
+    mbWaitForFunction(v, "true", 300);
+    mbWait(v, 100);
+    mbSetRequestCallbackEx(nullptr, nullptr);
+    mbClearMocks();
+    Expect(*cap == "m=POST hdr=1 body=payload-42",
+           "mbSetRequestCallbackEx: request hook sees method + headers + POST body",
+           "[" + *cap + "]");
+  }
+
   // 0d. Response hook: mbSetResponseCallback sees every response BEFORE the page and can
   // REPLACE the body. A mock serves {"v":1}; the hook inspects it (records the original)
   // and rewrites it to {"v":99}; the page's fetch() must observe the rewritten 99, and

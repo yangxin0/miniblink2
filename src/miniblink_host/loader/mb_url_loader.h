@@ -87,14 +87,19 @@ void MbBlockUrl(const std::string& substring);
 void MbClearUrlBlocks();
 bool MbIsUrlBlocked(const std::string& url);
 
-// Dynamic per-request hook: a process-wide callback consulted for EVERY request URL
-// (alongside the static block/mock/rewrite tables), so an embedder can inspect and
-// decide at runtime rather than pre-registering substrings. Returns nonzero to BLOCK
-// the request (failed like MbBlockUrl), zero to allow. Null clears it. MbRequestHookBlocks
-// invokes it (the loader's check). Runs on the main thread inside the load.
-typedef int (*MbRequestHookFn)(const char* url, void* userdata);
-void MbSetRequestHook(MbRequestHookFn fn, void* userdata);
-bool MbRequestHookBlocks(const std::string& url);
+// Dynamic per-request hook: a process-wide callback consulted for EVERY request
+// (alongside the static block/mock/rewrite tables), so an embedder can inspect the
+// request — URL, method, request headers, and POST/PUT body — and decide at runtime
+// whether to allow it. Returns nonzero to BLOCK (failed like MbBlockUrl), zero to allow.
+// {} clears it. MbRequestHookBlocks invokes it. Runs on the main thread inside the load.
+// (headers is the "\n"-joined request header lines; body is the raw upload bytes, empty
+// for GET.)
+using MbRequestHook =
+    std::function<int(const std::string& url, const std::string& method,
+                      const std::string& headers, const std::string& body)>;
+void MbSetRequestHook(MbRequestHook hook);
+bool MbRequestHookBlocks(const std::string& url, const std::string& method,
+                         const std::string& headers, const std::string& body);
 
 // Response hook: a process-wide callback invoked after a successful fetch/mock/file/data
 // load with the request URL, HTTP status, the raw response HEADER block (final response's
