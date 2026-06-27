@@ -1272,6 +1272,35 @@ static void RunCases(mbView* v, int W, int H) {
            "wg=[" + wg + "]");
   }
 
+  // 41n2. Compositor-ADJACENT CSS/animation features work (no crash/hang) without the
+  // compositor: scroll-driven animations (ScrollTimeline — element.animate with a scroll
+  // timeline runs), Houdini @property (a registered '<length>' custom property applies its
+  // typed value), and the Web Animations registry (getAnimations). These are the same class
+  // as View Transitions (which DID hang) — this guards that they keep degrading gracefully.
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0'>"
+      "<style>@property --p{syntax:'<length>';inherits:false;initial-value:0px}"
+      "#hp{--p:5px;width:var(--p)}</style>"
+      "<div style='height:3000px'></div><div id='sda'>s</div><div id='hp'>h</div>"
+      "<script>window.__r={};"
+      "try{var a=document.getElementById('sda').animate({opacity:[1,.3]},"
+      "{timeline:new ScrollTimeline({source:document.documentElement})});"
+      "window.__r.st=a?a.playState:'noanim';}catch(e){window.__r.st='err:'+e.name;}"
+      "try{window.__r.prop=getComputedStyle(document.getElementById('hp')).width;}catch(e){window.__r.prop='err:'+e.name;}"
+      "try{document.getElementById('hp').animate([{opacity:1},{opacity:0}],1000);"
+      "window.__r.ga=document.getAnimations().length;}catch(e){window.__r.ga='err:'+e.name;}"
+      "</script></body>","https://anim.test/");
+    mbWait(v, 200);
+    const std::string st = Eval(v, "String(window.__r.st)");
+    const std::string prop = Eval(v, "String(window.__r.prop)");
+    const std::string ga = Eval(v, "String(window.__r.ga)");
+    Expect((st == "running" || st == "paused" || st == "finished") && prop == "5px" &&
+               std::atoi(ga.c_str()) >= 1,
+           "scroll-driven animations + Houdini @property + getAnimations work (no compositor)",
+           "st=[" + st + "] prop=[" + prop + "] ga=[" + ga + "]");
+  }
+
   // 41o0. View Transitions DEGRADE GRACEFULLY (patch 0009): document.startViewTransition()
   // needs the compositor to capture/animate snapshots; with our non-compositing widget the
   // capture never completes, so ready/finished hung FOREVER (probed: neither settled in 5s).

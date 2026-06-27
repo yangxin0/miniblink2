@@ -1386,6 +1386,17 @@ body=payload-42; 0c (basic url-only veto) still passes. mb_smoke 157->158, full 
 full-fidelity both ways - inspect/monitor a request's method+headers+body, block it, and on the
 response inspect status+headers+body and replace the body. Playwright-route-class.
 
+[VERIFIED + LOCKED IN - compositor-adjacent CSS/animation features work (no compositor)].
+Probed the animation/CSS features in the same class as the View-Transition hang for crashes/
+hangs. ALL work, none hang/crash: scroll-driven animations (element.animate with a
+ScrollTimeline -> playState 'running'), Houdini @property (a registered '<length>' custom
+property applies its typed value -> width 5px), Web Animations getAnimations (returns the live
+animations), ViewTimeline, elementsFromPoint. So they degrade gracefully (run/apply at the
+DOM/style level even though the compositor can't visually animate). Locked in as mb_smoke_render
+41n2 (st=running, prop=5px, getAnimations>=1). render 129->130, full battery green (mb_smoke 158,
+platform 46, shot 66, wke 114), no leaks. (Unlike View Transitions, these needed no patch -
+blink runs them on the main thread / at style resolution; the probe confirms that.)
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),
