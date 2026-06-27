@@ -1,0 +1,48 @@
+diff --git a/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc b/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
+--- a/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
++++ b/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
+@@ -1668,8 +1668,24 @@ bool WebFrameWidgetImpl::ShouldIgnoreInputEvents() {
+   return IgnoreInputEvents(GetPage()->BrowsingContextGroupToken());
+ }
+
++namespace {
++// miniblink host hook (see WebFrameWidgetImpl::SetLayerTreeFrameSinkHookForHost).
++WebFrameWidgetImpl::LayerTreeFrameSinkHook& MbFrameSinkHook() {
++  DEFINE_STATIC_LOCAL(WebFrameWidgetImpl::LayerTreeFrameSinkHook, hook, ());
++  return hook;
++}
++}  // namespace
++
++// static
++void WebFrameWidgetImpl::SetLayerTreeFrameSinkHookForHost(
++    LayerTreeFrameSinkHook hook) {
++  MbFrameSinkHook() = std::move(hook);
++}
++
+ std::unique_ptr<cc::LayerTreeFrameSink>
+ WebFrameWidgetImpl::AllocateNewLayerTreeFrameSink() {
++  if (MbFrameSinkHook())
++    return MbFrameSinkHook().Run();
+   return nullptr;
+ }
+
+diff --git a/third_party/blink/renderer/core/frame/web_frame_widget_impl.h b/third_party/blink/renderer/core/frame/web_frame_widget_impl.h
+--- a/third_party/blink/renderer/core/frame/web_frame_widget_impl.h
++++ b/third_party/blink/renderer/core/frame/web_frame_widget_impl.h
+@@ -157,6 +157,16 @@ class CORE_EXPORT WebFrameWidgetImpl
+       bool is_for_scalable_page);
+   ~WebFrameWidgetImpl() override;
+
++  // miniblink host hook: supplies the cc::LayerTreeFrameSink for a compositing
++  // widget in the single-process embedder. Upstream AllocateNewLayerTreeFrameSink()
++  // returns nullptr, which routes WidgetBase to a GPU-process mojo frame sink that
++  // does not exist here; this hook lets the host return its in-process software
++  // frame sink instead. Install once before showing a compositing widget; pass a
++  // null callback to clear.
++  using LayerTreeFrameSinkHook =
++      base::RepeatingCallback<std::unique_ptr<cc::LayerTreeFrameSink>()>;
++  static void SetLayerTreeFrameSinkHookForHost(LayerTreeFrameSinkHook hook);
++
+   virtual void Trace(Visitor*) const;
+
+   // Shutdown the widget.

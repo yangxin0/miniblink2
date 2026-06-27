@@ -2320,3 +2320,24 @@ D2b): wire MbWebView's WebFrameWidgetImpl to own a mb::SoftwareCompositor + retu
 from AllocateNewLayerTreeFrameSink + call WidgetBase::InitializeCompositing instead of Initialize
 NonCompositing; drive a BeginFrame; confirm a real loaded page composites through cc into the
 captured bitmap. The live-widget integration (riskiest; mb_widget.cc / mb_webview.cc).
+
+[DONE — compositor milestone D2b-1: the blink injection point for the host frame sink].
+patches/0012-mb-frame-sink-hook.patch. The ONLY way to feed our in-process software frame sink into
+blink: WidgetBase::RequestNewLayerTreeFrameSink (widget_base.cc:712) calls client_->AllocateNewLayer
+TreeFrameSink() and, if it returns non-null, uses it directly — otherwise it routes to a GPU-process
+mojo frame sink that does not exist in this single-process embedder. Upstream WebFrameWidgetImpl::
+AllocateNewLayerTreeFrameSink() just `return nullptr`. The patch adds a static host hook:
+WebFrameWidgetImpl::SetLayerTreeFrameSinkHookForHost(base::RepeatingCallback<unique_ptr<cc::Layer
+TreeFrameSink>()>) stored in a DEFINE_STATIC_LOCAL; AllocateNewLayerTreeFrameSink() returns the
+hook's result when installed, else nullptr (unchanged default). Surgical: 2 files (web_frame_widget
+_impl.{h,cc}), additive, no behavior change until a host installs the hook AND uses Initialize
+Compositing. Patch round-trips (reverse-check / reverse / forward-check / forward all clean) so
+build.sh's idempotent apply works. VERIFIED: recompiles libblink_core.dylib + libminiblink_host.dylib
+clean; FULL battery green WITH the patch applied (mb_smoke 165, platform 46, render 133, wke 117;
+compositor probes 3/4/5 PASS), no leaks — i.e. touching blink core regressed nothing across all 461
+library tests + probes. NEXT (milestone D2b-2): the live flip — MbWidget owns a mb::SoftwareCompositor,
+installs the hook (bound to compositor.CreateFrameSink), and calls WidgetBase/WebWidget::Initialize
+Compositing(ScreenInfos, LayerTreeSettings, empty mojo frame-sink args) instead of InitializeNon
+Compositing; SetCompositorVisible(true) to trigger RequestNewLayerTreeFrameSink -> our hook; pump the
+loop; confirm the hook fires and a page composites. Additive + opt-in (default stays non-compositing,
+preserving the heavily-tested software-paint screenshot path) so the risky flip can't regress it.
