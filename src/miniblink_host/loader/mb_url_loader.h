@@ -140,6 +140,14 @@ void MbClearMocks();
 bool MbFindMock(const std::string& url, std::string* body,
                 std::string* content_type, int* status);
 
+// Dynamic request mock: consulted by MbFindMock when no static mock matches. The hook may
+// COMPUTE a response for any URL (one the caller can't pre-register) and fill body/
+// content_type/status; return true to serve it WITHOUT a real fetch, false to fetch
+// normally. {} clears it. Process-wide.
+using MbRequestMockHook = std::function<bool(const std::string& url, std::string* body,
+                                             std::string* content_type, int* status)>;
+void MbSetRequestMockHook(MbRequestMockHook hook);
+
 // Request URL rewriting: before any fetch, replace the first occurrence of `from`
 // with `to` in the request URL (host swap, scheme upgrade, CDN -> local mock). The
 // rewrite is transparent — the page still sees its original URL as the response

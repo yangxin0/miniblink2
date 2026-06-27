@@ -269,6 +269,35 @@ int main() {
     mbClearMocks();
   }
 
+  // 0d4. Dynamic request mock (mbSetRequestMockCallback): COMPUTE a response per-URL with no
+  // fetch, for URLs that can't be pre-registered as a fixed substring. Here the callback
+  // parses the id out of /item/N and serves {"id":N} as JSON — something the static
+  // mbMockResponse (fixed substring -> fixed body) can't do.
+  {
+    mbSetRequestMockCallback(
+        [](const char* url, mbRequestMock* m, void*) -> int {
+          const char* p = std::strstr(url, "/item/");
+          if (!p)
+            return 0;  // not ours: fetch normally
+          std::string body = std::string("{\"id\":") + (p + 6) + "}";
+          mbRequestMockResponse(m, body.data(), static_cast<int>(body.size()),
+                                "application/json", 200);
+          return 1;  // serve the computed response
+        },
+        nullptr);
+    mbLoadHTML(v,
+               "<body><div id='r'>?</div><script>"
+               "fetch('https://x.test/item/42').then(r=>r.json()).then(j=>{"
+               "document.getElementById('r').textContent='id='+j.id;});</script></body>",
+               "https://x.test/");
+    mbWaitForFunction(v, "document.getElementById('r').textContent!=='?'", 2000);
+    const std::string r = Eval(v, "document.getElementById('r').textContent");
+    Expect(r == "id=42",
+           "mbSetRequestMockCallback computes a per-URL response served without a fetch",
+           "r=[" + r + "]");
+    mbSetRequestMockCallback(nullptr, nullptr);
+  }
+
   // 0e. mbDownloadURL fetches a URL through the engine and writes the body to disk
   // WITHOUT rendering it. (a) a data: URL decodes to the file; (b) a mocked URL is
   // served from the interception layer (no network) AND the response hook can rewrite

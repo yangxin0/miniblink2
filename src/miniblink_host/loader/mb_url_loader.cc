@@ -755,23 +755,51 @@ void MbClearMocks() {
   MockList().clear();
 }
 
+// Dynamic request mock: a hook that may COMPUTE a response for any URL (one the caller
+// could not pre-register as a static substring) without a real fetch. Returns true to serve.
+namespace {
+MbRequestMockHook& RequestMockHook() {
+  static MbRequestMockHook* h = new MbRequestMockHook();
+  return *h;
+}
+}  // namespace
+
+void MbSetRequestMockHook(MbRequestMockHook hook) {
+  RequestMockHook() = std::move(hook);
+}
+
 bool MbFindMock(const std::string& url, std::string* body,
                 std::string* content_type, int* status) {
-  // Last matching entry wins, so a later mbMockResponse overrides an earlier
-  // overlapping one (intuitive "re-mock to replace").
+  // Static mocks first. Last matching entry wins, so a later mbMockResponse overrides an
+  // earlier overlapping one (intuitive "re-mock to replace").
   const MockEntry* hit = nullptr;
   for (const MockEntry& e : MockList())
     if (url.find(e.substring) != std::string::npos)
       hit = &e;
-  if (!hit)
-    return false;
-  if (body)
-    *body = hit->body;
-  if (content_type)
-    *content_type = hit->content_type;
-  if (status)
-    *status = hit->status;
-  return true;
+  if (hit) {
+    if (body)
+      *body = hit->body;
+    if (content_type)
+      *content_type = hit->content_type;
+    if (status)
+      *status = hit->status;
+    return true;
+  }
+  // Then the dynamic hook (computed per URL). It runs for every otherwise-unmocked load.
+  if (RequestMockHook()) {
+    std::string b, ct;
+    int s = 0;
+    if (RequestMockHook()(url, &b, &ct, &s)) {
+      if (body)
+        *body = std::move(b);
+      if (content_type)
+        *content_type = std::move(ct);
+      if (status)
+        *status = s > 0 ? s : 200;
+      return true;
+    }
+  }
+  return false;
 }
 
 // --- Request URL rewriting ---------------------------------------------------

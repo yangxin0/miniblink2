@@ -636,6 +636,19 @@ MB_EXPORT void mbMockResponse(const char* url_substring, const char* body,
                               const char* content_type, int status);
 MB_EXPORT void mbClearMocks(void);
 
+// Dynamic request mock — like mbMockResponse but DECIDED per-request by a callback, for
+// URLs you cannot pre-register as a fixed substring (e.g. compute a JSON body from the
+// path, serve a different response per request). Consulted only when no static mock matches.
+// The callback returns 1 to serve a computed response (call mbRequestMockResponse to fill
+// it), or 0 to let the request fetch normally. One callback process-wide; NULL clears it.
+typedef struct mbRequestMock mbRequestMock;
+// Fill the response to serve (body bytes + length; content_type defaults text/html, status
+// defaults 200). Valid only during the callback.
+MB_EXPORT void mbRequestMockResponse(mbRequestMock*, const char* body, int len,
+                                     const char* content_type, int status);
+typedef int (*mbRequestMockCallback)(const char* url, mbRequestMock*, void* userdata);
+MB_EXPORT void mbSetRequestMockCallback(mbRequestMockCallback, void* userdata);
+
 // Request URL rewriting — the request-side counterpart to mocking. Before any
 // fetch, the first occurrence of `from` in a request URL is replaced with `to`
 // (host swap, http->https, point a CDN/API at a local mock). The rewrite is

@@ -792,6 +792,48 @@ void mbClearMocks(void) {
   mb::MbClearMocks();
 }
 
+// Dynamic request mock: a callback decides per-URL whether to serve a COMPUTED response
+// (no fetch). The opaque mbRequestMock is a transient view of the loader's pending response
+// slots; mbRequestMockResponse fills it.
+struct mbRequestMock {
+  std::string* body;
+  std::string* content_type;
+  int* status;
+};
+
+void mbRequestMockResponse(mbRequestMock* m, const char* body, int len,
+                           const char* content_type, int status) {
+  if (!m)
+    return;
+  if (m->body)
+    m->body->assign(body ? body : "", (body && len > 0) ? static_cast<size_t>(len) : 0);
+  if (m->content_type)
+    *m->content_type = content_type ? content_type : "text/html";
+  if (m->status)
+    *m->status = status > 0 ? status : 200;
+}
+
+namespace {
+mbRequestMockCallback g_request_mock_cb = nullptr;
+void* g_request_mock_ud = nullptr;
+}  // namespace
+
+void mbSetRequestMockCallback(mbRequestMockCallback cb, void* userdata) {
+  g_request_mock_cb = cb;
+  g_request_mock_ud = userdata;
+  if (cb) {
+    mb::MbSetRequestMockHook([](const std::string& url, std::string* body,
+                                std::string* ct, int* status) -> bool {
+      if (!g_request_mock_cb)
+        return false;
+      mbRequestMock m{body, ct, status};
+      return g_request_mock_cb(url.c_str(), &m, g_request_mock_ud) != 0;
+    });
+  } else {
+    mb::MbSetRequestMockHook({});
+  }
+}
+
 void mbRewriteUrl(const char* from, const char* to) {
   if (from)
     mb::MbAddUrlRewrite(from, to ? to : "");
