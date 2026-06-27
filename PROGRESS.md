@@ -1344,6 +1344,20 @@ render 127->128, full battery green (mb_smoke 157, platform 46, shot 66, wke 114
 (patches/0009; same graceful-degradation principle as the WebGPU-hang fix. :has()/popover were
 probed too - both already work.)
 
+[VERIFIED + LOCKED IN - 8 more browser promise APIs degrade gracefully (no hang)]. After the
+View-Transition hang fix, probed the next batch of browser/compositor promise APIs for the same
+never-settle failure mode. ALL settle: requestFullscreen -> rej TypeError (needs user gesture),
+wakeLock.request -> resolved, requestStorageAccess -> resolved, getScreenDetails -> rej
+NotAllowedError, setAppBadge -> resolved, IdleDetector.requestPermission -> rej NotAllowedError,
+PaymentRequest.canMakePayment -> resolved, credentials.get -> rej NotSupportedError. Locked in as
+mb_smoke_render 41o1 (asserts none stay 'pending'), extending 41o's "no hang" regression guard to
+this surface. ONE genuine pending found and JUDGED NOT-A-BUG: navigator.serviceWorker.ready stays
+pending forever - but that is SPEC-COMPLIANT (ready resolves only when a worker controls the page;
+with no SW backend, none ever does, exactly like a real browser where nothing was registered, and
+our serviceWorker.register already rejects). Making it reject would be non-spec, so left as-is +
+documented. render 128->129, full battery green (mb_smoke 157, platform 46, shot 66, wke 114), no
+leaks.
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

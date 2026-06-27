@@ -1302,6 +1302,45 @@ static void RunCases(mbView* v, int W, int H) {
            "vt=[" + vt + "] upd=[" + upd + "] txt=[" + txt + "]");
   }
 
+  // 41o1. MORE browser-backed promise APIs DEGRADE GRACEFULLY (no hang) — extends 41o's
+  // "settle, don't hang" guarantee to the rest of the heavy hitters: requestFullscreen,
+  // wakeLock.request, requestStorageAccess, getScreenDetails, setAppBadge, IdleDetector,
+  // PaymentRequest.canMakePayment, credentials.get. None may sit forever pending (which would
+  // freeze a page that awaits them). Each must reach a terminal state (resolved/rejected/
+  // threw). (navigator.serviceWorker.ready is deliberately NOT here: with no SW backend it
+  // stays pending — spec-compliant, same as a real browser with no registered worker.)
+  {
+    mbLoadHTML(v, "<body><div id='d'>x</div></body>", "https://hang2.test/");
+    mbRunJS(v,
+      "window.__h={};function S(k,p){window.__h[k]='pending';try{Promise.resolve(p).then("
+      "function(){window.__h[k]='resolved';},function(e){window.__h[k]='rej:'+(e&&e.name||e);});}"
+      "catch(e){window.__h[k]='threw';}}"
+      "S('fullscreen',document.getElementById('d').requestFullscreen&&document.getElementById('d').requestFullscreen());"
+      "S('wakelock',navigator.wakeLock&&navigator.wakeLock.request('screen'));"
+      "S('storageaccess',document.requestStorageAccess&&document.requestStorageAccess());"
+      "S('screendetails',window.getScreenDetails&&window.getScreenDetails());"
+      "S('appbadge',navigator.setAppBadge&&navigator.setAppBadge(1));"
+      "S('idle',window.IdleDetector&&IdleDetector.requestPermission&&IdleDetector.requestPermission());"
+      "try{var pr=window.PaymentRequest&&new PaymentRequest([{supportedMethods:'basic-card'}],{total:{label:'t',amount:{currency:'USD',value:'1'}}});"
+      "S('paycanmake',pr&&pr.canMakePayment());}catch(e){window.__h['paycanmake']='threw';}"
+      "S('credentials',navigator.credentials&&navigator.credentials.get({}));");
+    mbWait(v, 1500);
+    const char* keys[] = {"fullscreen","wakelock","storageaccess","screendetails",
+                          "appbadge","idle","paycanmake","credentials"};
+    std::string report;
+    bool any_pending = false;
+    for (const char* k : keys) {
+      std::string s = Eval(v, (std::string("String(window.__h['")+k+"']||'absent')").c_str());
+      report += std::string(k) + "=" + s + " ";
+      if (s == "pending" || s == "absent")
+        any_pending = true;
+    }
+    Expect(!any_pending,
+           "browser promise APIs all settle, none hang (fullscreen/wakelock/storage/screen/"
+           "badge/idle/payment/credentials)",
+           report);
+  }
+
   // 41o. Browser-service-backed promise APIs DEGRADE GRACEFULLY — they SETTLE (resolve
   // or reject), never HANG. With no browser process these must not leave a page awaiting
   // forever (the worst failure mode — cf. the WebGPU requestAdapter hang fixed in 41n).
