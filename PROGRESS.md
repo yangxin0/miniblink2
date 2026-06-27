@@ -1940,6 +1940,21 @@ the SAME view runs its script (CSP shed). Every-load path; no crash, all suites 
 ### Accepted, by-design (NOT tasks):
 - `<meta name=viewport>` ignored (mobile = narrow view + UA, works). Color emoji monochrome
   (no color-emoji font bundled).
+- `window.open()` returns NULL (MbFrameClient::CreateNewWindow denies the auto-popup by design —
+  the embedder owns view creation; the URL+name are surfaced via the OnCreateNewWindow callback
+  so the app can open it where it wants). Not a bug; don't "fix" it to return a view.
+- `<select>` + arrow keys on a CLOSED menulist do NOT cycle options inline — on macOS that input
+  is meant to OPEN the native popup (LayoutTheme::PopsMenuByArrowKeys() == true on Mac;
+  select_type.cc MenuListSelectType::DefaultEventHandler returns false before the inline-change
+  path), and we render no popup, so the value is unchanged. This is macOS-CORRECT (real Chrome on
+  Mac behaves the same); set select.value / click options for automation. [Verified this session:
+  the keydown reaches the focused select (activeElement=s, e.key=ArrowDown fires) — only the Mac
+  default action differs; not a routing bug.]
+- The whole sub-frame (iframe) synthetic-input surface is crash-free and routes correctly (click,
+  mousemove, wheel, drag, context-menu, keyboard text entry) — guarded by mb_smoke_render 35z.
+  Clicking interactive widgets (`<select>`/`<input type=file>`/`<input type=date>`) does not crash
+  either (no popup/file-chooser UI is rendered, but no null-service deref). [Probed this session; no
+  new engine bug — recorded so future ticks don't re-investigate these as bugs.]
 
 ---
 
