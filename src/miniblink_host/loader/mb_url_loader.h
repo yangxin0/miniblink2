@@ -118,12 +118,16 @@ bool MbRequestHookBlocks(const std::string& url, const std::string& method,
 // `status` is MUTABLE (an embedder may rewrite the delivered HTTP status — e.g. force a
 // 503 to exercise a page's retry path, or normalize an upstream 500 to 200) alongside the
 // body; the loader uses the (possibly modified) status for the response it delivers.
+// `headers` is the raw response header block and is MUTABLE too — an embedder may inject or
+// override header lines (e.g. add a CORS header, set a custom field). For SUBRESOURCE /
+// fetch / XHR loads the modified block is re-parsed onto the delivered response, so the
+// page's fetch Response.headers / XHR getResponseHeader see the changes.
 using MbResponseHook = std::function<void(const std::string& url, int* status,
-                                          const std::string& headers,
+                                          std::string* headers,
                                           std::string* body)>;
 void MbSetResponseHook(MbResponseHook hook);
 void MbInvokeResponseHook(const std::string& url, int* status,
-                          const std::string& headers, std::string* body);
+                          std::string* headers, std::string* body);
 
 // Response mocking: serve a canned body for any request whose URL contains
 // `substring`, WITHOUT a real fetch (run offline, substitute an API response).

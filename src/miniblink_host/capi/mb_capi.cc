@@ -3,6 +3,7 @@
 
 #include "miniblink_host/capi/mb_capi.h"
 
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -668,7 +669,7 @@ void mbSetRequestCallbackEx(mbRequestCallbackEx cb, void* userdata) {
 struct mbResponse {
   const std::string& url;
   int* status;  // mutable: mbResponseSetStatus rewrites the delivered HTTP status
-  const std::string& headers;
+  std::string* headers;  // mutable: mbResponseSetHeader injects/overrides header lines
   std::string* body;
 };
 
@@ -682,7 +683,7 @@ void mbSetResponseCallback(mbResponseCallback cb, void* userdata) {
   g_response_ud = userdata;
   if (cb) {
     mb::MbSetResponseHook(
-        [](const std::string& url, int* status, const std::string& headers,
+        [](const std::string& url, int* status, std::string* headers,
            std::string* body) {
           mbResponse r{url, status, headers, body};
           if (g_response_cb)
@@ -728,7 +729,44 @@ void mbResponseSetStatus(mbResponse* r, int status) {
 }
 
 const char* mbResponseHeaders(mbResponse* r) {
-  return r ? r->headers.c_str() : "";
+  return (r && r->headers) ? r->headers->c_str() : "";
+}
+
+// Inject or override a response header line (case-insensitive name). Any existing line with
+// the same name is removed, then "Name: value\r\n" is appended. For subresource/fetch/XHR
+// loads the page's fetch Response.headers / XHR getResponseHeader see it; setting
+// "Content-Type" also changes the delivered MIME.
+void mbResponseSetHeader(mbResponse* r, const char* name, const char* value) {
+  if (!r || !r->headers || !name || !*name || !value)
+    return;
+  std::string lname(name);
+  for (char& c : lname)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  // Rebuild the block without any existing line of the same name.
+  std::string out;
+  std::string line;
+  std::string buf = *r->headers;
+  buf.push_back('\n');  // flush sentinel
+  for (char c : buf) {
+    if (c == '\n') {
+      if (!line.empty() && line.back() == '\r')
+        line.pop_back();
+      std::string::size_type colon = line.find(':');
+      std::string ln;
+      if (colon != std::string::npos) {
+        ln = line.substr(0, colon);
+        for (char& cc : ln)
+          cc = static_cast<char>(std::tolower(static_cast<unsigned char>(cc)));
+      }
+      if (!line.empty() && ln != lname)
+        out += line + "\r\n";
+      line.clear();
+    } else {
+      line.push_back(c);
+    }
+  }
+  out += std::string(name) + ": " + value + "\r\n";
+  *r->headers = std::move(out);
 }
 
 const char* mbResponseBody(mbResponse* r, int* out_len) {

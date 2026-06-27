@@ -2339,6 +2339,13 @@ void wkeNetSetData(void* job, void* buf, int len) {
                       static_cast<const char*>(buf), len);
 }
 
+// Override a response's Content-Type from inside a wkeOnLoadUrlEnd callback (job ==
+// mbResponse*) — e.g. force a payload to be parsed as a different type.
+void wkeNetSetMIMEType(void* job, const char* type) {
+  if (job && type)
+    mbResponseSetHeader(static_cast<mbResponse*>(job), "Content-Type", type);
+}
+
 void wkeOnConsole(wkeWebView webView, wkeConsoleCallback callback, void* param) {
   if (!webView)
     return;

@@ -766,5 +766,7 @@ typedef void (*wkeLoadUrlEndCallback)(wkeWebView webView, void* param,
 WKE_API void wkeOnLoadUrlEnd(wkeWebView webView, wkeLoadUrlEndCallback callback,
                              void* param);
 WKE_API void wkeNetSetData(void* job, void* buf, int len);
+// Override the response Content-Type from a wkeOnLoadUrlEnd callback (job == the response).
+WKE_API void wkeNetSetMIMEType(void* job, const char* type);
 
 #endif  // MINIBLINK_WKE_WKE_H_

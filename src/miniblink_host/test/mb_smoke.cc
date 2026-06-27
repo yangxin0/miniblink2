@@ -238,6 +238,37 @@ int main() {
     mbClearMocks();
   }
 
+  // 0d3. Response hook can inject/override response HEADERS (mbResponseSetHeader): a custom
+  // header the page reads back via fetch Response.headers.get, and a Content-Type override.
+  // Same-origin so all headers are exposed. Proves header mutation flows to the delivered
+  // response (CORS injection / Content-Type forcing / custom fields).
+  {
+    mbMockResponse("api.test/h", "hello", "text/plain", 200);
+    mbSetResponseCallback(
+        [](mbResponse* r, void*) {
+          if (std::strstr(mbResponseURL(r), "api.test/h")) {
+            mbResponseSetHeader(r, "X-Injected", "yes");
+            mbResponseSetHeader(r, "Content-Type", "application/json");
+          }
+        },
+        nullptr);
+    mbLoadHTML(v,
+               "<body><div id='r'>?</div><script>"
+               "fetch('https://api.test/h').then(r=>{"
+               "document.getElementById('r').textContent="
+               "'x='+r.headers.get('x-injected')+',ct='+r.headers.get('content-type');});"
+               "</script></body>",
+               "https://api.test/");
+    mbWaitForFunction(v, "document.getElementById('r').textContent!=='?'", 2000);
+    const std::string r = Eval(v, "document.getElementById('r').textContent");
+    Expect(r.find("x=yes") != std::string::npos &&
+               r.find("application/json") != std::string::npos,
+           "mbResponseSetHeader injects a custom header + overrides Content-Type (fetch sees both)",
+           "r=[" + r + "]");
+    mbSetResponseCallback(nullptr, nullptr);
+    mbClearMocks();
+  }
+
   // 0e. mbDownloadURL fetches a URL through the engine and writes the body to disk
   // WITHOUT rendering it. (a) a data: URL decodes to the file; (b) a mocked URL is
   // served from the interception layer (no network) AND the response hook can rewrite

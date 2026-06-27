@@ -605,6 +605,11 @@ MB_EXPORT void mbResponseSetStatus(mbResponse*, int status);
 // for non-http loads (data:/file:/mock). Read Content-Type, Set-Cookie, rate-limit, or any
 // custom API header an app cares about. Valid only during the callback.
 MB_EXPORT const char* mbResponseHeaders(mbResponse*);
+// Inject or override a response header (case-insensitive name; any existing same-name line
+// is replaced). For subresource/fetch/XHR loads the page's fetch Response.headers / XHR
+// getResponseHeader see it; setting "Content-Type" also changes the delivered MIME (e.g.
+// force a text/plain payload to parse as a stylesheet, or add a permissive CORS header).
+MB_EXPORT void mbResponseSetHeader(mbResponse*, const char* name, const char* value);
 // Returns the body bytes (NOT NUL-terminated; may contain NULs). *out_len gets the length.
 MB_EXPORT const char* mbResponseBody(mbResponse*, int* out_len);
 MB_EXPORT void mbResponseSetBody(mbResponse*, const char* body, int len);
