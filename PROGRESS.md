@@ -1450,6 +1450,18 @@ include services/network/public/cpp/request_destination.h. mb_smoke 160->161, fu
 (platform 46, render 131, shot 66, wke 114), no leaks. Resource interception now covers: by URL
 (block/mock/rewrite), by dynamic hook (method/headers/body), and by TYPE.
 
+[DONE - editor commands with a VALUE (mbExecuteEditCommandValue)]. Completed the editor
+command set: the value-taking ExecuteCommand(name, value) variant, for "InsertText"/
+"InsertHTML" (insert at the caret / over the selection), "FontName", "FontSize", "ForeColor",
+"CreateLink", etc. — which the no-value mbExecuteEditCommand can't do. mbExecuteEditCommandValue
+(view, command, value) -> WebLocalFrame::ExecuteCommand(name, value). Verified mb_smoke 23e2
+(extended): after SelectAll+Delete empties a contenteditable, InsertHTML '<b>ins</b>' ->
+innerHTML is '<b>ins</b>', textContent 'ins'. mb_smoke 161 (extended existing test), full battery
+green (platform 46, render 131, shot 66, wke 114), no leaks. So a webview hosting a rich editor
+has both editor command forms (no-value: SelectAll/Copy/Cut/Paste/Undo/Delete; value: Insert*/
+formatting). [NOTE: PDF print-background (Settings::SetShouldPrintBackgrounds) is a known gap -
+skipped this tick because it can't be cleanly verified from the binary SkPDF output.]
+
 === PROJECT MATURITY NOTE (after the API-survey ticks) ===. The embedder is now comprehensive
 and robust. Verified-working modern surface: WebGL 1/2 (+shaders/offscreen/worker/screenshots),
 media (<audio> full lifecycle + <video> decode/paint/in-page-screenshot, decodeAudioData),

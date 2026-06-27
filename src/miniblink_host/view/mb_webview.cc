@@ -1882,6 +1882,13 @@ bool MbWebView::ExecuteEditCommand(const char* command) {
   return main_frame_->ExecuteCommand(blink::WebString::FromUtf8(command));
 }
 
+bool MbWebView::ExecuteEditCommandValue(const char* command, const char* value) {
+  if (!command || !main_frame_)
+    return false;
+  return main_frame_->ExecuteCommand(blink::WebString::FromUtf8(command),
+                                     blink::WebString::FromUtf8(value ? value : ""));
+}
+
 void MbWebView::SetZoomFactor(float factor) {
   zoom_factor_ = factor > 0.0f ? factor : 1.0f;
   if (!widget_ || !widget_->widget())

@@ -200,6 +200,9 @@ class MbWebView {
   // webview editor operations, at the DOM/editing layer (no compositor). Returns whether
   // the command applied (false for an unknown command or nothing to act on).
   bool ExecuteEditCommand(const char* command);
+  // Editor command that takes a VALUE: "InsertText"/"InsertHTML" (insert at the caret /
+  // over the selection), "FontName", "FontSize", "ForeColor", "CreateLink", etc.
+  bool ExecuteEditCommandValue(const char* command, const char* value);
   // Device/mobile emulation WITHOUT the compositor (EnableDeviceEmulation drives a null
   // LayerTreeHost -> SIGSEGV). Drives the layout-visible part via WebSettings: mobile ->
   // coarse pointer + no hover + viewport-meta/mobile-viewport, desktop -> fine pointer +

@@ -405,6 +405,10 @@ int mbExecuteEditCommand(mbView* v, const char* command) {
   return (v && v->impl && v->impl->ExecuteEditCommand(command)) ? 1 : 0;
 }
 
+int mbExecuteEditCommandValue(mbView* v, const char* command, const char* value) {
+  return (v && v->impl && v->impl->ExecuteEditCommandValue(command, value)) ? 1 : 0;
+}
+
 float mbGetZoomFactor(mbView* v) {
   return (v && v->impl) ? v->impl->GetZoomFactor() : 1.0f;
 }

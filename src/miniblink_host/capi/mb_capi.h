@@ -349,6 +349,10 @@ MB_EXPORT float mbGetZoomFactor(mbView*);
 // Copy/Cut write the in-process clipboard (mbGetClipboard); Paste reads it. Returns 1 if
 // the command applied, 0 otherwise. DOM/editing layer (no compositor).
 MB_EXPORT int mbExecuteEditCommand(mbView*, const char* command);
+// Editor command that takes a VALUE: "InsertText"/"InsertHTML" (insert at the caret / over
+// the selection), "FontName", "FontSize", "ForeColor", "CreateLink", "Indent", etc.
+// Returns 1 if applied. (Needs a focused editable, like mbExecuteEditCommand.)
+MB_EXPORT int mbExecuteEditCommandValue(mbView*, const char* command, const char* value);
 
 // Override the User-Agent (navigator.userAgent + outgoing HTTP requests). Call
 // before mbLoadURL/mbLoadHTML so it applies to that navigation. Pass NULL/empty to

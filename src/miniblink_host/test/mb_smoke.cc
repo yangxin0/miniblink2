@@ -1565,10 +1565,17 @@ int main() {
     const bool del = mbExecuteEditCommand(v, "Delete") != 0;
     mbWait(v, 30);
     const std::string after = Eval(v, "document.getElementById('e').textContent");
-    Expect(sel && cop && std::string(cb) == "hello-edit" && del && after.empty(),
-           "mbExecuteEditCommand: SelectAll+Copy->clipboard, Delete empties the editable",
+    // Value-taking command: InsertHTML inserts rich content at the (now-empty) caret.
+    const bool ins = mbExecuteEditCommandValue(v, "InsertHTML", "<b>ins</b>") != 0;
+    mbWait(v, 30);
+    const std::string html = Eval(v, "document.getElementById('e').innerHTML");
+    const std::string txt = Eval(v, "document.getElementById('e').textContent");
+    Expect(sel && cop && std::string(cb) == "hello-edit" && del && after.empty() &&
+               ins && html.find("<b>") != std::string::npos && txt == "ins",
+           "mbExecuteEditCommand(+Value): SelectAll/Copy/Delete + InsertHTML",
            "sel=" + std::string(sel ? "1" : "0") + " cop=" + (cop ? "1" : "0") +
-               " clip=[" + std::string(cb) + "] after=[" + after + "]");
+               " clip=[" + std::string(cb) + "] after=[" + after + "] ins=" +
+               (ins ? "1" : "0") + " html=[" + html + "]");
   }
 
   // 23f. Web Locks (navigator.locks, broker #8): the in-process LockManager grants with
