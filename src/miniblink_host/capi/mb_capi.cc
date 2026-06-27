@@ -109,6 +109,16 @@ void mbDestroyView(mbView* v) {
   delete v;  // unique_ptr<MbWebView> dtor closes the WebView
 }
 
+void mbSetCompositingEnabled(int on) {
+  mb::MbWebView::SetCompositingEnabled(on != 0);
+}
+
+int mbViewFrameSinkRequested(mbView* v) {
+  if (!v || !v->impl)
+    return -1;
+  return v->impl->CompositorFrameSinkCount();
+}
+
 void mbResize(mbView* v, int width, int height) {
   if (v && v->impl)
     v->impl->Resize(width, height);

@@ -235,6 +235,7 @@ SoftwareCompositor::~SoftwareCompositor() {
 }
 
 std::unique_ptr<cc::LayerTreeFrameSink> SoftwareCompositor::CreateFrameSink() {
+  ++frame_sink_count_;
   return std::make_unique<MbDirectLayerTreeFrameSink>(
       frame_sink_id_, frame_sink_manager_.get(), display_.get(), task_runner_);
 }

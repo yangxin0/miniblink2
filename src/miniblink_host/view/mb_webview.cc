@@ -18,6 +18,7 @@
 #include "miniblink_host/frame/mb_view_client.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/loader/mb_url_loader.h"
+#include "miniblink_host/platform/mb_compositor.h"
 #include "miniblink_host/widget/mb_widget.h"
 
 #include "base/containers/span.h"
@@ -159,6 +160,27 @@ std::string DownloadFilenameFor(const std::string& url,
 }  // namespace
 
 // static
+namespace {
+// Process-global opt-in (see MbWebView::SetCompositingEnabled). The next Create()
+// consumes it for its widget attach.
+bool g_compositing_enabled = false;
+}  // namespace
+
+void MbWebView::SetCompositingEnabled(bool on) {
+  g_compositing_enabled = on;
+}
+
+int MbWebView::CompositorFrameSinkCount() const {
+  if (widget_ && widget_->compositor())
+    return widget_->compositor()->frame_sink_count();
+  return -1;
+}
+
+void MbWebView::Composite() {
+  if (widget_)
+    widget_->Composite();
+}
+
 std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
   auto v = std::unique_ptr<MbWebView>(new MbWebView());
   v->view_client_ = std::make_unique<MbViewClient>();
@@ -171,15 +193,18 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
               ->CreateAgentGroupScheduler());
 
   // 1. WebView::Create — all browser-side handles null (frame_test_helpers.cc:778).
+  // Default: non-compositing offscreen path (InitializeNonCompositing requires
+  // compositing_enabled=false / widgets_never_composited=true); pixels come from the
+  // paint record. When the compositor opt-in is on, the WebView must report
+  // does_composite()=true (InitializeCompositing DCHECKs it) and allow composited widgets.
+  const bool composite = g_compositing_enabled;
   v->web_view_ = blink::To<blink::WebViewImpl>(blink::WebView::Create(
       v->view_client_.get(),
       /*is_hidden=*/false,
       /*prerender_param=*/nullptr,
       /*fenced_frame_mode=*/std::nullopt,
-      // Non-compositing offscreen path (InitializeNonCompositing requires this);
-      // pixels come from the paint record, not a compositor.
-      /*compositing_enabled=*/false,
-      /*widgets_never_composited=*/true,
+      /*compositing_enabled=*/composite,
+      /*widgets_never_composited=*/!composite,
       /*opener=*/nullptr, mojo::NullAssociatedReceiver(),
       *v->agent_group_scheduler_,
       /*session_storage_namespace_id=*/std::string(),
@@ -227,7 +252,8 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
 
   // 3. Frame widget (non-compositing), attach, size, then inform the WebView.
   v->widget_ = std::make_unique<MbWidget>();
-  v->widget_->Attach(v->main_frame_, width, height);
+  v->widget_->Attach(v->main_frame_, width, height,
+                     /*composited=*/g_compositing_enabled);
   v->web_view_->DidAttachLocalMainFrame();
 
   // Mark the page active + focused so focus-dependent behavior works headlessly:

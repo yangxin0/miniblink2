@@ -151,6 +151,12 @@ class SoftwareCompositor {
   }
   const viz::FrameSinkId& frame_sink_id() const { return frame_sink_id_; }
 
+  // Number of times CreateFrameSink() has been called — i.e. how many times
+  // blink's compositor has requested a frame sink through the host hook. >0 after
+  // a compositing widget is shown and the loop pumped (used to verify the live
+  // integration).
+  int frame_sink_count() const { return frame_sink_count_; }
+
   void Resize(const gfx::Size& size);
 
   // Drives one Display draw+swap (the in-process scheduler is begin-frame-driven; for
@@ -173,6 +179,7 @@ class SoftwareCompositor {
   raw_ptr<MbCapturingSoftwareOutputDevice> output_device_ = nullptr;
   std::unique_ptr<viz::Display> display_;
   gfx::Size size_;
+  int frame_sink_count_ = 0;
 };
 
 }  // namespace mb

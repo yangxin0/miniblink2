@@ -79,6 +79,15 @@ MB_EXPORT mbView* mbCreateView(int width, int height);
 MB_EXPORT void    mbDestroyView(mbView*);
 MB_EXPORT void    mbResize(mbView*, int width, int height);
 
+// Compositing (experimental). When enabled, the NEXT mbCreateView attaches its widget
+// COMPOSITING — blink drives cc into an in-process software viz::Display — instead of the
+// default non-compositing software-paint path. Process-global; default OFF (screenshots
+// are unchanged). mbViewFrameSinkRequested returns how many frame sinks blink's compositor
+// has pulled (>0 once the view is shown + the message loop pumped), or -1 if the view is
+// not compositing.
+MB_EXPORT void    mbSetCompositingEnabled(int on);
+MB_EXPORT int     mbViewFrameSinkRequested(mbView*);
+
 // Content entry points.
 //   mbLoadHTML  — render an in-memory document (no network). First render proof.
 //   mbLoadURL   — fetch via libcurl (mb_url_loader) then render.

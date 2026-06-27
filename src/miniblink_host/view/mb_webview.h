@@ -44,6 +44,16 @@ class MbWebView {
   static std::unique_ptr<MbWebView> Create(int width, int height);
   ~MbWebView();
 
+  // Opt-in: when enabled, the NEXT Create() attaches its widget COMPOSITING (blink
+  // drives cc -> the in-process software Display) instead of the default non-compositing
+  // software-paint path. Process-global; default off (the screenshot path is unchanged).
+  static void SetCompositingEnabled(bool on);
+  // Number of frame sinks blink's compositor has pulled through the host hook (>0 once a
+  // compositing widget is shown + a frame driven); -1 if this view is not compositing.
+  int CompositorFrameSinkCount() const;
+  // Drive one synchronous compositor frame (compositing views only; no-op otherwise).
+  void Composite();
+
   void Resize(int width, int height);
   void LoadHTML(const char* utf8_html, const char* base_url);  // no network
   void LoadURL(const char* utf8_url);                          // via libcurl factory

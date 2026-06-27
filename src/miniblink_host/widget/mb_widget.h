@@ -13,6 +13,8 @@
 #ifndef MINIBLINK_HOST_WIDGET_MB_WIDGET_H_
 #define MINIBLINK_HOST_WIDGET_MB_WIDGET_H_
 
+#include <memory>
+
 #include "third_party/blink/public/web/web_non_composited_widget_client.h"
 
 namespace blink {
@@ -22,14 +24,20 @@ class WebFrameWidget;
 
 namespace mb {
 
+class SoftwareCompositor;
+
 class MbWidget : public blink::WebNonCompositedWidgetClient {
  public:
   MbWidget();
   ~MbWidget() override;
 
-  // Creates the frame widget on `main_frame` with no-op browser channels, inits it
-  // non-compositing, and sizes it. Must be followed by web_view->DidAttachLocalMainFrame().
-  void Attach(blink::WebLocalFrame* main_frame, int width, int height);
+  // Creates the frame widget on `main_frame` with no-op browser channels and sizes it;
+  // must be followed by web_view->DidAttachLocalMainFrame(). When `composited` is false
+  // (default) it inits NON-compositing (pixels via the software-paint path). When true it
+  // owns a mb::SoftwareCompositor, installs the blink frame-sink hook (patch 0012), and
+  // inits COMPOSITING so blink drives cc -> our in-process software Display.
+  void Attach(blink::WebLocalFrame* main_frame, int width, int height,
+              bool composited = false);
   void Resize(int width, int height);
   void SendMouseClick(int x, int y);  // synthesize mousedown+mouseup at (x,y)
   void SendMouseDown(int x, int y);   // press the left button at (x,y) (drag start)
@@ -75,10 +83,19 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   void SendIme(const char* composing, const char* committed);
 
   blink::WebFrameWidget* widget() { return widget_; }
+  // The software compositor backing this widget when attached compositing, else null.
+  SoftwareCompositor* compositor() { return compositor_.get(); }
+  bool composited() const { return composited_; }
+  // Drive one synchronous compositor frame (BeginMainFrame + lifecycle + cc commit/draw
+  // through the in-process Display). No-op unless attached compositing. This is how a
+  // headless compositing widget produces a frame (no browser begin-frame source).
+  void Composite();
 
  private:
   blink::WebFrameWidget* widget_ = nullptr;  // owned by Blink (the frame)
   bool mouse_pressed_ = false;  // left button held (drag): moves carry the mask
+  bool composited_ = false;
+  std::unique_ptr<SoftwareCompositor> compositor_;  // non-null iff composited_
 };
 
 }  // namespace mb

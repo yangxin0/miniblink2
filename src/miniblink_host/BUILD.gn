@@ -143,6 +143,7 @@ component("miniblink_host") {
     "//skia",
     "//ui/accessibility:ax_base",
     "//ui/base",
+    "//ui/display",  # ScreenInfo/ScreenInfos for the compositing widget init (mb_widget.cc)
     "//ui/gfx",
     "//ui/gfx/codec",
     "//ui/gfx/geometry",
@@ -186,6 +187,14 @@ executable("mb_smoke_platform") {
 
 executable("mb_smoke_render") {
   sources = [ "test/mb_smoke_render.cc" ]
+  include_dirs = [ "//third_party/blink/renderer" ]
+  deps = [ ":miniblink_host" ]
+}
+
+# mb_compositor_widget_smoke: SOFTWARE COMPOSITOR milestone D2b-2 — the live widget flip
+# (InitializeCompositing + the patch-0012 frame-sink hook) driven through the mb_capi ABI.
+executable("mb_compositor_widget_smoke") {
+  sources = [ "test/mb_compositor_widget_smoke.cc" ]
   include_dirs = [ "//third_party/blink/renderer" ]
   deps = [ ":miniblink_host" ]
 }

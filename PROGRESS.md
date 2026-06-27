@@ -2341,3 +2341,36 @@ Compositing(ScreenInfos, LayerTreeSettings, empty mojo frame-sink args) instead 
 Compositing; SetCompositorVisible(true) to trigger RequestNewLayerTreeFrameSink -> our hook; pump the
 loop; confirm the hook fires and a page composites. Additive + opt-in (default stays non-compositing,
 preserving the heavily-tested software-paint screenshot path) so the risky flip can't regress it.
+
+[DONE — compositor milestone D2b-2: the LIVE widget flip — InitializeCompositing works in this
+single-process embedder + the frame-sink hook FIRES]. Wired the opt-in compositing path end to end:
+  * MbWidget::Attach(main_frame, w, h, composited): when composited, owns a mb::SoftwareCompositor,
+    installs the patch-0012 hook (WebFrameWidgetImpl::SetLayerTreeFrameSinkHookForHost bound to
+    SoftwareCompositor::CreateFrameSink), and calls WebFrameWidget::InitializeCompositing(ScreenInfos,
+    single-thread-synchronous LayerTreeSettings {single_thread_proxy_scheduler=false, use_layer_lists,
+    enable_smooth_scroll, +elastic-overscroll on Mac}, {},{},{}) + Resize + SetCompositorVisible(true).
+  * MbWebView::Create: WebView must report does_composite()=true for InitializeCompositing — created
+    with compositing_enabled = !widgets_never_composited = the opt-in flag (was hardcoded false/true).
+    Opt-in is a process-global (MbWebView::SetCompositingEnabled) the next Create() consumes; DEFAULT
+    OFF so the screenshot path is byte-for-byte unchanged.
+  * mb_capi: mbSetCompositingEnabled(int) + mbViewFrameSinkRequested(view) (>=0 compositing / -1 not).
+  * MbWidget::Composite() / MbWebView::Composite() (internal, NOT yet exposed via mb_capi): drive a
+    synchronous frame via WebFrameWidgetImpl::SynchronouslyCompositeForTesting -> LayerTreeHost::
+    CompositeForTest. EMPIRICALLY (this tick) this DID fire RequestNewLayerTreeFrameSink -> our hook ->
+    cc accepted our MbDirectLayerTreeFrameSink (stack trace confirmed LayerTreeView::SetLayerTreeFrame
+    Sink with our sink), proving the hook works end to end. It then CRASHES one stage deeper in cc
+    raster: LayerTreeHostImpl::CreateRasterBufferProvider -> ZeroCopyRasterBufferProvider CHECKs a
+    non-null layer_tree_frame_sink_->shared_image_interface() — even is_software=true software raster
+    needs a gpu::SharedImageInterface, and ours passes nullptr. cc software-compositing tests use the
+    TESTONLY gpu::TestSharedImageInterface (via cc::FakeLayerTreeFrameSink); there is no lightweight
+    PRODUCTION in-process software SII (SharedImageInterfaceInProcess::Create needs a full GPU Shared
+    ContextState + SingleTaskSequence). So Composite() is held back from the public ABI until D2b-3.
+  DEPS: host lib gains //ui/display (ScreenInfo/ScreenInfos). VERIFY: mb_compositor_widget_smoke
+  (mb_capi, default-off opt-in) — a non-compositing view reports -1, a compositing view inits Initialize
+  Compositing WITHOUT crashing, reports >=0 (live SoftwareCompositor), and the page is DOM-live under it.
+  Full battery green (mb_smoke 165, platform 46, render 133, shot 66, wke 117; compositor probes
+  1-5 PASS + widget_smoke PASS), no leaks. NEXT (milestone D2b-3): supply an in-process SOFTWARE
+  gpu::SharedImageInterface to MbDirectLayerTreeFrameSink so cc raster works, then drive Composite()
+  and read the composited page out of the SoftwareCompositor's captured bitmap — the first real cc->viz
+  ->bitmap of a live page. Likely de-testonly gpu::TestSharedImageInterface (patch, like 0006) or stand
+  up SharedImageInterfaceInProcess over the existing in-process GPU thread holder.

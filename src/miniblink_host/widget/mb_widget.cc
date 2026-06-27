@@ -6,10 +6,16 @@
 #include <string_view>
 #include <tuple>
 
+#include "base/functional/bind.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
+#include "cc/trees/layer_tree_settings.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
+#include "miniblink_host/platform/mb_compositor.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
+#include "ui/display/screen_info.h"
+#include "ui/display/screen_infos.h"
 #include "third_party/blink/public/common/input/web_coalesced_input_event.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/common/input/web_keyboard_event.h"
@@ -27,6 +33,7 @@
 #include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
 #include "ui/base/ime/ime_text_span.h"
 #include "ui/events/keycodes/dom/dom_key.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/range/range.h"
 #include "ui/latency/latency_info.h"
@@ -76,7 +83,8 @@ const KeyDef* FindKeyByVk(int vk) {
 MbWidget::MbWidget() = default;
 MbWidget::~MbWidget() = default;
 
-void MbWidget::Attach(blink::WebLocalFrame* main_frame, int width, int height) {
+void MbWidget::Attach(blink::WebLocalFrame* main_frame, int width, int height,
+                      bool composited) {
   // Create four associated channels. Blink keeps the FrameWidget/Widget receivers
   // and the *Host remotes; the browser-side ends (FrameWidget/Widget remotes and
   // *Host receivers) are simply dropped — no browser process services them, which is
@@ -100,13 +108,55 @@ void MbWidget::Attach(blink::WebLocalFrame* main_frame, int width, int height) {
       widget_host.Unbind(), std::move(widget_receiver),
       viz::FrameSinkId(1, 1));
 
-  widget_->InitializeNonCompositing(this);
+  composited_ = composited;
+  if (!composited_) {
+    widget_->InitializeNonCompositing(this);
+    widget_->Resize(gfx::Size(width, height));
+    return;
+  }
+
+  // Compositing path: own a software compositor, install the blink frame-sink hook
+  // (patch 0012) so WidgetBase::RequestNewLayerTreeFrameSink gets our in-process sink,
+  // then init compositing with single-thread synchronous settings (the headless case —
+  // mirrors frame_test_helpers.cc GetSynchronousSingleThreadLayerTreeSettings).
+  compositor_ = std::make_unique<SoftwareCompositor>(gfx::Size(width, height));
+  blink::WebFrameWidgetImpl::SetLayerTreeFrameSinkHookForHost(
+      base::BindRepeating(&SoftwareCompositor::CreateFrameSink,
+                          base::Unretained(compositor_.get())));
+
+  cc::LayerTreeSettings settings;
+  settings.single_thread_proxy_scheduler = false;  // synchronous; loop goes idle
+  settings.use_layer_lists = true;
+#if BUILDFLAG(IS_MAC)
+  settings.enable_elastic_overscroll_on_root = true;
+#endif
+  settings.enable_smooth_scroll = true;
+
+  display::ScreenInfo screen_info;
+  screen_info.rect = gfx::Rect(width, height);
+  screen_info.available_rect = gfx::Rect(width, height);
+  display::ScreenInfos screen_infos(screen_info);
+
+  widget_->InitializeCompositing(screen_infos, &settings,
+                                 /*initial_frame_sink=*/{},
+                                 /*initial_frame_sink_client=*/{},
+                                 /*initial_viz_rir_client=*/{});
   widget_->Resize(gfx::Size(width, height));
+  widget_->SetCompositorVisible(true);
 }
 
 void MbWidget::Resize(int width, int height) {
   if (widget_)
     widget_->Resize(gfx::Size(width, height));
+}
+
+void MbWidget::Composite() {
+  if (!composited_ || !widget_)
+    return;
+  // Generates a BeginMainFrame + updates the document lifecycle + drives a cc
+  // commit/draw; the first call lazily requests the frame sink via our hook.
+  static_cast<blink::WebFrameWidgetImpl*>(widget_)
+      ->SynchronouslyCompositeForTesting(base::TimeTicks::Now());
 }
 
 void MbWidget::SendMouseClick(int x, int y) {
