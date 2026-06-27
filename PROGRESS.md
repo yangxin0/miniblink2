@@ -1899,6 +1899,13 @@ sites are all gated on IsRenderingContext2D(), so WebGL is safe. Verified mb_smo
 104->105). WebGL 1+2 readPixels unaffected. Full battery green (mb_smoke 145, platform 46,
 shot 66, wke 114), no leaks. So mb_shot can now screenshot WebGL visualizations. WebGL is
 COMPLETE for headless use: WebGL 1 + WebGL 2 + readPixels + screenshot capture.
+[VERIFIED — plain-CSS composited layers also screenshot correctly]. The 0008 bug class
+(software paint skipping cc-composited layers) was only guarded for WebGL/2D-canvas/video;
+mb_smoke_render 41z7 closes the gap for CSS compositing triggers — five 40x40 divs forced
+onto their own layers via translateZ(0) / will-change:transform / translate3d / filter:blur
+/ opacity:0.99 ALL render their color into mbPaintToBitmap (a skipped layer would read the
+white background). No bug — blink paints them inline in our non-compositing widget; this is
+regression protection for the most common screenshot content. render 132->133, no leaks.
 [DONE — OffscreenCanvas WebGL (main thread)]. new OffscreenCanvas(w,h).getContext('webgl')
 renders via the same in-process provider (no DOM <canvas> needed) — off-DOM GPU rendering.
 Verified mb_smoke_render 41z5: clear cyan + readPixels -> 0,255,255,255 (render 107->108).

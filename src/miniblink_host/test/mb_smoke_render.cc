@@ -13,6 +13,39 @@ using mbsmoke::EvalIso;
 using mbsmoke::Expect;
 
 static void RunCases(mbView* v, int W, int H) {
+  // 41z7. FORCE-COMPOSITED CSS layers render in a screenshot (mbPaintToBitmap). Same
+  // root-cause class as the WebGL-canvas-blank bug (patch 0008: our non-compositing
+  // software paint skips cc-composited layers); the existing screenshot tests cover only
+  // WebGL/2D-canvas/video, NOT plain CSS compositing triggers. Each 40x40 div has a
+  // distinct color and a different trigger (translateZ / will-change / translate3d /
+  // filter / opacity); if a layer were skipped its pixel would be the white background.
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0;background:#fff'>"
+      "<div style='position:absolute;left:10px;top:10px;width:40px;height:40px;background:#ff0000;transform:translateZ(0)'></div>"
+      "<div style='position:absolute;left:70px;top:10px;width:40px;height:40px;background:#00ff00;will-change:transform'></div>"
+      "<div style='position:absolute;left:130px;top:10px;width:40px;height:40px;background:#0000ff;transform:translate3d(0px,0px,0px)'></div>"
+      "<div style='position:absolute;left:10px;top:70px;width:40px;height:40px;background:#ff1493;filter:blur(0.1px)'></div>"
+      "<div style='position:absolute;left:70px;top:70px;width:40px;height:40px;background:#00ffff;opacity:0.99'></div>"
+      "</body>", "https://comp.test/");
+    mbWait(v, 250);
+    std::vector<unsigned char> cv(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, cv.data(), W, H, W * 4);
+    auto rgb = [&](int x, int y, int c) {
+      return static_cast<int>(cv[(static_cast<size_t>(y) * W + x) * 4 + (2 - c)]);
+    };
+    const bool red = rgb(30, 30, 0) > 200 && rgb(30, 30, 1) < 70 && rgb(30, 30, 2) < 70;
+    const bool grn = rgb(90, 30, 1) > 200 && rgb(90, 30, 0) < 70 && rgb(90, 30, 2) < 70;
+    const bool blu = rgb(150, 30, 2) > 200 && rgb(150, 30, 0) < 70 && rgb(150, 30, 1) < 70;
+    const bool pnk = rgb(30, 90, 0) > 200 && rgb(30, 90, 2) > 100 && rgb(30, 90, 1) < 90;
+    const bool cyn = rgb(90, 90, 1) > 200 && rgb(90, 90, 2) > 200 && rgb(90, 90, 0) < 60;
+    Expect(red && grn && blu && pnk && cyn,
+           "force-composited CSS layers (translateZ/will-change/3d/filter/opacity) render "
+           "in a screenshot",
+           "red=" + std::to_string(red) + " grn=" + std::to_string(grn) + " blu=" +
+               std::to_string(blu) + " pnk=" + std::to_string(pnk) + " cyn=" +
+               std::to_string(cyn));
+  }
   // 35z. ALL synthetic input modalities route INTO a sub-frame (iframe) and reach its
   // elements — instead of SIGSEGV. The bug this guards: on a mousedown a sub-frame takes
   // the press for, EventHandler::CaptureMouseEventsToWidget -> WebFrameWidgetImpl::
