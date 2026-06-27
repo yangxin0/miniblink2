@@ -2150,3 +2150,38 @@ IDB test to regress (grep confirms). Plan: thread frame_key through `MakeFrameIn
 ("",name) bucket — not parent-origin-shared, same gotcha as the BroadcastChannel worker residual); opaque
 "null" origins aren't uniquely isolated; the persistence key format gains the origin prefix (self-
 consistent for single-origin; a cross-version load of an OLD save won't match — bump/accept).
+
+[ARC OPENED — #1 SOFTWARE COMPOSITOR (cc::LayerTreeHost), strict-order per user]. The user
+explicitly chose to build the deferred gap list from #1, accepting that the compositor is a
+many-tick arc with ~zero observable gain for headless (composited content already screenshots
+correctly via the software PAINT path — verified: WebGL/WebGPU, transform/will-change/3D,
+mix-blend-mode, clip-path, backdrop-filter). ARCHITECTURE MAPPED this tick:
+ - Today our widget calls WidgetBase::InitializeNonCompositing() -> LayerTreeHost is NULL.
+ - The real path is WidgetBase::InitializeCompositing() -> creates a blink LayerTreeView, which
+   IS the cc LayerTreeHostDelegate/SchedulingDelegate/SingleThreadClient (so we do NOT have to
+   implement the cc client interfaces — blink's LayerTreeView does). It builds the cc::LayerTree
+   Host and, when it needs to draw, asks the client for a frame sink via WebFrameWidgetImpl::
+   AllocateNewLayerTreeFrameSink() — which currently returns nullptr (the crux to fill).
+ - The frame sink we must supply (normally arrives async from the GPU process over mojo; we are
+   single-process): a SOFTWARE LayerTreeFrameSink backed by the viz software display stack —
+   cc::LayerTreeFrameSink -> viz::Display -> viz::SoftwareRenderer -> viz::SoftwareOutputDevice
+   (the base class owns an SkBitmap; BeginPaint(damage)->SkCanvas / EndPaint, Resize). The
+   Android-WebView SynchronousLayerTreeFrameSink is the closest in-process (no GPU-process)
+   reference for synchronous on-demand compositing.
+MILESTONE PLAN (each a bounded, verifiable, committable slice):
+  A = blink-free probe: viz SoftwareRenderer + a SoftwareOutputSurface(SoftwareOutputDevice) +
+      DisplayResourceProviderSoftware draw a hand-crafted CompositorRenderPass (one solid-color
+      quad) -> read the SoftwareOutputDevice bitmap -> assert the pixel color. Proves the
+      in-process software render-pass->pixels path works (the frame-sink backend), with NO
+      cc::LayerTreeHost or scheduler. (Mirrors mb_gl_probe / mb_dawn_probe milestone A.)
+  B = stand up a full viz::Display (FrameSinkManagerImpl + BeginFrameSource + a software Output
+      Surface) and submit a CompositorFrame through it -> bitmap. Proves the Display path.
+  C = a software cc::LayerTreeFrameSink that wraps B and is what AllocateNewLayerTreeFrameSink
+      returns; drive a standalone single-threaded cc::LayerTreeHost (its own delegates) with a
+      solid-color layer -> composite -> readback. Proves cc->framesink->bitmap end to end.
+  D = blink integration: make MbWebView's widget call InitializeCompositing (vs NonCompositing),
+      return the C frame sink from AllocateNewLayerTreeFrameSink, drive BeginFrame, and confirm
+      a page composites (and the existing software-paint screenshot path stays green / is
+      reconciled). The risky live-widget step, gated on A-C proving the pieces.
+This tick: approach confirmed with the user + architecture mapped + milestones defined. Builds
+start next tick (milestone A). Tree clean (doc-only).
