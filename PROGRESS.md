@@ -167,3 +167,10 @@ screenshot path", DONE). Remaining polish if ever wanted: non-yellow/complex-pag
   Web_browser (title "Web browser - Wikipedia", 23 `<p>`, 12 `<img>`, 18.9KB innerText, 256KB
   screenshot), iana.org/domains/reserved (132KB screenshot) — all render + scrape + screenshot
   correctly. The embedder genuinely works on real complex sites, not just fixtures.
+- **2026-06-28 client-rendered SPA validation** (the real modern scraping target — static sites like
+  Wikipedia are server-rendered HTML; SPAs build the DOM client-side from async fetch): a page that
+  `fetch()`es a cross-origin JSON API (jsonplaceholder.typicode.com/users) and renders the results
+  dynamically, driven by `mb_shot --wait-selector "#app li"`. Result: title updated to "SPA: 10
+  users", 10 `<li>` built client-side, real data scraped ("Leanne Graham …"), 50KB screenshot —
+  async fetch + dynamic DOM + wait-synchronization all work end to end. Modern JS-heavy apps render.
+  File-upload automation (`mbSetFileForSelector`) also confirmed present in the API audit.
