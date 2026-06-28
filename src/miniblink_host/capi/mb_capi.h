@@ -74,6 +74,15 @@ MB_EXPORT int mbWaitForSelectorHidden(mbView*, const char* css_selector,
 // so clear it (mbClearRequestLog) before the navigation to scope it to this page.
 MB_EXPORT int mbWaitForNetworkIdle(mbView*, int idle_ms, int timeout_ms);
 
+// Runaway-script guard. A single-process embedder shares the main thread with the
+// page, so a synchronous infinite loop in page JS (e.g. `while(true){}`) would hang
+// the process forever. Set the max wall-clock (ms) a single main-thread task may run
+// before its JS is forcibly terminated; the embedder recovers and can load the next
+// page. `ms <= 0` disables (the DEFAULT). Process-global; set once after mbInitialize.
+// Only a single never-returning task is killed — slow async work (network waits across
+// many short tasks) is never affected. Recommended 5000–10000 for untrusted pages.
+MB_EXPORT void mbSetScriptTimeout(int ms);
+
 // View lifecycle. A view owns one WebView + main LocalFrame + WebFrameWidget.
 MB_EXPORT mbView* mbCreateView(int width, int height);
 MB_EXPORT void    mbDestroyView(mbView*);

@@ -41,6 +41,7 @@
 #include "third_party/blink/public/platform/web_network_state_notifier.h"
 #include "third_party/blink/public/web/blink.h"
 #include "v8/include/v8-isolate.h"
+#include "miniblink_host/runtime/mb_script_watchdog.h"
 
 namespace mb {
 
@@ -202,12 +203,25 @@ MbRuntime::MbRuntime() {
   blink::WebNetworkStateNotifier::SetWebConnection(
       blink::kWebConnectionTypeEthernet, /*max_bandwidth_mbps=*/100.0);
 
+  // Runaway-script guard: a TaskObserver + monitor thread that terminates a single
+  // main-thread task whose JS overruns the configured timeout (disabled by default;
+  // opt in via mbSetScriptTimeout). Without it a `while(true){}` page hangs the
+  // single-process embedder forever.
+  if (isolate_) {
+    script_watchdog_ = std::make_unique<MbScriptWatchdog>();
+    script_watchdog_->Start(isolate_);
+  }
+
   ok_ = (isolate_ != nullptr);
   MB_STEP("12 done");
 #undef MB_STEP
 }
 
 MbRuntime::~MbRuntime() {
+  // Stop the watchdog (joins its thread + removes the TaskObserver) before the
+  // scheduler/message loop is torn down.
+  if (script_watchdog_)
+    script_watchdog_->Stop();
   // The MainThreadSchedulerImpl dtor DCHECKs Shutdown() was called.
   if (main_thread_scheduler_)
     main_thread_scheduler_->Shutdown();
@@ -216,6 +230,11 @@ MbRuntime::~MbRuntime() {
 
 void MbRuntime::PumpOnce() {
   base::RunLoop().RunUntilIdle();
+}
+
+void MbRuntime::SetScriptTimeoutMs(int ms) {
+  if (script_watchdog_)
+    script_watchdog_->SetTimeoutMs(ms);
 }
 
 // static

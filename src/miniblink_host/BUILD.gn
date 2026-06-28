@@ -75,6 +75,8 @@ component("miniblink_host") {
     "platform/mb_webgpu_context.h",
     "runtime/mb_runtime.cc",
     "runtime/mb_runtime.h",
+    "runtime/mb_script_watchdog.cc",
+    "runtime/mb_script_watchdog.h",
     "view/mb_webview.cc",
     "view/mb_webview.h",
     "widget/mb_widget.cc",

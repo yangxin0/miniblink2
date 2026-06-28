@@ -4274,6 +4274,31 @@ int main() {
                " actions=" + (actions_safe ? "ok" : "BAD"));
   }
 
+  // Runaway-script guard: a synchronous infinite loop in page JS would otherwise hang
+  // the single-process embedder forever. mbSetScriptTimeout makes the watchdog terminate
+  // the stuck task; the embedder must RECOVER and load the next page normally. (This case
+  // blocks ~the timeout before the watchdog fires.)
+  {
+    mbSetScriptTimeout(1000);
+    mbView* wd = mbCreateView(200, 150);
+    // The <script> never returns (while(true){}). Without the watchdog this call hangs.
+    mbLoadHTML(wd,
+               "<body><div id=x>start</div><script>"
+               "document.getElementById('x').textContent='loop';while(true){}"
+               "</script></body>",
+               "https://hang.example/");
+    // Reaching here means the loop was terminated. Recovery: a fresh load + eval on the
+    // SAME view must work (the isolate was un-terminated at the next task boundary).
+    mbLoadHTML(wd, "<body><div id=y>recovered</div></body>", "https://ok.example/");
+    const std::string rec = Eval(wd, "document.getElementById('y').textContent");
+    const std::string math = Eval(wd, "String(6*7)");  // isolate fully usable again
+    mbDestroyView(wd);
+    mbSetScriptTimeout(0);  // restore default (disabled) for any later case
+    Expect(rec == "recovered" && math == "42",
+           "script watchdog terminates a runaway sync loop + the embedder recovers",
+           "rec=[" + rec + "] math=[" + math + "]");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

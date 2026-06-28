@@ -44,6 +44,7 @@ class WebThreadScheduler;
 namespace mb {
 
 class MbPlatform;
+class MbScriptWatchdog;
 
 // Owns the global engine state. Single instance per process (mbInitialize).
 class MbRuntime {
@@ -56,6 +57,11 @@ class MbRuntime {
   void PumpOnce();
 
   MbPlatform* platform() { return platform_.get(); }
+
+  // Max wall-clock for a single main-thread task before its (runaway synchronous)
+  // JS is terminated, so a `while(true){}` page can't hang the process. <= 0
+  // disables (the default). Process-global. See mb_script_watchdog.h.
+  void SetScriptTimeoutMs(int ms);
 
   // Task runner of the IO/service thread (mb-io). In-process mojo services that
   // must answer [Sync] calls the main thread makes (e.g. BlobRegistry) bind their
@@ -73,6 +79,7 @@ class MbRuntime {
   std::unique_ptr<mojo::core::ScopedIPCSupport> ipc_support_;
   std::unique_ptr<blink::scheduler::WebThreadScheduler> main_thread_scheduler_;
   std::unique_ptr<MbPlatform> platform_;
+  std::unique_ptr<MbScriptWatchdog> script_watchdog_;
   v8::Isolate* isolate_ = nullptr;  // owned by Blink main thread
   bool ok_ = false;
 };

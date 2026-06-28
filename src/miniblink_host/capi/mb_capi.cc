@@ -113,6 +113,11 @@ void mbSetCompositingEnabled(int on) {
   mb::MbWebView::SetCompositingEnabled(on != 0);
 }
 
+void mbSetScriptTimeout(int ms) {
+  if (auto* rt = mb::MbRuntime::Get())
+    rt->SetScriptTimeoutMs(ms);
+}
+
 int mbViewFrameSinkRequested(mbView* v) {
   if (!v || !v->impl)
     return -1;
