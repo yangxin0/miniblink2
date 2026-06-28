@@ -73,9 +73,14 @@ watchdog SIGKILL, then `pgrep -x`). Network features verified against PUBLIC hos
   (`runtime/mb_script_watchdog.{h,cc}`) — a main-thread `TaskObserver` arms a per-task deadline; a
   monitor thread calls `v8::Isolate::TerminateExecution()` if one task overruns. Re-armed per task,
   so slow async work is unaffected; CAS-claims the exact deadline + cancels at the next boundary so
-  the isolate recovers. Opt-in `mbSetScriptTimeout(ms)` (0 = disabled = default). Test in mb_smoke
-  (a `while(true)` page terminates at ~1s, the view then loads + evals normally). Async timeouts
-  (`--wait-selector`, network-idle) were already graceful.
+  the isolate recovers. Opt-in `mbSetScriptTimeout(ms)` (0 = disabled = default); also exposed as
+  `mb_shot --script-timeout MS`. Covers BOTH a sync `while(true){}` loop AND an infinite microtask
+  flood (`Promise.resolve().then(f)` recursion — it drains within one task's microtask checkpoint,
+  so the same per-task guard catches it). Tests in mb_smoke (both terminate at ~1s + the view
+  recovers). Adversarial-content sweep also confirmed graceful handling NOT needing the guard: stack
+  overflow → `RangeError`, infinite `setTimeout` flood → load completes (timers don't block it),
+  async waits (`--wait-selector`, network-idle) → bounded timeouts. (Network robustness — proxy /
+  ignore-cert / follow-redirects — already had `mb_shot` flags.)
 
 ## Deferred follow-ups (post-gap-list — pick highest-value per tick, or stop if none ripe)
 Each is genuinely lower-value than the gap list. Verify tractability before committing to one.
