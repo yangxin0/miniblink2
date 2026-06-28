@@ -20,6 +20,7 @@
 #include "third_party/blink/public/mojom/dom_storage/dom_storage.mojom-blink.h"
 #include "third_party/blink/public/mojom/dom_storage/session_storage_namespace.mojom-blink.h"
 #include "third_party/blink/public/mojom/dom_storage/storage_area.mojom-blink.h"
+#include "third_party/blink/renderer/platform/network/blink_schemeful_site.h"
 #include "third_party/blink/renderer/platform/storage/blink_storage_key.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -60,7 +61,19 @@ std::string KeyForStorageKey(const blink::BlinkStorageKey& storage_key) {
     static int counter = 0;
     return "opaque:" + std::to_string(counter++);
   }
-  return origin->ToString().Utf8();
+  std::string key = origin->ToString().Utf8();
+  // Third-party storage partitioning (blink kThirdPartyStoragePartitioning, on by
+  // default): a cross-site embedded context (e.g. widget.example inside a.com vs
+  // b.com) gets an ISOLATED store per top-level site, matching the broker-scoped
+  // backends (IDB/Cache/locks). First-party and same-site frames keep the
+  // bare-origin key (a shared store) — ancestor chain bit is kSameSite there.
+  if (storage_key.GetAncestorChainBit() ==
+      blink::mojom::blink::AncestorChainBit::kCrossSite) {
+    const blink::BlinkSchemefulSite& top = storage_key.GetTopLevelSite();
+    if (!top.IsOpaque())
+      key += "\x1f""3p""\x1f" + top.Serialize().Utf8();
+  }
+  return key;
 }
 
 // A StorageArea over one origin's shared AreaStore. Many instances (one per

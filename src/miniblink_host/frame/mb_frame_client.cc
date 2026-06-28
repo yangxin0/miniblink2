@@ -23,8 +23,14 @@
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "net/base/schemeful_site.h"
 #include "services/network/public/cpp/web_sandbox_flags.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-shared.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
+#include "third_party/blink/public/mojom/storage_key/ancestor_chain_bit.mojom-shared.h"
+#include "third_party/blink/public/platform/web_security_origin.h"
+#include "third_party/blink/public/web/web_frame.h"
+#include "url/origin.h"
 #include "third_party/blink/public/common/loader/http_body_element_type.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/platform/web_http_body.h"
@@ -294,6 +300,37 @@ void MbFrameClient::DoCommit(std::unique_ptr<blink::WebNavigationInfo> info) {
       network::mojom::WebSandboxFlags::kNone) {
     params->origin_to_commit =
         blink::SecurityOrigin::Create(url)->DeriveNewOpaqueOrigin();
+  }
+  // Third-party storage partitioning: compute the child frame's StorageKey so a
+  // cross-site iframe gets a top-level-site-partitioned key (matching the
+  // broker-scoped backends). Without this blink defaults the key to first-party
+  // and the iframe's localStorage/IndexedDB would be SHARED across embedding
+  // sites. Only meaningful for non-opaque child frames; the main frame and
+  // opaque/sandboxed children keep the document loader's first-party default.
+  const bool opaque_sandbox =
+      (params->policy_container->policies.sandbox_flags &
+       network::mojom::WebSandboxFlags::kOrigin) !=
+      network::mojom::WebSandboxFlags::kNone;
+  if (web_frame_ && web_frame_->Parent() && !opaque_sandbox) {
+    url::Origin child_origin = blink::WebSecurityOrigin::Create(url);
+    blink::WebFrame* top = web_frame_->Top();
+    url::Origin top_origin =
+        top ? url::Origin(top->GetSecurityOrigin()) : child_origin;
+    if (!child_origin.opaque() && !top_origin.opaque()) {
+      net::SchemefulSite top_site(top_origin);
+      bool cross_site = net::SchemefulSite(child_origin) != top_site;
+      // kCrossSite if any ancestor below the top is itself cross-site with the
+      // top (already-committed ancestors expose their security origin).
+      for (blink::WebFrame* f = web_frame_->Parent(); f && f != top && !cross_site;
+           f = f->Parent()) {
+        if (net::SchemefulSite(url::Origin(f->GetSecurityOrigin())) != top_site)
+          cross_site = true;
+      }
+      params->storage_key = blink::StorageKey::Create(
+          child_origin, top_site,
+          cross_site ? blink::mojom::AncestorChainBit::kCrossSite
+                     : blink::mojom::AncestorChainBit::kSameSite);
+    }
   }
   blink::To<blink::WebLocalFrameImpl>(web_frame_)->CommitNavigation(
       std::move(params), /*extra_data=*/nullptr);

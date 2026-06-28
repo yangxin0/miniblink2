@@ -57,7 +57,7 @@ watchdog SIGKILL, then `pgrep -x`). Network features verified against PUBLIC hos
 | 9 | IndexedDB blob-on-disk persistence | **✅ DONE** (stale "fragile" note) — `mbSaveIndexedDB`/`mbLoadIndexedDB` capture blob bytes via async per-blob remote reads + re-mint on load. Tested + passing: 37n2 (Blob round-trips through save/DELETE-db/load — bytes from DISK, not the in-session handle), 37n3 (File name/lastModified/type + a 300KB BytesProvider blob). No remaining gap. |
 | 10 | Worker storage origin | **✅ DONE** — dedicated + shared workers already alloc a synthetic frame_key and `MbSetFrameOrigin` to the script's origin, so a same-origin worker shares its window's IDB/locks and cross-origin is isolated. (Opaque data:/blob: worker = "null" wildcard for window↔worker BroadcastChannel bridging — a deliberate tradeoff.) |
 | — | **Child-frame BrowserInterfaceBroker** | **✅ FIXED this tick** (bonus, blocks #11/#12) — `CreateChildFrame` passed an EMPTY browser broker, so every broker-backed API (storage/locks/permissions/geolocation/IDB) HUNG in iframes. Now child frames get `MakeFrameInterfaceBroker(child frame_key)` (origin set on DidCommitNavigation). Test 23g3: a same-origin iframe's held lock blocks the parent. |
-| 11 | Third-party storage partitioning | **✅ DONE** (broker-scoped backends) — DidCommitNavigation now sets a frame's storage scope to `frame-origin` + `top-level-origin` when they differ, so a third-party iframe (e.g. widget.test in a.com vs b.com) gets ISOLATED IDB/Cache/locks per embedding site (first-party + same-origin frames key by the bare origin, unchanged). Test 23g4 (widget@t1's lock invisible to widget@t2). NOTE: localStorage scopes by blink's StorageKey (mb_dom_storage), not our map — partitioning it needs blink-side StorageKey changes (follow-up). |
+| 11 | Third-party storage partitioning | **✅ DONE** (broker-scoped backends) — DidCommitNavigation now sets a frame's storage scope to `frame-origin` + `top-level-origin` when they differ, so a third-party iframe (e.g. widget.test in a.com vs b.com) gets ISOLATED IDB/Cache/locks per embedding site (first-party + same-origin frames key by the bare origin, unchanged). Test 23g4 (widget@t1's lock invisible to widget@t2). localStorage ALSO partitioned now (follow-up done): `MbFrameClient::DoCommit` computes a top-level-site-partitioned `WebNavigationParams::storage_key` for cross-site child frames (blink defaulted it to first-party), and `KeyForStorageKey` honors the StorageKey's cross-site top-level site. Test 23g5 (w3pls@t1's localStorage invisible to w3pls@t2). |
 | 12 | Session / child-frame history | **✅ DONE (main-frame)** — `history.back()/forward()/go()`, pushState/replaceState, popstate, AND `history.length` all work (the archive's "non-functional / length stays 1" is stale — it's implemented via per-frame history_items_ + SetHistoryListFromNavigation + GoToEntryAtOffset replay). Tests 78c (multi-view back+popstate), 78c2 (length + back/forward traverse on a fresh view), 86 (host-driven). CHILD-FRAME joint session history (iframe navs in back/forward) remains — complex + low value, deferred. |
 | 13 | Video frame stepping (per-currentTime) | **✅ DONE** (stale note) — the player decodes the whole VPX stream, indexes frames by timestamp, and Paint() selects the frame at currentTime; drawImage/screenshot pull it. Test (mb_smoke_render): seeking 0→1.8s shows a DIFFERENT frame. |
 | 14 | Real audio output | **N/A by-design** — audio PROCESSING works (OfflineAudioContext, 41c); real speaker output is meaningless + untestable headless. |
@@ -68,11 +68,11 @@ watchdog SIGKILL, then `pgrep -x`). Network features verified against PUBLIC hos
 
 ## Deferred follow-ups (post-gap-list — pick highest-value per tick, or stop if none ripe)
 Each is genuinely lower-value than the gap list. Verify tractability before committing to one.
-- **localStorage third-party partitioning** (completes #11): localStorage keys by blink's StorageKey
-  (`mb_dom_storage`), not our frame-origin map, so a third-party iframe isn't site-partitioned like
-  IDB/Cache/locks are. Investigate whether enabling blink's `kThirdPartyStoragePartitioning` makes
-  blink hand the backend a top-level-site-partitioned StorageKey (then it "just works"), vs needing
-  host-side StorageKey plumbing.
+- **localStorage third-party partitioning** ✅ DONE (2026-06-28) — see gap #11 row. Root cause: our
+  `DoCommit` never set `WebNavigationParams::storage_key`, so blink defaulted a cross-site iframe to
+  a first-party key. Fix: compute the partitioned StorageKey (top-level SchemefulSite + ancestor
+  chain bit) for cross-site child frames at commit, and have `KeyForStorageKey` append the top site.
+  Bonus: blink's own StorageKey is now correct for cross-site iframes (IDB/quota/etc.). Test 23g5.
 - **Compositor → screenshot path** (completes #1 polish): read the composited `viz::Display` frame
   into the user-facing `mbPaintToBitmap` so opt-in compositing produces real screenshots (today it
   rasters to an internal bitmap only; the software-paint path still backs `mbPaintToBitmap`).

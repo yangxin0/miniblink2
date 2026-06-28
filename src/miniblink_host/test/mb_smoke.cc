@@ -1852,6 +1852,49 @@ int main() {
            "t1_held=[" + t1held + "] t2_acquire=[" + t2avail + "]");
   }
 
+  // 23g5. THIRD-PARTY localStorage PARTITIONING. localStorage keys by blink's BlinkStorageKey
+  // (not our frame-origin map), so this exercises the KeyForStorageKey top-level-site partition:
+  // the SAME third-party iframe origin (w3pls.test) under two DIFFERENT tops gets ISOLATED
+  // localStorage. widget@t1 writes localStorage['k']='t1'; widget@t2 must NOT see it (it reads
+  // its own empty partition). Without partitioning both widgets would share w3pls.test's store
+  // and t2 would read 't1'.
+  {
+    mbMockResponse("w3pls.test/w", "<body>widget</body>", "text/html", 200);
+    mbView* va = mbCreateView(200, 150);
+    mbView* vb = mbCreateView(200, 150);
+    mbLoadHTML(va, "<body>a<iframe src='https://w3pls.test/w'></iframe></body>",
+               "https://t1ls.test/");
+    mbLoadHTML(vb, "<body>b<iframe src='https://w3pls.test/w'></iframe></body>",
+               "https://t2ls.test/");
+    char lsb[96] = {0};
+    std::string t1wrote;
+    for (int i = 0; i < 60; ++i) {  // va's widget writes 'k'='t1' and reads it back
+      mbWait(va, 50);
+      mbEvalJSInFrame(va, 0,
+                      "(function(){try{localStorage.setItem('k','t1');"
+                      "return localStorage.getItem('k')||'NULL';}catch(e){return 'ERR';}})()",
+                      lsb, sizeof(lsb));
+      t1wrote = lsb;
+      if (t1wrote == "t1")
+        break;
+    }
+    std::string t2read = "?";
+    if (t1wrote == "t1") {
+      mbWait(vb, 100);  // vb's widget reads 'k' — must be empty (separate partition)
+      mbEvalJSInFrame(vb, 0,
+                      "(function(){try{return localStorage.getItem('k')||'NULL';}"
+                      "catch(e){return 'ERR';}})()",
+                      lsb, sizeof(lsb));
+      t2read = lsb;
+    }
+    mbClearMocks();
+    mbDestroyView(va);
+    mbDestroyView(vb);
+    Expect(t1wrote == "t1" && t2read == "NULL",
+           "third-party iframe localStorage is partitioned by top-level site (w3pls@t1 != w3pls@t2)",
+           "t1_wrote=[" + t1wrote + "] t2_read=[" + t2read + "]");
+  }
+
   // 23h. BroadcastChannel (window path, broker #8-adjacent): a window's BroadcastChannel
   // uses an ASSOCIATED provider from the frame's navigation-associated interfaces (not the
   // broker). The host serves it in-process: a message posted on one channel is delivered to
