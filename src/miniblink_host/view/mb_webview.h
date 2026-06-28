@@ -53,6 +53,9 @@ class MbWebView {
   int CompositorFrameSinkCount() const;
   // Drive one synchronous compositor frame (compositing views only; no-op otherwise).
   void Composite();
+  // The SkColor (0xAARRGGBB) at (x,y) in the compositor's last captured frame, or 0 if this view
+  // is not compositing / nothing composited yet. For verifying the live cc->viz->bitmap path.
+  unsigned int CompositorPixel(int x, int y) const;
 
   void Resize(int width, int height);
   void LoadHTML(const char* utf8_html, const char* base_url);  // no network

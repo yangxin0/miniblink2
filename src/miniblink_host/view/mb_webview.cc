@@ -181,6 +181,15 @@ void MbWebView::Composite() {
     widget_->Composite();
 }
 
+unsigned int MbWebView::CompositorPixel(int x, int y) const {
+  if (!widget_ || !widget_->compositor())
+    return 0;
+  const SkBitmap& b = widget_->compositor()->captured_bitmap();
+  if (b.isNull() || x < 0 || y < 0 || x >= b.width() || y >= b.height())
+    return 0;
+  return b.getColor(x, y);
+}
+
 std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
   auto v = std::unique_ptr<MbWebView>(new MbWebView());
   v->view_client_ = std::make_unique<MbViewClient>();

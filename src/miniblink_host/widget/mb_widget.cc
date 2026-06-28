@@ -153,10 +153,14 @@ void MbWidget::Resize(int width, int height) {
 void MbWidget::Composite() {
   if (!composited_ || !widget_)
     return;
-  // Generates a BeginMainFrame + updates the document lifecycle + drives a cc
-  // commit/draw; the first call lazily requests the frame sink via our hook.
+  // 1) BeginMainFrame + lifecycle + cc commit/raster/draw; the first call lazily requests the
+  //    frame sink via our hook. cc submits its CompositorFrame to the Display's root surface.
   static_cast<blink::WebFrameWidgetImpl*>(widget_)
       ->SynchronouslyCompositeForTesting(base::TimeTicks::Now());
+  // 2) The in-process Display's scheduler is begin-frame-driven (never fires headlessly), so
+  //    force it to aggregate + draw the submitted frame into the capturing output device.
+  if (compositor_)
+    compositor_->DrawAndCapture();
 }
 
 void MbWidget::SendMouseClick(int x, int y) {

@@ -434,6 +434,8 @@ executable("mb_compositor5_probe") {
   sources = [
     "platform/mb_compositor.cc",
     "platform/mb_compositor.h",
+    "platform/mb_gpu_thread.cc",
+    "platform/mb_gpu_thread.h",
     "tools/mb_compositor5_probe.cc",
   ]
   include_dirs = [ "//third_party/blink/renderer" ]
@@ -445,6 +447,8 @@ executable("mb_compositor5_probe") {
     "//components/viz/service",
     "//components/viz/test:test_support",
     "//gpu/command_buffer/service",
+    "//gpu/ipc:gl_in_process_context",
+    "//gpu/ipc:gpu_thread_holder",
     "//mojo/core/embedder",
     "//services/viz/public/mojom",
     "//skia",

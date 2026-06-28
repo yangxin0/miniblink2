@@ -119,6 +119,17 @@ int mbViewFrameSinkRequested(mbView* v) {
   return v->impl->CompositorFrameSinkCount();
 }
 
+void mbViewComposite(mbView* v) {
+  if (v && v->impl)
+    v->impl->Composite();
+}
+
+unsigned int mbViewCompositorPixel(mbView* v, int x, int y) {
+  if (!v || !v->impl)
+    return 0;
+  return v->impl->CompositorPixel(x, y);
+}
+
 void mbResize(mbView* v, int width, int height) {
   if (v && v->impl)
     v->impl->Resize(width, height);

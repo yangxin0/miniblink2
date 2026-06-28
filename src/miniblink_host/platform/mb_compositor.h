@@ -40,7 +40,9 @@
 #include "ui/gfx/geometry/size.h"
 
 namespace gpu {
+class GLInProcessContext;
 class Scheduler;
+class SharedImageInterface;
 class SharedImageManager;
 class SyncPointManager;
 }  // namespace gpu
@@ -68,7 +70,8 @@ class MbDirectLayerTreeFrameSink : public cc::LayerTreeFrameSink,
       const viz::FrameSinkId& frame_sink_id,
       viz::FrameSinkManagerImpl* frame_sink_manager,
       viz::Display* display,
-      scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner);
+      scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner,
+      scoped_refptr<gpu::SharedImageInterface> shared_image_interface);
   MbDirectLayerTreeFrameSink(const MbDirectLayerTreeFrameSink&) = delete;
   MbDirectLayerTreeFrameSink& operator=(const MbDirectLayerTreeFrameSink&) =
       delete;
@@ -169,7 +172,11 @@ class SoftwareCompositor {
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   std::unique_ptr<gpu::SyncPointManager> sync_point_manager_;
   std::unique_ptr<gpu::Scheduler> gpu_scheduler_;
-  std::unique_ptr<gpu::SharedImageManager> shared_image_manager_;
+  // In-process GL context (holder-backed) sources the SharedImageInterface cc rasters tiles
+  // through; the GPU service's SharedImageManager (which the Display also reads) backs both.
+  // gl_context_ is declared before shared_image_interface_ so the SII wrapper tears down first.
+  std::unique_ptr<gpu::GLInProcessContext> gl_context_;
+  scoped_refptr<gpu::SharedImageInterface> shared_image_interface_;
   std::unique_ptr<viz::FrameSinkManagerImpl> frame_sink_manager_;
   const viz::FrameSinkId frame_sink_id_;
   // viz::Display stores &debug_settings_ by pointer and the begin-frame source via its

@@ -47,21 +47,39 @@ int main() {
     mbPumpMessages();
   }
 
+  // Drive real cc frames: raster through the in-process GPU service's SharedImageInterface ->
+  // the Display -> the captured bitmap. The first composite lazily pulls the frame sink.
+  for (int i = 0; i < 3; ++i) {
+    mbViewComposite(v);
+    mbPumpMessages();
+  }
+
   int sinks = mbViewFrameSinkRequested(v);
 
   char body[256] = {0};
   mbEvalJS(v, "document.body.textContent", body, sizeof(body));
   bool live = std::strstr(body, "hello compositor") != nullptr;
 
-  // Compositing view -> a live SoftwareCompositor (count >= 0); non-compositing -> -1.
-  bool ok = (plain_sinks == -1) && (sinks >= 0) && live;
-  printf("mb_compositor_widget_smoke: plain=%d compositing=%d body=[%s] live=%d\n",
-         plain_sinks, sinks, body, live ? 1 : 0);
+  // The composited center pixel should be the page's yellow (#ffff00) if cc raster -> viz ->
+  // bitmap works end to end.
+  unsigned int c = mbViewCompositorPixel(v, 200, 150);
+  unsigned int a = (c >> 24) & 0xff, r = (c >> 16) & 0xff, g = (c >> 8) & 0xff,
+               b = c & 0xff;
+  bool yellow = r > 200 && g > 200 && b < 80;
+
+  // PASS gate: the live cc compositing pipeline runs end to end WITHOUT crashing and blink's
+  // compositor pulled our in-process frame sink (sinks>=1), with the page DOM-live. The composited
+  // PIXEL is a diagnostic only for now: cc raster posts tile work to the GPU service's thread and
+  // the captured bitmap is still empty (the cross-thread raster flush is the final step, D2b-4).
+  bool ok = (plain_sinks == -1) && (sinks >= 1) && live;
+  printf("mb_compositor_widget_smoke: plain=%d sinks=%d body=[%s] live=%d pixel=%08X "
+         "(a%d r%d g%d b%d) yellow=%d\n",
+         plain_sinks, sinks, body, live ? 1 : 0, c, a, r, g, b, yellow ? 1 : 0);
 
   mbDestroyView(v);
   mbShutdown();
 
-  printf("mb_compositor_widget_smoke: %s (InitializeCompositing live + frame-sink hook wired)\n",
-         ok ? "PASS" : "FAIL");
+  printf("mb_compositor_widget_smoke: %s (live cc compositing pipeline runs; frame sink pulled%s)\n",
+         ok ? "PASS" : "FAIL", yellow ? "; pixel YELLOW" : "");
   return ok ? 0 : 1;
 }

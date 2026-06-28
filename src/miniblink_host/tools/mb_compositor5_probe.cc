@@ -67,15 +67,9 @@ int main(int argc, char** argv) {
   base::SingleThreadTaskExecutor main_task_executor;
   base::ThreadPoolInstance::CreateAndStartWithDefaultParams("mb_compositor5_probe");
 
-  base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
-  cmd->AppendSwitchASCII(switches::kUseGL, gl::kGLImplementationANGLEName);
-  cmd->AppendSwitchASCII(switches::kUseANGLE,
-                         gl::kANGLEImplementationSwiftShaderName);
-  cmd->AppendSwitch(switches::kEnableUnsafeSwiftShader);
-  if (!gl::init::InitializeGLOneOff(gl::GpuPreference::kDefault)) {
-    fprintf(stderr, "mb_compositor5_probe: InitializeGLOneOff FAILED\n");
-    return 1;
-  }
+  // GL is initialized lazily by mb::GetSharedGpuThreadHolder() inside the SoftwareCompositor
+  // ctor (it sets the ANGLE/SwiftShader switches + calls InitializeGLOneOff once); the probe
+  // must NOT pre-init GL or that lazy init DCHECKs on a double InitializeGLOneOff.
 
   // The host-library component under test.
   mb::SoftwareCompositor compositor(gfx::Size(100, 100));

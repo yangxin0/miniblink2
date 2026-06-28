@@ -1,0 +1,38 @@
+diff --git a/gpu/command_buffer/service/shared_image_interface_in_process_base.cc b/gpu/command_buffer/service/shared_image_interface_in_process_base.cc
+index 2541ee9..0c48317 100644
+--- a/gpu/command_buffer/service/shared_image_interface_in_process_base.cc
++++ b/gpu/command_buffer/service/shared_image_interface_in_process_base.cc
+@@ -459,6 +459,15 @@ SyncToken SharedImageInterfaceInProcessBase::GenNextSyncToken() {
+   return GenNextSyncTokenLocked();
+ }
+ 
++// miniblink-modern patch: an in-process SII has no GPU channel that can be lost.
++bool SharedImageInterfaceInProcessBase::AddGpuChannelLostObserver(
++    GpuChannelLostObserver* /*observer*/) {
++  return true;
++}
++
++void SharedImageInterfaceInProcessBase::RemoveGpuChannelLostObserver(
++    GpuChannelLostObserver* /*observer*/) {}
++
+ SyncToken SharedImageInterfaceInProcessBase::GenNextSyncTokenLocked() {
+   return MakeSyncToken(next_fence_sync_release_++);
+ }
+diff --git a/gpu/command_buffer/service/shared_image_interface_in_process_base.h b/gpu/command_buffer/service/shared_image_interface_in_process_base.h
+index 0ac7049..5ae0d93 100644
+--- a/gpu/command_buffer/service/shared_image_interface_in_process_base.h
++++ b/gpu/command_buffer/service/shared_image_interface_in_process_base.h
+@@ -30,6 +30,13 @@ class GPU_GLES2_EXPORT SharedImageInterfaceInProcessBase
+   // Generate the next sequence token in the process's sequence
+   SyncToken GenNextSyncToken();
+ 
++  // miniblink-modern patch: an in-process SharedImageInterface has no GPU channel that can be
++  // lost, but cc::LayerTreeFrameSink::BindToClient (software compositing) calls these on its
++  // SII and the base SharedImageInterface NOTREACHEs them. Implement them as no-ops so an
++  // in-process SII can back a software cc::LayerTreeFrameSink.
++  bool AddGpuChannelLostObserver(GpuChannelLostObserver* observer) override;
++  void RemoveGpuChannelLostObserver(GpuChannelLostObserver* observer) override;
++
+   // Include default-args overloads from superclass.
+   using SharedImageInterface::CreateSharedImage;
+ 

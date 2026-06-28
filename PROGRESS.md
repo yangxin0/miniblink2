@@ -2436,3 +2436,33 @@ SII through the frame sink (steps 1-2). RESULTS, empirically:
     mb_compositor5_probe's own GL init (let the holder do it) AND give it the SII adapter, or retire that
     probe (its host-lib coverage is subsumed by mb_compositor_widget_smoke once Composite works).
   After step 2.5, step 4's cross-thread GPU-thread raster flush remains the final unknown.
+
+[DONE — compositor milestone D2b-3: the live cc compositing pipeline RUNS end to end, crash-free —
+blink drives cc -> our in-process frame sink -> viz::Display, no crash]. Implemented steps 1-2.5:
+  * platform/mb_compositor.cc: SoftwareCompositor's ctor creates a holder-backed GLInProcessContext,
+    sources its SharedImageInterface, and uses the in-process GPU service's SharedImageManager (via
+    holder->GetTaskExecutor()->shared_image_manager()) for the Display — so cc's raster SII and the
+    Display read ONE manager. The D1 standalone gpu::SharedImageManager is gone. The SII is plumbed
+    through CreateFrameSink -> MbDirectLayerTreeFrameSink base ctor.
+  * patches/0013-inprocess-sii-gpu-channel-lost-noop.patch: the in-process SII (SharedImageInterface
+    InProcess, via base SharedImageInterfaceInProcessBase) didn't implement AddGpuChannelLostObserver
+    /RemoveGpuChannelLostObserver, which cc::LayerTreeFrameSink::BindToClient calls in SOFTWARE mode
+    (the base gpu::SharedImageInterface NOTREACHEs). NOTE: gpu::SharedImageInterface's ctor is private
+    with an explicit //gpu friend list, so a host-side forwarding adapter CANNOT subclass it — the
+    patch adds the two methods (return true / no-op; an in-process SII never loses a GPU channel) to
+    SharedImageInterfaceInProcessBase, which IS a friend. 16 lines, 2 files.
+  * mb_widget.cc Composite() now drives SynchronouslyCompositeForTesting THEN SoftwareCompositor::
+    DrawAndCapture; mb_capi gains mbViewComposite + mbViewCompositorPixel (now SAFE — driving a
+    composite no longer crashes). MbWebView::CompositorPixel reads the captured bitmap.
+  * mb_compositor5_probe (D2a): dropped its own InitializeGLOneOff (the holder does it now; a double
+    init DCHECKs) + added the gpu ipc deps; STILL PASSES with a yellow hand-built frame (R255 G255 B0)
+    -> proves the holder-backed Display + patch 0013 + SII path are sound.
+  VERIFIED: mb_compositor_widget_smoke drives 3 real composites -> sinks=1 (frame sink pulled, no
+  crash), page DOM-live; full battery green (mb_smoke 165, platform 46, render 133, shot 66, wke 117;
+  probes gl/gpu/dawn/webgpu/webgpu2/compositor/2/3/4/5 PASS + widget_smoke PASS), no leaks.
+  REMAINING (milestone D2b-4, the last step): the widget-driven captured bitmap is still empty
+  (pixel=0x00000000) — cc rasters tiles on the GPU service's thread and they haven't landed/flushed
+  into the Display's SoftwareOutputDevice when DrawAndCapture reads it. The hand-built-frame path
+  (mb_compositor5) DOES yield pixels, so the Display is fine; the gap is cc's cross-thread raster
+  completion. NEXT: flush/await GPU-thread raster before the Display draw (e.g. a sync round-trip on
+  the SII, or pump until tiles are ready), then assert the composited pixel is the page's yellow.

@@ -9,6 +9,7 @@
 
 #include "base/check_op.h"
 #include "base/functional/bind.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/notreached.h"
 #include "base/time/time.h"
 #include "cc/trees/layer_tree_frame_sink_client.h"
@@ -24,9 +25,14 @@
 #include "components/viz/service/display_embedder/software_output_surface.h"
 #include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
 #include "components/viz/service/surfaces/surface_manager.h"
+#include "gpu/command_buffer/client/shared_image_interface.h"
+#include "gpu/command_buffer/service/command_buffer_task_executor.h"
 #include "gpu/command_buffer/service/scheduler.h"
 #include "gpu/command_buffer/service/shared_image/shared_image_manager.h"
 #include "gpu/command_buffer/service/sync_point_manager.h"
+#include "gpu/ipc/gl_in_process_context.h"
+#include "gpu/ipc/in_process_gpu_thread_holder.h"
+#include "miniblink_host/platform/mb_gpu_thread.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkSurface.h"
 
@@ -54,11 +60,12 @@ MbDirectLayerTreeFrameSink::MbDirectLayerTreeFrameSink(
     const viz::FrameSinkId& frame_sink_id,
     viz::FrameSinkManagerImpl* frame_sink_manager,
     viz::Display* display,
-    scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner)
+    scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner,
+    scoped_refptr<gpu::SharedImageInterface> shared_image_interface)
     : LayerTreeFrameSink(/*context_provider=*/nullptr,
                          /*worker_context_provider=*/nullptr,
                          std::move(compositor_task_runner),
-                         /*shared_image_interface=*/nullptr),
+                         std::move(shared_image_interface)),
       frame_sink_id_(frame_sink_id),
       frame_sink_manager_(frame_sink_manager),
       display_(display) {
@@ -202,12 +209,31 @@ SoftwareCompositor::SoftwareCompositor(const gfx::Size& size)
       sync_point_manager_(std::make_unique<gpu::SyncPointManager>()),
       gpu_scheduler_(
           std::make_unique<gpu::Scheduler>(sync_point_manager_.get())),
-      shared_image_manager_(
-          std::make_unique<gpu::SharedImageManager>(/*thread_safe=*/false)),
       frame_sink_manager_(std::make_unique<viz::FrameSinkManagerImpl>(
           viz::FrameSinkManagerImpl::InitParams())),
       frame_sink_id_(1, 1),
       size_(size) {
+  // cc rasters tiles THROUGH a gpu::SharedImageInterface into a SharedImageManager, and the
+  // Display's SoftwareRenderer reads from the SAME manager. Source both from the shared in-process
+  // GPU service (the one mb_webgl uses): an in-process GL context gives the SII (wrapped so cc's
+  // software path accepts it), and the service's SharedImageManager (via its task executor) backs
+  // the Display. If the holder is unavailable, fall back to a Display with no shared manager (the
+  // hand-built-frame path still works; cc raster won't).
+  gpu::SharedImageManager* shared_image_manager = nullptr;
+  if (gpu::InProcessGpuThreadHolder* holder = GetSharedGpuThreadHolder()) {
+    gl_context_ = std::make_unique<gpu::GLInProcessContext>();
+    if (gl_context_->Initialize(holder->GetTaskExecutor(),
+                                gpu::CONTEXT_TYPE_OPENGLES2) ==
+        gpu::ContextResult::kSuccess) {
+      shared_image_interface_ =
+          base::WrapRefCounted(gl_context_->GetSharedImageInterface());
+      shared_image_manager =
+          holder->GetTaskExecutor()->shared_image_manager();
+    } else {
+      gl_context_.reset();
+    }
+  }
+
   auto device = std::make_unique<MbCapturingSoftwareOutputDevice>();
   output_device_ = device.get();
   auto output_surface =
@@ -224,7 +250,7 @@ SoftwareCompositor::SoftwareCompositor(const gfx::Size& size)
   viz::RendererSettings settings;
 
   display_ = std::make_unique<viz::Display>(
-      shared_image_manager_.get(), gpu_scheduler_.get(), settings,
+      shared_image_manager, gpu_scheduler_.get(), settings,
       &debug_settings_, frame_sink_id_, /*gpu_dependency=*/nullptr,
       std::move(output_surface), std::move(overlay), std::move(scheduler),
       task_runner_);
@@ -237,7 +263,8 @@ SoftwareCompositor::~SoftwareCompositor() {
 std::unique_ptr<cc::LayerTreeFrameSink> SoftwareCompositor::CreateFrameSink() {
   ++frame_sink_count_;
   return std::make_unique<MbDirectLayerTreeFrameSink>(
-      frame_sink_id_, frame_sink_manager_.get(), display_.get(), task_runner_);
+      frame_sink_id_, frame_sink_manager_.get(), display_.get(), task_runner_,
+      shared_image_interface_);
 }
 
 void SoftwareCompositor::Resize(const gfx::Size& size) {

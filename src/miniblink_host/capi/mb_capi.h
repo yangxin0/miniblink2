@@ -87,6 +87,12 @@ MB_EXPORT void    mbResize(mbView*, int width, int height);
 // not compositing.
 MB_EXPORT void    mbSetCompositingEnabled(int on);
 MB_EXPORT int     mbViewFrameSinkRequested(mbView*);
+// Drive one synchronous compositor frame (compositing views only; no-op otherwise) — a headless
+// compositing widget has no browser begin-frame source, so frames are pulled explicitly.
+MB_EXPORT void    mbViewComposite(mbView*);
+// The SkColor (0xAARRGGBB) at (x,y) in the compositor's last captured frame, or 0 if not
+// compositing / nothing composited. For verifying the cc -> viz -> bitmap path.
+MB_EXPORT unsigned int mbViewCompositorPixel(mbView*, int x, int y);
 
 // Content entry points.
 //   mbLoadHTML  — render an in-memory document (no network). First render proof.
