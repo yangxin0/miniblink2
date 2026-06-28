@@ -123,6 +123,16 @@ Each is genuinely lower-value than the gap list. Verify tractability before comm
   Zero headless-automation value — only do if explicitly asked.
 - **Cache large-blob durability** (#3): >256KB cached bodies intermittently read empty under rapid
   succession (blink in-process BlobBytesProvider stall). Not safely fixable from our layer (4 tries).
+- **Service Workers** — INVESTIGATED + DECLINED (2026-06-28). Scope: 28 SW mojom interfaces + 40
+  renderer `.cc` files, plus all the browser-side infra to reimplement in-process (ServiceWorker
+  ContainerHost, Registration/Object hosts, embedded-worker startup, install/activate lifecycle,
+  ControllerServiceWorker + fetch-event dispatch with response streams, installed-scripts caching).
+  The largest single subsystem in the project — multi-week — and LOW headless-scraping value (SW is
+  progressive enhancement; most sites work without it). Critically, NO safe minimal subset: a stub
+  that resolves `register()` without running the worker is HARMFUL (sites assume SW works, then break
+  when fetches aren't intercepted). Current state is the correct non-support: `navigator.serviceWorker`
+  exists and `register()` REJECTS cleanly with a TypeError (no hang), so feature-detecting sites
+  degrade gracefully. Only build this on an explicit, effort-aware request.
 
 ## Compositor #1 — COMPLETE (architecture, for reference)
 Opt-in (`mbSetCompositingEnabled`, default OFF; the software-paint screenshot path is untouched).
