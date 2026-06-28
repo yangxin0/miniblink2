@@ -43,8 +43,8 @@ watchdog SIGKILL, then `pgrep -x`). Network features verified against PUBLIC hos
 | # | Feature | Status |
 |---|---------|--------|
 | **1** | **Software compositor / cc raster → pixels** | **✅ COMPLETE** — a live page rasters through cc → viz::Display → bitmap, in-process headless (opt-in, default off). See below. |
-| 2 | WebRTC | **IN PROGRESS** — SDP/signaling WORKS (RTCPeerConnection + createOffer/Answer + data-channel SDP + two-peer offer/answer handshake to signalingState=stable). Connectivity blocked: ICE gathers **0 candidates** (no P2P UDP socket factory). Plan: bind the REAL `network::P2PSocketManager` in `mb_frame_broker::GetInterface` over a minimal `net::URLRequestContext`. getUserMedia headless = no devices (by design). |
-| 3 | Cache-body large-blob durability | upstream blink bug; likely document-as-unfixable |
+| 2 | WebRTC | **DONE (SDP) — connectivity deferred by-design.** SDP/signaling WORKS (RTCPeerConnection + createOffer/Answer + data-channel SDP + two-peer handshake to signalingState=stable). Real peer connectivity (ICE/DTLS) deferred: zero headless-automation value + needs heavy `//services/network` or a reimplemented P2P UDP socket stack (diagnosis + reuse plan in archive if ever wanted). getUserMedia = no devices (headless). |
+| 3 | Cache-body large-blob durability | **ACCEPTED by-design** (4 investigations) — >256KB cached bodies read in RAPID succession intermittently come back empty: blink's in-process BlobBytesProvider stalls/empties under load. Found a real sub-bug (MbBlob::Clone copied empty data_ before async materialize — fix: defer clone), but the deeper provider stall remains + the fix risks page-blocking HANGS (worse than the current intermittent-empty). Not safely fixable from our layer. |
 | 4 | Geolocation | deferred |
 | 5 | PWA install | deferred |
 | 6 | Permissions API (full) | deferred |

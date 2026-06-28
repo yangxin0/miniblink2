@@ -2522,3 +2522,24 @@ This tick diagnosed #2 empirically (a loopback test, then reverted to keep the b
     'got:ping'. NOTE low headless value (no automation use case for real peer connections); doing it
     per the strict-order directive. Likely 2-3 ticks (minimal URLRequestContext; broker wiring +
     linking; loopback verification).
+
+---
+
+[#3 cache large-blob — 4th investigation: real sub-bug found, deeper stall remains, ACCEPTED]
+Pursued the unexplored angle (the clone path) and found a GENUINE sub-bug:
+  * MbBlob::Clone copied data_ (the materialized bytes) "only after ready". A >256KB cache body is
+    a BytesProvider blob that materializes ASYNCHRONOUSLY; cache.match clones it via resp.Clone() ->
+    MbBlob::Clone, often BEFORE materialize completes -> the clone got an empty data_ (the archive's
+    "clone ready=1 datasize=0"). FIX: defer the clone (queue the receiver) until ready_, then MakeClone
+    from the materialized data_ — mirrors the existing pending_reads_/pending_loads_ deferral.
+  * With that fix, instrumentation CONFIRMED the provider delivers (OnProviderBytes size=300000) and a
+    300000-byte clone is built — 3 of 5 rapid put->match->text() iterations round-tripped a full 300KB.
+  * BUT the deeper bug remains: on SOME iterations blink's BlobBytesProvider never replies to Request
+    AsReply (its remote disconnects first) -> Materialize stalls -> the deferred clone HANGS (worse than
+    the old intermittent-empty). A disconnect-handler guard (continue-on-provider-gone) did NOT fix it
+    reliably (made it worse: 3 iterations -> 1). So the root cause is upstream in blink's in-process
+    BytesProvider delivery under rapid cache.put/match succession, NOT safely fixable from our layer.
+  DECISION: reverted all changes (the original Clone — copy data_ even if empty — at least never hangs;
+  a hang blocks the page forever, strictly worse). Accepted #3 as a by-design limitation: only >256KB
+  cached bodies read in rapid succession are affected; small bodies, single reads, and all non-cache
+  blobs work. The Clone-defer insight is recorded here if the upstream provider stall is ever resolved.
