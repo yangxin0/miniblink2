@@ -85,6 +85,9 @@ Each is genuinely lower-value than the gap list. Verify tractability before comm
   child never bound a history sink). See gap #12 row. Test 23at3. Remaining (deferred, low value):
   per-entry frame-TREE snapshots so an iframe nav creates its own joint entry that back() reverts in
   isolation — needs HistoryItem child trees + a per-entry frame tree; the common case works now.
+- **UA Client Hints** ✅ DONE (2026-06-28) — an empirical feature sweep found navigator.userAgentData
+  .brands was EMPTY despite the rich UA string (an automation tell). Now `UserAgentMetadataOverride`
+  returns realistic Chrome-150/macOS metadata for the built-in UA (custom UA stays empty). Test 19c.
 - **WebRTC peer connectivity** (#2): SDP/signaling works; real ICE/DTLS needs a P2P UDP socket stack.
   Zero headless-automation value — only do if explicitly asked.
 - **Cache large-blob durability** (#3): >256KB cached bodies intermittently read empty under rapid
