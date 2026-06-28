@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <memory>
 #include <set>
@@ -19,6 +20,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/single_thread_task_runner.h"
@@ -82,6 +84,10 @@ struct MbIDBBackend {
   // aborted upgrade can be found from MbIDBDatabase::Abort (to reject the open
   // request + roll back the schema). Cleared on the txn's commit/abort/destruction.
   MbIDBTransactionImpl* version_change_txn = nullptr;
+  // Live connections (open MbIDBDatabase handles) to this backend. Used to fire a
+  // best-effort versionchange notification on OTHER connections when one of them runs
+  // deleteDatabase. Each MbIDBDatabase registers/unregisters itself (ctor/dtor).
+  std::set<MbIDBDatabase*> connections;
   // Snapshot of the schema (version + object stores) as it was BEFORE the in-flight
   // upgrade began — the per-transaction data snapshot below does NOT cover metadata,
   // so an aborted upgrade restores this to undo CreateObjectStore/version changes.
@@ -208,6 +214,10 @@ void RemoveFromIndexes(MbIDBBackend* b, int64_t store_id,
 // Big-endian, order-preserving encoding of a double: flip the sign bit for positives and
 // all bits for negatives, so lexicographic byte order matches numeric order.
 std::string EncodeDouble(double d) {
+  // IndexedDB treats -0 and +0 as equal, but they have different bit patterns;
+  // normalize so they encode identically (else a key stored as -0 wouldn't match +0).
+  if (d == 0.0)
+    d = 0.0;
   uint64_t u = base::bit_cast<uint64_t>(d);
   u = (u & (uint64_t{1} << 63)) ? ~u : (u | (uint64_t{1} << 63));
   char buf[8];
@@ -493,11 +503,17 @@ class MbIDBCursor : public m::IDBCursor {
   }
   void Prefetch(int32_t count, PrefetchCallback callback) override {
     auto cv = m::IDBCursorValue::New();
+    // AppendCurrent skips stale records, so pos_ does NOT advance by exactly one per
+    // delivered value. Record pos_ before the batch and after each delivered value so a
+    // reset can rewind precisely by consumed-count rather than guessing the delta.
+    prefetch_start_pos_ = pos_;
+    prefetch_positions_.clear();
     int32_t n = 0;
-    for (; n < count && pos_ < entries_.size(); ++n)
+    for (; n < count && pos_ < entries_.size(); ++n) {
       if (!AppendCurrent(cv.get()))
         break;
-    last_prefetch_ = n;
+      prefetch_positions_.push_back(pos_);  // pos_ right after consuming this value
+    }
     if (n == 0) {
       std::move(callback).Run(m::IDBCursorResult::NewEmpty(true));
       return;
@@ -505,8 +521,14 @@ class MbIDBCursor : public m::IDBCursor {
     std::move(callback).Run(m::IDBCursorResult::NewValues(std::move(cv)));
   }
   void PrefetchReset(int32_t used_prefetches) override {
-    pos_ -= (last_prefetch_ - used_prefetches);
-    last_prefetch_ = 0;
+    // Rewind to the position right after the LAST used value (or to the pre-prefetch
+    // position if none were used). Relative to consumed count, robust to skipped records.
+    if (used_prefetches > 0 &&
+        static_cast<size_t>(used_prefetches) <= prefetch_positions_.size())
+      pos_ = prefetch_positions_[used_prefetches - 1];
+    else
+      pos_ = prefetch_start_pos_;
+    prefetch_positions_.clear();
   }
 
   void set_pos(size_t pos) { pos_ = pos; }
@@ -550,7 +572,8 @@ class MbIDBCursor : public m::IDBCursor {
   bool reverse_;  // Prev/PrevNoDuplicate: entries_ is pre-reversed (descending)
   std::vector<std::pair<std::string, std::string>> entries_;  // (cursor-key, primary-key)
   size_t pos_ = 0;
-  int32_t last_prefetch_ = 0;
+  size_t prefetch_start_pos_ = 0;        // pos_ at the start of the last Prefetch
+  std::vector<size_t> prefetch_positions_;  // pos_ after each delivered prefetch value
 };
 
 class MbIDBDatabase : public m::IDBDatabase {
@@ -560,7 +583,9 @@ class MbIDBDatabase : public m::IDBDatabase {
       : backend_(backend) {
     if (db_cb.is_valid())
       db_callbacks_.Bind(std::move(db_cb));
+    backend_->connections.insert(this);
   }
+  ~MbIDBDatabase() override { backend_->connections.erase(this); }
 
   // This connection's transaction-completion sink — PER-CONNECTION, not shared on
   // the backend, so a second connection to the same DB doesn't clobber this one's
@@ -763,9 +788,20 @@ class MbIDBDatabase : public m::IDBDatabase {
       return;
     }
 
-    const MbRecord& first = store_it->second.at(entries.front().second);
+    // Skip leading entries whose record was deleted (an index entry can outlive its
+    // record); .at() below would otherwise throw. Mirrors AppendCurrent's guard.
+    size_t start = 0;
+    while (start < entries.size() &&
+           store_it->second.find(entries[start].second) == store_it->second.end())
+      ++start;
+    if (start >= entries.size()) {
+      std::move(callback).Run(m::IDBDatabaseOpenCursorResult::NewEmpty(true));
+      return;
+    }
+
+    const MbRecord& first = store_it->second.at(entries[start].second);
     auto val = m::IDBDatabaseOpenCursorValue::New();
-    val->key = is_index ? DecodeKey(entries.front().first)
+    val->key = is_index ? DecodeKey(entries[start].first)
                         : blink::IDBKey::Clone(first.key);
     val->primary_key = blink::IDBKey::Clone(first.key);
     if (!key_only)
@@ -774,7 +810,7 @@ class MbIDBDatabase : public m::IDBDatabase {
     auto cursor = std::make_unique<MbIDBCursor>(
         backend_, object_store_id, key_only, is_index, reverse,
         std::move(entries));
-    cursor->set_pos(1);  // entries[0] is delivered in this open result
+    cursor->set_pos(start + 1);  // entries[start] is delivered in this open result
     mojo::PendingAssociatedRemote<m::IDBCursor> cursor_remote;
     auto cursor_receiver = cursor_remote.InitWithNewEndpointAndPassReceiver();
     mojo::MakeSelfOwnedAssociatedReceiver(std::move(cursor),
@@ -870,7 +906,13 @@ class MbIDBDatabase : public m::IDBDatabase {
         it->value->max_index_id = index->id;
     }
   }
-  void DeleteIndex(int64_t, int64_t object_store_id, int64_t index_id) override {
+  void DeleteIndex(int64_t transaction_id, int64_t object_store_id,
+                   int64_t index_id) override {
+    // Snapshot the store before erasing index_data so an aborted upgrade restores the
+    // index's entries (metadata rolls back via pre_upgrade_metadata; the index DATA only
+    // rolls back through the per-store snapshot). conn == `this`, matching the version-
+    // change txn's snapshot key (db_.get() inside the transaction is this same object).
+    EnsureSnapshot(backend_, this, transaction_id, object_store_id);
     auto it = backend_->metadata.object_stores.find(object_store_id);
     if (it != backend_->metadata.object_stores.end())
       it->value->indexes.erase(index_id);
@@ -963,10 +1005,13 @@ class MbIDBTransactionImpl : public IDBTransaction {
       use_key = generated.get();
     } else if (use_key && use_key->GetType() == blink::mojom::IDBKeyType::Number &&
                IsAutoIncrement(backend_, object_store_id)) {
-      int64_t k = static_cast<int64_t>(use_key->Number());
+      // Only a NUMBER key bumps the generator (spec). Cap at 2^53 and use a saturating
+      // cast: static_cast<int64_t> of a huge double (e.g. 1e30) is undefined behavior.
+      double v = std::min(use_key->Number(), 9007199254740992.0);
+      int64_t candidate = 1 + base::saturated_cast<int64_t>(std::floor(v));
       int64_t& next = backend_->key_generator[object_store_id];
-      if (k >= next)
-        next = k + 1;
+      if (candidate > next)
+        next = candidate;
     }
 
     std::string ekey = EncodeKey(use_key);
@@ -1025,6 +1070,9 @@ class MbIDBTransactionImpl : public IDBTransaction {
   void SetIndexKeys(int64_t object_store_id,
                     std::unique_ptr<blink::IDBKey> primary_key,
                     blink::IDBIndexKeys index_keys) override {
+    // Snapshot the store before writing index_data so an aborted upgrade rolls these
+    // index entries back (index_data is part of the per-store snapshot).
+    EnsureSnapshot(backend_, db_.get(), txn_id_, object_store_id);
     std::string pkey = EncodeKey(primary_key.get());
     if (pkey.empty())
       return;
@@ -1102,7 +1150,20 @@ class MbIDBFactory : public m::IDBFactory {
   explicit MbIDBFactory(uint64_t frame_key) : frame_key_(frame_key) {}
 
   void GetDatabaseInfo(GetDatabaseInfoCallback callback) override {
-    std::move(callback).Run({}, nullptr);
+    // databases(): report every database for THIS frame's origin. Registry keys are
+    // "origin\nname" (see IDBKey), so filter by the origin prefix. Skip backends that
+    // were opened but never upgraded (still kNoVersion) — they aren't real databases yet.
+    blink::Vector<m::IDBNameAndVersionPtr> names;
+    const std::string prefix = MbGetFrameOrigin(frame_key_) + "\n";
+    for (const auto& [key, b] : Registry()) {
+      if (key.compare(0, prefix.size(), prefix) != 0)
+        continue;
+      if (b->metadata.version == blink::IDBDatabaseMetadata::kNoVersion)
+        continue;
+      names.push_back(
+          m::IDBNameAndVersion::New(b->metadata.name, b->metadata.version));
+    }
+    std::move(callback).Run(std::move(names), nullptr);
   }
 
   void Open(mojo::PendingAssociatedRemote<IDBFactoryClient> client_pending,
@@ -1127,11 +1188,26 @@ class MbIDBFactory : public m::IDBFactory {
                                           std::move(db_receiver));
 
     const int64_t current = CurrentVersion(backend);
-    if (version > current) {
+    // Resolve the effective version, matching content's connection_coordinator:
+    //  - open(name) with no version (kNoVersion) -> max(1, current): a brand-new DB
+    //    upgrades to 1 (so upgradeneeded fires and stores can be created), an existing
+    //    DB just opens at its current version.
+    //  - open(name, v) with v < current -> reject with VersionError.
+    //  - otherwise upgrade only when the effective version is greater than current.
+    int64_t new_version = version;
+    if (version == blink::IDBDatabaseMetadata::kNoVersion) {
+      new_version = std::max<int64_t>(1, current);
+    } else if (version < current) {
+      client->Error(
+          m::IDBException::kVersionError,
+          blink::String("The requested version is less than the existing version"));
+      return;
+    }
+    if (new_version > current) {
       // Snapshot the schema BEFORE the upgrade so an aborted upgrade can roll back
       // version + object stores (the per-txn data snapshot doesn't cover metadata).
       backend->pre_upgrade_metadata = CloneMetadata(backend->metadata);
-      backend->metadata.version = version;
+      backend->metadata.version = new_version;
       auto txn = std::make_unique<MbIDBTransactionImpl>(
           backend, transaction_id, std::move(client), db_weak);
       MbIDBTransactionImpl* txn_ptr = txn.get();
@@ -1158,6 +1234,13 @@ class MbIDBFactory : public m::IDBFactory {
     auto it = Registry().find(key);
     if (it != Registry().end()) {
       old_version = CurrentVersion(it->second.get());
+      // Best-effort versionchange: notify every live connection so its onversionchange
+      // can react (a real browser would block the delete until they close; here we just
+      // signal and proceed). new_version == kNoVersion signals deletion.
+      for (MbIDBDatabase* conn : it->second->connections) {
+        if (auto* cb = conn->callbacks())
+          cb->VersionChange(old_version, blink::IDBDatabaseMetadata::kNoVersion);
+      }
       RetireBackend(std::move(it->second));
       Registry().erase(it);
     }
