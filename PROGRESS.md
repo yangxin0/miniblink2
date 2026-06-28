@@ -88,6 +88,14 @@ Each is genuinely lower-value than the gap list. Verify tractability before comm
 - **UA Client Hints** ✅ DONE (2026-06-28) — an empirical feature sweep found navigator.userAgentData
   .brands was EMPTY despite the rich UA string (an automation tell). Now `UserAgentMetadataOverride`
   returns realistic Chrome-150/macOS metadata for the built-in UA (custom UA stays empty). Test 19c.
+- **Browser-identity / anti-detection tells** ✅ MOSTLY DONE (2026-06-28) — a bot-detection sweep found
+  several headless tells that are also correctness bugs. FIXED: `window.chrome` (absent → injected
+  app/runtime/csi/loadTimes stub at document-start), `window.screen` (0x0 → 1920x1080 desktop monitor
+  via patch 0015 in `WidgetBase::InitializeNonCompositing`), `window.outer{Width,Height}` (0x0 → inner
+  + ~79px chrome via `SetScreenRects`). Test 19d. REMAINING tell (deferred): `navigator.plugins` is
+  empty + `navigator.pdfViewerEnabled` is false (real Chrome has the 5 built-in PDF-viewer entries) —
+  needs blink plugin-data registration; medium effort. WebGL UNMASKED_RENDERER still reveals
+  "SwiftShader" (would need a WebGL getParameter shim) — low priority.
 - **WebRTC peer connectivity** (#2): SDP/signaling works; real ICE/DTLS needs a P2P UDP socket stack.
   Zero headless-automation value — only do if explicitly asked.
 - **Cache large-blob durability** (#3): >256KB cached bodies intermittently read empty under rapid
