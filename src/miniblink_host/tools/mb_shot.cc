@@ -16,6 +16,9 @@
 //   --click CSS        before capturing, click the element matching CSS
 //                      (timeout = --wait-ms or 5000ms). For JS-rendered content.
 //   --wait-ms N        before capturing, drive the engine for N ms (settle timers/async).
+//   --script-timeout MS  terminate a single page-JS task that runs longer than MS
+//                      (guards against while(true){} / infinite microtask floods that
+//                      would otherwise hang the load forever). Off by default.
 //   --console          print the page's console output (console.log/warn/error) to stderr.
 //   --header "N: V"    add an HTTP request header (repeatable) to the navigation + subresources.
 //   --text             print the page's visible text (document.body.innerText) to stdout.
@@ -110,6 +113,7 @@ int main(int argc, char** argv) {
   std::string load_cookies;    // cookie jar file to load before navigating
   std::string save_cookies;    // cookie jar file to write after the page settles
   int wait_ms = 0;            // fixed wait before capture
+  int script_timeout_ms = 0;  // kill a single task whose JS runs >this (0=off)
   int scroll_to_y = -1;       // absolute scroll Y before capture (-1 = none)
   std::string scroll_to_sel;  // scroll this selector into view before capture
   std::string post_body;       // when set, POST this body to the URL (vs GET)
@@ -220,6 +224,8 @@ int main(int argc, char** argv) {
       save_cookies = argv[++i];
     } else if (a == "--wait-ms" && i + 1 < argc) {
       wait_ms = std::atoi(argv[++i]);
+    } else if (a == "--script-timeout" && i + 1 < argc) {
+      script_timeout_ms = std::atoi(argv[++i]);
     } else if (a == "--scroll-to" && i + 1 < argc) {
       scroll_to_y = std::atoi(argv[++i]);
     } else if (a == "--scroll-to-selector" && i + 1 < argc) {
@@ -290,7 +296,7 @@ int main(int argc, char** argv) {
         "[--click CSS] [--drag FROM TO] [--dispatch CSS EVT] [--press KEY] "
         "[--wait-selector CSS] [--wait-visible CSS] "
         "[--wait-hidden CSS] [--wait-eval JS] [--wait-idle] [--css STYLES] [--auto-scroll] "
-        "[--wait-ms N] "
+        "[--wait-ms N] [--script-timeout MS] "
         "[--scroll-to Y] [--scroll-to-selector CSS] "
         "[--post BODY] [--proxy URL] "
         "[--load-cookies FILE] [--save-cookies FILE] [--insecure] [--headers] "
@@ -328,6 +334,10 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "mb_shot: engine init failed\n");
     return 1;
   }
+  // Guard against a runaway page script (sync infinite loop / microtask flood) that
+  // would otherwise hang the load forever. Process-global; off unless requested.
+  if (script_timeout_ms > 0)
+    mbSetScriptTimeout(script_timeout_ms);
   mbView* view = mbCreateView(w, h);
   if (!view) {
     std::fprintf(stderr, "mb_shot: view creation failed\n");

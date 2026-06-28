@@ -4293,10 +4293,26 @@ int main() {
     const std::string rec = Eval(wd, "document.getElementById('y').textContent");
     const std::string math = Eval(wd, "String(6*7)");  // isolate fully usable again
     mbDestroyView(wd);
-    mbSetScriptTimeout(0);  // restore default (disabled) for any later case
     Expect(rec == "recovered" && math == "42",
            "script watchdog terminates a runaway sync loop + the embedder recovers",
            "rec=[" + rec + "] math=[" + math + "]");
+
+    // An infinite MICROTASK flood (Promise.resolve().then(f) recursively) also never
+    // returns to the loop — it drains within one task's microtask checkpoint, so the
+    // same per-task watchdog catches it. Without the guard this hangs the load forever.
+    mbView* wd2 = mbCreateView(200, 150);
+    mbLoadHTML(wd2,
+               "<body><div id=z>start</div><script>"
+               "document.getElementById('z').textContent='flood';"
+               "(function f(){Promise.resolve().then(f);})();"
+               "</script></body>",
+               "https://flood.example/");
+    const std::string rec2 = Eval(wd2, "(function(){try{return 6*7;}catch(e){return 'ERR';}})()");
+    mbDestroyView(wd2);
+    mbSetScriptTimeout(0);  // restore default (disabled) for any later case
+    Expect(rec2 == "42",
+           "script watchdog also catches an infinite microtask flood (recovers)",
+           "rec2=[" + rec2 + "]");
   }
 
   mbDestroyView(v);
