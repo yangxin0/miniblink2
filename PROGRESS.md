@@ -94,8 +94,9 @@ Each is genuinely lower-value than the gap list. Verify tractability before comm
   via patch 0015 in `WidgetBase::InitializeNonCompositing`), `window.outer{Width,Height}` (0x0 → inner
   + ~79px chrome via `SetScreenRects`). Test 19d. `navigator.plugins`/`pdfViewerEnabled` ALSO fixed now (2026-06-28): `MbPluginRegistry`
   (process broker) advertises `application/pdf` + `SetPluginsEnabled(true)`, so blink synthesizes the
-  canonical 5-entry PDF-viewer list and `pdfViewerEnabled=true`. Test 19e. REMAINING tell (low
-  priority): WebGL `UNMASKED_RENDERER` reveals "SwiftShader" (would need a WebGL getParameter shim).
+  canonical 5-entry PDF-viewer list and `pdfViewerEnabled=true`. Test 19e. The only remaining tell —
+  WebGL `UNMASKED_RENDERER` = SwiftShader — is now ACCEPTED BY-DESIGN (truthful software renderer;
+  spoofing is inconsistent + detectable; see "Accepted by-design"). Anti-detection surface complete.
 - **WebRTC peer connectivity** (#2): SDP/signaling works; real ICE/DTLS needs a P2P UDP socket stack.
   Zero headless-automation value — only do if explicitly asked.
 - **Cache large-blob durability** (#3): >256KB cached bodies intermittently read empty under rapid
@@ -142,5 +143,21 @@ screenshot path", DONE). Remaining polish if ever wanted: non-yellow/complex-pag
   opens the native popup, which we don't render). Set `.value` / click options for automation.
 - Sub-frame synthetic input (click/move/wheel/drag/contextmenu/keyboard) is crash-free and routes
   correctly; clicking `<select>`/`<input type=file|date>` renders no popup but doesn't crash.
-- `history.back()/forward()` page-driven traversal is non-functional (needs a browser-side history
-  index; see gap #12). pushState/replaceState + sessionStorage DO work.
+- WebGL `UNMASKED_RENDERER_WEBGL` reports the real ANGLE/SwiftShader software renderer. NOT spoofed:
+  it's truthful, software rendering is common on real machines (CI/VMs/low-end), and faking a
+  hardware-GPU string would be INCONSISTENT with our actual canvas/WebGL pixel output (which
+  fingerprinters hash) while the JS `getParameter` override is itself `toString`-detectable — a
+  half-measure with real downsides. The `VENDOR`/`RENDERER` (non-debug) params already report the
+  spec-masked "WebKit"/"WebKit WebGL" like every browser.
+
+## Verification log (empirical sweeps via `mb_shot --eval-json`, so future ticks don't repeat them)
+- **2026-06-28 feature sweep:** WASM, SharedArrayBuffer, streams (Readable/Text*), observers
+  (Resize/Intersection), structuredClone, Popover, dialog, View Transitions, requestIdleCallback,
+  CSS.registerProperty, color-mix, :has(), container queries, Intl.Segmenter, Promise.withResolvers,
+  URLPattern, CompressionStream, customElements — all present. (`WebShare`/`Array.group` absent =
+  correct: UI-only / removed-from-spec.)
+- **2026-06-28 functional sweep:** timezone (system-derived + `mbSetTimezone` override, tested),
+  Intl (NumberFormat/RelativeTimeFormat/DateTimeFormat), performance timing + monotonic now,
+  TextEncoder CJK, URL/searchParams, JSON, encodeURIComponent, Number.toLocaleString, unicode regex,
+  String.normalize, Array.at, structuredClone(Date), crypto.randomUUID/getRandomValues — all correct.
+  No functional bugs found; the engine + automation surface are comprehensive.
