@@ -1770,6 +1770,43 @@ int main() {
            "view2_ifAvailable=[" + xf + "]");
   }
 
+  // 23g3. Broker-backed APIs work in CHILD FRAMES now (each iframe gets its own Browser
+  // InterfaceBroker; previously child frames got an empty broker so navigator.locks et al.
+  // HUNG). A same-origin iframe acquires + holds a lock — proving its broker resolves — and the
+  // parent's ifAvailable sees it held (cross-frame same-origin sharing).
+  {
+    mbLoadHTML(
+        v, "<body>p<iframe srcdoc=\"<body>c</body>\"></iframe></body>",
+        "https://iframebroker.test/");
+    mbWaitForFunction(
+        v, "document.querySelector('iframe').contentDocument!==null", 2000);
+    char fbuf[64] = {0};
+    mbEvalJSInFrame(v, 0,
+                    "window.__h='';navigator.locks.request('L',function(){"
+                    "window.__h='held';return new Promise(function(){});});",
+                    fbuf, sizeof(fbuf));
+    std::string iheld;
+    for (int i = 0; i < 40; ++i) {  // iframe must ACQUIRE -> proves its broker works
+      mbWait(v, 50);
+      mbEvalJSInFrame(v, 0, "window.__h", fbuf, sizeof(fbuf));
+      iheld = fbuf;
+      if (iheld == "held")
+        break;
+    }
+    Eval(v, "window.__pa='';navigator.locks.request('L',{ifAvailable:true},"
+            "function(lk){window.__pa=(lk===null)?'null':'got';});");
+    std::string ifpa;
+    for (int i = 0; i < 40; ++i) {
+      mbWait(v, 50);
+      ifpa = Eval(v, "window.__pa");
+      if (ifpa == "null" || ifpa == "got")
+        break;
+    }
+    Expect(iheld == "held" && ifpa == "null",
+           "iframe broker works: a same-origin iframe's held lock blocks the parent",
+           "iframe_held=[" + iheld + "] parent_ifAvailable=[" + ifpa + "]");
+  }
+
   // 23h. BroadcastChannel (window path, broker #8-adjacent): a window's BroadcastChannel
   // uses an ASSOCIATED provider from the frame's navigation-associated interfaces (not the
   // broker). The host serves it in-process: a message posted on one channel is delivered to

@@ -13,6 +13,7 @@
 #include "base/unguessable_token.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "miniblink_host/blob/mb_blob_registry.h"
+#include "miniblink_host/frame/mb_frame_broker.h"
 #include "miniblink_host/frame/mb_frame_origin.h"
 #include "miniblink_host/frame/mb_local_frame_host.h"
 #include "miniblink_host/loader/mb_url_loader.h"
@@ -142,7 +143,11 @@ blink::WebLocalFrame* MbFrameClient::CreateChildFrame(
   // them in the WebNavigationParams; here we apply them in BeginNavigation.
   child_ptr->SetSandboxFlags(frame_policy.sandbox_flags);
   child_ptr->Bind(child, std::move(child_client));
-  finish_creation(child, blink::DocumentToken(), /*browser_broker=*/{},
+  // Give the child frame its OWN BrowserInterfaceBroker (scoped to its frame_key -> origin, set
+  // on DidCommitNavigation), like the main frame — without it every broker-backed API
+  // (storage / locks / permissions / geolocation) HANGS in an iframe (the request is dropped).
+  finish_creation(child, blink::DocumentToken(),
+                  MakeFrameInterfaceBroker(child_ptr->frame_key()),
                   std::make_unique<base::UnguessableToken>(
                       base::UnguessableToken::Create()));
   return child;
