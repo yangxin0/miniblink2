@@ -15,6 +15,7 @@
 #define MINIBLINK_HOST_FRAME_MB_FRAME_CLIENT_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -30,11 +31,16 @@
 
 namespace blink {
 class HistoryItem;
+struct UserAgentMetadata;
 }  // namespace blink
 
 namespace mb {
 
 class MbWebView;  // owner / callback sink
+
+// Realistic UA Client Hints metadata matching MbDefaultUserAgent() (Chrome 150 /
+// macOS). Shared so document frames and workers report the same brands/platform.
+blink::UserAgentMetadata MbDefaultUserAgentMetadata();
 
 // In-renderer PolicyContainerHost for committing navigations: it gives each commit a
 // FRESH, empty (advisory CSP/referrer; no-op) policy container with a bound dedicated
@@ -187,6 +193,13 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // non-empty (else Platform::UserAgent(), which is empty here), so we always
   // return a real UA. Set before navigating to take effect for that load.
   blink::WebString UserAgentOverride() override;
+
+  // navigator.userAgentData (UA Client Hints). blink consults this whenever
+  // UserAgentOverride() is non-empty (always, for us); returning nullopt left
+  // brands/platform EMPTY — an automation tell inconsistent with the rich UA
+  // string. We supply realistic Chrome-150/macOS metadata for the built-in UA;
+  // a caller-set custom UA still gets nullopt (so we don't contradict it).
+  std::optional<blink::UserAgentMetadata> UserAgentMetadataOverride() override;
 
   void SetUserAgent(const std::string& ua) { user_agent_ = ua; }
   const std::string& user_agent() const { return user_agent_; }

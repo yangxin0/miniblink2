@@ -36,6 +36,7 @@
 
 #include "miniblink_host/frame/mb_frame_broker.h"
 #include "miniblink_host/frame/mb_frame_origin.h"
+#include "miniblink_host/frame/mb_frame_client.h"  // MbDefaultUserAgentMetadata
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/worker/mb_worker_fetch_context.h"
 #include "miniblink_host/worker/mb_worker_script.h"
@@ -144,7 +145,7 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
         info->options->credentials, blink::WebString(info->options->name), origin,
         origin, /*is_constructor_secure_context=*/false,
         blink::WebString::FromUtf8(MbDefaultUserAgent()),
-        blink::UserAgentMetadata(),
+        mb::MbDefaultUserAgentMetadata(),
         std::vector<blink::WebContentSecurityPolicy>(),
         blink::WebFetchClientSettingsObject(
             blink::WebPolicyContainerPolicies(), blink::WebURL(),

@@ -1407,6 +1407,41 @@ int main() {
            "user-agent: mbGetUserAgent returns the override", ua);
   }
 
+  // 19c. navigator.userAgentData (UA Client Hints). Real Chrome exposes brands + platform
+  // here; an empty list is an automation tell inconsistent with the rich UA string. We supply
+  // realistic Chrome-150/macOS metadata for the built-in UA, but NOT for a caller-set custom UA
+  // (so we never contradict it). Isolated fresh views: a custom-UA view (empty brands) and a
+  // default-UA view (populated brands + platform + high-entropy hints via getHighEntropyValues).
+  {
+    mbView* uac = mbCreateView(200, 150);
+    mbSetUserAgent(uac, "MiniblinkBot/9.9 (test)");
+    mbLoadHTML(uac, "<body>x</body>", "https://uacustom.example/");
+    const std::string custom_brands =
+        Eval(uac, "String(navigator.userAgentData.brands.length)");
+    mbDestroyView(uac);
+
+    mbView* uav = mbCreateView(200, 150);
+    mbLoadHTML(uav, "<body>x</body>", "https://uadefault.example/");
+    const std::string brands =
+        Eval(uav, "navigator.userAgentData.brands.map(b=>b.brand).sort().join(',')");
+    const std::string plat = Eval(uav, "navigator.userAgentData.platform");
+    Eval(uav,
+         "window.__he='';navigator.userAgentData.getHighEntropyValues("
+         "['platformVersion','architecture','bitness','fullVersionList']).then(function(x){"
+         "window.__he=x.architecture+'|'+x.platformVersion+'|'+x.bitness+'|'+"
+         "(x.fullVersionList.find(function(b){return b.brand==='Chromium';})||{}).version;});");
+    mbWaitForFunction(uav, "window.__he.length>0", 3000);
+    const std::string he = Eval(uav, "window.__he");
+    mbDestroyView(uav);
+    Expect(custom_brands == "0" &&
+               brands == "Chromium,Google Chrome,Not.A/Brand" && plat == "macOS" &&
+               he == "x86|10.15.7|64|150.0.0.0",
+           "navigator.userAgentData: built-in UA populates brands/platform + high-entropy "
+           "hints; a custom UA stays empty",
+           "custom=[" + custom_brands + "] brands=[" + brands + "] plat=[" + plat +
+               "] he=[" + he + "]");
+  }
+
   // 20. Clip capture: a green box at logical (50,60,100,40). Clipping exactly to it
   // must yield an all-green bitmap (proves the region offset lands at the origin).
   mbSetDeviceScaleFactor(v, 1.0f);  // undo case-15's 2x so clip math is 1:1

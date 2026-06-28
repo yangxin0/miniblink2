@@ -33,6 +33,7 @@
 #include "third_party/blink/public/web/web_frame.h"
 #include "url/origin.h"
 #include "third_party/blink/public/common/loader/http_body_element_type.h"
+#include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/platform/web_http_body.h"
 #include "third_party/blink/public/platform/web_url_request.h"
@@ -605,6 +606,38 @@ blink::WebString MbFrameClient::UserAgentOverride() {
 
 const std::string& MbFrameClient::EffectiveUserAgent() const {
   return user_agent_.empty() ? MbDefaultUserAgent() : user_agent_;
+}
+
+blink::UserAgentMetadata MbDefaultUserAgentMetadata() {
+  // UA Client Hints consistent with MbDefaultUserAgent() (Chrome 150 / macOS /
+  // Intel). brand_version_list is the low-entropy navigator.userAgentData.brands;
+  // brand_full_version_list backs the high-entropy "fullVersionList" hint. The
+  // GREASE brand ("Not.A/Brand") mirrors what real Chrome emits.
+  blink::UserAgentMetadata m;
+  m.brand_version_list = {
+      {"Not.A/Brand", "24"}, {"Chromium", "150"}, {"Google Chrome", "150"}};
+  m.brand_full_version_list = {{"Not.A/Brand", "24.0.0.0"},
+                               {"Chromium", "150.0.0.0"},
+                               {"Google Chrome", "150.0.0.0"}};
+  m.full_version = "150.0.0.0";
+  m.platform = "macOS";
+  m.platform_version = "10.15.7";  // matches "Mac OS X 10_15_7" in the UA string
+  m.architecture = "x86";          // matches "Intel" in the UA string
+  m.model = "";
+  m.mobile = false;
+  m.bitness = "64";
+  m.wow64 = false;
+  m.form_factors = {"Desktop"};
+  return m;
+}
+
+std::optional<blink::UserAgentMetadata> MbFrameClient::UserAgentMetadataOverride() {
+  // Supply metadata only for the built-in UA, so navigator.userAgentData matches
+  // navigator.userAgent. A caller-set custom UA gets nullopt (blink falls back to
+  // Platform's empty metadata) rather than a contradicting Chrome brand list.
+  if (!user_agent_.empty())
+    return std::nullopt;
+  return MbDefaultUserAgentMetadata();
 }
 
 void MbFrameClient::DidAddMessageToConsole(const blink::WebConsoleMessage& msg,
