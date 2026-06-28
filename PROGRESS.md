@@ -161,3 +161,9 @@ screenshot path", DONE). Remaining polish if ever wanted: non-yellow/complex-pag
   TextEncoder CJK, URL/searchParams, JSON, encodeURIComponent, Number.toLocaleString, unicode regex,
   String.normalize, Array.at, structuredClone(Date), crypto.randomUUID/getRandomValues — all correct.
   No functional bugs found; the engine + automation surface are comprehensive.
+- **2026-06-28 real-site end-to-end validation** (live HTTPS via `mb_shot`, public hosts): the smoke
+  suite uses mocked/local content, so this exercises real TLS / redirects / CDN / complex CSS+JS /
+  image decode / fonts. example.com (title+h1+body scraped, 18KB shot), en.wikipedia.org/wiki/
+  Web_browser (title "Web browser - Wikipedia", 23 `<p>`, 12 `<img>`, 18.9KB innerText, 256KB
+  screenshot), iana.org/domains/reserved (132KB screenshot) — all render + scrape + screenshot
+  correctly. The embedder genuinely works on real complex sites, not just fixtures.
