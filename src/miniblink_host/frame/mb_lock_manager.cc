@@ -2,7 +2,9 @@
 
 #include <stdint.h>
 
+#include <map>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -24,6 +26,7 @@ using blink::mojom::blink::LockHandle;
 using blink::mojom::blink::LockManager;
 using blink::mojom::blink::LockMode;
 using blink::mojom::blink::LockRequest;
+using WaitMode = blink::mojom::blink::LockManager::WaitMode;
 
 // LockHandle is an empty interface — the page just holds the remote; dropping it (when the
 // lock's callback promise settles) closes the pipe and releases the lock. One shared inert
@@ -35,14 +38,18 @@ MbLockHandle* SharedLockHandleImpl() {
   return p;
 }
 
-class MbLockManager : public LockManager {
+// Process-wide lock state for ONE origin. navigator.locks is partitioned by origin AND shared
+// across all same-origin contexts (a lock held by one frame/worker blocks another of the SAME
+// origin; different origins are isolated). This lives forever in the per-origin registry below,
+// so the held-lock disconnect handlers (which post releases back here) always have a valid target.
+// Previously the lock state lived per-LockManager-instance (one per bind), so same-origin contexts
+// never shared locks and cross-origin isolation was accidental.
+class OriginLockState {
  public:
-  MbLockManager() = default;
-
   void RequestLock(const blink::String& name,
                    LockMode mode,
                    WaitMode wait,
-                   mojo::PendingAssociatedRemote<LockRequest> request) override {
+                   mojo::PendingAssociatedRemote<LockRequest> request) {
     mojo::AssociatedRemote<LockRequest> req(std::move(request));
     if (wait == WaitMode::PREEMPT)
       ReleaseAllForName(name);
@@ -59,7 +66,8 @@ class MbLockManager : public LockManager {
     }
   }
 
-  void QueryState(QueryStateCallback callback) override {
+  void QueryState(
+      LockManager::QueryStateCallback callback) {
     blink::Vector<blink::mojom::blink::LockInfoPtr> requested;
     blink::Vector<blink::mojom::blink::LockInfoPtr> held;
     for (const auto& h : held_) {
@@ -114,11 +122,11 @@ class MbLockManager : public LockManager {
     // The page drops the handle when the lock's callback promise settles. Don't
     // delete the receiver inside its own disconnect handler — post the release.
     held->handle->set_disconnect_handler(base::BindOnce(
-        [](base::WeakPtr<MbLockManager> self, uint64_t id) {
+        [](base::WeakPtr<OriginLockState> self, uint64_t id) {
           if (!self)
             return;
           base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-              FROM_HERE, base::BindOnce(&MbLockManager::OnReleased, self, id));
+              FROM_HERE, base::BindOnce(&OriginLockState::OnReleased, self, id));
         },
         weak_factory_.GetWeakPtr(), id));
     held_.push_back(std::move(held));
@@ -164,14 +172,53 @@ class MbLockManager : public LockManager {
   std::vector<std::unique_ptr<Held>> held_;
   std::vector<std::unique_ptr<Waiter>> queue_;
   uint64_t next_id_ = 1;
-  base::WeakPtrFactory<MbLockManager> weak_factory_{this};
+  base::WeakPtrFactory<OriginLockState> weak_factory_{this};
+};
+
+// origin scope -> its shared lock state. Process-wide; entries live for the process (locks are
+// transient but the per-origin state is cheap and the disconnect handlers depend on its stability).
+std::map<std::string, std::unique_ptr<OriginLockState>>& LockStates() {
+  static auto* m =
+      new std::map<std::string, std::unique_ptr<OriginLockState>>();
+  return *m;
+}
+OriginLockState* LockStateFor(const std::string& scope) {
+  auto& m = LockStates();
+  auto it = m.find(scope);
+  if (it == m.end())
+    it = m.emplace(scope, std::make_unique<OriginLockState>()).first;
+  return it->second.get();
+}
+
+// Per-context navigator.locks receiver: resolves its origin once and forwards to the shared
+// per-origin state, so same-origin contexts contend on one lock namespace and origins are isolated.
+class MbLockManager : public LockManager {
+ public:
+  explicit MbLockManager(std::string scope) : scope_(std::move(scope)) {}
+
+  void RequestLock(const blink::String& name,
+                   LockMode mode,
+                   WaitMode wait,
+                   mojo::PendingAssociatedRemote<LockRequest> request) override {
+    LockStateFor(scope_)->RequestLock(name, mode, wait, std::move(request));
+  }
+  void QueryState(QueryStateCallback callback) override {
+    LockStateFor(scope_)->QueryState(std::move(callback));
+  }
+
+ private:
+  std::string scope_;
 };
 
 }  // namespace
 
 void BindLockManager(
-    mojo::PendingReceiver<blink::mojom::blink::LockManager> receiver) {
-  mojo::MakeSelfOwnedReceiver(std::make_unique<MbLockManager>(),
+    mojo::PendingReceiver<blink::mojom::blink::LockManager> receiver,
+    const std::string& scope) {
+  // `scope` is the storage scope the caller already partitions by: a frame's origin (default
+  // navigator.locks) or an (origin, bucket) key (a storage bucket's locks). Same scope -> shared
+  // lock namespace; different scopes isolated.
+  mojo::MakeSelfOwnedReceiver(std::make_unique<MbLockManager>(scope),
                               std::move(receiver));
 }
 

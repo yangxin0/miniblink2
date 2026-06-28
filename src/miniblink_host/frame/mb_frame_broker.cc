@@ -14,6 +14,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "miniblink_host/frame/mb_broadcast_channel.h"
 #include "miniblink_host/frame/mb_cache_storage.h"
+#include "miniblink_host/frame/mb_frame_origin.h"
 #include "miniblink_host/frame/mb_indexeddb.h"
 #include "miniblink_host/frame/mb_lock_manager.h"
 #include "miniblink_host/frame/mb_notification_service.h"
@@ -1378,9 +1379,9 @@ class MbBrowserInterfaceBroker
                                   std::move(r));
       return;
     }
-    // navigator.locks — real exclusive/shared lock serialization.
+    // navigator.locks — real exclusive/shared lock serialization, scoped per origin.
     if (auto r = receiver.As<blink::mojom::blink::LockManager>()) {
-      BindLockManager(std::move(r));
+      BindLockManager(std::move(r), MbGetFrameOrigin(frame_key_));
       return;
     }
     // Worker BroadcastChannel (the worker path asks its broker; windows use the

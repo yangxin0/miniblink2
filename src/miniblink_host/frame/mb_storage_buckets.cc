@@ -77,7 +77,9 @@ class MbBucketHost : public m::BucketHost {
     BindIDBFactory(std::move(r), ScopeKey());  // (origin, bucket)-scoped IDB
   }
   void GetLockManager(mojo::PendingReceiver<m::LockManager> r) override {
-    BindLockManager(std::move(r));
+    // (origin, bucket)-scoped locks. ScopeKey() is a uint64 bucket key; stringify it as the
+    // lock scope (distinct from a frame's origin-URL scope, so bucket locks are isolated).
+    BindLockManager(std::move(r), "bucket:" + std::to_string(ScopeKey()));
   }
   void GetCaches(mojo::PendingReceiver<m::CacheStorage> r) override {
     BindCacheStorage(std::move(r), ScopeKey());  // (origin, bucket)-scoped caches

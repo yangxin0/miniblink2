@@ -1743,6 +1743,33 @@ int main() {
            "av=[" + av + "]");
   }
 
+  // 23g2. Web Locks are SHARED ACROSS SAME-ORIGIN CONTEXTS (per-origin partitioning). View 1
+  // holds 'xf' exclusive; a SECOND same-origin view's ifAvailable request must see it HELD (null).
+  // Previously each LockManager bind had its own state, so the second context wrongly got the lock.
+  {
+    mbView* v2 = mbCreateView(200, 150);
+    mbLoadHTML(v, "<body>one</body>", "https://lockshare.test/");
+    mbLoadHTML(v2, "<body>two</body>", "https://lockshare.test/");  // same origin
+    Eval(v, "window.__rel2=null;navigator.locks.request('xf',function(){"
+            "return new Promise(function(res){window.__rel2=res;});});");
+    mbWait(v, 200);  // let view 1's lock be granted
+    Eval(v2, "window.__xf='pending';navigator.locks.request('xf',"
+             "{ifAvailable:true},function(lock){"
+             "window.__xf=(lock===null)?'null':'got';});");
+    std::string xf;
+    for (int i = 0; i < 40; ++i) {
+      mbWait(v2, 50);
+      xf = Eval(v2, "window.__xf");
+      if (xf == "null" || xf == "got")
+        break;
+    }
+    Eval(v, "window.__rel2&&window.__rel2()");  // release
+    mbDestroyView(v2);
+    Expect(xf == "null",
+           "navigator.locks: a 2nd same-origin view contends with view 1's held lock",
+           "view2_ifAvailable=[" + xf + "]");
+  }
+
   // 23h. BroadcastChannel (window path, broker #8-adjacent): a window's BroadcastChannel
   // uses an ASSOCIATED provider from the frame's navigation-associated interfaces (not the
   // broker). The host serves it in-process: a message posted on one channel is delivered to
