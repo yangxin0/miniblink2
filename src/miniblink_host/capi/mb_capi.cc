@@ -1171,6 +1171,11 @@ void mbReload(mbView* v) {
     v->impl->Reload();
 }
 
+void mbStopLoading(mbView* v) {
+  if (v && v->impl)
+    v->impl->StopLoading();
+}
+
 int mbGetHttpStatus(mbView* v) {
   return (v && v->impl) ? v->impl->GetHttpStatus() : 0;
 }

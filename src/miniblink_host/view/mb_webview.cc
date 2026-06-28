@@ -1717,6 +1717,13 @@ void MbWebView::Reload() {
     LoadURL(u.c_str());
 }
 
+void MbWebView::StopLoading() {
+  // Abort any in-flight load on the main frame (provisional navigation or
+  // pending main resource). Harmless when the frame is already idle.
+  if (main_frame_)
+    main_frame_->DeprecatedStopLoading();
+}
+
 void MbWebView::OnDidCommitMainFrame(const std::string& url, bool standard) {
   // Notify on every main-frame commit (host load, page navigation, redirect, reload) —
   // the "URL changed" signal, before the history bookkeeping below.

@@ -879,6 +879,10 @@ MB_EXPORT int mbGetComputedStyle(mbView*, const char* css_selector,
 // documents (about:blank, data:, mbLoadHTML content).
 MB_EXPORT void mbReload(mbView*);
 
+// Cancel the main frame's in-flight load (provisional navigation or pending main
+// resource). No-op when the frame is already idle.
+MB_EXPORT void mbStopLoading(mbView*);
+
 // HTTP status code of the last top-level http(s) navigation (e.g. 200, 404, 500),
 // or 0 if the last load was non-http (file://, data:, mbLoadHTML) or the network
 // request failed before a response. Lets a caller distinguish a successful page

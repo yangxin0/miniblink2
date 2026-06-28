@@ -526,6 +526,42 @@ void wkeEditorRedo(wkeWebView webView) {
     mbExecuteEditCommand(webView->view, "Redo");
 }
 
+// Classic miniblink49 names for the editor commands above (real apps call these
+// unprefixed forms). wkeSelectAll selects the whole document — handy for
+// "select-all then copy/read" text scraping; the rest act on the focused
+// editable. Thin aliases over the same editor command path.
+void wkeSelectAll(wkeWebView webView) {
+  if (webView && webView->view)
+    mbExecuteEditCommand(webView->view, "SelectAll");
+}
+void wkeCopy(wkeWebView webView) {
+  if (webView && webView->view)
+    mbExecuteEditCommand(webView->view, "Copy");
+}
+void wkeCut(wkeWebView webView) {
+  if (webView && webView->view)
+    mbExecuteEditCommand(webView->view, "Cut");
+}
+void wkePaste(wkeWebView webView) {
+  if (webView && webView->view)
+    mbExecuteEditCommand(webView->view, "Paste");
+}
+void wkeDelete(wkeWebView webView) {
+  if (webView && webView->view)
+    mbExecuteEditCommand(webView->view, "Delete");
+}
+
+// Abort the current load (classic miniblink49 API). No-op when already idle.
+void wkeStopLoading(wkeWebView webView) {
+  if (webView && webView->view)
+    mbStopLoading(webView->view);
+}
+
+// Classic alias for wkeIsLoadingCompleted (the load finished, success or fail).
+bool wkeIsLoadComplete(wkeWebView webView) {
+  return wkeIsLoadingCompleted(webView);
+}
+
 void wkeSetLoadImages(wkeWebView webView, bool enable) {
   // Enable (default) or disable automatic image loading — disabling speeds up
   // text/HTML scraping (no image fetch/decode). Inline data: images are

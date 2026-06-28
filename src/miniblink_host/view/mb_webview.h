@@ -395,6 +395,8 @@ class MbWebView {
   const std::string& GetLastError() const { return last_error_; }
   // Re-navigate to the current document URL, re-fetching it (file/http only).
   void Reload();
+  // Cancel the frame's in-flight provisional/main-resource load (no-op if idle).
+  void StopLoading();
 
   // Host-driven session history over the main frame's navigations (host-initiated
   // LoadURL *and* page-initiated link/location/form commits — all captured via

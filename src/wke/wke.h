@@ -145,6 +145,17 @@ WKE_API void wkeEditorPaste(wkeWebView webView);
 WKE_API void wkeEditorDelete(wkeWebView webView);
 WKE_API void wkeEditorUndo(wkeWebView webView);
 WKE_API void wkeEditorRedo(wkeWebView webView);
+// Classic miniblink49 names for the editor commands above. wkeSelectAll selects
+// the whole document (useful for select-all-then-copy text scraping); the rest
+// act on the focused editable. wkeStopLoading aborts the current load;
+// wkeIsLoadComplete aliases wkeIsLoadingCompleted.
+WKE_API void wkeSelectAll(wkeWebView webView);
+WKE_API void wkeCopy(wkeWebView webView);
+WKE_API void wkeCut(wkeWebView webView);
+WKE_API void wkePaste(wkeWebView webView);
+WKE_API void wkeDelete(wkeWebView webView);
+WKE_API void wkeStopLoading(wkeWebView webView);
+WKE_API bool wkeIsLoadComplete(wkeWebView webView);
 // Extra HTTP request headers added to the navigation and its subresources:
 // newline-separated "Name: Value" lines (NULL/"" clears them). Set before
 // loading. Port extension — classic wke injects per-request via the net hook.

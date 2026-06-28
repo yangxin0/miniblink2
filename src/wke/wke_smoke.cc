@@ -2174,6 +2174,20 @@ int main() {
     wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore for later cases
   }
 
+  // Classic miniblink49 aliases (#18): wkeSelectAll (the genuinely-new capability —
+  // selects the whole document), wkeStopLoading (no-op when idle), wkeIsLoadComplete.
+  // wkeSelectAll's effect is observable via window.getSelection().
+  {
+    wkeLoadHTML(wv, "<body>The quick brown fox jumps over the lazy dog.</body>");
+    wkeSelectAll(wv);
+    const int sel_len =
+        jsToInt(es, wkeRunJS(wv, "window.getSelection().toString().length"));
+    wkeStopLoading(wv);  // idle -> no-op, must not crash
+    const bool complete = wkeIsLoadComplete(wv);
+    check(sel_len >= 40 && complete,
+          "wkeSelectAll selects document + wkeStopLoading/wkeIsLoadComplete aliases");
+  }
+
   // wkeNetSetHTTPHeaderField overrides a response Content-Type (miniblink49 parity). Module
   // scripts enforce STRICT MIME regardless of origin: a text/plain module (a .txt file) is
   // rejected and does NOT run; forcing its Content-Type to a JS type makes it run.
