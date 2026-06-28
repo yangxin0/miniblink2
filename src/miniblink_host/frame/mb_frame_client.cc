@@ -304,12 +304,20 @@ void MbFrameClient::DidCommitNavigation(
     bool /*should_reset_browser_interface_broker*/,
     const network::ParsedPermissionsPolicy& /*permissions_policy_header*/,
     const blink::DocumentPolicyFeatureState& /*document_policy_header*/) {
-  // Publish this frame's new document origin (main AND child frames) so origin-
-  // agnostic frame-keyed services (BroadcastChannel) can scope cross-origin
-  // isolation. Done before the main-frame-only history bookkeeping below.
+  // Publish this frame's storage scope (main AND child frames) so origin-keyed services
+  // (IndexedDB / Cache / DOM-storage / locks / BroadcastChannel) partition correctly.
+  // THIRD-PARTY STORAGE PARTITIONING: a frame's storage key is its own origin PLUS the
+  // top-level origin when they differ — so a third-party iframe (e.g. widget.com embedded in
+  // a.com vs b.com) gets ISOLATED storage per embedding site, while a top frame and a
+  // same-origin (first-party) iframe key by the bare origin (Top()'s origin == ours, so the
+  // partition suffix is skipped — first-party storage is unchanged + still shared).
   if (web_frame_) {
-    MbSetFrameOrigin(frame_key_,
-                     web_frame_->GetSecurityOrigin().ToString().Utf8());
+    std::string origin = web_frame_->GetSecurityOrigin().ToString().Utf8();
+    std::string top_origin =
+        web_frame_->Top()->GetSecurityOrigin().ToString().Utf8();
+    std::string scope =
+        (top_origin == origin) ? origin : (origin + "\x1f""3p""\x1f" + top_origin);
+    MbSetFrameOrigin(frame_key_, scope);
   }
   // Only the main frame feeds the view's history (child/iframe commits don't).
   if (self_owned_ || !web_frame_ || !owner_)

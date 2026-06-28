@@ -1807,6 +1807,51 @@ int main() {
            "iframe_held=[" + iheld + "] parent_ifAvailable=[" + ifpa + "]");
   }
 
+  // 23g4. THIRD-PARTY STORAGE PARTITIONING (locks/IDB/cache scope = frame-origin + top-origin):
+  // the SAME third-party iframe origin (w3p.test) embedded under two DIFFERENT tops is ISOLATED.
+  // widget@t1 HOLDS lock 'L'; widget@t2 must be able to acquire 'L' (separate scope) — if it
+  // were NOT partitioned the two widgets would share one scope and t2 would see it held.
+  {
+    mbMockResponse("w3p.test/w", "<body>widget</body>", "text/html", 200);
+    mbView* va = mbCreateView(200, 150);
+    mbView* vb = mbCreateView(200, 150);
+    mbLoadHTML(va, "<body>a<iframe src='https://w3p.test/w'></iframe></body>",
+               "https://t1part.test/");
+    mbLoadHTML(vb, "<body>b<iframe src='https://w3p.test/w'></iframe></body>",
+               "https://t2part.test/");
+    char pfb[96] = {0};
+    std::string t1held;
+    for (int i = 0; i < 60; ++i) {  // va's widget acquires + holds 'L'
+      mbWait(va, 50);
+      mbEvalJSInFrame(va, 0,
+                      "window.__h=window.__h||'';if(!window.__started){window.__started=1;"
+                      "navigator.locks.request('L',function(){window.__h='held';"
+                      "return new Promise(function(){});});}window.__h",
+                      pfb, sizeof(pfb));
+      t1held = pfb;
+      if (t1held == "held")
+        break;
+    }
+    std::string t2avail;
+    for (int i = 0; i < 40; ++i) {  // vb's widget ifAvailable 'L' -> 'got' iff partitioned
+      mbWait(vb, 50);
+      mbEvalJSInFrame(vb, 0,
+                      "window.__a=window.__a||'';if(!window.__q){window.__q=1;"
+                      "navigator.locks.request('L',{ifAvailable:true},function(lk){"
+                      "window.__a=(lk===null)?'null':'got';});}window.__a",
+                      pfb, sizeof(pfb));
+      t2avail = pfb;
+      if (t2avail == "got" || t2avail == "null")
+        break;
+    }
+    mbClearMocks();
+    mbDestroyView(va);
+    mbDestroyView(vb);
+    Expect(t1held == "held" && t2avail == "got",
+           "third-party iframe storage is partitioned by top-level site (widget@t1 != widget@t2)",
+           "t1_held=[" + t1held + "] t2_acquire=[" + t2avail + "]");
+  }
+
   // 23h. BroadcastChannel (window path, broker #8-adjacent): a window's BroadcastChannel
   // uses an ASSOCIATED provider from the frame's navigation-associated interfaces (not the
   // broker). The host serves it in-process: a message posted on one channel is delivered to
