@@ -394,6 +394,13 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
 // permission consistent with GeolocationService (which grants only when set).
 bool GeoConfigured();
 
+// Registers a PermissionObserver for the GEOLOCATION permission (the only one whose status
+// changes at runtime — granted iff a fix is set). It's notified (OnPermissionStatusChange)
+// whenever mbSetGeolocation/mbClearGeolocation flips the fix, so permissions.query(
+// {name:'geolocation'}).onchange fires. Defined with the geo helpers below.
+void RegisterGeoPermObserver(
+    mojo::PendingRemote<blink::mojom::blink::PermissionObserver> observer);
+
 // Minimal in-process PermissionService. With no browser, navigator.permissions.query()
 // otherwise never resolves (the request is dropped) and a page awaiting it HANGS. Answer
 // every query DENIED — the headless reality — EXCEPT the handful we actually service
@@ -436,9 +443,18 @@ class MbPermissionService : public blink::mojom::blink::PermissionService {
     std::move(callback).Run(Denied());
   }
   void AddPermissionObserver(
-      blink::mojom::blink::PermissionDescriptorPtr,
+      blink::mojom::blink::PermissionDescriptorPtr permission,
       blink::mojom::blink::PermissionStatusWithDetailsPtr,
-      mojo::PendingRemote<blink::mojom::blink::PermissionObserver>) override {}
+      mojo::PendingRemote<blink::mojom::blink::PermissionObserver> observer)
+      override {
+    // Geolocation is the only permission whose status changes at runtime; wire its observer
+    // so permissions.query({name:'geolocation'}).onchange fires on mbSetGeolocation/Clear.
+    // Other permissions are static (always granted/denied) -> nothing to observe; drop.
+    if (permission &&
+        permission->name == blink::mojom::blink::PermissionName::GEOLOCATION) {
+      RegisterGeoPermObserver(std::move(observer));
+    }
+  }
   void AddPageEmbeddedPermissionObserver(
       blink::mojom::blink::PermissionDescriptorPtr,
       blink::mojom::blink::PermissionStatus,
@@ -1194,6 +1210,42 @@ device::mojom::blink::GeopositionResultPtr MakeGeoResult() {
 
 // Wake every held watchPosition reply — called after the fix is set/cleared. Each waiter
 // posts the fresh result to its watcher's sequence. Runs on the main thread (the C-ABI setter).
+// Geolocation permission observers (permissions.query({name:'geolocation'}).onchange). Bound +
+// used ONLY on the broker service thread; the service runner is captured at first registration so
+// the main-thread geo setter can post a notification there. (Geolocation is the only permission
+// whose status changes at runtime, so this is the whole observer set.)
+std::vector<mojo::Remote<blink::mojom::blink::PermissionObserver>>& GeoPermObs() {
+  static auto* v =
+      new std::vector<mojo::Remote<blink::mojom::blink::PermissionObserver>>();
+  return *v;
+}
+base::Lock& GeoPermRunnerLock() {
+  static base::Lock* l = new base::Lock();
+  return *l;
+}
+scoped_refptr<base::SequencedTaskRunner>& GeoPermRunner() {
+  static auto* r = new scoped_refptr<base::SequencedTaskRunner>();
+  return *r;
+}
+
+// Runs on the service thread: push the current geolocation permission status to every observer,
+// pruning ones whose page has gone away.
+void NotifyGeoPermObservers() {
+  const auto status = GeoConfigured()
+                          ? blink::mojom::blink::PermissionStatus::GRANTED
+                          : blink::mojom::blink::PermissionStatus::DENIED;
+  auto& obs = GeoPermObs();
+  for (auto it = obs.begin(); it != obs.end();) {
+    if (!it->is_connected()) {
+      it = obs.erase(it);
+      continue;
+    }
+    (*it)->OnPermissionStatusChange(
+        blink::mojom::blink::PermissionStatusWithDetails::New(status, nullptr));
+    ++it;
+  }
+}
+
 void GeoNotifyChange() {
   std::vector<base::OnceClosure> waiters;
   {
@@ -1202,6 +1254,25 @@ void GeoNotifyChange() {
   }
   for (auto& w : waiters)
     std::move(w).Run();
+  // Notify geolocation permission observers on the service thread (the geo setter runs on the
+  // main thread; the observers' Remotes are service-thread-affine).
+  scoped_refptr<base::SequencedTaskRunner> runner;
+  {
+    base::AutoLock al(GeoPermRunnerLock());
+    runner = GeoPermRunner();
+  }
+  if (runner)
+    runner->PostTask(FROM_HERE, base::BindOnce(&NotifyGeoPermObservers));
+}
+
+void RegisterGeoPermObserver(
+    mojo::PendingRemote<blink::mojom::blink::PermissionObserver> observer) {
+  {
+    base::AutoLock al(GeoPermRunnerLock());
+    if (!GeoPermRunner())
+      GeoPermRunner() = base::SequencedTaskRunner::GetCurrentDefault();
+  }
+  GeoPermObs().emplace_back(std::move(observer));  // service thread
 }
 
 // device.mojom.Geolocation: hands back the configured fix on every position query.

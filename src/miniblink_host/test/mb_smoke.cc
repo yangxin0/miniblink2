@@ -1585,6 +1585,26 @@ int main() {
            "gp=[" + granted + "|" + denied + "]");
   }
 
+  // 23d2b. permissions.query({name:'geolocation'}).onchange FIRES when mbSetGeolocation /
+  // mbClearGeolocation flips the permission (AddPermissionObserver was a no-op -> onchange never
+  // fired). A page holding the PermissionStatus gets notified granted -> denied live.
+  {
+    mbClearGeolocation();
+    mbLoadHTML(v, "<body>x</body>", "https://permobs.test/");
+    Eval(v, "window.__pc='';navigator.permissions.query({name:'geolocation'})"
+            ".then(function(s){window.__ps=s;s.onchange=function(){"
+            "window.__pc+=s.state+';';};});");
+    mbWaitForFunction(v, "window.__ps!==undefined", 2000);
+    mbSetGeolocation(1.0, 2.0, 3.0);  // -> granted
+    mbWaitForFunction(v, "window.__pc.indexOf('granted')>=0", 2000);
+    mbClearGeolocation();             // -> denied
+    mbWaitForFunction(v, "window.__pc.indexOf('denied')>=0", 2000);
+    const std::string pc = Eval(v, "window.__pc");
+    Expect(pc == "granted;denied;",
+           "permissions.query(geolocation).onchange fires on mbSetGeolocation/Clear",
+           "changes=[" + pc + "]");
+  }
+
   // 23d3. Permission-API consistency for the permissions we actually service: Notification.permission,
   // navigator.permissions.query, and Notification.requestPermission() all AGREE (notifications +
   // clipboard granted — the APIs work) instead of one reporting a stale/denied state. Guards the
