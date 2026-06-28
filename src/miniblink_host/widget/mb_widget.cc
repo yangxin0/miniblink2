@@ -113,6 +113,7 @@ void MbWidget::Attach(blink::WebLocalFrame* main_frame, int width, int height,
   if (!composited_) {
     widget_->InitializeNonCompositing(this);
     widget_->Resize(gfx::Size(width, height));
+    SetRealisticScreen(width, height);
     return;
   }
 
@@ -153,6 +154,20 @@ void MbWidget::Attach(blink::WebLocalFrame* main_frame, int width, int height,
 void MbWidget::Resize(int width, int height) {
   if (widget_)
     widget_->Resize(gfx::Size(width, height));
+}
+
+void MbWidget::SetRealisticScreen(int view_w, int view_h) {
+  if (!widget_)
+    return;
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  // window.outer{Width,Height}: the window is the inner viewport plus typical desktop
+  // browser chrome (tab strip + toolbar ~ 79px tall). Backs RootWindowRect(). This setter
+  // just stores the rects (no event dispatch), so it's safe at attach (pre-document).
+  // window.screen.* (the monitor size) is set in WidgetBase::InitializeNonCompositing via
+  // patch 0015 — UpdateScreenInfo can't be used here because it dispatches into a not-yet-
+  // existent document and crashes.
+  impl->SetScreenRects(gfx::Rect(0, 0, view_w, view_h),
+                       gfx::Rect(0, 0, view_w, view_h + 79));
 }
 
 void MbWidget::Composite() {

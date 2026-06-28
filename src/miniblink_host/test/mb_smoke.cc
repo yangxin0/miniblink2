@@ -1442,6 +1442,30 @@ int main() {
                "] he=[" + he + "]");
   }
 
+  // 19d. Browser-identity consistency (anti-detection + correctness). window.chrome exists
+  // (real Chrome always exposes app/runtime/csi/loadTimes — its absence is a classic headless
+  // tell and inconsistent with the Chrome UA); window.screen is a real desktop monitor, not
+  // the 0x0 a headless widget defaults to (0x0 breaks responsive/analytics code AND is a tell);
+  // window.outer* is non-zero and >= inner.
+  {
+    mbView* idv = mbCreateView(1024, 768);
+    mbLoadHTML(idv, "<body>x</body>", "https://ident.example/");
+    const std::string chrome = Eval(
+        idv, "typeof window.chrome+','+typeof chrome.runtime+','+typeof chrome.csi+','+"
+             "typeof chrome.loadTimes");
+    const std::string scr =
+        Eval(idv, "screen.width+'x'+screen.height+',avail='+screen.availWidth+'x'+"
+                  "screen.availHeight+',depth='+screen.colorDepth");
+    const std::string outer =
+        Eval(idv, "String(outerWidth>0&&outerHeight>=innerHeight)+',ow='+outerWidth");
+    mbDestroyView(idv);
+    Expect(chrome == "object,object,function,function" &&
+               scr == "1920x1080,avail=1920x1055,depth=24" &&
+               outer == "true,ow=1024",
+           "browser identity: window.chrome + realistic screen/window metrics (anti-detection)",
+           "chrome=[" + chrome + "] screen=[" + scr + "] outer=[" + outer + "]");
+  }
+
   // 20. Clip capture: a green box at logical (50,60,100,40). Clipping exactly to it
   // must yield an all-green bitmap (proves the region offset lands at the origin).
   mbSetDeviceScaleFactor(v, 1.0f);  // undo case-15's 2x so clip math is 1:1

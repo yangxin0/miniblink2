@@ -2329,6 +2329,31 @@ void MbWebView::RunDocumentStartScript() {
       "window.confirm=function(m){return B('confirm',m===undefined?'':String(m),'');};"
       "window.prompt=function(m,d){return B('prompt',m===undefined?'':String(m),"
       "d===undefined||d===null?'':String(d));};})()")));
+  // Built-in `window.chrome` so the runtime matches the Chrome UA string it reports.
+  // Real Chrome always exposes window.chrome (app/runtime/csi/loadTimes) on a normal
+  // page; its absence is a classic automation tell that breaks browser-detection and
+  // some feature scripts. Installed only if absent (never clobbers a real one or the
+  // user's init script, which runs after this). Defensive parity, not deception.
+  main_frame_->ExecuteScript(blink::WebScriptSource(blink::WebString::FromUtf8(
+      "(function(){if(window.chrome)return;var noop=function(){};"
+      "window.chrome={"
+      "app:{isInstalled:false,"
+      "InstallState:{DISABLED:'disabled',INSTALLED:'installed',NOT_INSTALLED:'not_installed'},"
+      "RunningState:{CANNOT_RUN:'cannot_run',READY_TO_RUN:'ready_to_run',RUNNING:'running'},"
+      "getDetails:function(){return null;},getIsInstalled:function(){return false;},"
+      "runningState:function(){return 'cannot_run';}},"
+      "runtime:{OnInstalledReason:{CHROME_UPDATE:'chrome_update',INSTALL:'install',"
+      "SHARED_MODULE_UPDATE:'shared_module_update',UPDATE:'update'},"
+      "OnRestartRequiredReason:{APP_UPDATE:'app_update',OS_UPDATE:'os_update',PERIODIC:'periodic'},"
+      "PlatformArch:{ARM:'arm',ARM64:'arm64',MIPS:'mips',MIPS64:'mips64',X86_32:'x86-32',X86_64:'x86-64'},"
+      "PlatformOs:{ANDROID:'android',CROS:'cros',LINUX:'linux',MAC:'mac',OPENBSD:'openbsd',WIN:'win'},"
+      "connect:noop,sendMessage:noop},"
+      "csi:function(){return {onloadT:Date.now(),startE:Date.now(),pageT:0,tran:15};},"
+      "loadTimes:function(){var t=Date.now()/1000;return {requestTime:t,startLoadTime:t,"
+      "commitLoadTime:t,finishDocumentLoadTime:t,finishLoadTime:t,firstPaintTime:t,"
+      "firstPaintAfterLoadTime:0,navigationType:'Other',wasFetchedViaSpdy:false,"
+      "wasNpnNegotiated:true,npnNegotiatedProtocol:'h2',wasAlternateProtocolAvailable:false,"
+      "connectionInfo:'h2'};}};})()")));
   if (!init_script_.empty()) {
     main_frame_->ExecuteScript(
         blink::WebScriptSource(blink::WebString::FromUtf8(init_script_)));

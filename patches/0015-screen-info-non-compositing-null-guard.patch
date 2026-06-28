@@ -1,0 +1,62 @@
+diff --git a/third_party/blink/renderer/platform/widget/widget_base.cc b/third_party/blink/renderer/platform/widget/widget_base.cc
+index 00e308a..3825f59 100644
+--- a/third_party/blink/renderer/platform/widget/widget_base.cc
++++ b/third_party/blink/renderer/platform/widget/widget_base.cc
+@@ -295,7 +295,17 @@ void WidgetBase::InitializeCompositing(
+ void WidgetBase::InitializeNonCompositing() {
+   DCHECK(!initialized_);
+   // WidgetBase users implicitly expect one default ScreenInfo to exist.
+-  screen_infos_ = display::ScreenInfos(display::ScreenInfo());
++  // miniblink-modern patch: give a headless non-compositing widget a realistic desktop
++  // monitor (1920x1080, 25px menu bar, 24-bit) instead of the 0x0 default. A 0x0
++  // window.screen is both a glaring automation tell and breaks size-based site logic;
++  // it can't be set later because UpdateScreenInfo dispatches into the (not yet existent)
++  // document. The view/viewport size is separate (Resize); this is the monitor.
++  display::ScreenInfo screen_info;
++  screen_info.rect = gfx::Rect(1920, 1080);
++  screen_info.available_rect = gfx::Rect(0, 25, 1920, 1055);
++  screen_info.depth = 24;
++  screen_info.depth_per_component = 8;
++  screen_infos_ = display::ScreenInfos(screen_info);
+   initialized_ = true;
+ }
+ 
+@@ -1775,19 +1785,25 @@ void WidgetBase::UpdateSurfaceAndScreenInfo(
+ 
+   // Note carefully that the DSF specified in |new_screen_info| is not the
+   // DSF used by the compositor during device emulation!
+-  LayerTreeHost()->SetViewportRectAndScale(compositor_viewport_pixel_rect,
+-                                           GetOriginalDeviceScaleFactor(),
+-                                           local_surface_id_from_parent_);
+-  // The VisualDeviceViewportIntersectionRect derives from the LayerTreeView's
+-  // viewport size, which is set above.
+-  LayerTreeHost()->SetVisualDeviceViewportIntersectionRect(
+-      client_->ViewportVisibleRect());
+-  if (display::Display::HasForceRasterColorProfile()) {
+-    LayerTreeHost()->SetDisplayColorSpaces(gfx::DisplayColorSpaces(
+-        display::Display::GetForcedRasterColorProfile()));
+-  } else {
+-    LayerTreeHost()->SetDisplayColorSpaces(
+-        screen_infos_.current().display_color_spaces);
++  // miniblink-modern patch: a headless non-compositing widget has no LayerTreeHost
++  // (LayerTreeHost() is null), but the embedder still updates screen_infos_ above so
++  // window.screen / matchMedia size queries return realistic values instead of 0x0.
++  // Guard the compositor-only updates so that path doesn't null-deref.
++  if (cc::LayerTreeHost* layer_tree_host = LayerTreeHost()) {
++    layer_tree_host->SetViewportRectAndScale(compositor_viewport_pixel_rect,
++                                             GetOriginalDeviceScaleFactor(),
++                                             local_surface_id_from_parent_);
++    // The VisualDeviceViewportIntersectionRect derives from the LayerTreeView's
++    // viewport size, which is set above.
++    layer_tree_host->SetVisualDeviceViewportIntersectionRect(
++        client_->ViewportVisibleRect());
++    if (display::Display::HasForceRasterColorProfile()) {
++      layer_tree_host->SetDisplayColorSpaces(gfx::DisplayColorSpaces(
++          display::Display::GetForcedRasterColorProfile()));
++    } else {
++      layer_tree_host->SetDisplayColorSpaces(
++          screen_infos_.current().display_color_spaces);
++    }
+   }
+ 
+   if (orientation_changed)

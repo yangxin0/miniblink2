@@ -92,6 +92,13 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   void Composite();
 
  private:
+  // Give a non-compositing widget a realistic desktop screen (window.screen.*) and
+  // window rect (window.outer{Width,Height}) instead of the default 0x0 — the latter
+  // is a glaring headless tell and breaks size-based site logic. view_w/view_h are
+  // the inner viewport (logical px). Relies on patch 0015 (UpdateScreenInfo is
+  // null-LayerTreeHost-safe for non-compositing widgets).
+  void SetRealisticScreen(int view_w, int view_h);
+
   blink::WebFrameWidget* widget_ = nullptr;  // owned by Blink (the frame)
   bool mouse_pressed_ = false;  // left button held (drag): moves carry the mask
   bool composited_ = false;
