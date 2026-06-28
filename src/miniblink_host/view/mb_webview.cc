@@ -91,7 +91,9 @@
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
+#include "third_party/skia/include/core/SkSamplingOptions.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/geometry/rect.h"
@@ -2732,6 +2734,36 @@ bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y) {
 bool MbWebView::PaintToBitmap(void* out_bgra, int w, int h, int stride) {
   if (!out_bgra)
     return false;
+  // Compositing view: copy the compositor's captured frame (cc -> viz::Display ->
+  // bitmap) so the screenshot reflects the REAL composited output instead of the
+  // software paint record. Drives one fresh synchronous frame first. Falls through
+  // to software paint if the compositor hasn't produced a frame yet.
+  if (widget_ && widget_->compositor()) {
+    Composite();
+    const SkBitmap& src = widget_->compositor()->captured_bitmap();
+    if (!src.isNull() && src.width() > 0 && src.height() > 0) {
+      const SkImageInfo dst_info =
+          SkImageInfo::Make(w, h, kBGRA_8888_SkColorType, kPremul_SkAlphaType);
+      if (src.width() == w && src.height() == h) {
+        // Exact viewport match (the common case): a direct, format-converting copy.
+        if (src.readPixels(dst_info, out_bgra, stride, 0, 0))
+          return true;
+      } else {
+        // Size mismatch (e.g. a clip/scale request): scale the captured frame in.
+        SkBitmap out;
+        if (out.installPixels(dst_info, out_bgra, stride)) {
+          SkCanvas c(out);
+          c.clear(transparent_bg_ ? SK_ColorTRANSPARENT : SK_ColorWHITE);
+          c.drawImageRect(src.asImage().get(),
+                          SkRect::MakeIWH(src.width(), src.height()),
+                          SkRect::MakeIWH(w, h),
+                          SkSamplingOptions(SkFilterMode::kLinear), nullptr,
+                          SkCanvas::kStrict_SrcRectConstraint);
+          return true;
+        }
+      }
+    }
+  }
   SkBitmap bitmap;
   if (!bitmap.installPixels(
           SkImageInfo::Make(w, h, kBGRA_8888_SkColorType, kPremul_SkAlphaType),

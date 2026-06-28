@@ -16,6 +16,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 #include "miniblink_host/capi/mb_capi.h"
 
@@ -67,14 +68,26 @@ int main() {
                b = c & 0xff;
   bool yellow = r > 200 && g > 200 && b < 80;
 
+  // The SCREENSHOT path (mbPaintToBitmap) must reflect the composited frame for a
+  // compositing view (not the software paint record). Paint the full 400x300 view
+  // and check the center pixel is the page's yellow — proving cc -> viz::Display ->
+  // bitmap now flows all the way into the user-facing screenshot API.
+  const int kW = 400, kH = 300, kStride = kW * 4;
+  std::vector<unsigned char> shot(static_cast<size_t>(kStride) * kH, 0);
+  bool painted = mbPaintToBitmap(v, shot.data(), kW, kH, kStride) != 0;
+  const unsigned char* px = &shot[(static_cast<size_t>(150) * kStride) + 200 * 4];
+  unsigned int sb = px[0], sg = px[1], sr = px[2], sa = px[3];  // BGRA
+  bool shot_yellow = painted && sr > 200 && sg > 200 && sb < 80;
+
   // PASS gate: the FULL live cc compositing path works — a non-compositing view reports -1, the
   // compositing view pulls our in-process frame sink (sinks>=1), the page is DOM-live, AND the page
   // RASTERS through cc -> viz::Display -> the captured bitmap so the center pixel is the page's
   // yellow (#ffff00).
-  bool ok = (plain_sinks == -1) && (sinks >= 1) && live && yellow;
+  bool ok = (plain_sinks == -1) && (sinks >= 1) && live && yellow && shot_yellow;
   printf("mb_compositor_widget_smoke: plain=%d sinks=%d body=[%s] live=%d pixel=%08X "
-         "(a%d r%d g%d b%d) yellow=%d\n",
-         plain_sinks, sinks, body, live ? 1 : 0, c, a, r, g, b, yellow ? 1 : 0);
+         "(a%d r%d g%d b%d) yellow=%d shot=(r%d g%d b%d a%d) shot_yellow=%d\n",
+         plain_sinks, sinks, body, live ? 1 : 0, c, a, r, g, b, yellow ? 1 : 0,
+         sr, sg, sb, sa, shot_yellow ? 1 : 0);
 
   mbDestroyView(v);
   mbShutdown();

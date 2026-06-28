@@ -73,9 +73,13 @@ Each is genuinely lower-value than the gap list. Verify tractability before comm
   a first-party key. Fix: compute the partitioned StorageKey (top-level SchemefulSite + ancestor
   chain bit) for cross-site child frames at commit, and have `KeyForStorageKey` append the top site.
   Bonus: blink's own StorageKey is now correct for cross-site iframes (IDB/quota/etc.). Test 23g5.
-- **Compositor → screenshot path** (completes #1 polish): read the composited `viz::Display` frame
-  into the user-facing `mbPaintToBitmap` so opt-in compositing produces real screenshots (today it
-  rasters to an internal bitmap only; the software-paint path still backs `mbPaintToBitmap`).
+- **Compositor → screenshot path** ✅ DONE (2026-06-28) — `mbPaintToBitmap` now reflects the
+  composited frame for compositing views: it drives one fresh synchronous `Composite()` then copies
+  the compositor's `captured_bitmap()` (cc → viz::Display → bitmap) into the output — a direct
+  `readPixels` on an exact viewport match, a `drawImageRect` scale otherwise. Non-compositing views
+  are untouched (software paint record). `mb_compositor_widget_smoke` now asserts the painted center
+  pixel is the page's yellow (`shot_yellow=1`), so the compositor flows all the way into the
+  user-facing screenshot API (`mbSavePng`/`mbSaveJpeg` ride on `PaintToBitmap` too).
 - **Child-frame joint session history** (completes #12): iframe navigations don't participate in
   main-frame back/forward. Complex (needs a browser-side joint history index); low automation value.
 - **WebRTC peer connectivity** (#2): SDP/signaling works; real ICE/DTLS needs a P2P UDP socket stack.
@@ -94,8 +98,8 @@ ForTesting` (sets cc's device viewport). `Composite()` drives `LayerTreeHostForT
 ForTest(raster=true)` then the Display draw → captured bitmap. Patches it needed: **0012** (blink
 `AllocateNewLayerTreeFrameSink` host hook), **0013** (in-process SII channel-lost no-ops), **0014**
 (holder `SharedImageManager` thread-safe — Display reads on main thread, GPU produces on GPU thread).
-Remaining polish if ever wanted: read the composited frame into the actual `mbPaintToBitmap`
-screenshot path; non-yellow/complex-page pixel tests.
+Composited frame is now wired into `mbPaintToBitmap` (see deferred follow-ups → "Compositor →
+screenshot path", DONE). Remaining polish if ever wanted: non-yellow/complex-page pixel tests.
 
 ---
 
