@@ -66,6 +66,17 @@ watchdog SIGKILL, then `pgrep -x`). Network features verified against PUBLIC hos
 | 17 | wke request-side interception (`wkeOnLoadUrlBegin`) | **✅ DONE** — fires per-request with a tagged WkeNetJob; `wkeNetSetData`/`wkeNetSetMIMEType` on a request job serve a canned response with NO network fetch (the classic offline-mock hook), backed by `mbSetRequestMockCallback`. The same setters still rewrite response bodies for `wkeOnLoadUrlEnd` (job kind dispatch). `wkeNetHookRequest` stub for parity. wke_smoke test. |
 | 18 | wke aliases / API variants | **✅ DONE (real subset; rest N/A-headless).** Added the classic miniblink49 editor/load names real apps call: `wkeSelectAll` (a genuinely-NEW capability — whole-document select for select-all-then-copy scraping; verified via getSelection), `wkeCopy`/`wkeCut`/`wkePaste`/`wkeDelete`, plus `wkeStopLoading` (new `mbStopLoading` host backend → `WebLocalFrame::DeprecatedStopLoading`) and `wkeIsLoadComplete` alias. wke_smoke 118→119. The remaining ~120 unimplemented reference names are Windows windowing (`wkeCreateWebWindow`/`wkeShowWindow`/`wkeFireWindowsMessage`/HWND/DC), the native message loop, and W-suffix wide-string variants — **N/A for a headless macOS embedder**; not stubbed (an embedder should get a link error, not a silent no-op). |
 
+## Robustness
+- **Runaway-script watchdog** ✅ DONE (2026-06-28) — adversarial-content testing found a real hang: a
+  synchronous infinite loop in page JS (`while(true){}`) blocked the single-process main thread
+  FOREVER (one bad/untrusted page kills a long-running scraper's process). Fix: `MbScriptWatchdog`
+  (`runtime/mb_script_watchdog.{h,cc}`) — a main-thread `TaskObserver` arms a per-task deadline; a
+  monitor thread calls `v8::Isolate::TerminateExecution()` if one task overruns. Re-armed per task,
+  so slow async work is unaffected; CAS-claims the exact deadline + cancels at the next boundary so
+  the isolate recovers. Opt-in `mbSetScriptTimeout(ms)` (0 = disabled = default). Test in mb_smoke
+  (a `while(true)` page terminates at ~1s, the view then loads + evals normally). Async timeouts
+  (`--wait-selector`, network-idle) were already graceful.
+
 ## Deferred follow-ups (post-gap-list — pick highest-value per tick, or stop if none ripe)
 Each is genuinely lower-value than the gap list. Verify tractability before committing to one.
 - **localStorage third-party partitioning** ✅ DONE (2026-06-28) — see gap #11 row. Root cause: our
