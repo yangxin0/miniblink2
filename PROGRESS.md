@@ -35,11 +35,15 @@ watchdog SIGKILL, then `pgrep -x`). Network features verified against PUBLIC hos
   + header inject + load-error + CLI + wke peers); **WebGL** (in-process ANGLE/SwiftShader GLES2
   over an in-process GPU command buffer); **WebGPU** (in-process Dawn device + production context);
   **software compositor #1** (see below); device/media emulation; AX snapshot; print-background.
-- **Tests (all green, no leaked procs):** `mb_smoke` 165, `mb_smoke_platform` 46, `mb_smoke_render`
-  133, `mb_shot_smoke` 66, `wke_smoke` 117; probes gl/gpu/dawn/webgpu/webgpu2/compositor{,2,3,4,5}
+- **Tests (all green, no leaked procs):** `mb_smoke` 171, `mb_smoke_platform` 46, `mb_smoke_render`
+  135, `mb_shot_smoke` 66, `wke_smoke` 119; probes gl/gpu/dawn/webgpu/webgpu2/compositor{,2,3,4,5}
   + `mb_compositor_widget_smoke`. This coverage is **sufficient** — do not pad it.
 
 ## Deferred gap list (strict build order — user directive: "start from 1st to last")
+> **✅ ENTIRE GAP LIST #1–#18 COMPLETE** (as of 2026-06-28). Every numbered item is DONE or
+> resolved as N/A-headless / accepted-by-design with empirical justification. No numbered gap
+> remains. Remaining work is the **deferred follow-ups** listed under the table (each genuinely
+> lower-value than the gap list was); pick the highest-value one per tick or stop if none is ripe.
 | # | Feature | Status |
 |---|---------|--------|
 | **1** | **Software compositor / cc raster → pixels** | **✅ COMPLETE** — a live page rasters through cc → viz::Display → bitmap, in-process headless (opt-in, default off). See below. |
@@ -61,6 +65,23 @@ watchdog SIGKILL, then `pgrep -x`). Network features verified against PUBLIC hos
 | 16 | Device-emulation visual transform | **Addressed / visual transform N/A headless** — `mbEmulateDevice` does the LAYOUT/media-query emulation (pointer/hover/viewport/dpr — the valuable part). The DevTools `EnableDeviceEmulation` "fit-to-window" VISUAL scale is cosmetic for headless (screenshots already render at device size via resize+DPR) + crashes on the null LayerTreeHost; deferred. |
 | 17 | wke request-side interception (`wkeOnLoadUrlBegin`) | **✅ DONE** — fires per-request with a tagged WkeNetJob; `wkeNetSetData`/`wkeNetSetMIMEType` on a request job serve a canned response with NO network fetch (the classic offline-mock hook), backed by `mbSetRequestMockCallback`. The same setters still rewrite response bodies for `wkeOnLoadUrlEnd` (job kind dispatch). `wkeNetHookRequest` stub for parity. wke_smoke test. |
 | 18 | wke aliases / API variants | **✅ DONE (real subset; rest N/A-headless).** Added the classic miniblink49 editor/load names real apps call: `wkeSelectAll` (a genuinely-NEW capability — whole-document select for select-all-then-copy scraping; verified via getSelection), `wkeCopy`/`wkeCut`/`wkePaste`/`wkeDelete`, plus `wkeStopLoading` (new `mbStopLoading` host backend → `WebLocalFrame::DeprecatedStopLoading`) and `wkeIsLoadComplete` alias. wke_smoke 118→119. The remaining ~120 unimplemented reference names are Windows windowing (`wkeCreateWebWindow`/`wkeShowWindow`/`wkeFireWindowsMessage`/HWND/DC), the native message loop, and W-suffix wide-string variants — **N/A for a headless macOS embedder**; not stubbed (an embedder should get a link error, not a silent no-op). |
+
+## Deferred follow-ups (post-gap-list — pick highest-value per tick, or stop if none ripe)
+Each is genuinely lower-value than the gap list. Verify tractability before committing to one.
+- **localStorage third-party partitioning** (completes #11): localStorage keys by blink's StorageKey
+  (`mb_dom_storage`), not our frame-origin map, so a third-party iframe isn't site-partitioned like
+  IDB/Cache/locks are. Investigate whether enabling blink's `kThirdPartyStoragePartitioning` makes
+  blink hand the backend a top-level-site-partitioned StorageKey (then it "just works"), vs needing
+  host-side StorageKey plumbing.
+- **Compositor → screenshot path** (completes #1 polish): read the composited `viz::Display` frame
+  into the user-facing `mbPaintToBitmap` so opt-in compositing produces real screenshots (today it
+  rasters to an internal bitmap only; the software-paint path still backs `mbPaintToBitmap`).
+- **Child-frame joint session history** (completes #12): iframe navigations don't participate in
+  main-frame back/forward. Complex (needs a browser-side joint history index); low automation value.
+- **WebRTC peer connectivity** (#2): SDP/signaling works; real ICE/DTLS needs a P2P UDP socket stack.
+  Zero headless-automation value — only do if explicitly asked.
+- **Cache large-blob durability** (#3): >256KB cached bodies intermittently read empty under rapid
+  succession (blink in-process BlobBytesProvider stall). Not safely fixable from our layer (4 tries).
 
 ## Compositor #1 — COMPLETE (architecture, for reference)
 Opt-in (`mbSetCompositingEnabled`, default OFF; the software-paint screenshot path is untouched).
