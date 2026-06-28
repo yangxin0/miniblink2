@@ -378,6 +378,11 @@ void MbFrameClient::DidCommitNavigation(
   owner_->OnDidCommitMainFrame(
       web_frame_->GetDocument().Url().GetString().Utf8(),
       commit_type == blink::kWebStandardCommit);
+  // A page-driven cross-document traversal (GoToHistoryTarget -> owner LoadURL) is a MOVE,
+  // not a new entry — the index is already at the target. Skip the record so it doesn't
+  // double-grow this list (owner_->set_in_history_nav suppressed the view's append).
+  if (suppress_history_record_)
+    return;
   // Capture this (cross-document) entry for page-driven history traversal.
   if (commit_type == blink::kWebStandardCommit)
     RecordHistoryCommit(/*is_standard=*/true);
@@ -524,8 +529,14 @@ void MbFrameClient::GoToHistoryTarget(int target, bool has_user_gesture) {
     // HistoryBackListCount both derive from this index + length).
     SyncBlinkHistoryCursor();
   } else if (owner_) {
-    // Cross-document target: re-navigate to the entry's URL (full reload).
+    // Cross-document target: re-navigate to the entry's URL (full reload). Mark the
+    // traversal on BOTH lists so the resulting commit moves the cursor instead of
+    // appending a duplicate entry (index is already at `target`); then realign blink.
+    suppress_history_record_ = true;
+    owner_->set_in_history_nav(true);
     owner_->LoadURL(item->Url().GetString().Utf8().c_str());
+    suppress_history_record_ = false;
+    SyncBlinkHistoryCursor();
   }
 }
 

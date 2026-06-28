@@ -412,6 +412,10 @@ class MbWebView {
   }
   bool GoBack();
   bool GoForward();
+  // Mark that the next main-frame commit is a history traversal, so it MOVES the cursor
+  // instead of appending a new entry. Used by a page-driven cross-document
+  // history.back()/forward() (which re-navigates via LoadURL) to avoid double-recording.
+  void set_in_history_nav(bool v) { in_history_nav_ = v; }
   // The main frame's client — used so a child frame can route its page-driven
   // history.back()/forward()/go() into the JOINT (main-frame) session history,
   // per the HTML spec (window.history is shared across the browsing context).
@@ -596,10 +600,17 @@ class MbWebView {
   void RunInFrameTask(base::OnceClosure body, bool settle);
   // Run requestAnimationFrame callbacks (no compositor drives them otherwise).
   void ServiceAnimations();
+  // Navigate to the adjacent history entry `target` (Go{Back,Forward} core): re-commits a
+  // cached in-memory doc or re-fetches a URL, rolling back on a non-commit. Returns
+  // whether the navigation committed.
+  bool TraverseHistory(int target);
   // Settle async loads, run lifecycle, and play the frame's paint record into `canvas`.
   // (origin_x, origin_y) shifts the document so that logical point lands at the canvas
   // origin — used for clip/region capture; (0,0) renders from the top-left as usual.
-  bool PaintInto(SkCanvas& canvas, int origin_x = 0, int origin_y = 0);
+  // apply_device_scale=false renders 1:1 (no dsf scale) — for the caller-buffer region
+  // path (PaintRectToBitmap), whose ABI contract is a w x h px buffer with dsf NOT applied.
+  bool PaintInto(SkCanvas& canvas, int origin_x = 0, int origin_y = 0,
+                 bool apply_device_scale = true);
 
   std::unique_ptr<MbViewClient> view_client_;
   std::unique_ptr<MbFrameClient> frame_client_;
@@ -621,9 +632,25 @@ class MbWebView {
   void InstallJsBindings();  // install all bindings into the current main world
   bool transparent_bg_ = false;  // omitBackground: clear to alpha 0
 
-  std::vector<std::string> history_;  // main-frame navigation stack (URLs)
+  // Main-frame navigation stack. A URL nav stores its URL and re-fetches on traversal;
+  // an in-memory LoadHTML doc caches its source so back/forward can re-commit it (its
+  // committed URL is about:blank, which can't be re-fetched).
+  struct HistoryEntry {
+    std::string url;
+    std::string html;      // cached source for an in-memory doc; empty for a URL nav
+    std::string base_url;  // base for the cached html
+    std::string charset;   // charset for the cached html
+    bool is_html = false;  // re-commit html instead of LoadURL on traversal
+  };
+  std::vector<HistoryEntry> history_;
   int history_index_ = -1;            // current position; -1 before first load
   bool in_history_nav_ = false;       // a Go{Back,Forward} is in flight
+  // The pending navigation's source, captured into the next recorded history entry:
+  // set by LoadHTML (in-memory doc), cleared by LoadURL (URL nav).
+  bool pending_is_html_ = false;
+  std::string pending_html_;
+  std::string pending_base_;
+  std::string pending_charset_;
 
   bool load_finished_ = false;        // main-frame load event has fired (DidFinishLoad)
   std::function<void()> on_load_finish_;  // optional embedder finish callback

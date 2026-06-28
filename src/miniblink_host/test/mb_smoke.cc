@@ -2667,6 +2667,68 @@ int main() {
            "idbCK=[" + r + "]");
   }
 
+  // 23y2. IndexedDB KEY RANGES on get/delete/count (regression). Earlier these treated a
+  // range as the exact lower-bound key: get(lowerBound(5)) returned nothing when 5 was
+  // absent, delete(bound(2,4)) removed only key 2, and count(bound(2,4)) returned <=1.
+  // Store ids 1..5; exercise get >=2 (first in range), bounded count, bounded delete.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://idb.test/");
+    Eval(v,
+         "window.__idbRG='';"
+         "var __o=indexedDB.open('mdbRange',1);"
+         "__o.onupgradeneeded=function(e){e.target.result.createObjectStore('o',{keyPath:'id'});};"
+         "__o.onsuccess=function(e){var db=e.target.result;"
+         "var t=db.transaction('o','readwrite');var s=t.objectStore('o');"
+         "for(var i=1;i<=5;i++)s.put({id:i});"
+         "t.oncomplete=function(){"
+         // get(lowerBound(2,open=true)) -> first record with id>2 == 3
+         "var s2=db.transaction('o').objectStore('o');"
+         "var g=s2.get(IDBKeyRange.lowerBound(2,true));"
+         "var c=s2.count(IDBKeyRange.bound(2,4));"  // == 3 (ids 2,3,4)
+         "g.onsuccess=function(){c.onsuccess=function(){"
+         "var first=g.result?g.result.id:'-';var cnt=c.result;"
+         // delete the bounded range [2,4]; the rest (1,5) must remain
+         "var dt=db.transaction('o','readwrite');var ds=dt.objectStore('o');"
+         "ds.delete(IDBKeyRange.bound(2,4));"
+         "dt.oncomplete=function(){"
+         "var ga=db.transaction('o').objectStore('o').getAll();"
+         "ga.onsuccess=function(){var left=ga.result.map(function(r){return r.id;}).join(',');"
+         "window.__idbRG='first='+first+',count='+cnt+',left='+left;};};};};};};");
+    mbWaitForFunction(v, "window.__idbRG!==''", 4000);
+    const std::string r = Eval(v, "window.__idbRG");
+    Expect(r == "first=3,count=3,left=1,5",
+           "IndexedDB get/count/delete honor a key RANGE (not just the lower-bound key)",
+           "idbRG=[" + r + "]");
+  }
+
+  // 23y3. IndexedDB index nextunique cursor + count(range) (regression). A non-unique index
+  // 'by_g' over a 'g' field: three records share g='x', one has g='y'. A "nextunique" index
+  // cursor must visit each index key ONCE (x,y -> 2 steps, not 4), and index.count() over a
+  // range must count index entries (not the whole store).
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://idb.test/");
+    Eval(v,
+         "window.__idbUQ='';"
+         "var __o=indexedDB.open('mdbUniq',1);"
+         "__o.onupgradeneeded=function(e){var s=e.target.result.createObjectStore('o',{keyPath:'id'});"
+         "s.createIndex('by_g','g',{unique:false});};"
+         "__o.onsuccess=function(e){var db=e.target.result;"
+         "var t=db.transaction('o','readwrite');var s=t.objectStore('o');"
+         "s.put({id:1,g:'x'});s.put({id:2,g:'x'});s.put({id:3,g:'x'});s.put({id:4,g:'y'});"
+         "t.oncomplete=function(){var keys=[];"
+         "var idx=db.transaction('o').objectStore('o').index('by_g');"
+         "var cr=idx.openCursor(null,'nextunique');"
+         "cr.onsuccess=function(ev){var cur=ev.target.result;"
+         "if(cur){keys.push(cur.key);cur.continue();}else{"
+         "var cnt=db.transaction('o').objectStore('o').index('by_g').count(IDBKeyRange.only('x'));"
+         "cnt.onsuccess=function(){window.__idbUQ='keys='+keys.join(',')+',xcount='+cnt.result;};}};};};");
+    mbWaitForFunction(v, "window.__idbUQ!==''", 4000);
+    const std::string r = Eval(v, "window.__idbUQ");
+    Expect(r == "keys=x,y,xcount=3",
+           "IndexedDB nextunique index cursor visits each key once; index.count(range) counts entries",
+           "idbUQ=[" + r + "]");
+  }
+
   // 23z. Battery Status API (navigator.getBattery, broker BatteryMonitor): the in-process
   // monitor reports a static "plugged in, fully charged" battery, so getBattery() resolves a
   // BatteryManager with level 1, charging true, chargingTime 0.

@@ -60,6 +60,7 @@ class MbScriptWatchdog : public base::TaskObserver,
   std::atomic<bool> running_{false};
   base::PlatformThreadHandle thread_;
   bool observer_added_ = false;
+  int task_depth_ = 0;  // main-thread task nesting; only the outermost arms/disarms
 };
 
 }  // namespace mb

@@ -49,13 +49,20 @@ void MbScriptWatchdog::WillProcessTask(const base::PendingTask&, bool) {
   // before this task's JS runs (else it would be spuriously terminated).
   if (terminated_.exchange(false, std::memory_order_acq_rel))
     isolate_->CancelTerminateExecution();
+  ++task_depth_;  // main thread only; tracks nested run-loops
   const int t = timeout_ms_.load(std::memory_order_relaxed);
   deadline_us_.store(t > 0 ? NowUs() + int64_t{t} * 1000 : 0,
                      std::memory_order_relaxed);
 }
 
 void MbScriptWatchdog::DidProcessTask(const base::PendingTask&) {
-  deadline_us_.store(0, std::memory_order_relaxed);
+  if (task_depth_ > 0)
+    --task_depth_;
+  // Only DISARM at the outermost level: a nested task (a run-loop pumped inside an outer
+  // task) clearing the deadline would leave the rest of the outer task unguarded. Inner
+  // tasks re-armed the deadline in WillProcessTask, so the outer task stays covered.
+  if (task_depth_ == 0)
+    deadline_us_.store(0, std::memory_order_relaxed);
   if (terminated_.exchange(false, std::memory_order_acq_rel))
     isolate_->CancelTerminateExecution();
 }

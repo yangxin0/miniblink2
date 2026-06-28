@@ -79,6 +79,21 @@ const KeyDef* FindKeyByVk(int vk) {
       return &e;
   return nullptr;
 }
+// The pressed-button modifier for a mousedown, so a handler reading event.buttons sees
+// the button as held (real Chrome ORs it into the modifiers). mouseup carries no button
+// modifier (the button is released by then -> buttons == 0 for a single click).
+int ButtonDownModifier(blink::WebMouseEvent::Button b) {
+  switch (b) {
+    case blink::WebMouseEvent::Button::kLeft:
+      return blink::WebInputEvent::kLeftButtonDown;
+    case blink::WebMouseEvent::Button::kRight:
+      return blink::WebInputEvent::kRightButtonDown;
+    case blink::WebMouseEvent::Button::kMiddle:
+      return blink::WebInputEvent::kMiddleButtonDown;
+    default:
+      return 0;
+  }
+}
 }  // namespace
 
 MbWidget::MbWidget() = default;
@@ -152,8 +167,17 @@ void MbWidget::Attach(blink::WebLocalFrame* main_frame, int width, int height,
 }
 
 void MbWidget::Resize(int width, int height) {
-  if (widget_)
-    widget_->Resize(gfx::Size(width, height));
+  if (!widget_)
+    return;
+  widget_->Resize(gfx::Size(width, height));
+  // Keep window.outer{Width,Height}/screen rects in step with the new size (Resize alone
+  // doesn't update them), and for the compositing path update cc's device_viewport_rect
+  // (Resize doesn't), so a composited capture after a resize draws at the new size.
+  SetRealisticScreen(width, height);
+  if (composited_) {
+    static_cast<blink::WebFrameWidgetImpl*>(widget_)
+        ->SetWindowRectSynchronouslyForTesting(gfx::Rect(width, height));
+  }
 }
 
 void MbWidget::SetRealisticScreen(int view_w, int view_h) {
@@ -193,8 +217,10 @@ void MbWidget::SendMouseClick(int x, int y) {
     return;
   auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
   auto make = [&](blink::WebInputEvent::Type type) {
-    blink::WebMouseEvent e(type, blink::WebInputEvent::kNoModifiers,
-                           base::TimeTicks::Now());
+    int mods = type == blink::WebInputEvent::Type::kMouseDown
+                   ? blink::WebInputEvent::kLeftButtonDown
+                   : blink::WebInputEvent::kNoModifiers;
+    blink::WebMouseEvent e(type, mods, base::TimeTicks::Now());
     e.pointer_type = blink::WebPointerProperties::PointerType::kMouse;
     e.SetPositionInWidget(x, y);
     e.SetPositionInScreen(x, y);
@@ -213,8 +239,10 @@ void MbWidget::SendDoubleClick(int x, int y) {
     return;
   auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
   auto make = [&](blink::WebInputEvent::Type type, int click_count) {
-    blink::WebMouseEvent e(type, blink::WebInputEvent::kNoModifiers,
-                           base::TimeTicks::Now());
+    int mods = type == blink::WebInputEvent::Type::kMouseDown
+                   ? blink::WebInputEvent::kLeftButtonDown
+                   : blink::WebInputEvent::kNoModifiers;
+    blink::WebMouseEvent e(type, mods, base::TimeTicks::Now());
     e.pointer_type = blink::WebPointerProperties::PointerType::kMouse;
     e.SetPositionInWidget(x, y);
     e.SetPositionInScreen(x, y);
@@ -239,8 +267,10 @@ void MbWidget::SendRightClick(int x, int y) {
     return;
   auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
   auto make = [&](blink::WebInputEvent::Type type) {
-    blink::WebMouseEvent e(type, blink::WebInputEvent::kNoModifiers,
-                           base::TimeTicks::Now());
+    int mods = type == blink::WebInputEvent::Type::kMouseDown
+                   ? blink::WebInputEvent::kRightButtonDown
+                   : blink::WebInputEvent::kNoModifiers;
+    blink::WebMouseEvent e(type, mods, base::TimeTicks::Now());
     e.pointer_type = blink::WebPointerProperties::PointerType::kMouse;
     e.SetPositionInWidget(x, y);
     e.SetPositionInScreen(x, y);
@@ -275,7 +305,10 @@ void MbWidget::SendMouseClickEx(int x, int y, int button, int modifiers) {
   if (modifiers & 8)
     mods |= blink::WebInputEvent::kMetaKey;
   auto make = [&](blink::WebInputEvent::Type type) {
-    blink::WebMouseEvent e(type, mods, base::TimeTicks::Now());
+    int ev_mods = mods;
+    if (type == blink::WebInputEvent::Type::kMouseDown)
+      ev_mods |= ButtonDownModifier(btn);  // so event.buttons reflects the held button
+    blink::WebMouseEvent e(type, ev_mods, base::TimeTicks::Now());
     e.pointer_type = blink::WebPointerProperties::PointerType::kMouse;
     e.SetPositionInWidget(x, y);
     e.SetPositionInScreen(x, y);

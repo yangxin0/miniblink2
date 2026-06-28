@@ -8,7 +8,9 @@
 #include "wke/wke.h"
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -1674,12 +1676,15 @@ std::map<jsValue, JsRecord>& JsRegistry() {
   static auto* r = new std::map<jsValue, JsRecord>();
   return *r;
 }
+// thread_local so the returned const utf8* isn't clobbered by a concurrent call on
+// another thread (matches jsGetKeys's per-thread holder; the contract is "valid until
+// the next call on THIS thread").
 std::string& JsTempBuf() {
-  static auto* s = new std::string();
+  thread_local std::string* s = new std::string();  // leaked: no exit-time destructor
   return *s;
 }
 std::string& JsStringBuf() {  // separate temp for jsToString (JSON view)
-  static auto* s = new std::string();
+  thread_local std::string* s = new std::string();  // leaked: no exit-time destructor
   return *s;
 }
 // Start above wke's small reserved constants (jsUndefined/jsNull/jsTrue/jsFalse).
@@ -1739,16 +1744,28 @@ jsValue MakeLiteral(const std::string& value, const std::string& type,
   return h;
 }
 
-// Quote `s` as a JS string literal (for embedding a property name safely).
+// Quote `s` as a JS string literal (for embedding a property name / value safely). All
+// control chars are escaped — a raw control char in a string literal is a SyntaxError, so
+// the old \n/\r-only escaping could produce an unparseable literal. (An embedded NUL still
+// truncates: the input is a NUL-terminated C string, so the bytes after it are unreachable.)
 std::string JsStringLiteral(const char* s) {
   std::string out = "\"";
   for (const char* p = s; p && *p; ++p) {
-    switch (*p) {
+    unsigned char c = static_cast<unsigned char>(*p);
+    switch (c) {
       case '\\': out += "\\\\"; break;
       case '"': out += "\\\""; break;
       case '\n': out += "\\n"; break;
       case '\r': out += "\\r"; break;
-      default: out += *p;
+      case '\t': out += "\\t"; break;
+      default:
+        if (c < 0x20) {
+          char buf[8];
+          std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+          out += buf;
+        } else {
+          out += static_cast<char>(c);
+        }
     }
   }
   out += "\"";
@@ -1758,23 +1775,29 @@ std::string JsStringLiteral(const char* s) {
 // Eval `script` and record its coerced value + type under a fresh handle, ALSO
 // parking the live result in window.__mbslots[handle] so a later eval can index
 // it (backs jsGetAt). The slot store is done IN JS (a wrapper assignment) — never
-// from C++, which is what crashed a prior attempt. The wrapper only parses if
-// `script` is an EXPRESSION; for a statement it's a parse error (nothing runs,
-// empty type) and we fall back to a plain eval (no slot). The empty-type check
-// avoids re-running a valid expression that merely yields undefined.
+// from C++, which is what crashed a prior attempt.
+//
+// The wrapper is an IIFE that CATCHES a runtime exception and returns undefined: so a
+// statement (which can't be the assignment's RHS) is a SyntaxError of the whole wrapper
+// -> nothing runs -> empty type -> plain-eval fallback; but a side-effecting EXPRESSION
+// that throws runs ONCE inside the try and returns a defined (undefined-typed) value ->
+// NO fallback. The earlier `slot=(script)` form couldn't tell a throw from a parse error
+// (both gave empty type), so it re-ran a throwing expression's side effects a second time.
 jsValue StoreEval(wkeWebView wv, const std::string& script) {
   auto& reg = JsRegistry();
   EvictOldJsRecords();  // bound the registry; evicts only OLDEST handles + their slots
   const jsValue handle = g_next_js_value++;  // handle id == its __mbslots slot
+  const std::string slot =
+      "window.__mbslots[" + std::to_string(handle) + "]";
   const std::string wrapped =
-      "window.__mbslots=window.__mbslots||{};window.__mbslots[" +
-      std::to_string(handle) + "]=(" + script + ")";
+      "window.__mbslots=window.__mbslots||{};(function(){try{return(" + slot +
+      "=(" + script + "));}catch(e){" + slot + "=undefined;return undefined;}})()";
   std::vector<char> value(1 << 16, 0);  // 64 KiB result cap
   char type[16] = {0};
   mbEvalJSEx(wv->view, wrapped.c_str(), value.data(),
              static_cast<int>(value.size()), type, sizeof(type));
   bool slotted = true;
-  if (type[0] == '\0') {  // wrapper didn't parse/run (a statement) -> plain eval
+  if (type[0] == '\0') {  // wrapper didn't parse (a statement) -> plain eval
     slotted = false;
     std::fill(value.begin(), value.end(), 0);
     mbEvalJSEx(wv->view, script.c_str(), value.data(),
@@ -2011,19 +2034,40 @@ void wkeJsBindFunction(wkeWebView webView, const char* name,
   mbJsBindFunction(webView->view, name, &WkeNativeShim, raw);
 }
 
+namespace {
+// Numeric value of a jsValue, keyed off its JS TYPE. strtod (not atoi/atof) parses the
+// number forms V8 stringifies, including exponential notation ("1e+21") — atoi("1e+21")
+// returned 1. boolean -> 1/0; null/undefined/object -> 0/NaN.
+double JsToNumber(const JsRecord* r) {
+  if (!r)
+    return 0.0;
+  if (r->type == "boolean")
+    return r->value == "true" ? 1.0 : 0.0;
+  if (r->type == "null")
+    return 0.0;
+  if (r->type == "number" || r->type == "string")
+    return std::strtod(r->value.c_str(), nullptr);
+  return std::nan("");  // undefined / object / array / function
+}
+}  // namespace
+
 int jsToInt(jsExecState /*es*/, jsValue v) {
-  const JsRecord* r = JsLookup(v);
-  return r ? std::atoi(r->value.c_str()) : 0;
+  const double d = JsToNumber(JsLookup(v));
+  if (std::isnan(d))
+    return 0;
+  if (d >= static_cast<double>(INT_MAX))
+    return INT_MAX;
+  if (d <= static_cast<double>(INT_MIN))
+    return INT_MIN;
+  return static_cast<int>(d);
 }
 
 double jsToDouble(jsExecState /*es*/, jsValue v) {
-  const JsRecord* r = JsLookup(v);
-  return r ? std::atof(r->value.c_str()) : 0.0;
+  return JsToNumber(JsLookup(v));
 }
 
 float jsToFloat(jsExecState /*es*/, jsValue v) {
-  const JsRecord* r = JsLookup(v);
-  return r ? static_cast<float>(std::atof(r->value.c_str())) : 0.0f;
+  return static_cast<float>(JsToNumber(JsLookup(v)));
 }
 
 bool jsToBoolean(jsExecState /*es*/, jsValue v) {
@@ -2203,11 +2247,28 @@ jsKeys* jsGetKeys(jsExecState es, jsValue object) {
 }
 
 // --- jsValue constructors (build args to pass INTO JS) -------------------------
+namespace {
+// A double formatted as a JS numeric literal that round-trips. std::to_string is %f (6
+// fractional digits), which mangled jsDouble(1e-7) -> "0.000000" and lost precision on the
+// way into AND out of the page; %.17g round-trips every double. NaN/Infinity get their JS
+// spellings (the %g forms "nan"/"inf" aren't valid JS literals).
+std::string NumberToJs(double d) {
+  if (std::isnan(d))
+    return "NaN";
+  if (std::isinf(d))
+    return d < 0 ? "-Infinity" : "Infinity";
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%.17g", d);
+  return std::string(buf);
+}
+}  // namespace
+
 jsValue jsInt(int n) {
   return MakeLiteral(std::to_string(n), "number", std::to_string(n));
 }
 jsValue jsDouble(double d) {
-  return MakeLiteral(std::to_string(d), "number", std::to_string(d));
+  const std::string s = NumberToJs(d);
+  return MakeLiteral(s, "number", s);
 }
 jsValue jsBoolean(bool b) {
   return MakeLiteral(b ? "true" : "false", "boolean", b ? "true" : "false");

@@ -1153,16 +1153,28 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
     // Forward the request's own headers (fetch headers:{}, XHR setRequestHeader)
     // — Authorization, X-*, Accept, etc. — so API calls authenticate/negotiate.
     // Content-Type is carried separately (post_ct) to avoid a duplicate header.
-    std::string req_headers = extra_headers_;
+    // Kept STRUCTURED (not pre-joined) so a redirect can apply blink's removed_headers/
+    // modified_headers between hops — otherwise Authorization/Cookie/etc. would be re-sent
+    // to a cross-origin redirect target (a credential leak blink asks us to prevent).
+    net::HttpRequestHeaders hop_headers;
     for (const auto& kv : request->headers.GetHeaderVector()) {
       if (ToLower(kv.key) == "content-type") {
         post_ct = kv.value;
         continue;
       }
-      if (!req_headers.empty())
-        req_headers += "\n";
-      req_headers += kv.key + ": " + kv.value;
+      hop_headers.SetHeader(kv.key, kv.value);
     }
+    // Serialize the current hop's headers for FetchHttp (embedder extra_headers_ persist
+    // across hops; the request's own headers are subject to redirect stripping).
+    auto build_req_headers = [&]() {
+      std::string h = extra_headers_;
+      for (const auto& kv : hop_headers.GetHeaderVector()) {
+        if (!h.empty())
+          h += "\n";
+        h += kv.key + ": " + kv.value;
+      }
+      return h;
+    };
     // (Per-URL injected headers from mbSetRequestHeader are applied inside FetchHttp,
     // the shared http chokepoint, so the top-level navigation gets them too.)
     // Follow redirects MANUALLY (curl auto-follow off) so each hop is reported to
@@ -1178,6 +1190,7 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
       http_content_type.clear();
       resp_headers.clear();
       http_status = 0;
+      const std::string req_headers = build_req_headers();
       ok = FetchHttp(cur, &contents, &http_content_type, user_agent_, req_headers,
                      cur_body, post_ct, cur_method, &http_status, &resp_headers,
                      &final_url, /*follow_redirects=*/false);
@@ -1213,6 +1226,12 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
         ok = false;
         break;  // client declined the redirect
       }
+      // Apply blink's header edits for the next hop: drop sensitive headers it wants
+      // removed on a cross-origin redirect (Authorization, Cookie, …) and take any
+      // overrides (updated Referer/Origin/sec-fetch-*).
+      for (const std::string& rm : removed_headers)
+        hop_headers.RemoveHeader(rm);
+      hop_headers.MergeFrom(modified_headers);
       cur = next.spec();
       cur_method = new_method;
     }
@@ -1287,7 +1306,10 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
             value.erase(value.begin());
           const std::string lname = ToLower(name);
           if (lname != "content-length" && lname != "transfer-encoding") {
-            response.SetHttpHeaderField(blink::WebString::FromUtf8(name),
+            // AddHttpHeaderField (comma-join), not Set (replace): a response with
+            // multiple Set-Cookie/Link/Vary/WWW-Authenticate lines must expose all of
+            // them, not just the last. Content-Type is set authoritatively below.
+            response.AddHttpHeaderField(blink::WebString::FromUtf8(name),
                                         blink::WebString::FromUtf8(value));
           }
         }

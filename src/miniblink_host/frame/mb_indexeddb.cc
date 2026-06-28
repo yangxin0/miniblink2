@@ -16,6 +16,8 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/waitable_event.h"
@@ -85,56 +87,75 @@ struct MbIDBBackend {
   // so an aborted upgrade restores this to undo CreateObjectStore/version changes.
   blink::IDBDatabaseMetadata pre_upgrade_metadata;
 
-  // Per-transaction rollback snapshot of the mutable store state (data + key generators +
-  // indexes), captured lazily on a transaction's FIRST mutation. A subsequent Abort restores
-  // it, giving the whole transaction atomic all-or-nothing semantics; Commit discards it.
+  // Per-transaction rollback snapshot of the mutable store state, captured lazily and
+  // PER STORE on a transaction's first mutation of that store. A subsequent Abort restores
+  // only the stores the transaction touched, so two concurrent transactions with disjoint
+  // scopes don't clobber each other (a whole-backend snapshot did). Keyed by (connection,
+  // transaction id): blink allocates transaction ids per-connection, so two connections can
+  // reuse the same id — the connection pointer disambiguates. Commit discards the snapshot.
   struct Snapshot {
-    std::map<int64_t, std::map<std::string, MbRecord>> data;
-    std::map<int64_t, int64_t> key_generator;
+    std::map<int64_t, std::map<std::string, MbRecord>> data;  // store -> records
+    std::map<int64_t, int64_t> key_generator;                 // store -> next
     std::map<int64_t,
              std::map<int64_t, std::map<std::string, std::set<std::string>>>>
-        index_data;
+        index_data;             // store -> indexes
+    std::set<int64_t> stores;   // which stores this txn captured (present or absent)
   };
-  std::map<int64_t, Snapshot> txn_snapshots;  // transaction id -> pre-transaction state
+  std::map<std::pair<const void*, int64_t>, Snapshot> txn_snapshots;
 };
 
-// Deep-clone the records map (MbRecord holds a unique_ptr<IDBKey>, so it can't be copied).
-std::map<int64_t, std::map<std::string, MbRecord>> CloneData(
-    const std::map<int64_t, std::map<std::string, MbRecord>>& src) {
-  std::map<int64_t, std::map<std::string, MbRecord>> out;
-  for (const auto& store : src) {
-    auto& dst = out[store.first];
-    for (const auto& rec : store.second)
-      dst[rec.first] = MbRecord{blink::IDBKey::Clone(rec.second.key.get()),
-                                rec.second.bytes, rec.second.blob_info};
-  }
+// Deep-clone one store's records (MbRecord holds a unique_ptr<IDBKey>, can't be copied).
+std::map<std::string, MbRecord> CloneStore(
+    const std::map<std::string, MbRecord>& src) {
+  std::map<std::string, MbRecord> out;
+  for (const auto& rec : src)
+    out[rec.first] = MbRecord{blink::IDBKey::Clone(rec.second.key.get()),
+                              rec.second.bytes, rec.second.blob_info};
   return out;
 }
 
-// Snapshot the backend before a transaction's first mutation (idempotent per txn).
-void EnsureSnapshot(MbIDBBackend* b, int64_t txn_id) {
-  if (b->txn_snapshots.count(txn_id))
-    return;
-  MbIDBBackend::Snapshot s;
-  s.data = CloneData(b->data);
-  s.key_generator = b->key_generator;
-  s.index_data = b->index_data;
-  b->txn_snapshots[txn_id] = std::move(s);
+// Snapshot store `store_id` before a transaction's first mutation of it (idempotent per
+// (conn, txn, store)). Records the store's data + indexes + key generator — or its ABSENCE
+// (via `stores`) so a rollback can re-delete a store the txn created.
+void EnsureSnapshot(MbIDBBackend* b, const void* conn, int64_t txn_id,
+                    int64_t store_id) {
+  auto& snap = b->txn_snapshots[{conn, txn_id}];
+  if (!snap.stores.insert(store_id).second)
+    return;  // already captured this store for this txn
+  if (auto dit = b->data.find(store_id); dit != b->data.end())
+    snap.data[store_id] = CloneStore(dit->second);
+  if (auto iit = b->index_data.find(store_id); iit != b->index_data.end())
+    snap.index_data[store_id] = iit->second;
+  if (auto kit = b->key_generator.find(store_id); kit != b->key_generator.end())
+    snap.key_generator[store_id] = kit->second;
 }
 
-// Restore (and consume) a transaction's snapshot — its writes never happened.
-void RollbackSnapshot(MbIDBBackend* b, int64_t txn_id) {
-  auto it = b->txn_snapshots.find(txn_id);
+// Restore (and consume) a transaction's snapshot — its writes never happened. Only the
+// captured stores are reverted; stores absent at snapshot time are erased.
+void RollbackSnapshot(MbIDBBackend* b, const void* conn, int64_t txn_id) {
+  auto it = b->txn_snapshots.find({conn, txn_id});
   if (it == b->txn_snapshots.end())
     return;
-  b->data = std::move(it->second.data);
-  b->key_generator = std::move(it->second.key_generator);
-  b->index_data = std::move(it->second.index_data);
+  for (int64_t sid : it->second.stores) {
+    if (auto d = it->second.data.find(sid); d != it->second.data.end())
+      b->data[sid] = CloneStore(d->second);
+    else
+      b->data.erase(sid);
+    if (auto i = it->second.index_data.find(sid); i != it->second.index_data.end())
+      b->index_data[sid] = i->second;
+    else
+      b->index_data.erase(sid);
+    if (auto k = it->second.key_generator.find(sid);
+        k != it->second.key_generator.end())
+      b->key_generator[sid] = k->second;
+    else
+      b->key_generator.erase(sid);
+  }
   b->txn_snapshots.erase(it);
 }
 
-void DiscardSnapshot(MbIDBBackend* b, int64_t txn_id) {
-  b->txn_snapshots.erase(txn_id);
+void DiscardSnapshot(MbIDBBackend* b, const void* conn, int64_t txn_id) {
+  b->txn_snapshots.erase({conn, txn_id});
 }
 
 // Deep-clone database metadata for the pre-upgrade schema snapshot. Object-store
@@ -267,6 +288,17 @@ std::unique_ptr<blink::IDBKey> DecodeKey(const std::string& e) {
     case '\x30':
       return blink::IDBKey::CreateString(
           blink::String::FromUtf8(std::string_view(rest)));
+    case '\x40': {
+      // Binary (ArrayBuffer) key — the bytes follow the type byte verbatim (EncodeKey
+      // emits them raw). Without this case a persisted binary key reloaded to a None
+      // key, so its record reported a bogus primary key after MbLoadIndexedDB.
+      auto binary =
+          base::MakeRefCounted<base::RefCountedData<blink::Vector<char>>>();
+      binary->data.reserve(static_cast<blink::wtf_size_t>(rest.size()));
+      for (char c : rest)
+        binary->data.push_back(c);
+      return blink::IDBKey::CreateBinary(std::move(binary));
+    }
     case '\x50': {
       // Array: walk escaped+terminated components until the 0x00 array-end marker.
       blink::IDBKey::KeyArray arr;
@@ -430,18 +462,30 @@ class MbIDBCursor : public m::IDBCursor {
     std::move(callback).Run(TakeOne());
   }
   void Continue(std::unique_ptr<blink::IDBKey> key,
-                std::unique_ptr<blink::IDBKey> /*primary_key*/,
+                std::unique_ptr<blink::IDBKey> primary_key,
                 ContinueCallback callback) override {
     if (key && key->IsValid()) {
       std::string target = EncodeKey(key.get());  // compared against the cursor key
-      // Skip toward `target` in the cursor's iteration direction: ascending for a
-      // forward cursor, DESCENDING for a Prev cursor (entries_ is pre-reversed, so
-      // an ascending `< target` test would walk the wrong way and mis-seek).
+      // continuePrimaryKey(key, primaryKey): among duplicate index keys, seek to the
+      // requested PRIMARY key too (empty when plain continue(key) was called). Without
+      // this an index cursor landed on the first duplicate, delivering the wrong record.
+      std::string ptarget =
+          (primary_key && primary_key->IsValid()) ? EncodeKey(primary_key.get())
+                                                  : std::string();
+      // Skip toward (target, ptarget) in the cursor's iteration direction: ascending for a
+      // forward cursor, DESCENDING for a Prev cursor (entries_ is pre-reversed, so an
+      // ascending test would walk the wrong way and mis-seek).
       if (reverse_) {
-        while (pos_ < entries_.size() && entries_[pos_].first > target)
+        while (pos_ < entries_.size() &&
+               (entries_[pos_].first > target ||
+                (!ptarget.empty() && entries_[pos_].first == target &&
+                 entries_[pos_].second > ptarget)))
           ++pos_;
       } else {
-        while (pos_ < entries_.size() && entries_[pos_].first < target)
+        while (pos_ < entries_.size() &&
+               (entries_[pos_].first < target ||
+                (!ptarget.empty() && entries_[pos_].first == target &&
+                 entries_[pos_].second < ptarget)))
           ++pos_;
       }
     }
@@ -534,39 +578,54 @@ class MbIDBDatabase : public m::IDBDatabase {
       m::IDBTransactionMode,
       m::IDBTransactionDurability) override;
   void VersionChangeIgnored() override {}
-  // objectStore.get(key): look the value up by the (only-)key in the range.
-  // get()/getKey() on an object store (index_id == kInvalidId) or an index. For an index,
-  // the range key is the INDEX key; resolve it to a primary key, then the record.
+  // get()/getKey() on an object store (index_id == kInvalidId) or an index, by a key
+  // RANGE: return the first record whose (cursor) key falls within the range, in forward
+  // key order — not just an exact match on the range's lower bound (which dropped
+  // get(lowerBound(5)) when key 5 was absent but 6,7… existed).
   void Get(int64_t, int64_t object_store_id, int64_t index_id,
            m::IDBKeyRangePtr key_range, bool key_only,
            GetCallback callback) override {
-    std::string ekey = EncodeKey(key_range ? key_range->lower.get() : nullptr);
     auto store_it = backend_->data.find(object_store_id);
-    if (ekey.empty() || store_it == backend_->data.end()) {
+    if (!key_range || store_it == backend_->data.end()) {
       std::move(callback).Run(m::IDBDatabaseGetResult::NewEmpty(true));
       return;
     }
+    const std::string lo = EncodeKey(key_range->lower.get());
+    const std::string hi = EncodeKey(key_range->upper.get());
+    const bool lo_open = key_range->lower_open;
+    const bool hi_open = key_range->upper_open;
 
     std::string primary_ekey;
+    bool found = false;
     if (index_id == blink::IDBIndexMetadata::kInvalidId) {
-      if (!store_it->second.count(ekey)) {
-        std::move(callback).Run(m::IDBDatabaseGetResult::NewEmpty(true));
-        return;
-      }
-      primary_ekey = ekey;
+      for (const auto& entry : store_it->second)  // sorted by primary key
+        if (InRange(entry.first, lo, lo_open, hi, hi_open)) {
+          primary_ekey = entry.first;
+          found = true;
+          break;
+        }
     } else {
-      // Index lookup: ekey is the index key -> smallest matching primary key.
+      // Index lookup: walk index keys in range, take the smallest primary key whose
+      // record still exists.
       auto si = backend_->index_data.find(object_store_id);
-      const std::set<std::string>* pkeys =
-          (si != backend_->index_data.end() && si->second.count(index_id) &&
-           si->second.at(index_id).count(ekey))
-              ? &si->second.at(index_id).at(ekey)
-              : nullptr;
-      if (!pkeys || pkeys->empty() || !store_it->second.count(*pkeys->begin())) {
-        std::move(callback).Run(m::IDBDatabaseGetResult::NewEmpty(true));
-        return;
+      if (si != backend_->index_data.end() && si->second.count(index_id)) {
+        for (const auto& ik : si->second.at(index_id)) {  // sorted by index key
+          if (!InRange(ik.first, lo, lo_open, hi, hi_open))
+            continue;
+          for (const std::string& pk : ik.second)  // sorted primary keys
+            if (store_it->second.count(pk)) {
+              primary_ekey = pk;
+              found = true;
+              break;
+            }
+          if (found)
+            break;
+        }
       }
-      primary_ekey = *pkeys->begin();
+    }
+    if (!found) {
+      std::move(callback).Run(m::IDBDatabaseGetResult::NewEmpty(true));
+      return;
     }
 
     const MbRecord& rec = store_it->second.at(primary_ekey);
@@ -598,6 +657,11 @@ class MbIDBDatabase : public m::IDBDatabase {
       const bool keys_only = result_type == m::IDBGetAllResultType::Keys;
       const bool reverse = direction == m::IDBCursorDirection::Prev ||
                            direction == m::IDBCursorDirection::PrevNoDuplicate;
+      // nextunique/prevunique: emit only ONE record per index key (the first existing
+      // primary key). Only meaningful for an index cursor (store keys are already unique).
+      const bool unique =
+          direction == m::IDBCursorDirection::NextNoDuplicate ||
+          direction == m::IDBCursorDirection::PrevNoDuplicate;
       const uint32_t limit = max_count == 0 ? UINT32_MAX : max_count;
       const bool is_index = index_id != blink::IDBIndexMetadata::kInvalidId;
 
@@ -621,8 +685,11 @@ class MbIDBDatabase : public m::IDBDatabase {
             if (in_range(ik.first))
               for (const std::string& pk : ik.second) {  // sorted primary keys
                 auto rit = store.find(pk);
-                if (rit != store.end())
+                if (rit != store.end()) {
                   ordered.push_back(&rit->second);
+                  if (unique)
+                    break;  // one record per index key
+                }
               }
         }
       } else {
@@ -660,6 +727,10 @@ class MbIDBDatabase : public m::IDBDatabase {
     bool hi_open = key_range && key_range->upper_open;
     bool reverse = direction == m::IDBCursorDirection::Prev ||
                    direction == m::IDBCursorDirection::PrevNoDuplicate;
+    // nextunique/prevunique: one entry per index key (the first primary key). Only
+    // meaningful for an index cursor — a store cursor's keys are already unique.
+    const bool unique = direction == m::IDBCursorDirection::NextNoDuplicate ||
+                        direction == m::IDBCursorDirection::PrevNoDuplicate;
     const bool is_index = index_id != blink::IDBIndexMetadata::kInvalidId;
 
     // (cursor-key, primary-key) pairs, in cursor-key order; the range applies to the
@@ -669,10 +740,15 @@ class MbIDBDatabase : public m::IDBDatabase {
       if (is_index) {
         auto si = backend_->index_data.find(object_store_id);
         if (si != backend_->index_data.end() && si->second.count(index_id)) {
-          for (const auto& ik : si->second.at(index_id))  // index key -> primary keys
-            if (InRange(ik.first, lo, lo_open, hi, hi_open))
-              for (const std::string& pk : ik.second)  // sorted primary keys
-                entries.emplace_back(ik.first, pk);
+          for (const auto& ik : si->second.at(index_id)) {  // index key -> primary keys
+            if (!InRange(ik.first, lo, lo_open, hi, hi_open))
+              continue;
+            for (const std::string& pk : ik.second) {  // sorted primary keys
+              entries.emplace_back(ik.first, pk);
+              if (unique)
+                break;  // one entry per index key
+            }
+          }
         }
       } else {
         for (const auto& entry : store_it->second)
@@ -707,34 +783,63 @@ class MbIDBDatabase : public m::IDBDatabase {
     std::move(callback).Run(
         m::IDBDatabaseOpenCursorResult::NewValue(std::move(val)));
   }
-  // count(): a single-key range counts that key (0/1); an absent/unbounded range counts
-  // every record in the store.
-  void Count(int64_t, int64_t object_store_id, int64_t, m::IDBKeyRangePtr key_range,
-             CountCallback callback) override {
+  // count(): count records whose (cursor) key is in the range — every record for an
+  // absent/unbounded range. Honors the index id (count() on an index counts its entries
+  // in range, not the whole store).
+  void Count(int64_t, int64_t object_store_id, int64_t index_id,
+             m::IDBKeyRangePtr key_range, CountCallback callback) override {
     auto it = backend_->data.find(object_store_id);
     uint64_t n = 0;
     if (it != backend_->data.end()) {
-      std::string ekey =
-          EncodeKey(key_range ? key_range->lower.get() : nullptr);
-      n = ekey.empty() ? it->second.size() : it->second.count(ekey);
+      const std::string lo = key_range ? EncodeKey(key_range->lower.get()) : std::string();
+      const std::string hi = key_range ? EncodeKey(key_range->upper.get()) : std::string();
+      const bool lo_open = key_range && key_range->lower_open;
+      const bool hi_open = key_range && key_range->upper_open;
+      if (index_id == blink::IDBIndexMetadata::kInvalidId) {
+        if (lo.empty() && hi.empty()) {
+          n = it->second.size();
+        } else {
+          for (const auto& entry : it->second)
+            if (InRange(entry.first, lo, lo_open, hi, hi_open))
+              ++n;
+        }
+      } else {
+        auto si = backend_->index_data.find(object_store_id);
+        if (si != backend_->index_data.end() && si->second.count(index_id))
+          for (const auto& ik : si->second.at(index_id))
+            if (InRange(ik.first, lo, lo_open, hi, hi_open))
+              for (const std::string& pk : ik.second)
+                if (it->second.count(pk))
+                  ++n;
+      }
     }
     std::move(callback).Run(/*success=*/true, n);
   }
-  // delete(key): remove the single-key record; an unbounded range removes all.
+  // delete(range): remove every record whose key is in the range; an unbounded range
+  // removes all. (Previously only the range's lower-bound key was deleted, silently
+  // leaving the rest of a bounded range like delete(bound(1,10)) in place.)
   void DeleteRange(int64_t transaction_id, int64_t object_store_id,
                    m::IDBKeyRangePtr key_range,
                    DeleteRangeCallback callback) override {
-    EnsureSnapshot(backend_, transaction_id);
+    EnsureSnapshot(backend_, this, transaction_id, object_store_id);
     auto it = backend_->data.find(object_store_id);
     if (it != backend_->data.end()) {
-      std::string ekey =
-          EncodeKey(key_range ? key_range->lower.get() : nullptr);
-      if (ekey.empty()) {
+      const std::string lo = key_range ? EncodeKey(key_range->lower.get()) : std::string();
+      const std::string hi = key_range ? EncodeKey(key_range->upper.get()) : std::string();
+      const bool lo_open = key_range && key_range->lower_open;
+      const bool hi_open = key_range && key_range->upper_open;
+      if (lo.empty() && hi.empty()) {
         it->second.clear();
         backend_->index_data[object_store_id].clear();
       } else {
-        it->second.erase(ekey);
-        RemoveFromIndexes(backend_, object_store_id, ekey);
+        for (auto rit = it->second.begin(); rit != it->second.end();) {
+          if (InRange(rit->first, lo, lo_open, hi, hi_open)) {
+            RemoveFromIndexes(backend_, object_store_id, rit->first);
+            rit = it->second.erase(rit);
+          } else {
+            ++rit;
+          }
+        }
       }
     }
     std::move(callback).Run(/*success=*/true);
@@ -748,7 +853,7 @@ class MbIDBDatabase : public m::IDBDatabase {
   }
   void Clear(int64_t transaction_id, int64_t object_store_id,
              ClearCallback callback) override {
-    EnsureSnapshot(backend_, transaction_id);
+    EnsureSnapshot(backend_, this, transaction_id, object_store_id);
     auto it = backend_->data.find(object_store_id);
     if (it != backend_->data.end())
       it->second.clear();
@@ -826,6 +931,10 @@ class MbIDBTransactionImpl : public IDBTransaction {
       backend_->metadata.max_object_store_id = object_store_id;
   }
   void DeleteObjectStore(int64_t object_store_id) override {
+    // Snapshot the store's records BEFORE erasing them so an aborted upgrade rolls them
+    // back (the metadata is restored from pre_upgrade_metadata, but the per-txn snapshot
+    // is what restores the data — without this an aborted delete lost the records).
+    EnsureSnapshot(backend_, db_.get(), txn_id_, object_store_id);
     backend_->metadata.object_stores.erase(object_store_id);
     backend_->data.erase(object_store_id);        // also drop the store's records
     backend_->index_data.erase(object_store_id);  // ...and its secondary-index data
@@ -836,7 +945,8 @@ class MbIDBTransactionImpl : public IDBTransaction {
            m::IDBPutMode put_mode,
            blink::Vector<blink::IDBIndexKeys> index_keys,
            PutCallback callback) override {
-    EnsureSnapshot(backend_, txn_id_);  // first mutation arms transaction rollback
+    // first mutation of this store arms its transaction rollback snapshot
+    EnsureSnapshot(backend_, db_.get(), txn_id_, object_store_id);
     // Auto-increment: blink sends a null key for a key-generator store; the backend
     // assigns the next number. An explicit numeric key also bumps the generator.
     std::unique_ptr<blink::IDBKey> generated;
@@ -926,7 +1036,8 @@ class MbIDBTransactionImpl : public IDBTransaction {
   }
   void SetIndexKeysDone() override {}
   void Commit(int64_t /*num_errors_handled*/) override {
-    DiscardSnapshot(backend_, txn_id_);  // changes are now durable; nothing to roll back
+    // changes are now durable; nothing to roll back
+    DiscardSnapshot(backend_, db_.get(), txn_id_);
     if (backend_->version_change_txn == this)
       backend_->version_change_txn = nullptr;  // upgrade committed
     // The transaction completed: notify its oncomplete via the OWNING connection's
@@ -951,7 +1062,7 @@ class MbIDBTransactionImpl : public IDBTransaction {
 
 // Out-of-line (needs the full MbIDBTransactionImpl type for the upgrade case).
 void MbIDBDatabase::Abort(int64_t transaction_id) {
-  RollbackSnapshot(backend_, transaction_id);  // undo this txn's data writes
+  RollbackSnapshot(backend_, this, transaction_id);  // undo this txn's data writes
   // If this is the in-flight version-change (upgrade) transaction, the per-txn data
   // snapshot does NOT cover schema — restore the pre-upgrade metadata (version +
   // object stores) so a later reopen sees the OLD schema, not the half-built one.

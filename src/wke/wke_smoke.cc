@@ -765,6 +765,34 @@ int main() {
           "jsCall/jsCallGlobal invoke functions with constructed args + this");
   }
 
+  // jsDouble round-trips with full precision (regression): the old std::to_string was
+  // %f/6-digit, so jsDouble(1e-7) became 0 and a long fraction lost precision — both on
+  // read-back AND when marshaled into JS. Pass a tiny + a precise value through jsCall.
+  {
+    jsValue idfn = wkeRunJS(wv, "(function(x){return x})");
+    jsValue a1[1] = {jsDouble(1e-7)};
+    const bool tiny_ok = jsToDouble(es, jsCallGlobal(es, idfn, a1, 1)) == 1e-7;
+    jsValue a2[1] = {jsDouble(3.141592653589793)};
+    const bool pi_ok =
+        jsToDouble(es, jsCallGlobal(es, idfn, a2, 1)) == 3.141592653589793;
+    // jsToInt parses V8's exponential stringification (1e21) instead of atoi -> 1.
+    const bool exp_ok = jsToInt(es, wkeRunJS(wv, "5")) == 5 &&
+                        jsToDouble(es, wkeRunJS(wv, "1e21")) == 1e21;
+    check(tiny_ok && pi_ok && exp_ok,
+          "jsDouble round-trips with full precision; jsTo* parse exponential numbers");
+  }
+
+  // StoreEval runs a side-effecting expression that throws ONCE (regression): the old
+  // empty-type fallback couldn't tell a runtime throw from a parse error and re-ran the
+  // script, double-applying side effects. Here the expression increments a counter then
+  // throws; the counter must end at 1, not 2.
+  {
+    wkeRunJS(wv, "window.__sec=0");
+    wkeRunJS(wv, "(function(){window.__sec++; throw new Error('boom')})()");
+    const bool once = jsToInt(es, wkeRunJS(wv, "window.__sec")) == 1;
+    check(once, "a throwing side-effecting expression runs exactly once (no double-eval)");
+  }
+
   // jsGetKeys enumerates own-enumerable property names in Object.keys order.
   {
     jsValue obj = wkeRunJS(wv, "({alpha:1, beta:2, gamma:3})");

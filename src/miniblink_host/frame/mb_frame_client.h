@@ -307,6 +307,11 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // can replay the target entry. Empty / -1 for child frames.
   std::vector<blink::Persistent<blink::HistoryItem>> history_items_;
   int history_index_ = -1;
+  // Set while a page-driven CROSS-document history.back()/forward() re-navigates via the
+  // owner's LoadURL: the resulting commit is a traversal (the index is already at the
+  // target), so it must NOT append a new entry to this list (or the view's). Without it a
+  // cross-doc back/forward grew both history lists and broke subsequent traversal.
+  bool suppress_history_record_ = false;
 
   // Unique per-client id so this frame's LocalFrameHost callbacks (history /
   // Navigation API / favicon) route to THIS client, not another view's.

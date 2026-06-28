@@ -307,7 +307,19 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
 MbWebView::MbWebView() = default;
 
 MbWebView::~MbWebView() {
-  // if (web_view_) web_view_->Close();  // closes frame + widget
+  // Tear down the blink object graph (WebViewImpl -> Page -> main LocalFrame ->
+  // WebFrameWidget) HERE, in the destructor body, while frame_client_/view_client_/
+  // agent_group_scheduler_ are still alive — those blink objects hold references to
+  // them. Without this the whole page leaked on every view destruction, and a page
+  // with a live timer (setInterval) kept scheduling through the freed
+  // WebAgentGroupScheduler after the view was gone (a use-after-free). Close() also
+  // disposes the main frame + widget, so MbWidget's dangling blink-widget pointer is
+  // never used during member destruction (its destructor is trivial).
+  if (web_view_) {
+    web_view_->Close();
+    web_view_ = nullptr;
+    main_frame_ = nullptr;
+  }
 }
 
 void MbWebView::Resize(int width, int height) {
@@ -355,6 +367,12 @@ void MbWebView::LoadHTML(const char* utf8_html, const char* base_url) {
   response_headers_.clear();
   last_error_.clear();  // an in-memory document always loads successfully
   const char* html = utf8_html ? utf8_html : "";
+  // Cache the source into the history entry recorded by this commit, so a later
+  // back/forward can re-render this in-memory doc (its committed URL is about:blank).
+  pending_is_html_ = true;
+  pending_html_.assign(html, std::strlen(html));
+  pending_base_ = base_url ? base_url : "";
+  pending_charset_.clear();
   CommitHtml(html, std::strlen(html), base_url);
 }
 
@@ -408,6 +426,7 @@ void MbWebView::LoadURL(const char* utf8_url) {
   http_status_ = 0;  // reset; only an http(s) load sets a real status
   response_headers_.clear();
   last_error_.clear();  // cleared up front; set only if this load fails
+  pending_is_html_ = false;  // a URL nav: the history entry re-fetches, no cached source
   constexpr char kFile[] = "file://";
   if (url.rfind(kFile, 0) == 0) {
     // Top-level file load: read it and commit. (Self-contained docs + data: URIs
@@ -1748,12 +1767,26 @@ void MbWebView::OnDidCommitMainFrame(const std::string& url, bool standard) {
   }
   if (history_index_ >= 0 &&
       history_index_ < static_cast<int>(history_.size()) &&
-      history_[history_index_] == url) {
+      history_[history_index_].url == url) {
+    pending_is_html_ = false;  // consumed (no new entry); don't leak onto the next commit
+    pending_html_.clear();
     return;  // same URL (e.g. a reload committed as standard) — no new entry
   }
   history_.resize(history_index_ + 1);  // a new navigation truncates forward
-  history_.push_back(url);
+  HistoryEntry e;
+  e.url = url;
+  if (pending_is_html_) {  // an in-memory doc — cache its source for re-commit on traversal
+    e.is_html = true;
+    e.html = std::move(pending_html_);
+    e.base_url = std::move(pending_base_);
+    e.charset = std::move(pending_charset_);
+  }
+  history_.push_back(std::move(e));
   history_index_ = static_cast<int>(history_.size()) - 1;
+  pending_is_html_ = false;  // consumed
+  pending_html_.clear();
+  pending_base_.clear();
+  pending_charset_.clear();
 }
 
 void MbWebView::OnDidFinishLoad() {
@@ -1859,22 +1892,41 @@ void MbWebView::SetNewWindowCallback(NewWindowFn cb) {
   on_new_window_ = std::move(cb);
 }
 
+// Navigate to history_[target] (assumed adjacent + valid). Re-commits a cached
+// in-memory doc or re-fetches a URL entry. in_history_nav_ tells OnDidCommitMainFrame to
+// MOVE the cursor (set above) rather than append. If the navigation does not commit (load
+// failure / download diversion), the commit hook never clears the flag — roll back the
+// index + flag so a failed traversal doesn't corrupt history (which would otherwise
+// swallow the next real navigation's commit). Returns whether it committed.
+bool MbWebView::TraverseHistory(int target) {
+  const int prev = history_index_;
+  in_history_nav_ = true;
+  history_index_ = target;
+  const HistoryEntry& e = history_[target];
+  if (e.is_html) {
+    CommitHtml(e.html.data(), e.html.size(),
+               e.base_url.empty() ? nullptr : e.base_url.c_str(), e.charset);
+  } else {
+    LoadURL(e.url.c_str());
+  }
+  if (in_history_nav_) {  // never committed
+    in_history_nav_ = false;
+    history_index_ = prev;
+    return false;
+  }
+  return true;
+}
+
 bool MbWebView::GoBack() {
   if (!CanGoBack())
     return false;
-  in_history_nav_ = true;
-  --history_index_;
-  LoadURL(history_[history_index_].c_str());
-  return true;
+  return TraverseHistory(history_index_ - 1);
 }
 
 bool MbWebView::GoForward() {
   if (!CanGoForward())
     return false;
-  in_history_nav_ = true;
-  ++history_index_;
-  LoadURL(history_[history_index_].c_str());
-  return true;
+  return TraverseHistory(history_index_ + 1);
 }
 
 void MbWebView::SetExtraHeaders(const char* utf8_headers) {
@@ -2719,7 +2771,8 @@ void MbWebView::ServiceAnimations() {
   }
 }
 
-bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y) {
+bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y,
+                          bool apply_device_scale) {
   if (!widget_ || !widget_->widget() || !main_frame_)
     return false;
   // Interleave lifecycle + task draining: layout issues subresource requests (images
@@ -2744,7 +2797,7 @@ bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y) {
   canvas.clear(transparent_bg_ ? SK_ColorTRANSPARENT : SK_ColorWHITE);
   // HiDPI: the paint record is in CSS px; scaling the canvas makes skia re-raster
   // glyphs/vectors crisply at the device pixel ratio into the (logical*dsf) bitmap.
-  if (dsf_ != 1.0f)
+  if (apply_device_scale && dsf_ != 1.0f)
     canvas.scale(dsf_, dsf_);
   // Clip capture: shift the document so logical (origin_x, origin_y) lands at the
   // canvas origin; the (smaller) bitmap then holds just that region. The translate
@@ -2817,7 +2870,9 @@ bool MbWebView::PaintRectToBitmap(void* out_bgra, int x, int y, int w, int h,
     return false;
   }
   SkCanvas canvas(bitmap);
-  return PaintInto(canvas, x, y);
+  // The ABI contract is a w x h px buffer with the device scale factor NOT applied,
+  // so render 1:1 (SavePngRect, which sizes its own w*dsf x h*dsf bitmap, keeps dsf).
+  return PaintInto(canvas, x, y, /*apply_device_scale=*/false);
 }
 
 namespace {

@@ -141,5 +141,33 @@ fixed and given regression tests:
 - `build.sh` silently continued when a donor patch failed to apply (→ a binary that builds but
   hangs/crashes); it now aborts.
 
+A **second correctness-review pass** (subsystem audit of the hand-written backends) found and fixed a
+further tail of edge bugs the capability suites didn't exercise (all green after; IDB-range + wke cases
+given regression tests in `mb_smoke`/`wke_smoke`):
+- **IndexedDB key ranges**: `get()`/`getKey()`/`delete()`/`count()` treated a range as its exact
+  lower-bound key — `get(lowerBound(5))` missed 6,7…, `delete(bound(2,4))` left 3,4, `count(range)`≤1.
+  Now they honor the full range (matching `getAll`/`openCursor`). Also: `count()`/`get()` honor the
+  index id; `nextunique`/`prevunique` cursors de-duplicate per index key; `continuePrimaryKey` seeks the
+  primary key; binary (ArrayBuffer) keys decode after save/load; an aborted upgrade that deleted a store
+  rolls its records back; the transaction rollback snapshot is now **per-store, keyed by (connection,
+  txn)** so concurrent disjoint-scope transactions don't clobber each other.
+- **libcurl loader**: cross-origin redirects now apply blink's `removed_headers`/`modified_headers`
+  (was re-sending `Authorization`/`Cookie` to the redirect target — a credential leak); duplicate
+  response headers (multi `Set-Cookie`/`Link`/`Vary`) are comma-joined (`AddHttpHeaderField`) not
+  collapsed to the last.
+- **WebView**: `~MbWebView` now calls `web_view_->Close()` (was a full page leak + a use-after-free of
+  the freed scheduler by a live timer); a failed `GoBack`/`GoForward` rolls back the index/flag instead
+  of corrupting history; back/forward to an in-memory `LoadHTML` doc re-commits its cached source;
+  `PaintRectToBitmap` no longer applies dsf (its ABI contract is a w×h, dsf-not-applied buffer).
+- **Widget**: synthetic `mousedown` carries the pressed-button modifier (so `event.buttons` is correct);
+  `Resize` refreshes the screen rects + cc viewport.
+- **Frame client**: a page-driven cross-document `history.back()/forward()` no longer double-records
+  into both history lists.
+- **wke**: `jsDouble` round-trips with full precision (was `%f`/6-digit, mangling `1e-7`→0);
+  `jsToInt`/`jsToFloat`/`jsToDouble` parse exponential/boolean forms (was `atoi`/`atof`); a throwing
+  side-effecting expression runs **once** (`StoreEval` no longer re-runs on a runtime throw);
+  `JsStringLiteral` escapes all control chars; the temp string buffers are thread-local.
+- **Script watchdog**: a nested run-loop's `DidProcessTask` no longer disarms the outer task's deadline.
+
 Lesson: capability coverage ≠ edge/adversarial coverage. The suites prove features *work*; they did not
 prove the in-process backend re-implementations and the `wke` compat layer were *correct* at their edges.
