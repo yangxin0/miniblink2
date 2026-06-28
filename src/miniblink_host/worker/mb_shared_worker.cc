@@ -181,18 +181,31 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
   }
 
   // A page client disconnected (already removed from the set). If it was the
-  // last, terminate the worker context -> WorkerContextDestroyed -> deregister +
-  // delete, so a later new SharedWorker(sameUrl) starts a FRESH instance.
+  // last, terminate the worker context. Deregister EAGERLY here (before the async
+  // WorkerContextDestroyed) so a concurrent new SharedWorker(sameUrl) Connect can't
+  // reuse this dying instance — its AddClient would be lost when WorkerContextDestroyed
+  // deletes us. A fresh instance is created instead.
   void OnClientGone(mojo::RemoteSetElementId /*id*/) {
-    if (clients_.empty() && worker_)
+    if (clients_.empty() && worker_ && !terminating_) {
+      terminating_ = true;
+      auto& reg = SwRegistry();
+      auto it = reg.find(key_);
+      if (it != reg.end() && it->second == this)
+        reg.erase(it);
       worker_->TerminateWorkerContext();
+    }
   }
 
   // blink::WebSharedWorkerClient:
   void WorkerContextDestroyed() override {
     if (worker_frame_key_)
       MbClearFrameOrigin(worker_frame_key_);  // forget the worker's origin entry
-    SwRegistry().erase(key_);
+    // Usually already deregistered at termination start; only erase if the registry
+    // still maps this key to us, so we never clobber a fresh same-key instance.
+    auto& reg = SwRegistry();
+    auto it = reg.find(key_);
+    if (it != reg.end() && it->second == this)
+      reg.erase(it);
     delete this;
   }
 
@@ -203,6 +216,7 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
   mojo::RemoteSet<blink::mojom::blink::SharedWorkerClient> clients_;
   int next_connection_id_ = 0;
   uint64_t worker_frame_key_ = 0;  // this worker's origin-map key (0 = unset)
+  bool terminating_ = false;  // last client gone; deregistered, awaiting destruction
 };
 
 class MbSharedWorkerConnector

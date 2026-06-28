@@ -1,5 +1,6 @@
 #include "miniblink_host/frame/mb_storage_buckets.h"
 
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -20,13 +21,20 @@
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace mb {
+
+// Defined in mb_cache_storage.cc: drop every cache stored under the given scope (an origin, or
+// an "origin\x01bucket:name" bucket scope). Lets deleteBucket() empty the bucket's caches.
+void MbClearCacheStorageForScope(const std::string& scope_origin);
+
 namespace {
 
 namespace m = blink::mojom::blink;
 
-// Names of buckets opened this run (process-wide; storageBuckets.keys() lists them).
-std::set<std::string>& BucketNames() {
-  static auto* names = new std::set<std::string>();
+// Names of buckets opened this run, keyed by origin: storageBuckets.keys()/.delete() must see
+// only the calling origin's buckets (a single process-wide set leaks one origin's buckets to
+// another and lets deleteBucket() affect a same-named bucket in a different origin).
+std::map<std::string, std::set<std::string>>& BucketNames() {
+  static auto* names = new std::map<std::string, std::set<std::string>>();
   return *names;
 }
 
@@ -124,7 +132,7 @@ class MbBucketManagerHost : public m::BucketManagerHost {
 
   void OpenBucket(const blink::String& name, m::BucketPoliciesPtr,
                   OpenBucketCallback cb) override {
-    BucketNames().insert(name.Utf8());
+    Names().insert(name.Utf8());
     mojo::PendingRemote<m::BucketHost> remote;
     mojo::MakeSelfOwnedReceiver(
         std::make_unique<MbBucketHost>(frame_key_, name.Utf8()),
@@ -134,24 +142,37 @@ class MbBucketManagerHost : public m::BucketManagerHost {
   void GetBucketForDevtools(
       const blink::String& name,
       mojo::PendingReceiver<m::BucketHost> receiver) override {
-    BucketNames().insert(name.Utf8());
+    Names().insert(name.Utf8());
     mojo::MakeSelfOwnedReceiver(
         std::make_unique<MbBucketHost>(frame_key_, name.Utf8()),
         std::move(receiver));
   }
   void Keys(KeysCallback cb) override {
     blink::Vector<blink::String> out;
-    for (const std::string& n : BucketNames())
+    for (const std::string& n : Names())
       out.push_back(blink::String::FromUtf8(n));
     std::move(cb).Run(out, /*success=*/true);
   }
   void DeleteBucket(const blink::String& name,
                     DeleteBucketCallback cb) override {
-    BucketNames().erase(name.Utf8());
+    const std::string bucket = name.Utf8();
+    Names().erase(bucket);
+    // Empty the (origin, bucket)-scoped data so a re-opened same-named bucket starts fresh.
+    // The bucket's Cache Storage lives under scope "origin\x01bucket:name" (see
+    // MbBucketHost::ScopeKey) — clear it here. The bucket's IndexedDB and OPFS lack a
+    // per-scope clear hook reachable from this file (their backends expose no scoped-delete
+    // entry point), so their data is not yet dropped on deleteBucket.
+    MbClearCacheStorageForScope(MbGetFrameOrigin(frame_key_) + "\x01" +
+                                "bucket:" + bucket);
     std::move(cb).Run(/*success=*/true);
   }
 
  private:
+  // This origin's bucket-name set (storageBuckets is per-origin).
+  std::set<std::string>& Names() {
+    return BucketNames()[MbGetFrameOrigin(frame_key_)];
+  }
+
   uint64_t frame_key_ = 0;  // the owning frame's key (-> origin), passed to buckets
 };
 

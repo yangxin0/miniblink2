@@ -43,26 +43,54 @@ namespace m = blink::mojom::blink;
 // again), keyed by a storage scope (origin, or origin+bucket) so OPFS is ISOLATED
 // per origin — the same per-origin requirement as IndexedDB; a process-wide root
 // would let different origins read/write each other's private files.
+// Children and bound handles hold the node via shared_ptr so a node that is removed from the
+// tree (RemoveEntry drops the parent's map entry) stays alive while any open handle/writer/
+// sync-access host references it — no dangling FsNode* / use-after-free on a removed-but-open
+// handle. Per-file lock state lives on the node so all handles for the same file contend.
 struct FsNode {
   bool is_dir = true;
-  std::map<std::string, std::unique_ptr<FsNode>> children;  // when is_dir
+  std::map<std::string, std::shared_ptr<FsNode>> children;  // when is_dir
   std::string bytes;                                        // when !is_dir
+  // Exclusive-access bookkeeping (createSyncAccessHandle / createWritable locks).
+  int lock_shared = 0;          // count of shared (read-only / siloed / unsafe) locks
+  bool lock_exclusive = false;  // a single exclusive (readwrite / exclusive) lock
 };
+
+// Acquire/release a per-file lock. Exclusive conflicts with any other lock; shared only with
+// an exclusive one. Returns false (caller maps to NoModificationAllowedError) on conflict.
+bool AcquireLock(FsNode* n, bool exclusive) {
+  if (exclusive) {
+    if (n->lock_exclusive || n->lock_shared > 0)
+      return false;
+    n->lock_exclusive = true;
+  } else {
+    if (n->lock_exclusive)
+      return false;
+    ++n->lock_shared;
+  }
+  return true;
+}
+void ReleaseLock(FsNode* n, bool exclusive) {
+  if (exclusive)
+    n->lock_exclusive = false;
+  else if (n->lock_shared > 0)
+    --n->lock_shared;
+}
 
 // Process-wide scope -> root tree (origin / origin+bucket isolated). Shared by OpfsRoot
 // and the persistence (save/load) below.
-std::map<std::string, std::unique_ptr<FsNode>>& OpfsRoots() {
+std::map<std::string, std::shared_ptr<FsNode>>& OpfsRoots() {
   static auto* roots =
-      new std::map<std::string, std::unique_ptr<FsNode>>();  // scope -> root
+      new std::map<std::string, std::shared_ptr<FsNode>>();  // scope -> root
   return *roots;
 }
 
-FsNode* OpfsRoot(const std::string& scope) {
+std::shared_ptr<FsNode> OpfsRoot(const std::string& scope) {
   auto& roots = OpfsRoots();
   auto it = roots.find(scope);
   if (it == roots.end())
-    it = roots.emplace(scope, std::make_unique<FsNode>()).first;
-  return it->second.get();
+    it = roots.emplace(scope, std::make_shared<FsNode>()).first;
+  return it->second;
 }
 
 m::FileSystemAccessErrorPtr Ok() {
@@ -81,8 +109,10 @@ m::FileSystemAccessErrorPtr NotSupported(const char* msg) {
       base::File::FILE_ERROR_FAILED, blink::String::FromUtf8(msg));
 }
 
-mojo::PendingRemote<m::FileSystemAccessFileHandle> BindFile(FsNode* node);
-mojo::PendingRemote<m::FileSystemAccessDirectoryHandle> BindDir(FsNode* node);
+mojo::PendingRemote<m::FileSystemAccessFileHandle> BindFile(
+    std::shared_ptr<FsNode> node);
+mojo::PendingRemote<m::FileSystemAccessDirectoryHandle> BindDir(
+    std::shared_ptr<FsNode> node);
 
 // ----------------------------- file writer -----------------------------
 // A writable session over one file. Writes accumulate into a working buffer (a copy of the
@@ -90,9 +120,12 @@ mojo::PendingRemote<m::FileSystemAccessDirectoryHandle> BindDir(FsNode* node);
 // discards it. Each Write drains its data pipe, then splices the bytes in at the given offset.
 class MbFsFileWriter : public m::FileSystemAccessFileWriter {
  public:
-  MbFsFileWriter(FsNode* node, bool keep_existing_data)
-      : node_(node),
-        buffer_(keep_existing_data ? node->bytes : std::string()) {}
+  MbFsFileWriter(std::shared_ptr<FsNode> node, bool keep_existing_data,
+                 bool locked_exclusive)
+      : node_(std::move(node)),
+        buffer_(keep_existing_data ? node_->bytes : std::string()),
+        locked_exclusive_(locked_exclusive) {}
+  ~MbFsFileWriter() override { ReleaseLock(node_.get(), locked_exclusive_); }
 
   void Write(uint64_t offset, mojo::ScopedDataPipeConsumerHandle stream,
              WriteCallback cb) override {
@@ -151,9 +184,10 @@ class MbFsFileWriter : public m::FileSystemAccessFileWriter {
     std::move(cb).Run(Ok(), data.size());
   }
 
-  FsNode* node_;
+  std::shared_ptr<FsNode> node_;
   std::string buffer_;
   std::vector<std::unique_ptr<WriteOp>> ops_;
+  bool locked_exclusive_ = false;
 };
 
 // ------------------------- sync access handle --------------------------
@@ -161,7 +195,8 @@ class MbFsFileWriter : public m::FileSystemAccessFileWriter {
 // the file synchronously via these [Sync] RPCs; they operate directly on the node's bytes.
 class MbFsFileDelegateHost : public m::FileSystemAccessFileDelegateHost {
  public:
-  explicit MbFsFileDelegateHost(FsNode* node) : node_(node) {}
+  explicit MbFsFileDelegateHost(std::shared_ptr<FsNode> node)
+      : node_(std::move(node)) {}
 
   void Read(int64_t offset, int32_t bytes_to_read, ReadCallback cb) override {
     const std::string& b = node_->bytes;
@@ -207,19 +242,38 @@ class MbFsFileDelegateHost : public m::FileSystemAccessFileDelegateHost {
   }
 
  private:
-  FsNode* node_;
+  std::shared_ptr<FsNode> node_;
 };
 
-// The browser-side handle whose Close() releases the file lock — a no-op ack here.
+// The browser-side handle whose Close() releases the file's (exclusive/shared) access lock.
+// Also releases on pipe disconnect (destructor) so an aborted handle doesn't leak the lock.
 class MbFsAccessHandleHost : public m::FileSystemAccessAccessHandleHost {
  public:
-  void Close(CloseCallback cb) override { std::move(cb).Run(); }
+  MbFsAccessHandleHost(std::shared_ptr<FsNode> node, bool locked_exclusive)
+      : node_(std::move(node)), locked_exclusive_(locked_exclusive) {}
+  ~MbFsAccessHandleHost() override { Release(); }
+  void Close(CloseCallback cb) override {
+    Release();
+    std::move(cb).Run();
+  }
+
+ private:
+  void Release() {
+    if (held_) {
+      ReleaseLock(node_.get(), locked_exclusive_);
+      held_ = false;
+    }
+  }
+  std::shared_ptr<FsNode> node_;
+  bool locked_exclusive_ = false;
+  bool held_ = true;
 };
 
 // ----------------------------- file handle -----------------------------
 class MbFsFileHandle : public m::FileSystemAccessFileHandle {
  public:
-  explicit MbFsFileHandle(FsNode* node) : node_(node) {}
+  explicit MbFsFileHandle(std::shared_ptr<FsNode> node)
+      : node_(std::move(node)) {}
 
   void GetPermissionStatus(m::FileSystemAccessPermissionMode,
                            GetPermissionStatusCallback cb) override {
@@ -239,24 +293,43 @@ class MbFsFileHandle : public m::FileSystemAccessFileHandle {
   }
   // createWritable(): open a writing session over this file.
   void CreateFileWriter(bool keep_existing_data, bool /*auto_close*/,
-                        m::FileSystemAccessWritableFileStreamLockMode,
+                        m::FileSystemAccessWritableFileStreamLockMode mode,
                         CreateFileWriterCallback cb) override {
+    // Only the "siloed" mode is shared; "exclusive" takes an exclusive lock.
+    const bool exclusive =
+        mode == m::FileSystemAccessWritableFileStreamLockMode::kExclusive;
+    if (!AcquireLock(node_.get(), exclusive)) {
+      std::move(cb).Run(
+          FileError(base::File::FILE_ERROR_IN_USE, "file is locked"),
+          mojo::NullRemote());
+      return;
+    }
     mojo::PendingRemote<m::FileSystemAccessFileWriter> remote;
     mojo::MakeSelfOwnedReceiver(
-        std::make_unique<MbFsFileWriter>(node_, keep_existing_data),
+        std::make_unique<MbFsFileWriter>(node_, keep_existing_data, exclusive),
         remote.InitWithNewPipeAndPassReceiver());
     std::move(cb).Run(Ok(), std::move(remote));
   }
   // createSyncAccessHandle() (Worker-only): hand back an in-memory file delegate the worker
   // drives synchronously, plus a host whose Close() releases the (notional) lock.
-  void OpenAccessHandle(m::FileSystemAccessAccessHandleLockMode,
+  void OpenAccessHandle(m::FileSystemAccessAccessHandleLockMode mode,
                         OpenAccessHandleCallback cb) override {
+    // Only read-only / readwrite-unsafe are shared; readwrite is exclusive.
+    const bool exclusive =
+        mode == m::FileSystemAccessAccessHandleLockMode::kReadwrite;
+    if (!AcquireLock(node_.get(), exclusive)) {
+      std::move(cb).Run(
+          FileError(base::File::FILE_ERROR_IN_USE, "file is locked"), nullptr,
+          mojo::NullRemote());
+      return;
+    }
     mojo::PendingRemote<m::FileSystemAccessFileDelegateHost> delegate;
     mojo::MakeSelfOwnedReceiver(std::make_unique<MbFsFileDelegateHost>(node_),
                                 delegate.InitWithNewPipeAndPassReceiver());
     mojo::PendingRemote<m::FileSystemAccessAccessHandleHost> host;
-    mojo::MakeSelfOwnedReceiver(std::make_unique<MbFsAccessHandleHost>(),
-                                host.InitWithNewPipeAndPassReceiver());
+    mojo::MakeSelfOwnedReceiver(
+        std::make_unique<MbFsAccessHandleHost>(node_, exclusive),
+        host.InitWithNewPipeAndPassReceiver());
     std::move(cb).Run(
         Ok(),
         m::FileSystemAccessAccessHandleFile::NewIncognitoFileDelegate(
@@ -287,13 +360,15 @@ class MbFsFileHandle : public m::FileSystemAccessFileHandle {
   }
 
  private:
-  FsNode* node_;  // the file node whose bytes back read (AsBlob) and write sessions
+  std::shared_ptr<FsNode>
+      node_;  // the file node whose bytes back read (AsBlob) and write sessions
 };
 
 // --------------------------- directory handle ---------------------------
 class MbFsDirectoryHandle : public m::FileSystemAccessDirectoryHandle {
  public:
-  explicit MbFsDirectoryHandle(FsNode* node) : node_(node) {}
+  explicit MbFsDirectoryHandle(std::shared_ptr<FsNode> node)
+      : node_(std::move(node)) {}
 
   void GetPermissionStatus(m::FileSystemAccessPermissionMode,
                            GetPermissionStatusCallback cb) override {
@@ -314,7 +389,7 @@ class MbFsDirectoryHandle : public m::FileSystemAccessDirectoryHandle {
             mojo::NullRemote());
         return;
       }
-      auto child = std::make_unique<FsNode>();
+      auto child = std::make_shared<FsNode>();
       child->is_dir = false;
       it = node_->children.emplace(name, std::move(child)).first;
     } else if (it->second->is_dir) {
@@ -323,7 +398,7 @@ class MbFsDirectoryHandle : public m::FileSystemAccessDirectoryHandle {
           mojo::NullRemote());
       return;
     }
-    std::move(cb).Run(Ok(), BindFile(it->second.get()));
+    std::move(cb).Run(Ok(), BindFile(it->second));
   }
   void GetDirectory(const blink::String& basename, bool create,
                     GetDirectoryCallback cb) override {
@@ -336,7 +411,7 @@ class MbFsDirectoryHandle : public m::FileSystemAccessDirectoryHandle {
             mojo::NullRemote());
         return;
       }
-      it = node_->children.emplace(name, std::make_unique<FsNode>())
+      it = node_->children.emplace(name, std::make_shared<FsNode>())
                .first;  // is_dir = true
     } else if (!it->second->is_dir) {
       std::move(cb).Run(
@@ -344,7 +419,7 @@ class MbFsDirectoryHandle : public m::FileSystemAccessDirectoryHandle {
           mojo::NullRemote());
       return;
     }
-    std::move(cb).Run(Ok(), BindDir(it->second.get()));
+    std::move(cb).Run(Ok(), BindDir(it->second));
   }
   void GetEntries(mojo::PendingRemote<m::FileSystemAccessDirectoryEntriesListener>
                       listener) override {
@@ -354,21 +429,28 @@ class MbFsDirectoryHandle : public m::FileSystemAccessDirectoryHandle {
     for (auto& kv : node_->children) {
       m::FileSystemAccessHandlePtr handle =
           kv.second->is_dir
-              ? m::FileSystemAccessHandle::NewDirectory(BindDir(kv.second.get()))
-              : m::FileSystemAccessHandle::NewFile(BindFile(kv.second.get()));
+              ? m::FileSystemAccessHandle::NewDirectory(BindDir(kv.second))
+              : m::FileSystemAccessHandle::NewFile(BindFile(kv.second));
       entries.push_back(m::FileSystemAccessEntry::New(
           std::move(handle), blink::String::FromUtf8(kv.first)));
     }
     l->DidReadDirectory(Ok(), std::move(entries), /*has_more_entries=*/false);
     listeners_.push_back(std::move(l));  // keep alive until the message flushes
   }
-  void RemoveEntry(const blink::String& basename, bool /*recurse*/,
+  void RemoveEntry(const blink::String& basename, bool recurse,
                    RemoveEntryCallback cb) override {
     std::string name = basename.Utf8();
     auto it = node_->children.find(name);
     if (it == node_->children.end()) {
       std::move(cb).Run(
           FileError(base::File::FILE_ERROR_NOT_FOUND, "entry not found"));
+      return;
+    }
+    // A non-empty directory may only be removed recursively (InvalidModificationError
+    // otherwise, which FILE_ERROR_NOT_EMPTY maps to).
+    if (it->second->is_dir && !recurse && !it->second->children.empty()) {
+      std::move(cb).Run(
+          FileError(base::File::FILE_ERROR_NOT_EMPTY, "directory not empty"));
       return;
     }
     node_->children.erase(it);
@@ -398,21 +480,24 @@ class MbFsDirectoryHandle : public m::FileSystemAccessDirectoryHandle {
   }
 
  private:
-  FsNode* node_;
+  std::shared_ptr<FsNode> node_;
   std::vector<mojo::Remote<m::FileSystemAccessDirectoryEntriesListener>>
       listeners_;
 };
 
-mojo::PendingRemote<m::FileSystemAccessFileHandle> BindFile(FsNode* node) {
+mojo::PendingRemote<m::FileSystemAccessFileHandle> BindFile(
+    std::shared_ptr<FsNode> node) {
   mojo::PendingRemote<m::FileSystemAccessFileHandle> remote;
-  mojo::MakeSelfOwnedReceiver(std::make_unique<MbFsFileHandle>(node),
+  mojo::MakeSelfOwnedReceiver(std::make_unique<MbFsFileHandle>(std::move(node)),
                               remote.InitWithNewPipeAndPassReceiver());
   return remote;
 }
-mojo::PendingRemote<m::FileSystemAccessDirectoryHandle> BindDir(FsNode* node) {
+mojo::PendingRemote<m::FileSystemAccessDirectoryHandle> BindDir(
+    std::shared_ptr<FsNode> node) {
   mojo::PendingRemote<m::FileSystemAccessDirectoryHandle> remote;
-  mojo::MakeSelfOwnedReceiver(std::make_unique<MbFsDirectoryHandle>(node),
-                              remote.InitWithNewPipeAndPassReceiver());
+  mojo::MakeSelfOwnedReceiver(
+      std::make_unique<MbFsDirectoryHandle>(std::move(node)),
+      remote.InitWithNewPipeAndPassReceiver());
   return remote;
 }
 
@@ -534,7 +619,7 @@ void ReadNodeInto(OpfsReader* r, FsNode* dst) {
         return;
       auto it = dst->children.find(name);
       if (it == dst->children.end())
-        it = dst->children.emplace(name, std::make_unique<FsNode>()).first;
+        it = dst->children.emplace(name, std::make_shared<FsNode>()).first;
       ReadNodeInto(r, it->second.get());
     }
   } else {
@@ -568,7 +653,8 @@ bool MbLoadOPFS(const std::string& path) {
     std::string scope = r.Blob();
     if (!r.ok)
       return false;
-    ReadNodeInto(&r, OpfsRoot(scope));  // merge onto the live (or fresh) scope root
+    // merge onto the live (or fresh) scope root
+    ReadNodeInto(&r, OpfsRoot(scope).get());
   }
   return r.ok;
 }

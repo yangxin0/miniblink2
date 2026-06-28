@@ -53,15 +53,31 @@ class OriginLockState {
     mojo::AssociatedRemote<LockRequest> req(std::move(request));
     if (wait == WaitMode::PREEMPT)
       ReleaseAllForName(name);
-    if (IsGrantable(name, mode)) {
+    // Grant immediately only if no held lock conflicts AND no same-name request is
+    // already waiting ahead of this one (FIFO per resource).
+    if (IsGrantable(name, mode) && !HasWaiterForName(name)) {
       Grant(name, mode, std::move(req));
     } else if (wait == WaitMode::NO_WAIT) {
       req->Failed();
     } else {
       auto w = std::make_unique<Waiter>();
+      const uint64_t id = next_id_++;
+      w->id = id;
       w->name = name;
       w->mode = mode;
       w->request = std::move(req);
+      // An aborted (AbortSignal) or torn-down request must not linger in the queue
+      // and get "granted" into a dead pipe. Drop it on disconnect; post the removal
+      // so we don't destroy the remote inside its own disconnect callback.
+      w->request.set_disconnect_handler(base::BindOnce(
+          [](base::WeakPtr<OriginLockState> self, uint64_t id) {
+            if (!self)
+              return;
+            base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+                FROM_HERE,
+                base::BindOnce(&OriginLockState::OnWaiterGone, self, id));
+          },
+          weak_factory_.GetWeakPtr(), id));
       queue_.push_back(std::move(w));
     }
   }
@@ -89,6 +105,7 @@ class OriginLockState {
     std::unique_ptr<mojo::AssociatedReceiver<LockHandle>> handle;
   };
   struct Waiter {
+    uint64_t id = 0;
     blink::String name;
     LockMode mode = LockMode::SHARED;
     mojo::AssociatedRemote<LockRequest> request;
@@ -103,6 +120,17 @@ class OriginLockState {
         return false;
     }
     return true;
+  }
+
+  // FIFO per resource: a request can't jump ahead of an already-queued same-name
+  // request even if it's compatible with the held locks (otherwise a steady stream
+  // of shared requests starves a queued exclusive).
+  bool HasWaiterForName(const blink::String& name) const {
+    for (const auto& w : queue_) {
+      if (w->name == name)
+        return true;
+    }
+    return false;
   }
 
   void Grant(const blink::String& name,
@@ -152,19 +180,40 @@ class OriginLockState {
     }
   }
 
+  // A queued request's pipe disconnected (aborted/torn down) before it was granted.
+  void OnWaiterGone(uint64_t id) {
+    for (auto it = queue_.begin(); it != queue_.end(); ++it) {
+      if ((*it)->id == id) {
+        queue_.erase(it);
+        break;
+      }
+    }
+    // Removing a blocking (e.g. exclusive) waiter can unblock same-name waiters
+    // queued behind it.
+    ProcessQueue();
+  }
+
   void ProcessQueue() {
-    // Grant any waiter that is now grantable, in FIFO order. Re-scan after each
-    // grant since granting a shared lock can unblock following shared waiters.
+    // Grant grantable waiters in FIFO order. Re-scan after each grant since granting
+    // a shared lock can unblock following shared waiters. Within a pass, once a
+    // request for a name is found non-grantable, skip all later same-name requests so
+    // a compatible request can't jump ahead of an earlier blocked one (FIFO per
+    // resource — keeps a queued exclusive from being starved by later shared ones).
     bool granted_any = true;
     while (granted_any) {
       granted_any = false;
+      blink::Vector<blink::String> blocked;
       for (auto it = queue_.begin(); it != queue_.end(); ++it) {
-        if (IsGrantable((*it)->name, (*it)->mode)) {
-          Grant((*it)->name, (*it)->mode, std::move((*it)->request));
+        const blink::String& name = (*it)->name;
+        if (blocked.Contains(name))
+          continue;
+        if (IsGrantable(name, (*it)->mode)) {
+          Grant(name, (*it)->mode, std::move((*it)->request));
           queue_.erase(it);
           granted_any = true;
-          break;
+          break;  // restart the scan; Grant mutated held_
         }
+        blocked.push_back(name);
       }
     }
   }

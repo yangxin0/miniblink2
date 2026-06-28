@@ -34,6 +34,7 @@
 #include "net/http/http_response_headers.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
+#include "services/network/public/mojom/data_pipe_getter.mojom-blink.h"
 #include "services/network/public/mojom/url_loader.mojom-blink.h"
 #include "services/network/public/mojom/url_loader_factory.mojom-blink.h"
 #include "services/network/public/mojom/url_response_head.mojom-blink.h"
@@ -144,10 +145,17 @@ class MbBlobURLLoader : public network::mojom::blink::URLLoader {
  public:
   MbBlobURLLoader(
       const std::vector<uint8_t>& data,
+      const blink::String& content_type,
       mojo::PendingRemote<network::mojom::blink::URLLoaderClient> client)
       : client_(std::move(client)) {
+    // The blob's stored type drives MIME sniffing for blob: URL consumers that
+    // enforce strict MIME (module scripts, Worker(), CSS @import). Fall back to a
+    // generic binary type when the blob carried no Content-Type.
+    blink::String mime = content_type.empty()
+                             ? blink::String("application/octet-stream")
+                             : content_type;
     auto head = network::mojom::blink::URLResponseHead::New();
-    head->mime_type = blink::String("application/octet-stream");
+    head->mime_type = mime;
     // Several URLResponseHead fields are non-nullable (mojo validation aborts on
     // a null), so give them valid empty/default values.
     head->charset = blink::String("utf-8");
@@ -159,7 +167,7 @@ class MbBlobURLLoader : public network::mojom::blink::URLLoader {
     head->cache_storage_cache_name = blink::String("");
     head->headers = base::MakeRefCounted<net::HttpResponseHeaders>(
         std::string("HTTP/1.1 200 OK\0", 16));
-    head->headers->SetHeader("Content-Type", "application/octet-stream");
+    head->headers->SetHeader("Content-Type", mime.Utf8());
     head->headers->SetHeader("Content-Length", std::to_string(data.size()));
     mojo::ScopedDataPipeProducerHandle producer;
     mojo::ScopedDataPipeConsumerHandle consumer;
@@ -181,6 +189,33 @@ class MbBlobURLLoader : public network::mojom::blink::URLLoader {
 
  private:
   mojo::Remote<network::mojom::blink::URLLoaderClient> client_;
+};
+
+// Streams a blob's bytes as a network DataPipeGetter. Blink binds one of these
+// per Blob/File request body (FormDataElement::kEncodedBlob) to upload it: Read
+// reports the byte count, then pushes the bytes into the supplied pipe. Holds its
+// own copy of the materialized bytes so it can be re-Read/Cloned by the network
+// stack. Self-owned on the service thread.
+class MbDataPipeGetter : public network::mojom::blink::DataPipeGetter {
+ public:
+  explicit MbDataPipeGetter(std::vector<uint8_t> data)
+      : data_(std::move(data)) {}
+
+  void Read(mojo::ScopedDataPipeProducerHandle pipe,
+            ReadCallback callback) override {
+    // Report the body size up front (status 0 == net::OK), then stream the bytes.
+    // BlobReadSession owns the write loop and closes the pipe (EOF) when done.
+    std::move(callback).Run(net::OK, data_.size());
+    BlobReadSession::Start(data_, std::move(pipe), mojo::NullRemote());
+  }
+  void Clone(mojo::PendingReceiver<network::mojom::blink::DataPipeGetter>
+                 receiver) override {
+    mojo::MakeSelfOwnedReceiver(std::make_unique<MbDataPipeGetter>(data_),
+                                std::move(receiver));
+  }
+
+ private:
+  std::vector<uint8_t> data_;
 };
 
 // Reads another Blob fully (ReadAll into a pipe, drained), then hands back the
@@ -228,9 +263,11 @@ class BlobRefReader : public mojo::DataPipeDrainer::Client {
     // Apply the element's [offset, offset+length) slice.
     std::vector<uint8_t> out;
     if (offset_ < bytes_.size()) {
-      size_t end = length_ == std::numeric_limits<uint64_t>::max()
+      // Overflow-safe end: comparing against the remaining count avoids the
+      // offset_ + length_ (uint64_t) wrap that would invert the iterator range.
+      size_t end = (length_ > bytes_.size() - offset_)
                        ? bytes_.size()
-                       : std::min<size_t>(bytes_.size(), offset_ + length_);
+                       : static_cast<size_t>(offset_ + length_);
       out.assign(bytes_.begin() + offset_, bytes_.begin() + end);
     }
     std::move(done_).Run(std::move(out));
@@ -260,8 +297,12 @@ class MbBlob : public blink::mojom::blink::Blob {
     uint64_t length = std::numeric_limits<uint64_t>::max();
   };
 
-  MbBlob(blink::String uuid, std::vector<Part> parts)
-      : uuid_(std::move(uuid)), parts_(std::move(parts)) {
+  MbBlob(blink::String uuid,
+         blink::String content_type,
+         std::vector<Part> parts)
+      : uuid_(std::move(uuid)),
+        content_type_(std::move(content_type)),
+        parts_(std::move(parts)) {
     Materialize(0);  // assemble data_ in element order (async if providers)
   }
 
@@ -280,7 +321,15 @@ class MbBlob : public blink::mojom::blink::Blob {
     CloneNow(std::move(receiver));
   }
   void AsDataPipeGetter(
-      mojo::PendingReceiver<network::mojom::blink::DataPipeGetter>) override {}
+      mojo::PendingReceiver<network::mojom::blink::DataPipeGetter> receiver)
+      override {
+    // Must stream the FULLY materialized bytes (see Clone()). Defer until ready.
+    if (!ready_) {
+      pending_getters_.push_back(std::move(receiver));
+      return;
+    }
+    BindDataPipeGetter(std::move(receiver));
+  }
   void ReadAll(
       mojo::ScopedDataPipeProducerHandle pipe,
       mojo::PendingRemote<blink::mojom::blink::BlobReaderClient> client)
@@ -292,10 +341,18 @@ class MbBlob : public blink::mojom::blink::Blob {
     }
   }
   void ReadRange(
-      uint64_t /*offset*/,
-      uint64_t /*length*/,
-      mojo::ScopedDataPipeProducerHandle,
-      mojo::PendingRemote<blink::mojom::blink::BlobReaderClient>) override {}
+      uint64_t offset,
+      uint64_t length,
+      mojo::ScopedDataPipeProducerHandle pipe,
+      mojo::PendingRemote<blink::mojom::blink::BlobReaderClient> client)
+      override {
+    if (!ready_) {
+      pending_ranges_.push_back(
+          {offset, length, std::move(pipe), std::move(client)});
+      return;
+    }
+    StartRange(offset, length, std::move(pipe), std::move(client));
+  }
   void Load(mojo::PendingReceiver<network::mojom::blink::URLLoader> loader,
             const blink::String& /*method*/,
             const net::HttpRequestHeaders& /*headers*/,
@@ -308,13 +365,20 @@ class MbBlob : public blink::mojom::blink::Blob {
       return;
     }
     mojo::MakeSelfOwnedReceiver(
-        std::make_unique<MbBlobURLLoader>(data_, std::move(client)),
+        std::make_unique<MbBlobURLLoader>(data_, content_type_,
+                                          std::move(client)),
         std::move(loader));
   }
   void ReadSideData(ReadSideDataCallback callback) override {
     std::move(callback).Run(std::nullopt);
   }
   void CaptureSnapshot(CaptureSnapshotCallback callback) override {
+    // data_ is only complete once ready_; reporting its partial size here would
+    // give File.size/lastModified a wrong (short) value. Defer until materialized.
+    if (!ready_) {
+      pending_snapshots_.push_back(std::move(callback));
+      return;
+    }
     std::move(callback).Run(data_.size(), std::nullopt);
   }
   void GetInternalUUID(GetInternalUUIDCallback callback) override {
@@ -329,6 +393,12 @@ class MbBlob : public blink::mojom::blink::Blob {
   struct PendingLoad {
     mojo::PendingReceiver<network::mojom::blink::URLLoader> loader;
     mojo::PendingRemote<network::mojom::blink::URLLoaderClient> client;
+  };
+  struct PendingRange {
+    uint64_t offset;
+    uint64_t length;
+    mojo::ScopedDataPipeProducerHandle pipe;
+    mojo::PendingRemote<blink::mojom::blink::BlobReaderClient> client;
   };
 
   // Walk parts in order, appending bytes to data_. Inline parts append
@@ -374,30 +444,72 @@ class MbBlob : public blink::mojom::blink::Blob {
     p.inline_bytes = data_;
     parts.push_back(std::move(p));
     mojo::MakeSelfOwnedReceiver(
-        std::make_unique<MbBlob>(uuid_, std::move(parts)), std::move(receiver));
+        std::make_unique<MbBlob>(uuid_, content_type_, std::move(parts)),
+        std::move(receiver));
+  }
+
+  // Bind a DataPipeGetter that streams the (now materialized) bytes.
+  void BindDataPipeGetter(
+      mojo::PendingReceiver<network::mojom::blink::DataPipeGetter> receiver) {
+    mojo::MakeSelfOwnedReceiver(std::make_unique<MbDataPipeGetter>(data_),
+                                std::move(receiver));
+  }
+
+  // Stream data_'s [offset, offset+length) slice to a BlobReaderClient, reusing
+  // the BlobReadSession path. Offset/length are clamped overflow-safe.
+  void StartRange(
+      uint64_t offset,
+      uint64_t length,
+      mojo::ScopedDataPipeProducerHandle pipe,
+      mojo::PendingRemote<blink::mojom::blink::BlobReaderClient> client) {
+    std::vector<uint8_t> slice;
+    if (offset < data_.size()) {
+      size_t end = (length > data_.size() - offset)
+                       ? data_.size()
+                       : static_cast<size_t>(offset + length);
+      slice.assign(data_.begin() + offset, data_.begin() + end);
+    }
+    BlobReadSession::Start(std::move(slice), std::move(pipe),
+                           std::move(client));
   }
 
   void DrainPending() {
     for (auto& pr : pending_reads_)
       BlobReadSession::Start(data_, std::move(pr.pipe), std::move(pr.client));
     pending_reads_.clear();
+    for (auto& pr : pending_ranges_)
+      StartRange(pr.offset, pr.length, std::move(pr.pipe),
+                 std::move(pr.client));
+    pending_ranges_.clear();
     for (auto& pl : pending_loads_) {
       mojo::MakeSelfOwnedReceiver(
-          std::make_unique<MbBlobURLLoader>(data_, std::move(pl.client)),
+          std::make_unique<MbBlobURLLoader>(data_, content_type_,
+                                            std::move(pl.client)),
           std::move(pl.loader));
     }
     pending_loads_.clear();
+    for (auto& pg : pending_getters_)
+      BindDataPipeGetter(std::move(pg));
+    pending_getters_.clear();
+    for (auto& cb : pending_snapshots_)
+      std::move(cb).Run(data_.size(), std::nullopt);
+    pending_snapshots_.clear();
     for (auto& rc : pending_clones_)
       CloneNow(std::move(rc));
     pending_clones_.clear();
   }
 
   blink::String uuid_;
+  blink::String content_type_;
   std::vector<Part> parts_;
   std::vector<uint8_t> data_;
   bool ready_ = false;
   std::vector<PendingRead> pending_reads_;
+  std::vector<PendingRange> pending_ranges_;
   std::vector<PendingLoad> pending_loads_;
+  std::vector<mojo::PendingReceiver<network::mojom::blink::DataPipeGetter>>
+      pending_getters_;
+  std::vector<CaptureSnapshotCallback> pending_snapshots_;
   // Clone requests received before the bytes finished materializing (see Clone()).
   std::vector<mojo::PendingReceiver<blink::mojom::blink::Blob>> pending_clones_;
   base::WeakPtrFactory<MbBlob> weak_factory_{this};
@@ -440,7 +552,7 @@ class StreamRegistration : public mojo::DataPipeDrainer::Client {
     p.inline_bytes = bytes_;
     parts.push_back(std::move(p));
     mojo::MakeSelfOwnedReceiver(
-        std::make_unique<MbBlob>(uuid, std::move(parts)),
+        std::make_unique<MbBlob>(uuid, content_type_, std::move(parts)),
         remote.InitWithNewPipeAndPassReceiver());
     std::move(callback_).Run(blink::BlobDataHandle::Create(
         uuid, content_type_, bytes_.size(), std::move(remote)));
@@ -459,7 +571,7 @@ class MbBlobRegistry : public blink::mojom::blink::BlobRegistry {
  public:
   void Register(mojo::PendingReceiver<blink::mojom::blink::Blob> blob,
                 const blink::String& uuid,
-                const blink::String& /*content_type*/,
+                const blink::String& content_type,
                 const blink::String& /*content_disposition*/,
                 blink::Vector<blink::mojom::blink::DataElementPtr> elements,
                 RegisterCallback callback) override {
@@ -489,7 +601,8 @@ class MbBlobRegistry : public blink::mojom::blink::BlobRegistry {
       parts.push_back(std::move(p));
     }
     mojo::MakeSelfOwnedReceiver(
-        std::make_unique<MbBlob>(uuid, std::move(parts)), std::move(blob));
+        std::make_unique<MbBlob>(uuid, content_type, std::move(parts)),
+        std::move(blob));
     std::move(callback).Run();  // reply () — unblocks Blink's [Sync] Register
   }
 
@@ -677,8 +790,9 @@ scoped_refptr<blink::BlobDataHandle> MbCreateInlineBlob(
   std::vector<MbBlob::Part> parts;
   parts.push_back(std::move(part));
   mojo::PendingRemote<blink::mojom::blink::Blob> remote;
-  mojo::MakeSelfOwnedReceiver(std::make_unique<MbBlob>(uuid, std::move(parts)),
-                              remote.InitWithNewPipeAndPassReceiver());
+  mojo::MakeSelfOwnedReceiver(
+      std::make_unique<MbBlob>(uuid, content_type, std::move(parts)),
+      remote.InitWithNewPipeAndPassReceiver());
   return blink::BlobDataHandle::Create(uuid, content_type, bytes.size(),
                                        std::move(remote));
 }
