@@ -163,8 +163,13 @@ class MbBlobURLLoader : public network::mojom::blink::URLLoader {
     head->headers->SetHeader("Content-Length", std::to_string(data.size()));
     mojo::ScopedDataPipeProducerHandle producer;
     mojo::ScopedDataPipeConsumerHandle consumer;
-    if (mojo::CreateDataPipe(nullptr, producer, consumer) != MOJO_RESULT_OK)
+    if (mojo::CreateDataPipe(nullptr, producer, consumer) != MOJO_RESULT_OK) {
+      // Don't leave the fetch hanging (loader bound, no response/complete sent) —
+      // fail it cleanly so the blob: URL fetch rejects instead of stalling.
+      client_->OnComplete(network::URLLoaderCompletionStatus(
+          net::ERR_INSUFFICIENT_RESOURCES));
       return;
+    }
     client_->OnReceiveResponse(std::move(head), std::move(consumer),
                                std::nullopt);
     BlobReadSession::Start(data, std::move(producer), mojo::NullRemote());
@@ -262,13 +267,17 @@ class MbBlob : public blink::mojom::blink::Blob {
 
   void Clone(
       mojo::PendingReceiver<blink::mojom::blink::Blob> receiver) override {
-    // Clone shares the already-fetched bytes (simplest: only after ready).
-    std::vector<Part> parts;
-    Part p;
-    p.inline_bytes = data_;
-    parts.push_back(std::move(p));
-    mojo::MakeSelfOwnedReceiver(
-        std::make_unique<MbBlob>(uuid_, std::move(parts)), std::move(receiver));
+    // The clone must serve the FULLY materialized bytes. If this blob isn't ready
+    // yet (a BytesProvider / blob_ref part is still being fetched asynchronously),
+    // data_ is partial — binding a clone from it NOW would serve TRUNCATED bytes
+    // (the bug that made a blob: URL fetched right after createObjectURL of a large
+    // blob come back short/empty). Defer until DrainPending(), like pending reads/
+    // loads: messages queue on the as-yet-unbound receiver pipe and flush on bind.
+    if (!ready_) {
+      pending_clones_.push_back(std::move(receiver));
+      return;
+    }
+    CloneNow(std::move(receiver));
   }
   void AsDataPipeGetter(
       mojo::PendingReceiver<network::mojom::blink::DataPipeGetter>) override {}
@@ -358,6 +367,16 @@ class MbBlob : public blink::mojom::blink::Blob {
     Materialize(i + 1);
   }
 
+  // Bind a clone serving the (now fully materialized) bytes.
+  void CloneNow(mojo::PendingReceiver<blink::mojom::blink::Blob> receiver) {
+    std::vector<Part> parts;
+    Part p;
+    p.inline_bytes = data_;
+    parts.push_back(std::move(p));
+    mojo::MakeSelfOwnedReceiver(
+        std::make_unique<MbBlob>(uuid_, std::move(parts)), std::move(receiver));
+  }
+
   void DrainPending() {
     for (auto& pr : pending_reads_)
       BlobReadSession::Start(data_, std::move(pr.pipe), std::move(pr.client));
@@ -368,6 +387,9 @@ class MbBlob : public blink::mojom::blink::Blob {
           std::move(pl.loader));
     }
     pending_loads_.clear();
+    for (auto& rc : pending_clones_)
+      CloneNow(std::move(rc));
+    pending_clones_.clear();
   }
 
   blink::String uuid_;
@@ -376,6 +398,8 @@ class MbBlob : public blink::mojom::blink::Blob {
   bool ready_ = false;
   std::vector<PendingRead> pending_reads_;
   std::vector<PendingLoad> pending_loads_;
+  // Clone requests received before the bytes finished materializing (see Clone()).
+  std::vector<mojo::PendingReceiver<blink::mojom::blink::Blob>> pending_clones_;
   base::WeakPtrFactory<MbBlob> weak_factory_{this};
 };
 

@@ -33,7 +33,13 @@ for p in "$HERE"/patches/*.patch; do
   elif git -C "$TREE" apply "$p" 2>/dev/null; then
     echo "  applied $(basename "$p")"
   else
-    echo "  WARN: could not apply $(basename "$p")"
+    # FATAL, not a warning: a silently-dropped patch can yield a binary that builds
+    # fine and then HANGS or CRASHES at runtime (e.g. 0002 suppress-js-dialogs guards
+    # a [Sync] main-thread deadlock; 0015/0011/0013 prevent null-deref crashes). On a
+    # Chromium uprev a context-drifted patch must fail loudly here, not at runtime.
+    echo "  ERROR: could not apply $(basename "$p") — aborting." >&2
+    echo "         (re-derive it against this tree; do NOT build without it)" >&2
+    exit 1
   fi
 done
 

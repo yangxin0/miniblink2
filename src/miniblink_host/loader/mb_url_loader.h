@@ -192,6 +192,9 @@ bool MbIgnoreCertErrors();
 void MbSetFollowRedirects(bool follow);
 bool MbFollowRedirects();
 
+// The fetch-retry decision lives in mb_retry_policy.h (a dependency-free header so
+// the smoke tests can include it without the loader's heavy base/blink deps).
+
 // Fetch a file:// or http(s):// URL into `body` (+ server Content-Type if any).
 // Shared by the subresource loader and the top-level navigation in MbWebView::LoadURL.
 // `user_agent` sets the HTTP User-Agent (empty -> MbDefaultUserAgent()).

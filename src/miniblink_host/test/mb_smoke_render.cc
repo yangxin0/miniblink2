@@ -3370,7 +3370,107 @@ static void RunCases(mbView* v, int W, int H) {
            Eval(v, "1+1"));
   }
 
+  // REVIEW-FIX #7. An aborted version-change (upgrade) transaction must roll back the
+  // SCHEMA (version + object stores) — the per-txn data snapshot doesn't cover
+  // metadata, so pre-fix an aborted upgrade left the DB at the new version with a
+  // half-built store. Abort inside onupgradeneeded, then reopen: the schema must be
+  // back at version 0 with no stores (a fresh upgrade fires). (Whether open()'s
+  // onerror fires is reported but not gated: the abort signal goes through the
+  // unchanged db_callbacks->Abort and is Blink-timing-dependent in this synchronous
+  // in-process model; the reviewed+fixed defect here is the schema rollback.)
+  {
+    mbLoadHTML(v, "<body>idbabort</body>", "https://idbabort.test/");
+    mbRunJS(v,
+        "window.__s='';var q=indexedDB.open('abrt',1);"
+        "q.onupgradeneeded=function(e){e.target.result.createObjectStore('s');"
+        "  e.target.transaction.abort();};"
+        "q.onerror=function(){window.__s='aborted';};"
+        "q.onsuccess=function(){window.__s='opened';};");
+    std::string s;
+    for (int i = 0; i < 120 && s.empty(); ++i) { mbWait(v, 25); s = Eval(v, "window.__s"); }
+    mbRunJS(v,
+        "window.__r='';var q2=indexedDB.open('abrt',1);"
+        "q2.onupgradeneeded=function(e){window.__r='upgrade:'+e.oldVersion+':'+"
+        "  e.target.result.objectStoreNames.length;};"
+        "q2.onsuccess=function(e){window.__r=window.__r||('noupg:'+"
+        "  e.target.result.objectStoreNames.length);};"
+        "q2.onerror=function(){window.__r='err';};");
+    std::string r;
+    for (int i = 0; i < 200 && r.empty(); ++i) { mbWait(v, 25); r = Eval(v, "window.__r"); }
+    Expect(r.rfind("upgrade:0:", 0) == 0 && Eval(v, "1+1") == "2",
+           "IndexedDB aborted upgrade rolls back schema; host survives (#7)",
+           "open=[" + s + "] reopen=[" + r + "]");
+  }
 
+  // REVIEW-FIX #8. A 'prev' (descending) cursor's continue(key) must seek in the
+  // cursor's direction. Pre-fix it compared ascending on the pre-reversed entry list
+  // and mis-seeked: on keys 1..5, after the open delivers 5, continue(3) wrongly
+  // landed on 4 instead of 3. (We isolate the keyed-seek behavior — the reviewed bug
+  // — rather than full post-seek iteration, which folds in Blink's cursor prefetch.)
+  {
+    mbLoadHTML(v, "<body>idbcur</body>", "https://idbcur.test/");
+    mbRunJS(v,
+        "window.__s='';var q=indexedDB.open('cur',1);"
+        "q.onupgradeneeded=function(e){var os=e.target.result.createObjectStore('s');"
+        "  for(var i=1;i<=5;i++)os.put('v'+i,i);};"
+        "q.onsuccess=function(e){var n=0;"
+        "  var c=e.target.result.transaction('s').objectStore('s').openCursor(null,'prev');"
+        "  c.onsuccess=function(ev){var cur=ev.target.result;n++;"
+        "    if(n===1){if(!cur||cur.key!==5){window.__s='bad-open:'+(cur?cur.key:'null');return;}"
+        "      cur.continue(3);}"  // descending: must land on the first key <= 3, i.e. 3
+        "    else{window.__s='k='+(cur?cur.key:'null');}};};");
+    std::string s;
+    for (int i = 0; i < 200 && s.empty(); ++i) { mbWait(v, 25); s = Eval(v, "window.__s"); }
+    Expect(s == "k=3",
+           "IndexedDB prev-cursor continue(key) seeks descending, lands on 3 not 4 (#8)",
+           "s=[" + s + "]");
+  }
+
+  // REVIEW-FIX #3. deleteDatabase with a STILL-OPEN handle must not free the backend
+  // out from under it (use-after-free); the host must stay alive and a fresh reopen
+  // must upgrade (version reset). (Release has no ASan, so this exercises the path +
+  // asserts host survival rather than detecting the freed read directly.)
+  {
+    mbLoadHTML(v, "<body>idbuaf</body>", "https://idbuaf.test/");
+    mbRunJS(v,
+        "window.__s='';var q=indexedDB.open('uaf',1);"
+        "q.onupgradeneeded=function(e){e.target.result.createObjectStore('s',{keyPath:'id'});};"
+        "q.onsuccess=function(e){window.__db=e.target.result;"
+        "  var t=window.__db.transaction('s','readwrite');t.objectStore('s').put({id:1});"
+        "  t.oncomplete=function(){window.__s='put';};};");
+    std::string s;
+    for (int i = 0; i < 200 && s != "put"; ++i) { mbWait(v, 25); s = Eval(v, "window.__s"); }
+    mbRunJS(v,
+        "window.__r='';var d=indexedDB.deleteDatabase('uaf');"
+        "d.onsuccess=function(){"
+        "  try{window.__db.transaction('s').objectStore('s').get(1);}catch(e){}"  // touch stale handle
+        "  var q2=indexedDB.open('uaf',2);"
+        "  q2.onupgradeneeded=function(){window.__r='upgrade';};"  // fresh backend -> upgrade fires
+        "  q2.onsuccess=function(){window.__r=window.__r||'noupg';};};");
+    std::string r;
+    for (int i = 0; i < 200 && r.empty(); ++i) { mbWait(v, 25); r = Eval(v, "window.__r"); }
+    Expect(s == "put" && r == "upgrade" && Eval(v, "1+1") == "2",
+           "IndexedDB deleteDatabase with a live handle is crash-safe + reopens fresh (#3)",
+           "s=[" + s + "] r=[" + r + "]");
+  }
+
+  // REVIEW-FIX #6. A blob: URL fetched right after createObjectURL of a LARGE
+  // (>256KB -> BytesProvider) blob must return the FULL bytes — pre-fix the clone
+  // ran before materialization and served truncated/empty bytes.
+  {
+    mbLoadHTML(v, "<body>blobfetch</body>", "https://blobfetch.test/");
+    mbRunJS(v,
+        "window.__s='';var big='Z'.repeat(400000);"
+        "var u=URL.createObjectURL(new Blob([big],{type:'text/plain'}));"
+        "fetch(u).then(function(r){return r.text();}).then(function(t){"
+        "  window.__s='len='+t.length+' ok='+(t.length===400000&&t[399999]==='Z');})"
+        ".catch(function(){window.__s='err';});");
+    std::string s;
+    for (int i = 0; i < 240 && s.empty(); ++i) { mbWait(v, 25); s = Eval(v, "window.__s"); }
+    Expect(s == "len=400000 ok=true",
+           "fetch of a blob: URL for a >256KB blob returns full bytes (#6)",
+           "s=[" + s + "]");
+  }
 }
 
 MB_SMOKE_MAIN("mb_smoke_render")

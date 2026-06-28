@@ -397,9 +397,18 @@ int mbSetFileForSelector(mbView* v, const char* css_selector,
 void mbSetJsDialogCallback(mbView* v, mbJsDialogCallback cb, void* userdata) {
   if (!v || !v->impl)
     return;
-  // mbJsDialogCallback matches MbWebView::JsDialogFn exactly.
+  // Wrap the C callback + userdata in a std::function instead of reinterpret_cast-ing
+  // the C fn-ptr to the host type (the two are layout-identical but differ in C/C++
+  // language linkage — calling through a punned pointer is UB and -Werror-fragile).
+  if (!cb) {
+    v->impl->SetJsDialogCallback({});
+    return;
+  }
   v->impl->SetJsDialogCallback(
-      reinterpret_cast<mb::MbWebView::JsDialogFn>(cb), userdata);
+      [cb, userdata](int type, const char* message, const char* default_value,
+                     char* out_value, int out_cap) {
+        return cb(type, message, default_value, out_value, out_cap, userdata);
+      });
 }
 
 int mbSelectOption(mbView* v, const char* css_selector, const char* value) {
@@ -1054,7 +1063,7 @@ void mbStopFind(mbView* v) {
 
 int mbGetTextForSelector(mbView* v, const char* css_selector, char* out,
                          int out_cap) {
-  if (!v || !v->impl)
+  if (!v || !v->impl || !css_selector)
     return -1;
   std::string result;
   if (!v->impl->GetTextForSelector(css_selector, &result))
@@ -1065,7 +1074,7 @@ int mbGetTextForSelector(mbView* v, const char* css_selector, char* out,
 
 int mbGetAllTextForSelector(mbView* v, const char* css_selector, char* out,
                             int out_cap) {
-  if (!v || !v->impl)
+  if (!v || !v->impl || !css_selector)
     return -1;
   std::string result;
   if (!v->impl->GetAllTextForSelector(css_selector, &result))
@@ -1082,7 +1091,7 @@ int mbSetHtmlForSelector(mbView* v, const char* css_selector, const char* html) 
 
 int mbGetHtmlForSelector(mbView* v, const char* css_selector, char* out,
                          int out_cap) {
-  if (!v || !v->impl)
+  if (!v || !v->impl || !css_selector)
     return -1;
   std::string result;
   if (!v->impl->GetHtmlForSelector(css_selector, &result))
@@ -1093,7 +1102,7 @@ int mbGetHtmlForSelector(mbView* v, const char* css_selector, char* out,
 
 int mbGetAllValueForSelector(mbView* v, const char* css_selector, char* out,
                              int out_cap) {
-  if (!v || !v->impl)
+  if (!v || !v->impl || !css_selector)
     return -1;
   std::string result;
   if (!v->impl->GetAllValueForSelector(css_selector, &result))
@@ -1104,7 +1113,7 @@ int mbGetAllValueForSelector(mbView* v, const char* css_selector, char* out,
 
 int mbGetAllAttributeForSelector(mbView* v, const char* css_selector,
                                  const char* attr, char* out, int out_cap) {
-  if (!v || !v->impl)
+  if (!v || !v->impl || !css_selector || !attr)
     return -1;
   std::string result;
   if (!v->impl->GetAllAttributeForSelector(css_selector, attr, &result))
@@ -1115,7 +1124,7 @@ int mbGetAllAttributeForSelector(mbView* v, const char* css_selector,
 
 int mbGetAttribute(mbView* v, const char* css_selector, const char* attr,
                    char* out, int out_cap) {
-  if (!v || !v->impl)
+  if (!v || !v->impl || !css_selector || !attr)
     return -1;
   std::string result;
   if (!v->impl->GetAttribute(css_selector, attr, &result))
@@ -1133,7 +1142,7 @@ int mbSetAttribute(mbView* v, const char* css_selector, const char* attr,
 
 int mbGetValueForSelector(mbView* v, const char* css_selector, char* out,
                           int out_cap) {
-  if (!v || !v->impl)
+  if (!v || !v->impl || !css_selector)
     return -1;
   std::string result;
   if (!v->impl->GetValueForSelector(css_selector, &result))
@@ -1162,7 +1171,7 @@ int mbCountSelector(mbView* v, const char* css_selector) {
 
 int mbGetComputedStyle(mbView* v, const char* css_selector, const char* property,
                        char* out, int out_cap) {
-  if (!v || !v->impl)
+  if (!v || !v->impl || !css_selector || !property)
     return -1;
   std::string result;
   if (!v->impl->GetComputedStyle(css_selector, property, &result))
@@ -1278,7 +1287,7 @@ int mbEvalJSEx(mbView* v, const char* utf8_script, char* out_value,
 }
 
 int mbPaintToBitmap(mbView* v, void* out_bgra, int width, int height, int stride) {
-  if (!v || !v->impl)
+  if (!v || !v->impl || !out_bgra)
     return 0;
   return v->impl->PaintToBitmap(out_bgra, width, height, stride) ? 1 : 0;
 }
@@ -1342,7 +1351,7 @@ int mbGetElementRect(mbView* v, const char* css_selector, int* x, int* y, int* w
 
 int mbPaintRectToBitmap(mbView* v, void* out_bgra, int x, int y, int w, int h,
                         int stride) {
-  if (!v || !v->impl)
+  if (!v || !v->impl || !out_bgra)
     return 0;
   return v->impl->PaintRectToBitmap(out_bgra, x, y, w, h, stride) ? 1 : 0;
 }

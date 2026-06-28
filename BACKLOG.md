@@ -124,6 +124,22 @@ Adversarial-content sweep (2026-06-28) — every case is handled gracefully:
 | Accepted by-design (C) | 5 | WebGL renderer string, `window.open`, viewport/emoji, `<select>` keys, native popups |
 | Robustness edges (D) | — | All handled |
 
-**There is no remaining work that is both substantive and safe.** Everything actionable is done; the
-embedder is validated five ways (feature sweep, functional sweep, real-site, SPA, adversarial-robustness),
-all green: mb_smoke 178 · mb_smoke_platform 46 · mb_smoke_render 135 · mb_shot_smoke 66 · wke_smoke 119.
+The **feature surface** is complete and validated five ways (feature sweep, functional sweep, real-site,
+SPA, adversarial-robustness). A later **correctness-review pass** of the implementation (not features)
+did, however, find a tail of real bugs that the capability-focused suites didn't exercise — these were
+fixed and given regression tests:
+- `WaitForSelector` didn't escape the selector (a `[data-x="y"]` wait timed out forever).
+- The libcurl loader retried non-idempotent requests (duplicate POST/PUT/DELETE) and mis-treated
+  204/304 empty bodies as failures.
+- IndexedDB: use-after-free on `deleteDatabase`/load-from-disk with a live handle; an aborted upgrade
+  hung `open()` and didn't roll back schema; a 2nd connection clobbered the 1st's completion routing;
+  reverse-cursor `continue(key)` mis-seeked; `deleteObjectStore` leaked records.
+- The `wke` `jsValue` store wholesale-cleared at 4096 entries, dangling all live handles; `jsToBoolean`
+  mis-coerced null/undefined/NaN/`"0"`/`"false"`.
+- A `blob:` URL cloned/fetched before a large blob materialized returned truncated bytes.
+- The JS-dialog C callback was installed via a UB `reinterpret_cast` across the C/C++ boundary.
+- `build.sh` silently continued when a donor patch failed to apply (→ a binary that builds but
+  hangs/crashes); it now aborts.
+
+Lesson: capability coverage ≠ edge/adversarial coverage. The suites prove features *work*; they did not
+prove the in-process backend re-implementations and the `wke` compat layer were *correct* at their edges.

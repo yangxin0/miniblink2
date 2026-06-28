@@ -3,6 +3,8 @@
 // robust; plus one pixel check). Prints PASS/FAIL per case and a summary; exit 0 iff all pass.
 #include "miniblink_host/test/mb_smoke_harness.h"
 
+#include "miniblink_host/loader/mb_retry_policy.h"  // mb::MbShouldRetryFetch (predicate test)
+
 using mbsmoke::Eval;     // shared harness helpers (see mb_smoke_harness.h)
 using mbsmoke::EvalIso;
 using mbsmoke::Expect;
@@ -4313,6 +4315,41 @@ int main() {
     Expect(rec2 == "42",
            "script watchdog also catches an infinite microtask flood (recovers)",
            "rec2=[" + rec2 + "]");
+  }
+
+  // REVIEW-FIX #1. mbWaitForSelector must ESCAPE the selector before embedding it in
+  // the probe's JS string literal — an attribute selector with double quotes (very
+  // common) otherwise made the probe a syntax error so the wait timed out forever.
+  {
+    mbLoadHTML(v, "<body><input data-x=\"y\" id='q'></body>", "about:blank");
+    const bool found = mbWaitForSelector(v, "[data-x=\"y\"]", 1000) != 0;
+    Expect(found, "mbWaitForSelector escapes a quoted attribute selector (#1)",
+           found ? "found" : "timeout");
+  }
+
+  // REVIEW-FIX #2. The loader retry predicate must NEVER retry a non-idempotent
+  // method (no duplicate POST/PUT/DELETE) and must NOT treat 204/304/HEAD empty
+  // bodies as failures. Pure function -> deterministic, offline.
+  {
+    using mb::MbShouldRetryFetch;
+    const bool ok =
+        // writes are never auto-retried (even on a transient transport error / 503 /
+        // empty-2xx anomaly):
+        !MbShouldRetryFetch("POST", true, false, 0, true, 1, 3) &&
+        !MbShouldRetryFetch("DELETE", false, true, 503, true, 1, 3) &&
+        !MbShouldRetryFetch("PUT", false, false, 200, true, 1, 3) &&
+        // safe methods retry transient transport errors + transient statuses:
+        MbShouldRetryFetch("GET", true, false, 0, true, 1, 3) &&
+        MbShouldRetryFetch("", true, false, 0, true, 1, 3) &&  // "" == GET
+        MbShouldRetryFetch("GET", false, true, 503, false, 1, 3) &&
+        // empty-2xx anomaly retries on GET, but 204/304/HEAD legit-empty does NOT:
+        MbShouldRetryFetch("GET", false, false, 200, true, 1, 3) &&
+        !MbShouldRetryFetch("GET", false, false, 204, true, 1, 3) &&
+        !MbShouldRetryFetch("GET", false, false, 304, true, 1, 3) &&
+        !MbShouldRetryFetch("HEAD", false, false, 200, true, 1, 3) &&
+        // attempts exhausted:
+        !MbShouldRetryFetch("GET", true, false, 0, true, 3, 3);
+    Expect(ok, "MbShouldRetryFetch: no write retries; 204/304/HEAD not anomalies (#2)");
   }
 
   mbDestroyView(v);

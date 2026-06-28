@@ -16,6 +16,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
+#include "base/memory/weak_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/single_thread_task_runner.h"
@@ -47,6 +48,9 @@ using m::IDBDatabaseCallbacks;
 using m::IDBFactoryClient;
 using m::IDBTransaction;
 
+class MbIDBDatabase;         // owns the per-connection IDBDatabaseCallbacks sink
+class MbIDBTransactionImpl;  // version-change txn is tracked on the backend
+
 // One stored record: the primary key (kept so getAll/cursors can report it) + the
 // serialized value bytes + any attached Blobs/Files. The SSV `bytes` reference blobs
 // by index; `blob_info` carries the WebBlobInfo handles (each holds a ref-counted
@@ -72,8 +76,14 @@ struct MbIDBBackend {
   std::map<int64_t,
            std::map<int64_t, std::map<std::string, std::set<std::string>>>>
       index_data;
-  // The active connection's database callbacks (transaction completion is reported here).
-  mojo::AssociatedRemote<IDBDatabaseCallbacks> db_callbacks;
+  // The in-flight version-change (upgrade) transaction, or null. Tracked so an
+  // aborted upgrade can be found from MbIDBDatabase::Abort (to reject the open
+  // request + roll back the schema). Cleared on the txn's commit/abort/destruction.
+  MbIDBTransactionImpl* version_change_txn = nullptr;
+  // Snapshot of the schema (version + object stores) as it was BEFORE the in-flight
+  // upgrade began — the per-transaction data snapshot below does NOT cover metadata,
+  // so an aborted upgrade restores this to undo CreateObjectStore/version changes.
+  blink::IDBDatabaseMetadata pre_upgrade_metadata;
 
   // Per-transaction rollback snapshot of the mutable store state (data + key generators +
   // indexes), captured lazily on a transaction's FIRST mutation. A subsequent Abort restores
@@ -125,6 +135,29 @@ void RollbackSnapshot(MbIDBBackend* b, int64_t txn_id) {
 
 void DiscardSnapshot(MbIDBBackend* b, int64_t txn_id) {
   b->txn_snapshots.erase(txn_id);
+}
+
+// Deep-clone database metadata for the pre-upgrade schema snapshot. Object-store
+// metadata is mutated IN PLACE by CreateIndex/DeleteIndex (its indexes map +
+// max_index_id), so each store is cloned into a FRESH object; index metadata is
+// immutable once created, so those scoped_refptrs can be shared.
+blink::IDBDatabaseMetadata CloneMetadata(const blink::IDBDatabaseMetadata& md) {
+  blink::IDBDatabaseMetadata out;
+  out.name = md.name;
+  out.version = md.version;
+  out.max_object_store_id = md.max_object_store_id;
+  for (const auto& [sid, os] : md.object_stores) {
+    auto os_copy = blink::IDBObjectStoreMetadata::Create();
+    os_copy->id = os->id;
+    os_copy->name = os->name;
+    os_copy->key_path = os->key_path;
+    os_copy->auto_increment = os->auto_increment;
+    os_copy->max_index_id = os->max_index_id;
+    for (const auto& [iid, idx] : os->indexes)
+      os_copy->indexes.Set(iid, idx);
+    out.object_stores.Set(sid, std::move(os_copy));
+  }
+  return out;
 }
 
 bool IsAutoIncrement(MbIDBBackend* b, int64_t store_id) {
@@ -324,6 +357,20 @@ std::map<std::string, std::unique_ptr<MbIDBBackend>>& Registry() {
   return *r;
 }
 
+// Backends removed from the active Registry (by deleteDatabase, or replaced by a
+// load-from-disk) are RETIRED here, not freed: a page may still hold a live
+// MbIDBDatabase / transaction / cursor whose raw backend_ points into one. Freeing
+// it was a use-after-free. Kept for the process lifetime (leaked like the other
+// process-global singletons; bounded by how often a DB is deleted/reloaded).
+std::vector<std::unique_ptr<MbIDBBackend>>& Graveyard() {
+  static auto* g = new std::vector<std::unique_ptr<MbIDBBackend>>();
+  return *g;
+}
+void RetireBackend(std::unique_ptr<MbIDBBackend> b) {
+  if (b)
+    Graveyard().push_back(std::move(b));
+}
+
 // The Registry key qualifies the database name with the opening frame's ORIGIN,
 // so two different origins that open the same db name get SEPARATE backends (IDB
 // is strictly per-origin). `origin` is "" for an unknown origin (worker): all
@@ -368,11 +415,13 @@ class MbIDBCursor : public m::IDBCursor {
               int64_t store_id,
               bool key_only,
               bool is_index,
+              bool reverse,
               std::vector<std::pair<std::string, std::string>> entries)
       : backend_(backend),
         store_id_(store_id),
         key_only_(key_only),
         is_index_(is_index),
+        reverse_(reverse),
         entries_(std::move(entries)) {}
 
   void Advance(uint32_t count, AdvanceCallback callback) override {
@@ -385,8 +434,16 @@ class MbIDBCursor : public m::IDBCursor {
                 ContinueCallback callback) override {
     if (key && key->IsValid()) {
       std::string target = EncodeKey(key.get());  // compared against the cursor key
-      while (pos_ < entries_.size() && entries_[pos_].first < target)
-        ++pos_;
+      // Skip toward `target` in the cursor's iteration direction: ascending for a
+      // forward cursor, DESCENDING for a Prev cursor (entries_ is pre-reversed, so
+      // an ascending `< target` test would walk the wrong way and mis-seek).
+      if (reverse_) {
+        while (pos_ < entries_.size() && entries_[pos_].first > target)
+          ++pos_;
+      } else {
+        while (pos_ < entries_.size() && entries_[pos_].first < target)
+          ++pos_;
+      }
     }
     std::move(callback).Run(TakeOne());
   }
@@ -446,6 +503,7 @@ class MbIDBCursor : public m::IDBCursor {
   int64_t store_id_;
   bool key_only_;
   bool is_index_;
+  bool reverse_;  // Prev/PrevNoDuplicate: entries_ is pre-reversed (descending)
   std::vector<std::pair<std::string, std::string>> entries_;  // (cursor-key, primary-key)
   size_t pos_ = 0;
   int32_t last_prefetch_ = 0;
@@ -453,7 +511,20 @@ class MbIDBCursor : public m::IDBCursor {
 
 class MbIDBDatabase : public m::IDBDatabase {
  public:
-  explicit MbIDBDatabase(MbIDBBackend* backend) : backend_(backend) {}
+  MbIDBDatabase(MbIDBBackend* backend,
+                mojo::PendingAssociatedRemote<IDBDatabaseCallbacks> db_cb)
+      : backend_(backend) {
+    if (db_cb.is_valid())
+      db_callbacks_.Bind(std::move(db_cb));
+  }
+
+  // This connection's transaction-completion sink — PER-CONNECTION, not shared on
+  // the backend, so a second connection to the same DB doesn't clobber this one's
+  // routing (Complete/Abort reach the connection that owns the transaction).
+  IDBDatabaseCallbacks* callbacks() {
+    return db_callbacks_.is_bound() ? db_callbacks_.get() : nullptr;
+  }
+  base::WeakPtr<MbIDBDatabase> AsWeakPtr() { return weak_factory_.GetWeakPtr(); }
 
   void RenameObjectStore(int64_t, int64_t, const blink::String&) override {}
   void CreateTransaction(
@@ -625,7 +696,8 @@ class MbIDBDatabase : public m::IDBDatabase {
       val->value = MakeValue(first.bytes, first.blob_info);
 
     auto cursor = std::make_unique<MbIDBCursor>(
-        backend_, object_store_id, key_only, is_index, std::move(entries));
+        backend_, object_store_id, key_only, is_index, reverse,
+        std::move(entries));
     cursor->set_pos(1);  // entries[0] is delivered in this open result
     mojo::PendingAssociatedRemote<m::IDBCursor> cursor_remote;
     auto cursor_receiver = cursor_remote.InitWithNewEndpointAndPassReceiver();
@@ -700,19 +772,16 @@ class MbIDBDatabase : public m::IDBDatabase {
     backend_->index_data[object_store_id].erase(index_id);
   }
   void RenameIndex(int64_t, int64_t, int64_t, const blink::String&) override {}
-  // transaction.abort() (or an unhandled request error) — roll back every write the
-  // transaction made, then fire its onabort via the database callbacks.
-  void Abort(int64_t transaction_id) override {
-    RollbackSnapshot(backend_, transaction_id);
-    if (backend_->db_callbacks)
-      backend_->db_callbacks->Abort(transaction_id, m::IDBException::kAbortError,
-                                    blink::String("transaction aborted"));
-  }
+  // transaction.abort() (or an unhandled request error). Defined out-of-line (below
+  // MbIDBTransactionImpl) because the version-change case needs the full txn type.
+  void Abort(int64_t transaction_id) override;
   void DidBecomeInactive() override {}
   void UpdatePriority(int32_t) override {}
 
  private:
   MbIDBBackend* backend_;
+  mojo::AssociatedRemote<IDBDatabaseCallbacks> db_callbacks_;
+  base::WeakPtrFactory<MbIDBDatabase> weak_factory_{this};
 };
 
 // A transaction. For the version-change transaction created during open, CreateObjectStore
@@ -721,10 +790,19 @@ class MbIDBTransactionImpl : public IDBTransaction {
  public:
   MbIDBTransactionImpl(MbIDBBackend* backend,
                        int64_t txn_id,
-                       mojo::AssociatedRemote<IDBFactoryClient> factory_client)
+                       mojo::AssociatedRemote<IDBFactoryClient> factory_client,
+                       base::WeakPtr<MbIDBDatabase> db)
       : backend_(backend),
         txn_id_(txn_id),
-        factory_client_(std::move(factory_client)) {}
+        factory_client_(std::move(factory_client)),
+        db_(std::move(db)) {}
+  ~MbIDBTransactionImpl() override {
+    // Don't leave the backend pointing at a freed version-change transaction.
+    if (backend_->version_change_txn == this)
+      backend_->version_change_txn = nullptr;
+  }
+
+  int64_t txn_id() const { return txn_id_; }
 
   // Send the upgrade event carrying the database handle + current schema.
   void SendUpgradeNeeded(mojo::PendingAssociatedRemote<m::IDBDatabase> db,
@@ -749,6 +827,8 @@ class MbIDBTransactionImpl : public IDBTransaction {
   }
   void DeleteObjectStore(int64_t object_store_id) override {
     backend_->metadata.object_stores.erase(object_store_id);
+    backend_->data.erase(object_store_id);        // also drop the store's records
+    backend_->index_data.erase(object_store_id);  // ...and its secondary-index data
   }
   void Put(int64_t object_store_id,
            std::unique_ptr<blink::IDBValue> value,
@@ -847,10 +927,15 @@ class MbIDBTransactionImpl : public IDBTransaction {
   void SetIndexKeysDone() override {}
   void Commit(int64_t /*num_errors_handled*/) override {
     DiscardSnapshot(backend_, txn_id_);  // changes are now durable; nothing to roll back
-    // The transaction completed: notify its oncomplete, and (for the open's
-    // version-change transaction) resolve the open request.
-    if (backend_->db_callbacks)
-      backend_->db_callbacks->Complete(txn_id_);
+    if (backend_->version_change_txn == this)
+      backend_->version_change_txn = nullptr;  // upgrade committed
+    // The transaction completed: notify its oncomplete via the OWNING connection's
+    // callbacks (per-connection, so a second connection isn't misrouted), and (for
+    // the open's version-change transaction) resolve the open request.
+    if (db_) {
+      if (auto* cb = db_->callbacks())
+        cb->Complete(txn_id_);
+    }
     if (factory_client_) {
       factory_client_->OpenSuccess(mojo::NullAssociatedRemote(),
                                    backend_->metadata);
@@ -861,7 +946,29 @@ class MbIDBTransactionImpl : public IDBTransaction {
   MbIDBBackend* backend_;
   int64_t txn_id_;
   mojo::AssociatedRemote<IDBFactoryClient> factory_client_;
+  base::WeakPtr<MbIDBDatabase> db_;  // owning connection (for its callbacks sink)
 };
+
+// Out-of-line (needs the full MbIDBTransactionImpl type for the upgrade case).
+void MbIDBDatabase::Abort(int64_t transaction_id) {
+  RollbackSnapshot(backend_, transaction_id);  // undo this txn's data writes
+  // If this is the in-flight version-change (upgrade) transaction, the per-txn data
+  // snapshot does NOT cover schema — restore the pre-upgrade metadata (version +
+  // object stores) so a later reopen sees the OLD schema, not the half-built one.
+  if (backend_->version_change_txn &&
+      backend_->version_change_txn->txn_id() == transaction_id) {
+    backend_->metadata = backend_->pre_upgrade_metadata;
+    backend_->version_change_txn = nullptr;
+  }
+  // Signal the abort through the connection's IDBDatabaseCallbacks. For an UPGRADE
+  // transaction this is ALSO how blink rejects the pending open() (it fires the
+  // request's onerror). Do NOT use IDBFactoryClient::Error here: once upgradeneeded
+  // has fired, the open request is past PENDING and Error trips a DCHECK in
+  // IDBRequest (ready_state_ == PENDING).
+  if (auto* cb = callbacks())
+    cb->Abort(transaction_id, m::IDBException::kAbortError,
+              blink::String("transaction aborted"));
+}
 
 void MbIDBDatabase::CreateTransaction(
     mojo::PendingAssociatedReceiver<IDBTransaction> transaction_receiver,
@@ -869,10 +976,13 @@ void MbIDBDatabase::CreateTransaction(
     const blink::Vector<int64_t>&,
     m::IDBTransactionMode,
     m::IDBTransactionDurability) {
-  // A regular (non-version-change) transaction: no factory client.
+  // A regular (non-version-change) transaction: no factory client. It routes
+  // completion through THIS connection (weak ptr) so concurrent connections don't
+  // cross-talk.
   mojo::MakeSelfOwnedAssociatedReceiver(
       std::make_unique<MbIDBTransactionImpl>(
-          backend_, transaction_id, mojo::AssociatedRemote<IDBFactoryClient>()),
+          backend_, transaction_id, mojo::AssociatedRemote<IDBFactoryClient>(),
+          weak_factory_.GetWeakPtr()),
       std::move(transaction_receiver));
 }
 
@@ -893,22 +1003,28 @@ class MbIDBFactory : public m::IDBFactory {
             int32_t /*priority*/) override {
     MbIDBBackend* backend = GetOrCreate(MbGetFrameOrigin(frame_key_), name);
     mojo::AssociatedRemote<IDBFactoryClient> client(std::move(client_pending));
-    // This connection's transaction-completion sink (shared by all its transactions).
-    backend->db_callbacks.reset();
-    backend->db_callbacks.Bind(std::move(db_cb_pending));
 
-    // The database handle blink will drive.
+    // The database handle blink will drive. Its IDBDatabaseCallbacks sink is bound
+    // PER-CONNECTION (inside MbIDBDatabase) rather than on the shared backend, so a
+    // second connection to the same DB no longer clobbers this one's routing.
     mojo::PendingAssociatedRemote<m::IDBDatabase> db_remote;
     auto db_receiver = db_remote.InitWithNewEndpointAndPassReceiver();
-    mojo::MakeSelfOwnedAssociatedReceiver(
-        std::make_unique<MbIDBDatabase>(backend), std::move(db_receiver));
+    auto db_impl =
+        std::make_unique<MbIDBDatabase>(backend, std::move(db_cb_pending));
+    base::WeakPtr<MbIDBDatabase> db_weak = db_impl->AsWeakPtr();
+    mojo::MakeSelfOwnedAssociatedReceiver(std::move(db_impl),
+                                          std::move(db_receiver));
 
     const int64_t current = CurrentVersion(backend);
     if (version > current) {
+      // Snapshot the schema BEFORE the upgrade so an aborted upgrade can roll back
+      // version + object stores (the per-txn data snapshot doesn't cover metadata).
+      backend->pre_upgrade_metadata = CloneMetadata(backend->metadata);
       backend->metadata.version = version;
       auto txn = std::make_unique<MbIDBTransactionImpl>(
-          backend, transaction_id, std::move(client));
+          backend, transaction_id, std::move(client), db_weak);
       MbIDBTransactionImpl* txn_ptr = txn.get();
+      backend->version_change_txn = txn_ptr;  // tracked for abort (reject + rollback)
       mojo::MakeSelfOwnedAssociatedReceiver(std::move(txn),
                                             std::move(vc_txn_receiver));
       // onupgradeneeded -> page creates stores -> vc txn commits -> OpenSuccess.
@@ -922,9 +1038,20 @@ class MbIDBFactory : public m::IDBFactory {
       mojo::PendingAssociatedRemote<IDBFactoryClient> client_pending,
       const blink::String& name,
       bool /*force_close*/) override {
-    Registry().erase(IDBKey(MbGetFrameOrigin(frame_key_), name));
+    // RETIRE the backend rather than erase/free it: a page may still hold a live
+    // IDB handle whose raw backend_ points here (deleteDatabase doesn't force-close
+    // open connections in this model). Freeing was a use-after-free. A later open()
+    // makes a fresh backend (correct: a deleted DB reopens empty).
+    int64_t old_version = 0;
+    const std::string key = IDBKey(MbGetFrameOrigin(frame_key_), name);
+    auto it = Registry().find(key);
+    if (it != Registry().end()) {
+      old_version = CurrentVersion(it->second.get());
+      RetireBackend(std::move(it->second));
+      Registry().erase(it);
+    }
     mojo::AssociatedRemote<IDBFactoryClient> client(std::move(client_pending));
-    client->DeleteSuccess(0);
+    client->DeleteSuccess(old_version);
   }
 
  private:
@@ -1212,7 +1339,11 @@ bool DeserializeRegistry(const std::string& buf) {
   }
   if (!r.ok)
     return false;
-  // Commit: replace the live registry with the restored set.
+  // Commit: replace the live registry with the restored set. RETIRE (don't free)
+  // the backends being replaced — a page may still hold a live IDB handle whose raw
+  // backend_ points into one of them (freeing here was a use-after-free).
+  for (auto& kv : Registry())
+    RetireBackend(std::move(kv.second));
   Registry() = std::move(loaded);
   return true;
 }

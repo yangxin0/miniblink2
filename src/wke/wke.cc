@@ -8,6 +8,7 @@
 #include "wke/wke.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -116,7 +117,11 @@ bool IsHttpUrl(const utf8* url) {
 void DrainConsoleToCallback(wkeWebView wv) {
   if (!wv || !wv->view || !wv->on_console)
     return;
-  std::vector<char> buf(1 << 16, 0);
+  // 1 MiB per-drain cap. mbDrainConsole is destructive (it clears the host buffer),
+  // so a single burst larger than this loses the overflow — generous enough that a
+  // real page's console output between drains fits. (Embedded NULs would also cut
+  // the string early, but console text doesn't contain them.)
+  std::vector<char> buf(1 << 20, 0);
   mbDrainConsole(wv->view, buf.data(), static_cast<int>(buf.size()));
   const std::string all(buf.data());
   std::string::size_type start = 0;
@@ -169,7 +174,7 @@ void ApplyInitScript(wkeWebView wv) {
 void DrainBridgeToCallback(wkeWebView wv) {
   if (!wv || !wv->view || !wv->on_js_bridge)
     return;
-  std::vector<char> buf(1 << 16, 0);
+  std::vector<char> buf(1 << 20, 0);  // 1 MiB per-drain cap (see DrainConsoleToCallback)
   mbEvalJS(wv->view,
            "(function(){try{var q=(window.__mbb||[]).join('\\u0002');"
            "window.__mbb=[];return q}catch(e){return ''}})()",
@@ -1302,7 +1307,11 @@ const utf8* wkeGetCookie(wkeWebView webView) {
     return "";
   char url[4096] = {0};
   mbGetURL(webView->view, url, sizeof(url));  // cookies for the current document
-  std::vector<char> buf(1 << 14, 0);          // 16 KiB; cookie strings are small
+  // Size-first (mbGetCookies is a non-destructive read): a fixed 16 KiB buffer
+  // silently truncated a large jar. Query the length, then fit the buffer — the
+  // same pattern the sibling wkeGetCookieValue / wkeGetAllCookie already use.
+  const int len = mbGetCookies(webView->view, url, nullptr, 0);
+  std::vector<char> buf(static_cast<size_t>(len > 0 ? len : 0) + 1, 0);
   mbGetCookies(webView->view, url, buf.data(), static_cast<int>(buf.size()));
   webView->cookie_cache.assign(buf.data());
   return webView->cookie_cache.c_str();
@@ -1690,13 +1699,41 @@ std::string LiteralOf(jsValue v) {
   return (r && !r->literal.empty()) ? r->literal : std::string("undefined");
 }
 
+// Bound the jsValue registry WITHOUT invalidating recent handles. When it grows
+// past a soft cap, drop only the OLDEST records (lowest ids — created long ago, so
+// most likely already consumed by the caller) and keep the most recent. The old
+// code did reg.clear() at 4096, which dangled EVERY outstanding jsValue at once —
+// turning held handles (including a native callback's own jsArgs) silently into
+// undefined the moment a loop crossed the cap. Slot-backed evictees also get their
+// window.__mbslots entry deleted so the page heap stays bounded between navigations.
+constexpr size_t kJsRegistrySoftCap = 16384;
+constexpr size_t kJsRegistryRetain = 8192;
+void EvictOldJsRecords() {
+  auto& reg = JsRegistry();
+  if (reg.size() < kJsRegistrySoftCap)
+    return;
+  const size_t to_drop = reg.size() - kJsRegistryRetain;
+  std::string del_js;  // prune the evicted slot-backed values from the page heap
+  size_t dropped = 0;
+  for (auto it = reg.begin(); dropped < to_drop && it != reg.end(); ++dropped) {
+    if (it->second.literal.rfind("window.__mbslots[", 0) == 0)
+      del_js += "delete window.__mbslots[" + std::to_string(it->first) + "];";
+    it = reg.erase(it);
+  }
+  if (!del_js.empty()) {
+    char tmp[8] = {0};
+    for (wkeWebView lv : LiveViews())
+      if (lv && lv->view)
+        mbEvalJS(lv->view, del_js.c_str(), tmp, sizeof(tmp));
+  }
+}
+
 // Register a primitive jsValue (jsInt/jsString/...) with no eval — value, type,
 // and the JS literal that reproduces it (so it can be inlined into a jsCall).
 jsValue MakeLiteral(const std::string& value, const std::string& type,
                     const std::string& literal) {
   auto& reg = JsRegistry();
-  if (reg.size() >= 4096)
-    reg.clear();
+  EvictOldJsRecords();
   const jsValue h = g_next_js_value++;
   reg[h] = JsRecord{value, type, literal};
   return h;
@@ -1727,15 +1764,7 @@ std::string JsStringLiteral(const char* s) {
 // avoids re-running a valid expression that merely yields undefined.
 jsValue StoreEval(wkeWebView wv, const std::string& script) {
   auto& reg = JsRegistry();
-  if (reg.size() >= 4096) {
-    reg.clear();  // bound the C++ registry; old handles' value/type expire to ""
-    // Also reset the JS-side slot stores: window.__mbslots would otherwise grow
-    // unbounded on a long-lived page (the cleared handles are dead in C++ now).
-    char tmp[8] = {0};
-    for (wkeWebView lv : LiveViews())
-      if (lv && lv->view)
-        mbEvalJS(lv->view, "window.__mbslots={}", tmp, sizeof(tmp));
-  }
+  EvictOldJsRecords();  // bound the registry; evicts only OLDEST handles + their slots
   const jsValue handle = g_next_js_value++;  // handle id == its __mbslots slot
   const std::string wrapped =
       "window.__mbslots=window.__mbslots||{};window.__mbslots[" +
@@ -1783,8 +1812,7 @@ void* FrameHandleOf(int frame_index) {  // frame_index -1 => main
 jsValue StoreEvalInFrame(wkeWebView wv, int frame_index,
                          const std::string& script) {
   auto& reg = JsRegistry();
-  if (reg.size() >= 4096)
-    reg.clear();  // bound the registry; old handles expire to ""
+  EvictOldJsRecords();  // bound the registry; evicts only OLDEST handles
   const jsValue handle = g_next_js_value++;
   std::vector<char> value(1 << 16, 0);  // 64 KiB result cap
   mbEvalJSInFrame(wv->view, frame_index, script.c_str(), value.data(),
@@ -2002,10 +2030,22 @@ bool jsToBoolean(jsExecState /*es*/, jsValue v) {
   const JsRecord* r = JsLookup(v);
   if (!r)
     return false;
-  const std::string& s = r->value;
-  // JS truthiness over the coerced string: "true" / any non-empty value that
-  // isn't "false" or "0".
-  return s == "true" || (!s.empty() && s != "false" && s != "0");
+  // ECMAScript ToBoolean, keyed off the stored JS TYPE. Operating on the coerced
+  // string (the old code) was wrong: null/undefined stringify to non-empty
+  // "null"/"undefined" (truthy), NaN to "NaN" (truthy), while the strings "0" and
+  // "false" are actually TRUTHY (any non-empty string is). Decide by type instead.
+  const std::string& t = r->type;
+  if (t == "null" || t == "undefined")
+    return false;
+  if (t == "boolean")
+    return r->value == "true";
+  if (t == "number") {
+    const double d = std::atof(r->value.c_str());
+    return d != 0.0 && !std::isnan(d);  // 0, -0, NaN are falsey
+  }
+  if (t == "string")
+    return !r->value.empty();  // ANY non-empty string is truthy (incl. "0"/"false")
+  return true;  // object / array / function are always truthy
 }
 
 const utf8* jsToTempString(jsExecState /*es*/, jsValue v) {

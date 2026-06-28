@@ -57,6 +57,7 @@ component("miniblink_host") {
     "frame/mb_websocket.h",
     "frame/mb_view_client.cc",
     "frame/mb_view_client.h",
+    "loader/mb_retry_policy.h",
     "loader/mb_url_loader.cc",
     "loader/mb_url_loader.h",
     "media/mb_audio_player.cc",

@@ -2250,17 +2250,15 @@ int MbWebView::HandleJsDialog(int type, const char* message,
                               const char* default_value, char* out, int out_cap) {
   if (dialog_cb_) {
     return dialog_cb_(type, message ? message : "",
-                      default_value ? default_value : "", out, out_cap,
-                      dialog_userdata_);
+                      default_value ? default_value : "", out, out_cap);
   }
   // No callback: headless-safe defaults — alert "shows" (accept), confirm/prompt
   // dismiss (false / null). Matches the suppressed-dialog behavior.
   return type == 0 ? 1 : 0;
 }
 
-void MbWebView::SetJsDialogCallback(JsDialogFn fn, void* userdata) {
-  dialog_cb_ = fn;
-  dialog_userdata_ = userdata;
+void MbWebView::SetJsDialogCallback(JsDialogFn fn) {
+  dialog_cb_ = std::move(fn);
 }
 
 void MbWebView::InstallJsBindings() {
@@ -2585,8 +2583,12 @@ bool MbWebView::WaitForSelector(const char* css, int timeout_ms) {
   // Poll document.querySelector(css) while pumping the loop until it matches or the
   // timeout elapses. Lets a capture wait for JS-rendered / delayed content (the way
   // Puppeteer's waitForSelector does) instead of shooting the page prematurely.
+  // Escape the selector before embedding it in the double-quoted JS string literal:
+  // an attribute selector like [data-x="y"] (very common) would otherwise close the
+  // literal early, make the probe a syntax error, and the wait would silently time
+  // out forever. (Sibling WaitForVisibleSelector/WaitForSelectorHidden already do this.)
   const std::string probe =
-      std::string("(document.querySelector(\"") + css + "\")?1:0)";
+      "(document.querySelector(\"" + JsEscape(css) + "\")?1:0)";
   const base::TimeTicks deadline =
       base::TimeTicks::Now() + base::Milliseconds(timeout_ms > 0 ? timeout_ms : 0);
   for (;;) {

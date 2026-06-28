@@ -2224,6 +2224,30 @@ int main() {
           "wkeNetSetHTTPHeaderField overrides a module script's Content-Type (it runs)");
   }
 
+  // REVIEW-FIX #9. jsToBoolean must follow ECMAScript ToBoolean BY TYPE. The old
+  // code coerced to a string: null/undefined -> non-empty "null"/"undefined" (wrongly
+  // truthy), and the strings "0"/"false" -> wrongly falsey.
+  {
+    const bool ok =
+        jsToBoolean(es, jsBoolean(true)) && !jsToBoolean(es, jsBoolean(false)) &&
+        !jsToBoolean(es, jsNull()) && !jsToBoolean(es, jsUndefined()) &&
+        !jsToBoolean(es, jsInt(0)) && jsToBoolean(es, jsInt(5)) &&
+        !jsToBoolean(es, jsString(es, "")) &&
+        jsToBoolean(es, jsString(es, "0")) &&      // non-empty string is truthy
+        jsToBoolean(es, jsString(es, "false"));    // ditto
+    check(ok, "jsToBoolean follows JS truthiness by type (null/undef/\"0\"/\"false\")");
+  }
+
+  // REVIEW-FIX #5. Creating many jsValues must NOT invalidate handles made earlier —
+  // the old store wholesale-cleared at 4096, dangling every outstanding handle.
+  {
+    jsValue first = jsInt(987654);
+    for (int i = 0; i < 5000; ++i)
+      (void)jsInt(i);  // churn well past the old 4096 cap
+    check(jsToInt(es, first) == 987654,
+          "a jsValue survives creating >4096 later values (no wholesale clear)");
+  }
+
   wkeDestroyWebView(wv);
   wkeFinalize();
 

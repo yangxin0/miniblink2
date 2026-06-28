@@ -102,10 +102,13 @@ class MbWebView {
   // message and prompt default; it returns accept(1)/dismiss(0) and, for prompt-accept,
   // writes the entered text into out_value. Handled via a JS-level override of
   // window.alert/confirm/prompt installed before page scripts (no browser, no modal).
-  using JsDialogFn = int (*)(int type, const char* message,
-                             const char* default_value, char* out_value,
-                             int out_cap, void* userdata);
-  void SetJsDialogCallback(JsDialogFn fn, void* userdata);
+  // A std::function (not a raw fn-ptr) so the C ABI can bind its callback + userdata
+  // without a reinterpret_cast across the C/C++ language-linkage boundary (UB +
+  // -Werror-fragile). The userdata is captured by the wrapping lambda at the seam.
+  using JsDialogFn =
+      std::function<int(int type, const char* message,
+                        const char* default_value, char* out_value, int out_cap)>;
+  void SetJsDialogCallback(JsDialogFn fn);  // {} clears
   // Bridge entry (called by the injected override via the __mbDlg native binding):
   // returns accept(1)/dismiss(0); fills `out` with the prompt text when accepting.
   int HandleJsDialog(int type, const char* message, const char* default_value,
@@ -613,8 +616,7 @@ class MbWebView {
   bool find_match_case_ = false;  // last search's case sensitivity
   std::string init_script_;  // runs before each new document's own scripts
   std::vector<std::unique_ptr<NativeBinding>> js_bindings_;  // BindJsFunction
-  JsDialogFn dialog_cb_ = nullptr;       // alert/confirm/prompt handler (optional)
-  void* dialog_userdata_ = nullptr;
+  JsDialogFn dialog_cb_;                 // alert/confirm/prompt handler (optional)
   bool dialog_registered_ = false;       // __mbDlg bridge pushed into js_bindings_ once
   void InstallJsBindings();  // install all bindings into the current main world
   bool transparent_bg_ = false;  // omitBackground: clear to alpha 0
