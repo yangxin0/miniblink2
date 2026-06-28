@@ -3073,6 +3073,34 @@ int main() {
            "nav=[" + r + "]");
   }
 
+  // 23at3. JOINT session history from a CHILD frame. window.history is shared across the
+  // browsing context (HTML spec), so an iframe's history.back() must traverse the MAIN
+  // frame's session history — not the child's own (empty) list. Before the child-frame
+  // LocalFrameHost.GoToEntryAtOffset routing it was a silent no-op (the child never bound a
+  // history sink), even though iframe.history.length already reported the main count. Build
+  // [/start, /a, /b] via main-frame pushState (the iframe persists across same-document
+  // pushes), then call history.back() FROM THE IFRAME and confirm the MAIN frame traversed
+  // to /a + fired its popstate.
+  {
+    mbMockResponse("jointh.test/if", "<body>iframe</body>", "text/html", 200);
+    mbLoadHTML(v, "<body>m<iframe src='https://jointh.test/if'></iframe></body>",
+               "https://jointh.test/start");
+    mbWaitForFunction(v, "window.frames.length>=1", 3000);
+    Eval(v,
+         "window.__pop=[];"
+         "addEventListener('popstate',function(){window.__pop.push(location.pathname);});"
+         "history.pushState({},'','/a');"
+         "history.pushState({},'','/b');");
+    char ifback[64] = {0};
+    mbEvalJSInFrame(v, 0, "history.back(); 'called'", ifback, sizeof(ifback));
+    mbWaitForFunction(v, "window.__pop.length>=1", 3000);
+    const std::string r = Eval(v, "location.pathname+'|pop:'+window.__pop.join(',')");
+    mbClearMocks();
+    Expect(r == "/a|pop:/a",
+           "an iframe's history.back() traverses the JOINT (main-frame) session history",
+           "joint=[" + r + "] ifcall=[" + std::string(ifback) + "]");
+  }
+
   // 23at2. Navigation API (modern SPA routing): a navigate handler that intercept()s keeps
   // navigation same-document. navigation.navigate('/a'),('/b') push entries (canGoBack); then
   // navigation.back() TRAVERSES to /a — blink routes it via LocalFrameHost.NavigateToNavigationApiKey,

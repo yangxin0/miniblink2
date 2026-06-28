@@ -409,6 +409,10 @@ class MbWebView {
   }
   bool GoBack();
   bool GoForward();
+  // The main frame's client — used so a child frame can route its page-driven
+  // history.back()/forward()/go() into the JOINT (main-frame) session history,
+  // per the HTML spec (window.history is shared across the browsing context).
+  MbFrameClient* main_frame_client() { return frame_client_.get(); }
   // Called by MbFrameClient when the MAIN frame commits a document. `standard`
   // is true for a normal (history-appending) commit, false for reload/initial.
   void OnDidCommitMainFrame(const std::string& url, bool standard);

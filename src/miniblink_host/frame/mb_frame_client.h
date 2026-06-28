@@ -245,6 +245,16 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // traverseTo() arrive keyed by the target entry's navigation-api key.
   void GoToHistoryKey(const std::string& key, bool has_user_gesture);
 
+  // Child-frame history routing: a page-driven history.back()/forward()/go() (or
+  // navigation.traverseTo) from inside an IFRAME arrives on the child's
+  // LocalFrameHost. window.history is JOINT across the browsing context (HTML
+  // spec), so we forward it to the MAIN frame's session-history traversal instead
+  // of the child's own (empty) list. Without this an iframe's history.back() was
+  // a silent no-op even though iframe.history.length already reports the main
+  // count. No-op if this is the main frame.
+  void ForwardHistoryToMainOffset(int offset, bool has_user_gesture);
+  void ForwardHistoryToMainKey(const std::string& key, bool has_user_gesture);
+
   // The page's favicon URL(s) (newline-separated) reported via LocalFrameHost
   // .UpdateFaviconURL; forwarded to MbWebView's favicon callback. Main frame only.
   void OnFaviconUrls(const std::string& favicon_urls);

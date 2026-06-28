@@ -8,6 +8,7 @@
 
 #include "base/containers/span.h"
 #include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/location.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/unguessable_token.h"
@@ -68,10 +69,11 @@ uint64_t NextFrameKey() {
 MbFrameClient::MbFrameClient(MbWebView* owner)
     : owner_(owner), frame_key_(NextFrameKey()) {}
 MbFrameClient::~MbFrameClient() {
-  // If we registered the main frame's history-traversal sink, clear it so a
-  // stray GoToEntryAtOffset doesn't post to a freed client.
-  if (!self_owned_)
-    MbClearHistoryGoToHandler(frame_key_);
+  // Clear our history-traversal sink (the main frame registers via SetFrame,
+  // child frames via CreateChildFrame's joint-history routing) so a stray
+  // GoToEntryAtOffset doesn't post to a freed client. Erasing by frame_key is a
+  // no-op if nothing was registered.
+  MbClearHistoryGoToHandler(frame_key_);
   MbClearFrameOrigin(frame_key_);
   delete nav_assoc_interfaces_;
 }
@@ -149,6 +151,19 @@ blink::WebLocalFrame* MbFrameClient::CreateChildFrame(
   // them in the WebNavigationParams; here we apply them in BeginNavigation.
   child_ptr->SetSandboxFlags(frame_policy.sandbox_flags);
   child_ptr->Bind(child, std::move(child_client));
+  // Route the child's page-driven history traversal (blink delivers it to the
+  // child's LocalFrameHost.GoToEntryAtOffset, keyed by the child's frame_key) to
+  // the MAIN frame's JOINT session history. The main frame registers its own sink
+  // via SetFrame; children forward to it. favicon/download sinks stay empty for
+  // children (unchanged behavior). The child's dtor clears this by frame_key.
+  MbSetHistoryGoToHandler(
+      child_ptr->frame_key(),
+      base::SingleThreadTaskRunner::GetCurrentDefault(),
+      base::BindRepeating(&MbFrameClient::ForwardHistoryToMainOffset,
+                          child_ptr->weak_factory_.GetWeakPtr()),
+      base::BindRepeating(&MbFrameClient::ForwardHistoryToMainKey,
+                          child_ptr->weak_factory_.GetWeakPtr()),
+      base::DoNothing(), base::DoNothing(), base::DoNothing());
   // Give the child frame its OWN BrowserInterfaceBroker (scoped to its frame_key -> origin, set
   // on DidCommitNavigation), like the main frame — without it every broker-backed API
   // (storage / locks / permissions / geolocation) HANGS in an iframe (the request is dropped).
@@ -458,6 +473,21 @@ void MbFrameClient::GoToHistoryKey(const std::string& key,
       return;
     }
   }
+}
+
+void MbFrameClient::ForwardHistoryToMainOffset(int offset, bool has_user_gesture) {
+  // window.history is joint across the browsing context: an iframe's history.go()
+  // traverses the MAIN frame's session history, not the child's own list.
+  if (owner_ && owner_->main_frame_client() &&
+      owner_->main_frame_client() != this)
+    owner_->main_frame_client()->GoToHistoryOffset(offset, has_user_gesture);
+}
+
+void MbFrameClient::ForwardHistoryToMainKey(const std::string& key,
+                                            bool has_user_gesture) {
+  if (owner_ && owner_->main_frame_client() &&
+      owner_->main_frame_client() != this)
+    owner_->main_frame_client()->GoToHistoryKey(key, has_user_gesture);
 }
 
 void MbFrameClient::GoToHistoryTarget(int target, bool has_user_gesture) {
