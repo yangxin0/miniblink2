@@ -11,6 +11,7 @@
 #include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/memory/read_only_shared_memory_region.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/task/single_thread_task_runner.h"
 #include "miniblink_host/frame/mb_broadcast_channel.h"
 #include "miniblink_host/frame/mb_cache_storage.h"
@@ -28,6 +29,7 @@
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_constants.h"
 #include "net/cookies/cookie_inclusion_status.h"
+#include "net/cookies/cookie_util.h"
 #include "services/network/public/mojom/cookie_manager.mojom-blink.h"
 #include "services/network/public/mojom/restricted_cookie_manager.mojom-blink.h"
 #include "url/gurl.h"
@@ -198,19 +200,56 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
     if (name.empty())
       return;
     CookieList& jar = CookieStore()[OriginKey(url)];
-    const bool deleting = attrs.find("max-age=0") != std::string::npos ||
-                          attrs.find("expires=thu, 01 jan 1970") != std::string::npos;
+    // Decide deletion by parsing the cookie attributes (already lowercased). Per
+    // RFC 6265 a cookie is deleted when Max-Age <= 0 or when Expires is in the
+    // past; Max-Age (when present as a valid integer) takes precedence over
+    // Expires. The in-memory store ignores future expiry, so only the delete
+    // case is acted on here.
+    bool has_max_age = false;
+    int64_t max_age = 0;
+    base::Time expires;  // null base::Time when absent or unparseable
+    for (size_t pos = 0; pos < attrs.size();) {
+      const size_t semi = attrs.find(';', pos);
+      std::string token =
+          attrs.substr(pos, semi == std::string::npos ? semi : semi - pos);
+      pos = semi == std::string::npos ? attrs.size() : semi + 1;
+      Trim(&token);
+      const auto teq = token.find('=');
+      if (teq == std::string::npos)
+        continue;
+      std::string key = token.substr(0, teq);
+      std::string val = token.substr(teq + 1);
+      Trim(&key);
+      Trim(&val);
+      if (key == "max-age") {
+        // StringToInt64 rejects non-numeric values, so a stray "max-age=05..."
+        // or a missing/invalid value leaves the attribute ignored.
+        has_max_age = base::StringToInt64(val, &max_age);
+      } else if (key == "expires") {
+        expires = net::cookie_util::ParseCookieExpirationTime(val);
+      }
+    }
+    bool deleting = false;
+    if (has_max_age)
+      deleting = max_age <= 0;
+    else if (!expires.is_null())
+      deleting = expires <= base::Time::Now();
+    bool found = false;
     for (auto it = jar.begin(); it != jar.end(); ++it) {
       if (it->first == name) {
         if (deleting) jar.erase(it);
         else it->second = value;
-        return;
+        found = true;
+        break;
       }
     }
-    if (!deleting)
+    if (!found && !deleting)
       jar.emplace_back(name, value);
     // Bridge to the HTTP cookie jar so a cookie set via document.cookie is also
-    // sent on subsequent network requests (no-op for non-http(s) origins).
+    // sent on subsequent network requests, AND so a deletion is removed there too:
+    // GetCookiesString merges the HTTP jar, so erasing only the in-memory copy would
+    // let the stale HTTP-jar copy reappear. MbAddCookieToJar honors the past Expires/
+    // Max-Age in `raw` and drops the cookie. No-op for non-http(s) origins.
     MbAddCookieToJar(url.GetString().Utf8(), raw);
     // Fan out a cookieStore 'change' event (document.cookie writes are observable).
     NotifyCookieChange(url, name, value,

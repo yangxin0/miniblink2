@@ -21,12 +21,14 @@
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/no_destructor.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/task/bind_post_task.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "net/base/data_url.h"
+#include "net/cookies/cookie_util.h"
 #include "net/base/filename_util.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
@@ -141,23 +143,33 @@ std::string ToLower(const std::string& s) {
 // Value of a header (case-insensitive `lname`) in a raw "Name: Value\r\n" block.
 std::string HeaderValueFromBlock(const std::string& block,
                                  const std::string& lname) {
+  // Split into logical header lines, unfolding obs-fold continuations (a line
+  // starting with SP/HTAB continues the previous header's value).
+  std::vector<std::string> headers;
   std::string line;
   std::string buf = block;
   buf.push_back('\n');  // flush sentinel
   for (char c : buf) {
-    if (c == '\n' || c == '\r') {
-      std::string::size_type colon = line.find(':');
-      if (colon != std::string::npos && ToLower(line.substr(0, colon)) == lname) {
-        std::string v = line.substr(colon + 1);
-        while (!v.empty() && (v.front() == ' ' || v.front() == '\t'))
-          v.erase(v.begin());
-        while (!v.empty() && (v.back() == ' ' || v.back() == '\t'))
-          v.pop_back();
-        return v;
-      }
+    if (c == '\n') {
+      if (!line.empty() && (line.front() == ' ' || line.front() == '\t') &&
+          !headers.empty())
+        headers.back() += line;  // continuation -> fold into previous header
+      else if (!line.empty())
+        headers.push_back(line);
       line.clear();
-    } else {
+    } else if (c != '\r') {
       line.push_back(c);
+    }
+  }
+  for (const std::string& h : headers) {
+    std::string::size_type colon = h.find(':');
+    if (colon != std::string::npos && ToLower(h.substr(0, colon)) == lname) {
+      std::string v = h.substr(colon + 1);
+      while (!v.empty() && (v.front() == ' ' || v.front() == '\t'))
+        v.erase(v.begin());
+      while (!v.empty() && (v.back() == ' ' || v.back() == '\t'))
+        v.pop_back();
+      return v;
     }
   }
   return {};
@@ -176,6 +188,19 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   if (!curl)
     return false;
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  // Restrict to http(s) on BOTH the initial request and any libcurl-followed
+  // redirect, so a "302 Location: file:///etc/passwd" (or other non-web scheme)
+  // can never reach curl's FILE/SCP/etc. handlers — a local-file read / SSRF.
+  // The string setopts exist since libcurl 7.85.0; older libcurl falls back to
+  // the deprecated bitmask form.
+#if CURL_AT_LEAST_VERSION(7, 85, 0)
+  curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
+  curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#elif defined(CURLOPT_REDIR_PROTOCOLS)
+  curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+  curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS,
+                   CURLPROTO_HTTP | CURLPROTO_HTTPS);
+#endif
   // Host-configured proxy (mbSetProxy). When set, applies to every request — an
   // explicit "" forces a direct connection (overriding *_proxy env vars). When
   // never set, libcurl's default proxy resolution (env vars) is left untouched.
@@ -235,9 +260,23 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   for (char c : lines) {
     if (c == '\n' || c == '\r') {
       if (!line.empty()) {
-        if (ToLower(line).rfind("accept-language:", 0) == 0)
+        const std::string lline = ToLower(line);
+        if (lline.rfind("accept-language:", 0) == 0)
           has_accept_language = true;
-        header_list = curl_slist_append(header_list, line.c_str());
+        // Cross-origin credential leak guard. When libcurl auto-follows redirects
+        // (follow_redirects==true — the MbFetchUrl navigation/API path), it would
+        // re-send these caller-supplied headers verbatim to a cross-origin hop, and
+        // libcurl offers no per-hop scrub for custom CURLOPT_HTTPHEADER lines. So we
+        // drop the sensitive ones on the auto-follow path. Cookies still flow via
+        // curl's origin-scoped shared jar (safe); the fetch/XHR/subresource path uses
+        // manual per-hop following (follow_redirects==false) with proper origin-aware
+        // scrubbing and is unaffected.
+        const bool sensitive =
+            follow_redirects && (lline.rfind("authorization:", 0) == 0 ||
+                                 lline.rfind("cookie:", 0) == 0 ||
+                                 lline.rfind("proxy-authorization:", 0) == 0);
+        if (!sensitive)
+          header_list = curl_slist_append(header_list, line.c_str());
         line.clear();
       }
     } else {
@@ -460,12 +499,29 @@ void MbAddCookieToJar(const std::string& url, const std::string& cookie) {
     path = "/";
   const std::string secure =
       lattrs.find("secure") != std::string::npos ? "TRUE" : "FALSE";
-  // Session by default (expiry 0). A deletion (max-age=0 / 1970 expiry) becomes a
-  // past expiry so curl drops it from the jar.
+  // Netscape expiry field (unix epoch seconds; 0 = session). A deletion — Max-Age<=0
+  // or an Expires in the PAST (ANY past date, not just the 1970 epoch) — becomes a
+  // past timestamp ("1") so curl drops the cookie; a future Expires/Max-Age persists
+  // until then. Max-Age takes precedence over Expires per RFC 6265.
   std::string expiry = "0";
-  if (lattrs.find("max-age=0") != std::string::npos ||
-      lattrs.find("expires=thu, 01 jan 1970") != std::string::npos)
-    expiry = "1";
+  if (std::string ma = AttrValue(lattrs, attrs, "max-age"); !ma.empty()) {
+    int64_t secs = 0;
+    if (base::StringToInt64(ma, &secs)) {
+      expiry = secs <= 0
+                   ? "1"
+                   : base::NumberToString(
+                         (base::Time::Now() - base::Time::UnixEpoch()).InSeconds() +
+                         secs);
+    }
+  } else if (std::string exp = AttrValue(lattrs, attrs, "expires"); !exp.empty()) {
+    base::Time t = net::cookie_util::ParseCookieExpirationTime(exp);
+    if (!t.is_null()) {
+      int64_t secs = (t - base::Time::UnixEpoch()).InSeconds();
+      expiry = secs <= 0 ? "1" : base::NumberToString(secs);
+    } else if (lattrs.find("expires=thu, 01 jan 1970") != std::string::npos) {
+      expiry = "1";  // fallback for the canonical epoch deletion string
+    }
+  }
   // Netscape TSV (domain tailmatch path secure expiry name value) — injected via
   // COOKIELIST with an explicit domain, so it needs no active transfer to land in
   // the shared jar (a "Set-Cookie:"-format line without a domain is dropped).
@@ -1123,6 +1179,7 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   int http_status = 0;            // real HTTP status (0 -> treat as 200)
   std::string resp_headers;       // raw final-response header block (http only)
   std::string final_url;          // URL after manual redirect following (http)
+  bool redirected = false;        // an actual 3xx hop was followed (not a rewrite)
   bool ok = false;
   // Response mocking: a registered URL substring serves its canned body without a
   // real fetch (offline tests, API substitution). Checked before any scheme fetch.
@@ -1199,10 +1256,23 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
       const std::string loc = HeaderValueFromBlock(resp_headers, "location");
       if (loc.empty())
         break;  // 3xx without Location -> treat as the final response
-      const GURL next = GURL(cur).Resolve(loc);
-      if (!next.is_valid() || hop == 20) {
+      GURL next = GURL(cur).Resolve(loc);
+      // Refuse a redirect to any non-http(s) scheme (file:, ftp:, …): handing such
+      // a target to FetchHttp->curl would let a 302 trigger a local-file read / SSRF.
+      // Treat it as a failed redirect.
+      if (!next.is_valid() || !next.SchemeIsHTTPOrHTTPS() || hop == 20) {
         ok = false;
         break;
+      }
+      // Per Fetch: if Location carries no fragment but the previous URL had one,
+      // carry the original fragment onto the redirect target.
+      if (!next.has_ref()) {
+        const GURL prev(cur);
+        if (prev.has_ref()) {
+          GURL::Replacements reps;
+          reps.SetRefStr(prev.ref());
+          next = next.ReplaceComponents(reps);
+        }
       }
       // Method rewrite: 303 (and POST on 301/302) becomes a bodyless GET.
       std::string new_method = cur_method;
@@ -1234,6 +1304,7 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
       hop_headers.MergeFrom(modified_headers);
       cur = next.spec();
       cur_method = new_method;
+      redirected = true;  // a real 3xx hop was followed (vs. a transparent rewrite)
     }
   } else if (fetch_url.SchemeIs("data")) {
     // Decode the data: URL in-process (libcurl doesn't serve it); the parsed
@@ -1281,41 +1352,59 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   }
 
   blink::WebURLResponse response;
-  // After manual redirect following, the response URL is the final URL — which
-  // now equals Blink's url_list_.back() (advanced by the WillFollowRedirect
-  // calls above), so fetch's response.url/redirected are correct and the
-  // fetch_manager URL DCHECK holds.
+  // Response URL. Only override with the final URL when a REAL redirect hop was
+  // followed — then it equals Blink's url_list_.back() (advanced by the
+  // WillFollowRedirect calls above), so fetch's response.url/redirected are
+  // correct and the fetch_manager URL DCHECK holds. A transparent URL rewrite
+  // (MbApplyUrlRewrites) is NOT a redirect: report the page's ORIGINAL url so the
+  // rewrite stays invisible and url_list_.back() still matches.
   response.SetCurrentRequestUrl(
-      (!final_url.empty() && final_url != url.spec()) ? ToWebURL(GURL(final_url))
-                                                      : ToWebURL(url));
+      (redirected && !final_url.empty()) ? ToWebURL(GURL(final_url))
+                                         : ToWebURL(url));
   response.SetMimeType(blink::WebString::FromUtf8(mime_str));
   // Expose the server's response headers to JS (fetch Response.headers.get(),
   // XHR getResponseHeader) — set them before Content-Type so the explicit one
   // below wins, and skip headers Blink derives from the delivered bytes.
   if (!resp_headers.empty()) {
+    // Split into logical header lines, unfolding obs-fold continuations (a line
+    // starting with SP/HTAB continues the previous header's value) so a folded
+    // value isn't silently dropped.
+    std::vector<std::string> hlines;
     std::string hline;
     std::string hbuf = resp_headers;
     hbuf.push_back('\n');  // flush sentinel
     for (char c : hbuf) {
-      if (c == '\n' || c == '\r') {
-        std::string::size_type colon = hline.find(':');
-        if (colon != std::string::npos && hline.rfind("HTTP/", 0) != 0) {
-          std::string name = hline.substr(0, colon);
-          std::string value = hline.substr(colon + 1);
-          while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
-            value.erase(value.begin());
-          const std::string lname = ToLower(name);
-          if (lname != "content-length" && lname != "transfer-encoding") {
-            // AddHttpHeaderField (comma-join), not Set (replace): a response with
-            // multiple Set-Cookie/Link/Vary/WWW-Authenticate lines must expose all of
-            // them, not just the last. Content-Type is set authoritatively below.
-            response.AddHttpHeaderField(blink::WebString::FromUtf8(name),
-                                        blink::WebString::FromUtf8(value));
-          }
-        }
+      if (c == '\n') {
+        if (!hline.empty() && (hline.front() == ' ' || hline.front() == '\t') &&
+            !hlines.empty())
+          hlines.back() += hline;  // continuation -> fold into previous header
+        else if (!hline.empty())
+          hlines.push_back(hline);
         hline.clear();
-      } else {
+      } else if (c != '\r') {
         hline.push_back(c);
+      }
+    }
+    for (const std::string& h : hlines) {
+      std::string::size_type colon = h.find(':');
+      if (colon != std::string::npos && h.rfind("HTTP/", 0) != 0) {
+        std::string name = h.substr(0, colon);
+        std::string value = h.substr(colon + 1);
+        while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+          value.erase(value.begin());
+        const std::string lname = ToLower(name);
+        // Strip headers that describe the ON-THE-WIRE body, not the bytes we deliver:
+        // curl already decompressed the body (CURLOPT_ACCEPT_ENCODING ""), so a stale
+        // content-encoding/content-md5 would describe gzip the JS never sees; length/
+        // chunking are likewise meaningless post-decode (Blink derives them).
+        if (lname != "content-length" && lname != "transfer-encoding" &&
+            lname != "content-encoding" && lname != "content-md5") {
+          // AddHttpHeaderField (comma-join), not Set (replace): a response with
+          // multiple Set-Cookie/Link/Vary/WWW-Authenticate lines must expose all of
+          // them, not just the last. Content-Type is set authoritatively below.
+          response.AddHttpHeaderField(blink::WebString::FromUtf8(name),
+                                      blink::WebString::FromUtf8(value));
+        }
       }
     }
   }
@@ -1324,6 +1413,24 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
                               blink::WebString::FromUtf8(content_type_header));
   // Real HTTP status (so fetch sees 404/500 + response.ok); file/data -> 200.
   response.SetHttpStatusCode(http_status > 0 ? http_status : 200);
+  // statusText: the reason phrase from the final "HTTP/x.y NNN reason" status line
+  // (the first line of the captured header block; empty for file/data).
+  {
+    const std::string::size_type eol = resp_headers.find_first_of("\r\n");
+    const std::string status_line = resp_headers.substr(0, eol);
+    if (status_line.rfind("HTTP/", 0) == 0) {
+      const std::string::size_type sp1 = status_line.find(' ');
+      const std::string::size_type sp2 =
+          sp1 == std::string::npos ? sp1 : status_line.find(' ', sp1 + 1);
+      if (sp2 != std::string::npos) {
+        std::string reason = status_line.substr(sp2 + 1);
+        while (!reason.empty() && (reason.back() == ' ' || reason.back() == '\t'))
+          reason.pop_back();
+        if (!reason.empty())
+          response.SetHttpStatusText(blink::WebString::FromUtf8(reason));
+      }
+    }
+  }
   response.SetExpectedContentLength(static_cast<int64_t>(contents.size()));
 
   // Deliver the body via a real Mojo data pipe (the production path). This is required
