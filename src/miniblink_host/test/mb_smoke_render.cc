@@ -92,6 +92,33 @@ static void RunCases(mbView* v, int W, int H) {
            "a sub-frame (no crash)",
            "child=[" + st + "]");
   }
+
+  // 35z2. Trusted TOUCH into a sub-frame: mbSendTouchTap routes a WebPointerEvent(kTouch) into an
+  // iframe and fires its touchstart + pointerdown (pointerType 'touch', isTrusted) without crashing
+  // — the touch peer of 35z (touch routing goes through the same sub-frame hit-test/capture path).
+  {
+    mbLoadHTML(v,
+      "<body style='margin:0'>"
+      "<iframe srcdoc=\"<body style='margin:0'>"
+      "<div id='d' style='width:300px;height:120px'>D</div>"
+      "<script>window.__t={};var d=document.getElementById('d');"
+      "d.addEventListener('touchstart',function(e){window.__t.ts=e.isTrusted?1:0;});"
+      "d.addEventListener('pointerdown',function(e){"
+      "window.__t.pd=(e.pointerType==='touch'&&e.isTrusted)?1:0;});"
+      "</script></body>\" style='border:0;width:300px;height:120px'></iframe>"
+      "</body>", "https://frametouch.test/");
+    mbWait(v, 300);
+    mbSendTouchTap(v, 120, 60);  // tap the iframe's div
+    mbWait(v, 200);
+    char tbuf[200] = {0};
+    mbEvalJSInFrame(v, 0, "JSON.stringify(window.__t||{})", tbuf, sizeof(tbuf));
+    const std::string ts(tbuf);
+    Expect(ts.find("\"pd\":1") != std::string::npos ||
+               ts.find("\"ts\":1") != std::string::npos,
+           "trusted touch (mbSendTouchTap) routes into a sub-frame (no crash)",
+           "child=[" + ts + "]");
+  }
+
   // 35. Cutting-edge modern CSS — the M150-vs-M47 selling points, none of which the
   // frozen ~2015 engine could do. Each rule colors an element only if the feature works.
   mbLoadHTML(v,
