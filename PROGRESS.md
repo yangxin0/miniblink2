@@ -2466,3 +2466,29 @@ blink drives cc -> our in-process frame sink -> viz::Display, no crash]. Impleme
   (mb_compositor5) DOES yield pixels, so the Display is fine; the gap is cc's cross-thread raster
   completion. NEXT: flush/await GPU-thread raster before the Display draw (e.g. a sync round-trip on
   the SII, or pump until tiles are ready), then assert the composited pixel is the page's yellow.
+
+[DONE — compositor milestone D2b-4: a LIVE PAGE RASTERS THROUGH cc -> viz::Display -> bitmap. THE
+COMPOSITOR ARC (#1) IS COMPLETE]. mb_compositor_widget_smoke: a compositing view loads a yellow page,
+drives 3 composites, and the captured center pixel is FFFFFF00 (yellow) — real in-process headless cc
+compositing. Three precise fixes, each found by diagnostics (DrawAndSwap=0 -> SubmitCompositorFrame
+never called -> viewport=0x0 -> thread-checker abort):
+  1. RASTER OFF: WebFrameWidgetImpl::SynchronouslyCompositeForTesting calls CompositeForTest(.., do_
+     raster=FALSE, ..) -> empty tiles. FIX: MbWidget::Composite drives impl->LayerTreeHostForTesting()
+     ->CompositeForTest(now, /*raster=*/true, {}) directly (LayerTreeHostForTesting is public; no patch).
+  2. EMPTY VIEWPORT: widget_->Resize() does NOT set cc's device_viewport_rect (normally via the
+     browser's Widget.UpdateVisualProperties); cc had a root layer + was visible but viewport=0x0 -> it
+     submitted no frame. FIX: Attach calls impl->SetWindowRectSynchronouslyForTesting(gfx::Rect(w,h))
+     (the frame_test_helpers WebViewHelper::Resize recipe) -> viewport=400x300, cc submits a frame.
+  3. CROSS-THREAD SharedImageManager: cc rasters tiles on the GPU thread; the Display's SoftwareRenderer
+     reads them on the MAIN thread -> SharedImageManager::ProduceMemory thread-checker abort. FIX:
+     patches/0014 — InProcessGpuThreadHolder creates its SharedImageManager with (thread_safe=true,
+     display_context_on_another_thread=true) instead of the default (false,false). 6 lines.
+  VERIFIED: mb_compositor_widget_smoke PASS (pixel FFFFFF00 yellow); full battery green (mb_smoke 165,
+  platform 46, render 133, shot 66, wke 117; probes gl/gpu/dawn/webgpu/webgpu2/compositor/2/3/4/5 +
+  widget_smoke PASS — the thread-safe SharedImageManager did NOT regress WebGL/WebGPU, which share the
+  holder), no leaks. Patches now 0001-0014 (0012 frame-sink hook, 0013 in-process SII channel-lost
+  no-op, 0014 thread-safe SharedImageManager).
+  COMPOSITOR #1 COMPLETE: viz software render (A) -> viz::Display (B) -> cc frame sink (C) -> production
+  components (D1) -> host-lib component (D2a) -> blink hook (D2b-1) -> live InitializeCompositing (D2b-2)
+  -> cc raster pipeline (D2b-3) -> LIVE PAGE TO PIXELS (D2b-4). Opt-in (mbSetCompositingEnabled, default
+  OFF) so the heavily-tested software-paint screenshot path is untouched. NEXT GAP: #2 WebRTC.

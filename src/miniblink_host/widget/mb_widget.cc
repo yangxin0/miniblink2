@@ -10,6 +10,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_settings.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "miniblink_host/platform/mb_compositor.h"
@@ -141,7 +142,11 @@ void MbWidget::Attach(blink::WebLocalFrame* main_frame, int width, int height,
                                  /*initial_frame_sink=*/{},
                                  /*initial_frame_sink_client=*/{},
                                  /*initial_viz_rir_client=*/{});
-  widget_->Resize(gfx::Size(width, height));
+  // Resize alone does NOT set cc's device_viewport_rect (normally set via the browser's
+  // Widget.UpdateVisualProperties). SetWindowRectSynchronouslyForTesting does both (the
+  // frame_test_helpers WebViewHelper::Resize recipe) so cc has a non-empty viewport to draw.
+  static_cast<blink::WebFrameWidgetImpl*>(widget_)
+      ->SetWindowRectSynchronouslyForTesting(gfx::Rect(width, height));
   widget_->SetCompositorVisible(true);
 }
 
@@ -153,10 +158,15 @@ void MbWidget::Resize(int width, int height) {
 void MbWidget::Composite() {
   if (!composited_ || !widget_)
     return;
-  // 1) BeginMainFrame + lifecycle + cc commit/raster/draw; the first call lazily requests the
+  // 1) BeginMainFrame + lifecycle + cc commit/RASTER/draw; the first call lazily requests the
   //    frame sink via our hook. cc submits its CompositorFrame to the Display's root surface.
-  static_cast<blink::WebFrameWidgetImpl*>(widget_)
-      ->SynchronouslyCompositeForTesting(base::TimeTicks::Now());
+  //    Drive CompositeForTest with raster=true directly (WebFrameWidgetImpl::Synchronously
+  //    CompositeForTesting passes raster=FALSE, which produces empty tiles).
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  if (cc::LayerTreeHost* host = impl->LayerTreeHostForTesting()) {
+    host->CompositeForTest(base::TimeTicks::Now(), /*raster=*/true,
+                           base::OnceClosure());
+  }
   // 2) The in-process Display's scheduler is begin-frame-driven (never fires headlessly), so
   //    force it to aggregate + draw the submitted frame into the capturing output device.
   if (compositor_)

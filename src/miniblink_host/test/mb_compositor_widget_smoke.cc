@@ -67,11 +67,11 @@ int main() {
                b = c & 0xff;
   bool yellow = r > 200 && g > 200 && b < 80;
 
-  // PASS gate: the live cc compositing pipeline runs end to end WITHOUT crashing and blink's
-  // compositor pulled our in-process frame sink (sinks>=1), with the page DOM-live. The composited
-  // PIXEL is a diagnostic only for now: cc raster posts tile work to the GPU service's thread and
-  // the captured bitmap is still empty (the cross-thread raster flush is the final step, D2b-4).
-  bool ok = (plain_sinks == -1) && (sinks >= 1) && live;
+  // PASS gate: the FULL live cc compositing path works — a non-compositing view reports -1, the
+  // compositing view pulls our in-process frame sink (sinks>=1), the page is DOM-live, AND the page
+  // RASTERS through cc -> viz::Display -> the captured bitmap so the center pixel is the page's
+  // yellow (#ffff00).
+  bool ok = (plain_sinks == -1) && (sinks >= 1) && live && yellow;
   printf("mb_compositor_widget_smoke: plain=%d sinks=%d body=[%s] live=%d pixel=%08X "
          "(a%d r%d g%d b%d) yellow=%d\n",
          plain_sinks, sinks, body, live ? 1 : 0, c, a, r, g, b, yellow ? 1 : 0);
@@ -79,7 +79,7 @@ int main() {
   mbDestroyView(v);
   mbShutdown();
 
-  printf("mb_compositor_widget_smoke: %s (live cc compositing pipeline runs; frame sink pulled%s)\n",
-         ok ? "PASS" : "FAIL", yellow ? "; pixel YELLOW" : "");
+  printf("mb_compositor_widget_smoke: %s (live page rasters through cc -> viz::Display -> bitmap)\n",
+         ok ? "PASS" : "FAIL");
   return ok ? 0 : 1;
 }
