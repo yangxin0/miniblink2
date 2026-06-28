@@ -94,10 +94,29 @@ int ButtonDownModifier(blink::WebMouseEvent::Button b) {
       return 0;
   }
 }
+// Process-global owner of the single frame-sink hook slot (patch 0012). The hook is a
+// DEFINE_STATIC_LOCAL with exactly one slot, so only one compositing widget can be wired
+// at a time (single-compositing-view limitation: two simultaneously-live compositing
+// views still cross-wire — the later Attach overwrites the earlier's hook). We record
+// which widget last installed it so a destroyed widget clears the hook ONLY if it still
+// owns it — preventing a stale widget's destruction from clobbering a newer compositing
+// view's hook and from leaving a dangling base::Unretained(compositor_) that a later
+// AllocateNewLayerTreeFrameSink would Run() (UAF).
+MbWidget* g_frame_sink_hook_owner = nullptr;
 }  // namespace
 
 MbWidget::MbWidget() = default;
-MbWidget::~MbWidget() = default;
+
+MbWidget::~MbWidget() {
+  // Clear the process-global frame-sink hook if THIS widget still owns it, so the
+  // dangling Unretained(compositor_.get()) can't be Run() after we (and the compositor)
+  // are gone. Guarded on ownership so destroying an older compositing widget doesn't
+  // clobber a newer live one's hook.
+  if (g_frame_sink_hook_owner == this) {
+    blink::WebFrameWidgetImpl::SetLayerTreeFrameSinkHookForHost({});
+    g_frame_sink_hook_owner = nullptr;
+  }
+}
 
 void MbWidget::Attach(blink::WebLocalFrame* main_frame, int width, int height,
                       bool composited) {
@@ -137,9 +156,13 @@ void MbWidget::Attach(blink::WebLocalFrame* main_frame, int width, int height,
   // then init compositing with single-thread synchronous settings (the headless case —
   // mirrors frame_test_helpers.cc GetSynchronousSingleThreadLayerTreeSettings).
   compositor_ = std::make_unique<SoftwareCompositor>(gfx::Size(width, height));
+  // Single global slot: re-installing here overwrites any prior owner's hook (and the
+  // null callback the previous owner left on its destruction). Record ownership so our
+  // destructor clears it only while it's still ours.
   blink::WebFrameWidgetImpl::SetLayerTreeFrameSinkHookForHost(
       base::BindRepeating(&SoftwareCompositor::CreateFrameSink,
                           base::Unretained(compositor_.get())));
+  g_frame_sink_hook_owner = this;
 
   cc::LayerTreeSettings settings;
   settings.single_thread_proxy_scheduler = false;  // synchronous; loop goes idle
@@ -504,6 +527,12 @@ void MbWidget::SendText(const char* utf8) {
     const bool is_pair = hi >= 0xD800 && hi <= 0xDBFF && i + 1 < u16.size() &&
                          u16[i + 1] >= 0xDC00 && u16[i + 1] <= 0xDFFF;
     const size_t units = is_pair ? 2 : 1;
+    // Full Unicode code point (decode a surrogate pair) for KeyboardEvent.key below.
+    const char32_t codepoint =
+        is_pair ? char32_t{0x10000} +
+                      ((static_cast<char32_t>(hi) - 0xD800) << 10) +
+                      (static_cast<char32_t>(u16[i + 1]) - 0xDC00)
+                : static_cast<char32_t>(hi);
 
     // windows_key_code is a VK code (ASCII letters use the uppercase form);
     // it's only meaningful for ASCII. For non-ASCII the text[] field below is
@@ -513,7 +542,10 @@ void MbWidget::SendText(const char* utf8) {
       blink::WebKeyboardEvent e(type, blink::WebInputEvent::kNoModifiers,
                                 base::TimeTicks::Now());
       e.windows_key_code = vk;
-      e.dom_key = hi;
+      // dom_key is a ui::DomKey (KeyboardEvent.key), not a raw code unit — encode the
+      // code point as a character key so event.key is the typed character, not
+      // "Unidentified". (Matches SendKey/SendKeyEx/SendKeyUp.)
+      e.dom_key = static_cast<int>(ui::DomKey::FromCharacter(codepoint));
       if (with_text) {
         for (size_t k = 0; k < units; ++k) {
           e.text[k] = u16[i + k];

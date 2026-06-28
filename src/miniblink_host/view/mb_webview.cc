@@ -1739,8 +1739,10 @@ void MbWebView::Reload() {
   // Re-navigate to the committed document's URL, re-fetching it. Only meaningful
   // for real (file/http) URLs; in-memory docs (about:blank, data:) are left as-is.
   std::string u = GetURL();
-  if (u.rfind("file://", 0) == 0 || u.rfind("http", 0) == 0)
+  if (u.rfind("file://", 0) == 0 || u.rfind("http", 0) == 0) {
+    pending_reload_ = true;  // re-use the current entry; don't append / truncate
     LoadURL(u.c_str());
+  }
 }
 
 void MbWebView::StopLoading() {
@@ -1763,14 +1765,35 @@ void MbWebView::OnDidCommitMainFrame(const std::string& url, bool standard) {
     return;
   if (in_history_nav_) {
     in_history_nav_ = false;
-    return;  // position already set by GoBack/GoForward
+    // A PAGE-driven cross-document traversal (set_page_history_nav): the host
+    // cursor is stale, so move it to the entry matching the committed URL. A
+    // host-driven mbGoBack/mbGoForward leaves pending_history_url_ empty — its
+    // cursor was already set in TraverseHistory.
+    if (!pending_history_url_.empty()) {
+      for (int i = 0; i < static_cast<int>(history_.size()); ++i) {
+        if (history_[i].url == pending_history_url_) {
+          history_index_ = i;
+          break;
+        }
+      }
+      pending_history_url_.clear();
+    }
+    return;  // position already set; do not append
   }
-  if (history_index_ >= 0 &&
-      history_index_ < static_cast<int>(history_.size()) &&
-      history_[history_index_].url == url) {
-    pending_is_html_ = false;  // consumed (no new entry); don't leak onto the next commit
-    pending_html_.clear();
-    return;  // same URL (e.g. a reload committed as standard) — no new entry
+  if (pending_reload_) {
+    // A host Reload() re-navigates to the current URL via LoadURL (a fresh standard
+    // commit). When it lands on the current entry it must NOT add an entry or
+    // truncate forward history — it is the same position. (A genuine new navigation
+    // to the same URL is NOT a reload and falls through to record normally, so it
+    // truncates stale forward entries as it should.)
+    pending_reload_ = false;
+    if (history_index_ >= 0 &&
+        history_index_ < static_cast<int>(history_.size()) &&
+        history_[history_index_].url == url) {
+      pending_is_html_ = false;  // consumed; don't leak onto the next commit
+      pending_html_.clear();
+      return;
+    }
   }
   history_.resize(history_index_ + 1);  // a new navigation truncates forward
   HistoryEntry e;
@@ -1783,6 +1806,15 @@ void MbWebView::OnDidCommitMainFrame(const std::string& url, bool standard) {
   }
   history_.push_back(std::move(e));
   history_index_ = static_cast<int>(history_.size()) - 1;
+  // Cap like blink's session history (kMaxSessionHistoryEntries == 50): drop the
+  // oldest entries, shifting the cursor down. Matches the frame client's cap so the
+  // host stack can't grow unbounded (and stays aligned with the page's length).
+  constexpr int kMaxHistoryEntries = 50;
+  while (static_cast<int>(history_.size()) > kMaxHistoryEntries) {
+    history_.erase(history_.begin());
+    if (history_index_ > 0)
+      --history_index_;
+  }
   pending_is_html_ = false;  // consumed
   pending_html_.clear();
   pending_base_.clear();
@@ -1902,14 +1934,30 @@ bool MbWebView::TraverseHistory(int target) {
   const int prev = history_index_;
   in_history_nav_ = true;
   history_index_ = target;
-  const HistoryEntry& e = history_[target];
-  if (e.is_html) {
-    CommitHtml(e.html.data(), e.html.size(),
-               e.base_url.empty() ? nullptr : e.base_url.c_str(), e.charset);
+  // Copy the entry's fields by value: the commit below pumps the message loop and
+  // can push_back into history_ (reallocating and invalidating a held reference).
+  const bool is_html = history_[target].is_html;
+  const std::string url = history_[target].url;
+  const std::string html = is_html ? history_[target].html : std::string();
+  const std::string base_url =
+      is_html ? history_[target].base_url : std::string();
+  const std::string charset = is_html ? history_[target].charset : std::string();
+  // A host mbGoBack/mbGoForward re-commits cross-document via LoadURL (a fresh
+  // standard commit). Bracket it so the frame client's PAGE session history MOVES
+  // its cursor to match instead of appending + truncating forward entries — without
+  // this a host traversal would grow history.length and drop forward entries.
+  if (frame_client_)
+    frame_client_->BeginHostHistoryTraversal();
+  if (is_html) {
+    CommitHtml(html.data(), html.size(),
+               base_url.empty() ? nullptr : base_url.c_str(), charset);
   } else {
-    LoadURL(e.url.c_str());
+    LoadURL(url.c_str());
   }
-  if (in_history_nav_) {  // never committed
+  const bool committed = !in_history_nav_;  // the commit hook cleared the flag
+  if (frame_client_)
+    frame_client_->EndHostHistoryTraversal(committed ? url : std::string());
+  if (!committed) {  // never committed (load failure / download diversion)
     in_history_nav_ = false;
     history_index_ = prev;
     return false;
@@ -2221,7 +2269,7 @@ void MbNativeTrampoline(const v8::FunctionCallbackInfo<v8::Value>& info) {
   for (const std::string& a : args)
     argv.push_back(a.c_str());
   int out_type = 0;  // 0 string, 1 number, 2 boolean, 3 null, 4 undefined
-  const char* result = b->fn(b->userdata, static_cast<int>(args.size()),
+  const char* result = b->fn(static_cast<int>(args.size()),
                              argv.empty() ? nullptr : argv.data(),
                              types.empty() ? nullptr : types.data(), &out_type);
   switch (out_type) {
@@ -2346,14 +2394,12 @@ void MbWebView::InstallJsBindings() {
   }
 }
 
-void MbWebView::BindJsFunction(const char* name, MbJsNativeFn fn,
-                               void* userdata) {
+void MbWebView::BindJsFunction(const char* name, JsNativeFn fn) {
   if (!name || !fn)
     return;
   auto b = std::make_unique<NativeBinding>();
   b->name = name;
-  b->fn = fn;
-  b->userdata = userdata;
+  b->fn = std::move(fn);
   js_bindings_.push_back(std::move(b));
 }
 
@@ -2369,8 +2415,11 @@ void MbWebView::RunDocumentStartScript() {
   if (!dialog_registered_) {
     auto b = std::make_unique<NativeBinding>();
     b->name = "__mbDlg";
-    b->fn = &MbDialogBridge;
-    b->userdata = this;
+    MbWebView* self = this;  // captured as the bridge's userdata
+    b->fn = [self](int argc, const char** argv, const int* argtypes,
+                   int* out_type) -> const char* {
+      return MbDialogBridge(self, argc, argv, argtypes, out_type);
+    };
     js_bindings_.push_back(std::move(b));
     dialog_registered_ = true;
   }
@@ -2817,7 +2866,7 @@ bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y,
 }
 
 bool MbWebView::PaintToBitmap(void* out_bgra, int w, int h, int stride) {
-  if (!out_bgra)
+  if (!out_bgra || w <= 0 || h <= 0)
     return false;
   // Compositing view: copy the compositor's captured frame (cc -> viz::Display ->
   // bitmap) so the screenshot reflects the REAL composited output instead of the

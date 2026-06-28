@@ -179,6 +179,16 @@ class MbFrameClient : public blink::WebLocalFrameClient {
     self_owned_ = std::move(self_owned);
   }
 
+  // Host-driven (mbGoBack/mbGoForward) traversal bracket. The host re-navigates the
+  // main frame to an adjacent entry's URL; that commit must NOT grow/truncate our
+  // page session history (history.length + forward entries stay put). Begin
+  // suppresses the record; End re-enables it and MOVES our cursor to the entry whose
+  // URL matches the committed one (empty url = the traversal never committed), so
+  // blink's session-history index and a later page history.back()/forward() stay
+  // aligned with the host's position.
+  void BeginHostHistoryTraversal() { suppress_history_record_ = true; }
+  void EndHostHistoryTraversal(const std::string& committed_url);
+
   // Sandbox flags for this (child) frame, captured from the owner's FramePolicy
   // in the parent's CreateChildFrame and applied to the document at commit (see
   // BeginNavigation). Without this, <iframe sandbox> would not be enforced.

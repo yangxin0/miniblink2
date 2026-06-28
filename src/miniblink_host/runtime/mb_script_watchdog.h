@@ -56,6 +56,10 @@ class MbScriptWatchdog : public base::TaskObserver,
   v8::Isolate* isolate_ = nullptr;
   std::atomic<int> timeout_ms_{0};        // 0 = disabled
   std::atomic<int64_t> deadline_us_{0};   // 0 = no task armed; else TimeTicks deadline
+  // Monotonic per-task counter, bumped (before the deadline) on every WillProcessTask.
+  // The monitor captures it with the deadline it claims and re-checks it around the
+  // terminate, so a task that armed AFTER the claim is never killed by a stale claim.
+  std::atomic<uint64_t> task_generation_{0};
   std::atomic<bool> terminated_{false};   // monitor fired a TerminateExecution
   std::atomic<bool> running_{false};
   base::PlatformThreadHandle thread_;

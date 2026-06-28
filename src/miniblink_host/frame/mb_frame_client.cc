@@ -380,7 +380,7 @@ void MbFrameClient::DidCommitNavigation(
       commit_type == blink::kWebStandardCommit);
   // A page-driven cross-document traversal (GoToHistoryTarget -> owner LoadURL) is a MOVE,
   // not a new entry — the index is already at the target. Skip the record so it doesn't
-  // double-grow this list (owner_->set_in_history_nav suppressed the view's append).
+  // double-grow this list (owner_->set_page_history_nav suppressed the view's append).
   if (suppress_history_record_)
     return;
   // Capture this (cross-document) entry for page-driven history traversal.
@@ -463,6 +463,23 @@ void MbFrameClient::SyncBlinkHistoryCursor() {
   }
 }
 
+void MbFrameClient::EndHostHistoryTraversal(const std::string& committed_url) {
+  suppress_history_record_ = false;
+  if (committed_url.empty())
+    return;  // the host traversal never committed — nothing to realign
+  // Move our cursor to the page-history entry whose URL matches the one the host
+  // traversed to, so blink's index (history.length / back-forward gating) and a
+  // subsequent page-driven history.back()/forward() continue from the right place.
+  for (size_t i = 0; i < history_items_.size(); ++i) {
+    if (history_items_[i] &&
+        history_items_[i]->Url().GetString().Utf8() == committed_url) {
+      history_index_ = static_cast<int>(i);
+      break;
+    }
+  }
+  SyncBlinkHistoryCursor();
+}
+
 void MbFrameClient::GoToHistoryOffset(int offset, bool has_user_gesture) {
   if (offset == 0)
     return;
@@ -530,11 +547,15 @@ void MbFrameClient::GoToHistoryTarget(int target, bool has_user_gesture) {
     SyncBlinkHistoryCursor();
   } else if (owner_) {
     // Cross-document target: re-navigate to the entry's URL (full reload). Mark the
-    // traversal on BOTH lists so the resulting commit moves the cursor instead of
-    // appending a duplicate entry (index is already at `target`); then realign blink.
+    // traversal on BOTH lists so the resulting commit moves each cursor instead of
+    // appending a duplicate entry: suppress our record, and tell the host to move
+    // its cursor to the matching entry (set_page_history_nav) — without which the
+    // host's history_index_ would go stale after a page-driven back/forward. Then
+    // realign blink.
+    std::string target_url = item->Url().GetString().Utf8();
     suppress_history_record_ = true;
-    owner_->set_in_history_nav(true);
-    owner_->LoadURL(item->Url().GetString().Utf8().c_str());
+    owner_->set_page_history_nav(target_url);
+    owner_->LoadURL(target_url.c_str());
     suppress_history_record_ = false;
     SyncBlinkHistoryCursor();
   }

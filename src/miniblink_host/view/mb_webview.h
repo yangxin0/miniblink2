@@ -85,12 +85,19 @@ class MbWebView {
   using MbJsNativeFn = const char* (*)(void* userdata, int argc,
                                        const char** argv, const int* argtypes,
                                        int* out_type);
-  void BindJsFunction(const char* name, MbJsNativeFn fn, void* userdata);
+  // The stored form of a bound native function: a std::function so the C ABI can
+  // wrap its C-linkage fn-ptr + userdata at the boundary (see mbJsBindFunction)
+  // without passing a C-linkage pointer through a C++ typedef and calling it
+  // through the punned type (UB). userdata is captured by the wrapping closure,
+  // so it is not a separate field here. (Mirrors JsDialogFn below.)
+  using JsNativeFn =
+      std::function<const char*(int argc, const char** argv,
+                                const int* argtypes, int* out_type)>;
+  void BindJsFunction(const char* name, JsNativeFn fn);
   // A bound native function (public so the install trampoline can read it).
   struct NativeBinding {
     std::string name;
-    MbJsNativeFn fn = nullptr;
-    void* userdata = nullptr;
+    JsNativeFn fn;
   };
   // Called by the frame client at document-element-available; runs the init
   // script and installs bound native functions.
@@ -412,10 +419,16 @@ class MbWebView {
   }
   bool GoBack();
   bool GoForward();
-  // Mark that the next main-frame commit is a history traversal, so it MOVES the cursor
-  // instead of appending a new entry. Used by a page-driven cross-document
-  // history.back()/forward() (which re-navigates via LoadURL) to avoid double-recording.
-  void set_in_history_nav(bool v) { in_history_nav_ = v; }
+  // Mark that the next main-frame commit is a PAGE-driven cross-document history
+  // traversal landing on `url`, so the commit MOVES the host cursor to the matching
+  // entry instead of appending a new one (which would corrupt history.length /
+  // drop forward entries). Used by the frame client's history.back()/forward()
+  // (which re-navigates via LoadURL). The host's own mbGoBack/mbGoForward set the
+  // cursor directly (see TraverseHistory) and do NOT go through here.
+  void set_page_history_nav(const std::string& url) {
+    in_history_nav_ = true;
+    pending_history_url_ = url;
+  }
   // The main frame's client — used so a child frame can route its page-driven
   // history.back()/forward()/go() into the JOINT (main-frame) session history,
   // per the HTML spec (window.history is shared across the browsing context).
@@ -645,6 +658,15 @@ class MbWebView {
   std::vector<HistoryEntry> history_;
   int history_index_ = -1;            // current position; -1 before first load
   bool in_history_nav_ = false;       // a Go{Back,Forward} is in flight
+  // Set by set_page_history_nav for a PAGE-driven cross-document traversal: the URL
+  // the next commit lands on, so OnDidCommitMainFrame moves the host cursor to the
+  // matching entry instead of appending. Empty for a host-driven traversal (whose
+  // cursor TraverseHistory sets directly).
+  std::string pending_history_url_;
+  // Set by Reload() so the resulting standard commit re-uses the current entry
+  // (no new entry, forward history preserved) rather than being recorded as a fresh
+  // navigation to the same URL.
+  bool pending_reload_ = false;
   // The pending navigation's source, captured into the next recorded history entry:
   // set by LoadHTML (in-memory doc), cleared by LoadURL (URL nav).
   bool pending_is_html_ = false;

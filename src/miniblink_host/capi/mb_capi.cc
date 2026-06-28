@@ -3,7 +3,9 @@
 
 #include "miniblink_host/capi/mb_capi.h"
 
+#include <algorithm>
 #include <cctype>
+#include <climits>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -465,7 +467,7 @@ int mbGetUserAgent(mbView* v, char* out, int out_cap) {
     return 0;
   std::string result = v->impl->GetUserAgent();
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 void mbSetProxy(const char* proxy) {
@@ -523,8 +525,17 @@ void mbSetVisibility(mbView* v, int visible) {
 
 void mbJsBindFunction(mbView* v, const char* name, mbJsNativeFn fn,
                       void* userdata) {
-  if (v && v->impl)
-    v->impl->BindJsFunction(name, fn, userdata);
+  if (!v || !v->impl || !name || !fn)
+    return;
+  // Wrap the C callback + userdata in a std::function instead of passing the
+  // C-linkage fn-ptr through the host's C++ typedef and calling it through that
+  // punned type (the two differ in C/C++ language linkage — UB). Mirrors
+  // mbSetJsDialogCallback. The lambda calls `fn` as exactly its declared C type.
+  v->impl->BindJsFunction(
+      name, [fn, userdata](int argc, const char** argv, const int* argtypes,
+                           int* out_type) -> const char* {
+        return fn(userdata, argc, argv, argtypes, out_type);
+      });
 }
 
 void mbSetLocale(mbView* v, const char* utf8_languages) {
@@ -588,7 +599,7 @@ int mbGetCookies(mbView* v, const char* url, char* out, int out_cap) {
     return 0;
   std::string result = v->impl->GetCookies(url);
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbGetCookie(mbView* v, const char* url, const char* name, char* out,
@@ -599,7 +610,7 @@ int mbGetCookie(mbView* v, const char* url, const char* name, char* out,
   if (!v->impl->GetCookieValue(url, name, &result))
     return -1;  // cookie not present
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbGetAllCookies(mbView* v, char* out, int out_cap) {
@@ -607,7 +618,7 @@ int mbGetAllCookies(mbView* v, char* out, int out_cap) {
     return 0;
   std::string result = v->impl->GetAllCookies();
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 void mbSetCookie(mbView* v, const char* url, const char* cookie) {
@@ -654,7 +665,7 @@ int mbGetRequestLog(char* out, int out_cap) {
   // Process-wide: newline-separated subresource URLs the loader has fetched.
   std::string result = mb::MbGetRequestLog();
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 void mbClearRequestLog(void) {
@@ -895,7 +906,7 @@ int mbGetLocalStorage(mbView* v, const char* key, char* out, int out_cap) {
   if (!v->impl->GetLocalStorage(key, &result))
     return -1;  // absent, or storage unavailable on this origin
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbSetLocalStorage(mbView* v, const char* key, const char* value) {
@@ -911,7 +922,7 @@ int mbGetSessionStorage(mbView* v, const char* key, char* out, int out_cap) {
   if (!v->impl->GetSessionStorage(key, &result))
     return -1;
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbSetSessionStorage(mbView* v, const char* key, const char* value) {
@@ -944,7 +955,7 @@ void mbSetClipboard(const char* utf8_text) {
 int mbGetClipboard(char* out, int out_cap) {
   std::string text = mb::MbGetClipboardText();
   CopyToBuffer(text, out, out_cap);
-  return static_cast<int>(text.size());
+  return static_cast<int>(std::min<size_t>(text.size(), INT_MAX));
 }
 
 int mbSaveLocalStorage(mbView* v, char* out, int out_cap) {
@@ -952,7 +963,7 @@ int mbSaveLocalStorage(mbView* v, char* out, int out_cap) {
     return 0;
   std::string result = v->impl->SaveLocalStorage();
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 void mbLoadLocalStorage(mbView* v, const char* json) {
@@ -965,7 +976,7 @@ int mbDrainConsole(mbView* v, char* out, int out_cap) {
     return 0;
   std::string result = v->impl->DrainConsole();
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 void mbOnConsoleMessage(mbView* v, mbConsoleCallback cb, void* userdata) {
@@ -1002,7 +1013,7 @@ int mbGetURL(mbView* v, char* out, int out_cap) {
     return 0;
   std::string result = v->impl->GetURL();
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbGetTitle(mbView* v, char* out, int out_cap) {
@@ -1010,7 +1021,7 @@ int mbGetTitle(mbView* v, char* out, int out_cap) {
     return 0;
   std::string result = v->impl->GetTitle();
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbGetText(mbView* v, char* out, int out_cap) {
@@ -1018,7 +1029,7 @@ int mbGetText(mbView* v, char* out, int out_cap) {
     return 0;
   std::string result = v->impl->GetText();
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbGetHTML(mbView* v, char* out, int out_cap) {
@@ -1026,7 +1037,7 @@ int mbGetHTML(mbView* v, char* out, int out_cap) {
     return 0;
   std::string result = v->impl->GetHTML();
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbGetAXTree(mbView* v, char* out, int out_cap) {
@@ -1034,7 +1045,7 @@ int mbGetAXTree(mbView* v, char* out, int out_cap) {
     return 0;
   std::string result = v->impl->GetAXTree();
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbFindText(mbView* v, const char* text, int match_case) {
@@ -1069,7 +1080,7 @@ int mbGetTextForSelector(mbView* v, const char* css_selector, char* out,
   if (!v->impl->GetTextForSelector(css_selector, &result))
     return -1;  // no element matched
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbGetAllTextForSelector(mbView* v, const char* css_selector, char* out,
@@ -1080,7 +1091,7 @@ int mbGetAllTextForSelector(mbView* v, const char* css_selector, char* out,
   if (!v->impl->GetAllTextForSelector(css_selector, &result))
     return -1;  // invalid selector
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbSetHtmlForSelector(mbView* v, const char* css_selector, const char* html) {
@@ -1097,7 +1108,7 @@ int mbGetHtmlForSelector(mbView* v, const char* css_selector, char* out,
   if (!v->impl->GetHtmlForSelector(css_selector, &result))
     return -1;  // no element matched
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbGetAllValueForSelector(mbView* v, const char* css_selector, char* out,
@@ -1108,7 +1119,7 @@ int mbGetAllValueForSelector(mbView* v, const char* css_selector, char* out,
   if (!v->impl->GetAllValueForSelector(css_selector, &result))
     return -1;  // invalid selector
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbGetAllAttributeForSelector(mbView* v, const char* css_selector,
@@ -1119,7 +1130,7 @@ int mbGetAllAttributeForSelector(mbView* v, const char* css_selector,
   if (!v->impl->GetAllAttributeForSelector(css_selector, attr, &result))
     return -1;  // invalid selector
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbGetAttribute(mbView* v, const char* css_selector, const char* attr,
@@ -1130,7 +1141,7 @@ int mbGetAttribute(mbView* v, const char* css_selector, const char* attr,
   if (!v->impl->GetAttribute(css_selector, attr, &result))
     return -1;  // no element matched, or attribute absent
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbSetAttribute(mbView* v, const char* css_selector, const char* attr,
@@ -1148,7 +1159,7 @@ int mbGetValueForSelector(mbView* v, const char* css_selector, char* out,
   if (!v->impl->GetValueForSelector(css_selector, &result))
     return -1;  // no element matched, or no value property
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbGetCheckedForSelector(mbView* v, const char* css_selector) {
@@ -1177,7 +1188,7 @@ int mbGetComputedStyle(mbView* v, const char* css_selector, const char* property
   if (!v->impl->GetComputedStyle(css_selector, property, &result))
     return -1;  // no element matched
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 void mbReload(mbView* v) {
@@ -1199,7 +1210,7 @@ int mbGetResponseHeaders(mbView* v, char* out, int out_cap) {
     return 0;
   const std::string& result = v->impl->GetResponseHeaders();
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbGetLastError(mbView* v, char* out, int out_cap) {
@@ -1207,7 +1218,7 @@ int mbGetLastError(mbView* v, char* out, int out_cap) {
     return 0;
   const std::string& result = v->impl->GetLastError();
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbCanGoBack(mbView* v) {
@@ -1231,7 +1242,7 @@ int mbEvalJSIsolated(mbView* v, const char* utf8_script, char* out, int out_cap)
     return 0;
   std::string result = v->impl->EvalIsolated(utf8_script);
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbEvalJS(mbView* v, const char* utf8_script, char* out, int out_cap) {
@@ -1239,7 +1250,7 @@ int mbEvalJS(mbView* v, const char* utf8_script, char* out, int out_cap) {
     return 0;
   std::string result = v->impl->EvalToString(utf8_script);
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbGetFrameCount(mbView* v) {
@@ -1252,7 +1263,7 @@ int mbEvalJSInFrame(mbView* v, int frame_index, const char* utf8_script, char* o
     return 0;
   std::string result = v->impl->EvalInFrame(frame_index, utf8_script);
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbFillSelectorInFrame(mbView* v, int frame_index, const char* css_selector,
@@ -1272,7 +1283,7 @@ int mbGetTextForSelectorInFrame(mbView* v, int frame_index,
   if (!v->impl->GetTextForSelectorInFrame(frame_index, css_selector, &result))
     return -1;  // no element matched (or out-of-range / remote frame)
   CopyToBuffer(result, out, out_cap);
-  return static_cast<int>(result.size());
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }
 
 int mbEvalJSEx(mbView* v, const char* utf8_script, char* out_value,
@@ -1283,7 +1294,7 @@ int mbEvalJSEx(mbView* v, const char* utf8_script, char* out_value,
   std::string value = v->impl->EvalWithType(utf8_script, &type);
   CopyToBuffer(value, out_value, value_cap);  // value is arbitrary page content
   CopyToBuffer(type, out_type, type_cap);      // type is ASCII, but stay uniform
-  return static_cast<int>(value.size());
+  return static_cast<int>(std::min<size_t>(value.size(), INT_MAX));
 }
 
 int mbPaintToBitmap(mbView* v, void* out_bgra, int width, int height, int stride) {
@@ -1306,7 +1317,7 @@ int mbEncodePng(mbView* v, int width, int height, const unsigned char** out_data
   const std::vector<uint8_t>& data = v->impl->EncodedData();
   if (out_data)
     *out_data = data.data();  // valid until the next mbEncodePng / mbDestroyView
-  return static_cast<int>(data.size());
+  return static_cast<int>(std::min<size_t>(data.size(), INT_MAX));
 }
 
 int mbSavePdf(mbView* v, const char* path) {
