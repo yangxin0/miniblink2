@@ -92,10 +92,10 @@ Each is genuinely lower-value than the gap list. Verify tractability before comm
   several headless tells that are also correctness bugs. FIXED: `window.chrome` (absent → injected
   app/runtime/csi/loadTimes stub at document-start), `window.screen` (0x0 → 1920x1080 desktop monitor
   via patch 0015 in `WidgetBase::InitializeNonCompositing`), `window.outer{Width,Height}` (0x0 → inner
-  + ~79px chrome via `SetScreenRects`). Test 19d. REMAINING tell (deferred): `navigator.plugins` is
-  empty + `navigator.pdfViewerEnabled` is false (real Chrome has the 5 built-in PDF-viewer entries) —
-  needs blink plugin-data registration; medium effort. WebGL UNMASKED_RENDERER still reveals
-  "SwiftShader" (would need a WebGL getParameter shim) — low priority.
+  + ~79px chrome via `SetScreenRects`). Test 19d. `navigator.plugins`/`pdfViewerEnabled` ALSO fixed now (2026-06-28): `MbPluginRegistry`
+  (process broker) advertises `application/pdf` + `SetPluginsEnabled(true)`, so blink synthesizes the
+  canonical 5-entry PDF-viewer list and `pdfViewerEnabled=true`. Test 19e. REMAINING tell (low
+  priority): WebGL `UNMASKED_RENDERER` reveals "SwiftShader" (would need a WebGL getParameter shim).
 - **WebRTC peer connectivity** (#2): SDP/signaling works; real ICE/DTLS needs a P2P UDP socket stack.
   Zero headless-automation value — only do if explicitly asked.
 - **Cache large-blob durability** (#3): >256KB cached bodies intermittently read empty under rapid
