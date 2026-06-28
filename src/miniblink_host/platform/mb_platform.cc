@@ -39,6 +39,8 @@
 #include "third_party/blink/public/mojom/blob/blob_registry.mojom-blink.h"
 #include "third_party/blink/public/mojom/dom_storage/dom_storage.mojom-blink.h"
 #include "third_party/blink/public/mojom/gpu/gpu.mojom-blink.h"
+#include "third_party/blink/public/mojom/plugins/plugin_registry.mojom-blink.h"
+#include "base/files/file_path.h"
 #include "third_party/blink/public/mojom/mime/mime_registry.mojom-blink.h"
 #include "third_party/blink/public/platform/web_data.h"
 #include "third_party/blink/public/platform/web_dedicated_worker_host_factory_client.h"
@@ -86,6 +88,32 @@ class MbGpuDataManager : public blink::mojom::blink::GpuDataManager {
   }
 };
 
+// A minimal PluginRegistry advertising the built-in PDF viewer. blink only needs ONE
+// plugin carrying the "application/pdf" mime to flip IsPdfViewerAvailable() on; it then
+// synthesizes the spec's canonical 5-entry navigator.plugins list + the application/pdf &
+// text/pdf mime types itself (dom_plugin_array.cc), and navigator.pdfViewerEnabled becomes
+// true. Without this navigator.plugins is empty — a headless tell, and wrong: a real
+// Chrome always ships the PDF viewer. (Pairs with SetPluginsEnabled(true) in the view.)
+class MbPluginRegistry : public blink::mojom::blink::PluginRegistry {
+ public:
+  void GetPlugins(GetPluginsCallback callback) override {
+    auto mime = blink::mojom::blink::PluginMimeType::New();
+    mime->mime_type = "application/pdf";
+    mime->description = "Portable Document Format";
+    mime->file_extensions.push_back("pdf");
+    auto pdf = blink::mojom::blink::PluginInfo::New();
+    pdf->name = "Chrome PDF Viewer";
+    pdf->description = "Portable Document Format";
+    pdf->filename = base::FilePath(FILE_PATH_LITERAL("internal-pdf-viewer"));
+    pdf->background_color = 0;  // transparent
+    pdf->may_use_external_handler = false;
+    pdf->mime_types.push_back(std::move(mime));
+    blink::Vector<blink::mojom::blink::PluginInfoPtr> plugins;
+    plugins.push_back(std::move(pdf));
+    std::move(callback).Run(std::move(plugins));
+  }
+};
+
 // A broker that binds the few in-process services we provide (MimeRegistry) and drops
 // the rest (no browser process).
 class MbEmptyBroker : public blink::ThreadSafeBrowserInterfaceBrokerProxy {
@@ -115,6 +143,13 @@ class MbEmptyBroker : public blink::ThreadSafeBrowserInterfaceBrokerProxy {
     // [Sync]). Gives same-origin contexts a shared store + the `storage` event.
     if (auto r = receiver.As<blink::mojom::blink::DomStorageProvider>()) {
       BindDomStorageProviderOnServiceThread(std::move(r));
+      return;
+    }
+    // navigator.plugins / pdfViewerEnabled: advertise the built-in PDF viewer.
+    // GetPlugins is [Sync] but trivial + same-thread (like GpuDataManager above).
+    if (auto r = receiver.As<blink::mojom::blink::PluginRegistry>()) {
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbPluginRegistry>(),
+                                  std::move(r));
       return;
     }
     // Drop everything else.

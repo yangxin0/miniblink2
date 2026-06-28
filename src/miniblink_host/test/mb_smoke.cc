@@ -1466,6 +1466,29 @@ int main() {
            "chrome=[" + chrome + "] screen=[" + scr + "] outer=[" + outer + "]");
   }
 
+  // 19e. navigator.plugins / navigator.pdfViewerEnabled: a real Chrome always ships the
+  // built-in PDF viewer, so navigator.plugins is the spec's canonical 5-entry list and
+  // pdfViewerEnabled is true. An empty plugins array is a classic headless tell. The
+  // MbPluginRegistry advertises application/pdf (+ SetPluginsEnabled) and blink synthesizes
+  // the rest. Sync mojo GetPlugins serviced same-thread without hanging.
+  {
+    mbView* pv = mbCreateView(800, 600);
+    mbLoadHTML(pv, "<body>x</body>", "https://plugins.example/");
+    const std::string n = Eval(pv, "String(navigator.plugins.length)");
+    const std::string names =
+        Eval(pv, "[].map.call(navigator.plugins,function(p){return p.name;}).join('|')");
+    const std::string pdf = Eval(pv, "String(navigator.pdfViewerEnabled)");
+    const std::string mimes =
+        Eval(pv, "[].map.call(navigator.mimeTypes,function(m){return m.type;}).sort().join('|')");
+    mbDestroyView(pv);
+    Expect(n == "5" &&
+               names == "PDF Viewer|Chrome PDF Viewer|Chromium PDF Viewer|"
+                        "Microsoft Edge PDF Viewer|WebKit built-in PDF" &&
+               pdf == "true" && mimes == "application/pdf|text/pdf",
+           "navigator.plugins is the canonical Chrome PDF list + pdfViewerEnabled=true",
+           "n=[" + n + "] pdf=[" + pdf + "] mimes=[" + mimes + "] names=[" + names + "]");
+  }
+
   // 20. Clip capture: a green box at logical (50,60,100,40). Clipping exactly to it
   // must yield an all-green bitmap (proves the region offset lands at the origin).
   mbSetDeviceScaleFactor(v, 1.0f);  // undo case-15's 2x so clip math is 1:1

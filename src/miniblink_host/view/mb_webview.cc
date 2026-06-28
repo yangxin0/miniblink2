@@ -234,6 +234,11 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
   settings->SetAllowFileAccessFromFileURLs(true);
   settings->SetAllowUniversalAccessFromFileURLs(true);
   settings->SetLocalStorageEnabled(true);  // else window.localStorage is null (TypeError)
+  // Enable the (built-in PDF) plugin so navigator.plugins is the canonical Chrome PDF
+  // list and navigator.pdfViewerEnabled is true (matches the MbPluginRegistry that
+  // advertises application/pdf). Off by default -> empty navigator.plugins, a headless
+  // tell + wrong (real Chrome always ships the PDF viewer).
+  settings->SetPluginsEnabled(true);
   // Let editor Cut/Copy/Paste (mbExecuteEditCommand) and execCommand reach the clipboard —
   // blink gates these behind these flags (off by default), so without them Copy returns
   // false and never writes the (in-process) clipboard.
