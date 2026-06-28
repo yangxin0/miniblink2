@@ -1540,6 +1540,30 @@ int main() {
            "default=[" + deflt + "] got=[" + got + "]");
   }
 
+  // 23d3. watchPosition does NOT flood (it held replies until the fix changes) AND delivers a
+  // live UPDATE when mbSetGeolocation moves the position. Was a busy-loop (~180 callbacks/sec)
+  // because QueryNextPosition replied instantly every time; now it reports once then waits.
+  {
+    mbSetGeolocation(1.0, 2.0, 5.0);
+    mbLoadHTML(v, "<body>w</body>", "https://geowatch.test/");
+    Eval(v, "window.__wc=0;window.__wlat='';navigator.geolocation.watchPosition("
+            "function(p){window.__wc++;window.__wlat=p.coords.latitude.toFixed(1);},"
+            "function(e){window.__wc=-1;});");
+    mbWait(v, 400);
+    const std::string after_initial = Eval(v, "window.__wc+','+window.__wlat");
+    mbSetGeolocation(9.0, 8.0, 5.0);  // move -> the watcher should get one update
+    mbWait(v, 400);
+    const std::string after_move = Eval(v, "window.__wc+','+window.__wlat");
+    mbClearGeolocation();
+    // After the initial fire: exactly 1 callback at lat 1.0 (NOT a flood). After the move:
+    // a small bounded count (<=3) ending at lat 9.0.
+    int c1 = atoi(after_initial.c_str()), c2 = atoi(after_move.c_str());
+    Expect(c1 == 1 && after_initial.find(",1.0") != std::string::npos &&
+               c2 >= 2 && c2 <= 3 && after_move.find(",9.0") != std::string::npos,
+           "watchPosition: no flood (1 initial) + delivers an update on mbSetGeolocation move",
+           "initial=[" + after_initial + "] moved=[" + after_move + "]");
+  }
+
   // 23d2. permissions.query({name:'geolocation'}) tracks the configured fix — GRANTED once
   // mbSetGeolocation sets one, DENIED after mbClearGeolocation — so a page that gates
   // getCurrentPosition on the permission state agrees with what getCurrentPosition actually does

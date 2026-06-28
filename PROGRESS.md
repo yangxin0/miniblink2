@@ -45,7 +45,7 @@ watchdog SIGKILL, then `pgrep -x`). Network features verified against PUBLIC hos
 | **1** | **Software compositor / cc raster → pixels** | **✅ COMPLETE** — a live page rasters through cc → viz::Display → bitmap, in-process headless (opt-in, default off). See below. |
 | 2 | WebRTC | **DONE (SDP) — connectivity deferred by-design.** SDP/signaling WORKS (RTCPeerConnection + createOffer/Answer + data-channel SDP + two-peer handshake to signalingState=stable). Real peer connectivity (ICE/DTLS) deferred: zero headless-automation value + needs heavy `//services/network` or a reimplemented P2P UDP socket stack (diagnosis + reuse plan in archive if ever wanted). getUserMedia = no devices (headless). |
 | 3 | Cache-body large-blob durability | **ACCEPTED by-design** (4 investigations) — >256KB cached bodies read in RAPID succession intermittently come back empty: blink's in-process BlobBytesProvider stalls/empties under load. Found a real sub-bug (MbBlob::Clone copied empty data_ before async materialize — fix: defer clone), but the deeper provider stall remains + the fix risks page-blocking HANGS (worse than the current intermittent-empty). Not safely fixable from our layer. |
-| 4 | Geolocation | deferred |
+| 4 | Geolocation | **✅ DONE** — getCurrentPosition + permissions tracked the configured fix already; this tick FIXED watchPosition (was flooding ~180 cb/s because QueryNextPosition replied instantly every re-query) to report once then hold until `mbSetGeolocation` changes the fix, delivering a live update per move. Test 23d3. |
 | 5 | PWA install | deferred |
 | 6 | Permissions API (full) | deferred |
 | 7 | Per-origin storage isolation hardening | deferred |

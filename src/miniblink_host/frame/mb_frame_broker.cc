@@ -1164,28 +1164,78 @@ bool GeoConfigured() {
   return GeoGet(&fix);
 }
 
+// watchPosition() holds a QueryNextPosition reply until the configured fix CHANGES (otherwise
+// blink re-queries immediately and the watcher floods). Held replies live here as closures that
+// each post the new position to their own (service-thread) sequence. Guarded by GeoLock.
+std::vector<base::OnceClosure>& GeoWaiters() {
+  static auto* v = new std::vector<base::OnceClosure>();
+  return *v;
+}
+
+// The GeopositionResult for the current fix: a position when set, else a POSITION_UNAVAILABLE
+// error (so a watch started while configured reports unavailable once the fix is cleared).
+device::mojom::blink::GeopositionResultPtr MakeGeoResult() {
+  MbGeoFix fix;
+  if (!GeoGet(&fix)) {
+    auto err = device::mojom::blink::GeopositionError::New();
+    err->error_code =
+        device::mojom::blink::GeopositionErrorCode::kPositionUnavailable;
+    err->error_message = "Position unavailable";
+    err->error_technical = "";
+    return device::mojom::blink::GeopositionResult::NewError(std::move(err));
+  }
+  auto pos = device::mojom::blink::Geoposition::New();
+  pos->latitude = fix.lat;
+  pos->longitude = fix.lng;
+  pos->accuracy = fix.accuracy > 0 ? fix.accuracy : 10.0;
+  pos->timestamp = base::Time::Now();
+  return device::mojom::blink::GeopositionResult::NewPosition(std::move(pos));
+}
+
+// Wake every held watchPosition reply — called after the fix is set/cleared. Each waiter
+// posts the fresh result to its watcher's sequence. Runs on the main thread (the C-ABI setter).
+void GeoNotifyChange() {
+  std::vector<base::OnceClosure> waiters;
+  {
+    base::AutoLock al(GeoLock());
+    waiters.swap(GeoWaiters());
+  }
+  for (auto& w : waiters)
+    std::move(w).Run();
+}
+
 // device.mojom.Geolocation: hands back the configured fix on every position query.
 class MbGeolocation : public device::mojom::blink::Geolocation {
  public:
   void SetHighAccuracyHint(bool) override {}
+  // getCurrentPosition + the FIRST watchPosition query reply immediately; every later query
+  // (watchPosition re-queries for the "next" position) is HELD until the fix changes — otherwise
+  // it would flood (blink re-queries instantly and our fix is always "available").
   void QueryNextPosition(QueryNextPositionCallback callback) override {
-    std::move(callback).Run(MakeResult());
+    if (!first_done_) {
+      first_done_ = true;
+      std::move(callback).Run(MakeGeoResult());
+      return;
+    }
+    auto runner = base::SequencedTaskRunner::GetCurrentDefault();
+    base::AutoLock al(GeoLock());
+    GeoWaiters().push_back(base::BindOnce(
+        [](scoped_refptr<base::SequencedTaskRunner> r,
+           QueryNextPositionCallback c) {
+          r->PostTask(FROM_HERE, base::BindOnce(
+                                     [](QueryNextPositionCallback c) {
+                                       std::move(c).Run(MakeGeoResult());
+                                     },
+                                     std::move(c)));
+        },
+        std::move(runner), std::move(callback)));
   }
   void QueryCachedPosition(QueryCachedPositionCallback callback) override {
-    std::move(callback).Run(MakeResult());
+    std::move(callback).Run(MakeGeoResult());
   }
 
  private:
-  static device::mojom::blink::GeopositionResultPtr MakeResult() {
-    MbGeoFix fix;
-    GeoGet(&fix);  // only reached when granted, i.e. fix.set is true
-    auto pos = device::mojom::blink::Geoposition::New();
-    pos->latitude = fix.lat;
-    pos->longitude = fix.lng;
-    pos->accuracy = fix.accuracy > 0 ? fix.accuracy : 10.0;
-    pos->timestamp = base::Time::Now();
-    return device::mojom::blink::GeopositionResult::NewPosition(std::move(pos));
-  }
+  bool first_done_ = false;
 };
 
 // blink.mojom.GeolocationService: grants only when a fix is configured (else the page's
@@ -1419,13 +1469,19 @@ class MbBrowserInterfaceBroker
 }  // namespace
 
 void MbSetGeolocation(double lat, double lng, double accuracy) {
-  base::AutoLock al(GeoLock());
-  GeoFix() = MbGeoFix{/*set=*/true, lat, lng, accuracy};
+  {
+    base::AutoLock al(GeoLock());
+    GeoFix() = MbGeoFix{/*set=*/true, lat, lng, accuracy};
+  }
+  GeoNotifyChange();  // deliver the new position to any live watchPosition watchers
 }
 
 void MbClearGeolocation() {
-  base::AutoLock al(GeoLock());
-  GeoFix() = MbGeoFix{};
+  {
+    base::AutoLock al(GeoLock());
+    GeoFix() = MbGeoFix{};
+  }
+  GeoNotifyChange();
 }
 
 void MbSetClipboardText(const std::string& text) {
