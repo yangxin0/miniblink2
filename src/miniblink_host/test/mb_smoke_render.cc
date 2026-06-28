@@ -2660,6 +2660,33 @@ static void RunCases(mbView* v, int W, int H) {
     }
   }
 
+  // 78c2. Page-driven session history is COMPLETE: on a FRESH view, history.length tracks
+  // pushState entries (the archive flagged it stuck at 1), and history.back()/forward() traverse
+  // them firing popstate with the right location. start -> /a -> /b: length 3, back to /a (pop),
+  // back to /start (pop), forward to /a (pop). (A fresh view: the shared `v` accumulates ~50
+  // navigations across the suite + caps history.length at 50, which is itself correct.)
+  {
+    mbView* hv = mbCreateView(W, H);
+    mbLoadHTML(hv, "<body>h</body>", "https://histlen.test/start");
+    mbRunJS(hv, "window.__log='';addEventListener('popstate',function(){"
+                "window.__log+=location.pathname+';';});"
+                "history.pushState({},'','/a');history.pushState({},'','/b');");
+    mbWait(hv, 30);
+    const std::string len = Eval(hv, "''+history.length");
+    mbRunJS(hv, "history.back();");  // -> /a
+    mbWaitForFunction(hv, "window.__log.indexOf('/a;')>=0", 2000);
+    mbRunJS(hv, "history.back();");  // -> /start
+    mbWaitForFunction(hv, "window.__log.indexOf('/start;')>=0", 2000);
+    mbRunJS(hv, "history.forward();");  // -> /a
+    mbWaitForFunction(hv, "window.__log.split('/a;').length>=3", 2000);
+    const std::string log = Eval(hv, "window.__log");
+    const std::string loc = Eval(hv, "location.pathname");
+    mbDestroyView(hv);
+    Expect(len == "3" && log == "/a;/start;/a;" && loc == "/a",
+           "session history: history.length tracks pushState; back/forward traverse + popstate",
+           "len=[" + len + "] log=[" + log + "] loc=[" + loc + "]");
+  }
+
   // 78d. BroadcastChannel cross-origin isolation: two views of DIFFERENT origins with the SAME
   // channel name must NOT cross-talk (BroadcastChannel is same-origin per spec). The in-process
   // registry now scopes delivery by the frame's origin (frame_key->origin map).
