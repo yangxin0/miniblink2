@@ -753,7 +753,7 @@ class MbIDBTransactionImpl : public IDBTransaction {
   void Put(int64_t object_store_id,
            std::unique_ptr<blink::IDBValue> value,
            std::unique_ptr<blink::IDBKey> key,
-           m::IDBPutMode,
+           m::IDBPutMode put_mode,
            blink::Vector<blink::IDBIndexKeys> index_keys,
            PutCallback callback) override {
     EnsureSnapshot(backend_, txn_id_);  // first mutation arms transaction rollback
@@ -785,6 +785,18 @@ class MbIDBTransactionImpl : public IDBTransaction {
           m::IDBError::New(m::IDBException::kDataError,
                            blink::String("unsupported key type"))));
       return;
+    }
+    // add() (AddOnly) must FAIL with ConstraintError if the primary key already exists —
+    // unlike put() (AddOrUpdate), which overwrites. (Previously the put mode was ignored, so
+    // add() silently overwrote and never triggered the error-driven transaction abort/rollback.)
+    if (put_mode == m::IDBPutMode::AddOnly) {
+      auto store = backend_->data.find(object_store_id);
+      if (store != backend_->data.end() && store->second.count(ekey)) {
+        std::move(callback).Run(m::IDBTransactionPutResult::NewErrorResult(
+            m::IDBError::New(m::IDBException::kConstraintError,
+                             blink::String("Key already exists in the object store"))));
+        return;
+      }
     }
     // Enforce unique-index constraints: reject if a unique index key already maps to a
     // DIFFERENT record.

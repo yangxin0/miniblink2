@@ -2405,6 +2405,35 @@ int main() {
            "idbAB=[" + r + "]");
   }
 
+  // 23x2. IndexedDB add() ConstraintError + ERROR-DRIVEN atomicity: add() with an existing key
+  // must FAIL (ConstraintError, unlike put() which overwrites), and if that error goes UNHANDLED
+  // the whole transaction auto-aborts — rolling back a prior put in the same txn. (The put mode
+  // used to be ignored, so add() silently overwrote and never triggered the abort.)
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://idbadd.test/");
+    Eval(v,
+         "window.__r8='';"
+         "var __o=indexedDB.open('mdbAdd',1);"
+         "__o.onupgradeneeded=function(e){e.target.result.createObjectStore('s',{keyPath:'id'});};"
+         "__o.onsuccess=function(e){var db=e.target.result;"
+         "var t1=db.transaction('s','readwrite');t1.objectStore('s').add({id:1,v:'a'});"
+         "t1.oncomplete=function(){"
+         "var t2=db.transaction('s','readwrite');var s=t2.objectStore('s');"
+         "s.put({id:2,v:'b'});"  // succeeds, then gets rolled back by the abort
+         "var rq=s.add({id:1,v:'dup'});"  // ConstraintError (key 1 exists)
+         "rq.onerror=function(ev){window.__err=ev.target.error.name;};"  // unhandled -> abort
+         "t2.onabort=function(){"
+         "var t3=db.transaction('s');var s3=t3.objectStore('s');"
+         "var g1=s3.get(1);var c=s3.count();"
+         "t3.oncomplete=function(){window.__r8='err:'+window.__err+',id1:'+g1.result.v"
+         "+',count:'+c.result;};};};};");
+    mbWaitForFunction(v, "window.__r8!==''", 4000);
+    const std::string r = Eval(v, "window.__r8");
+    Expect(r == "err:ConstraintError,id1:a,count:1",
+           "IndexedDB add() rejects a duplicate key + the unhandled error rolls back the txn",
+           "r8=[" + r + "]");
+  }
+
   // 23y. IndexedDB compound (array) primary keys: a store with keyPath ['a','b'] keys records
   // by the [a,b] tuple. get([1,2]) finds the exact record, and getAll() returns records in
   // compound-key order ([1,1] < [1,2] < [2,0]) — verifying the order-preserving array encoding.
