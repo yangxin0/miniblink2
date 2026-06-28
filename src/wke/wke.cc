@@ -8,6 +8,8 @@
 #include "wke/wke.h"
 
 #include <algorithm>
+#include <cctype>
+#include <charconv>
 #include <climits>
 #include <cmath>
 #include <cstdio>
@@ -99,6 +101,7 @@ wkeWebView AnyLiveView() {
   return LiveViews().empty() ? nullptr : LiveViews().back();
 }
 void ForgetBindingsForView(wkeWebView wv);  // defined with the binding storage
+void ClearNetHooksForView(wkeWebView wv);  // defined with the net-hook storage
 // The cookie jar file path (process-wide, matching mbSave/LoadCookies). Set via
 // wkeSetCookieJarPath; the Flush/Reload cookie commands persist to/from it.
 // Leaked (never destroyed) to avoid an exit-time destructor.
@@ -215,8 +218,12 @@ void DrainPageEvents(wkeWebView wv) {
 void ApplyZoom(wkeWebView wv) {
   if (!wv || !wv->view || wv->zoom_factor == 1.0)
     return;
+  // Build the zoom literal with '.'-decimal regardless of LC_NUMERIC (std::to_string
+  // honors the locale, so a comma-decimal locale would emit an unparseable "1,5").
+  char zoom[32];
+  std::snprintf(zoom, sizeof(zoom), "%.17g", wv->zoom_factor);
   const std::string js = "try{document.documentElement.style.zoom='" +
-                         std::to_string(wv->zoom_factor) + "'}catch(e){}";
+                         std::string(zoom) + "'}catch(e){}";
   char buf[8] = {0};
   mbEvalJS(wv->view, js.c_str(), buf, sizeof(buf));
 }
@@ -291,6 +298,7 @@ void wkeDestroyWebView(wkeWebView webView) {
   auto& live = LiveViews();
   live.erase(std::remove(live.begin(), live.end(), webView), live.end());
   ForgetBindingsForView(webView);  // free this view's native bindings
+  ClearNetHooksForView(webView);   // drop any process-wide net hooks this view owned
   if (webView->view)
     mbDestroyView(webView->view);
   delete webView;
@@ -1259,6 +1267,10 @@ const utf8* wkeGetSource(wkeWebView webView) {
   if (!webView || !webView->view)
     return "";
   const int len = mbGetHTML(webView->view, nullptr, 0);  // size first (pages vary)
+  if (len <= 0) {  // empty/failed: guard against assign(nullptr) from a 0-size buf
+    webView->source_cache.clear();
+    return webView->source_cache.c_str();
+  }
   std::vector<char> buf(static_cast<size_t>(len) + 1, 0);
   mbGetHTML(webView->view, buf.data(), len + 1);
   webView->source_cache.assign(buf.data());
@@ -1671,6 +1683,10 @@ struct JsRecord {
   std::string type;     // "number"/"string"/.../"array"/"null" from mbEvalJSEx
   std::string literal;  // a JS expression reproducing this value: a slot ref
                         // "window.__mbslots[h]" or a primitive literal ("5"/"x").
+  // The view whose window.__mbslots holds this handle's live value (null for a
+  // primitive with no slot). Slot reads/eviction must target THIS view, not the
+  // caller's es-derived one, so a handle works regardless of which es is passed.
+  wkeWebView owner = nullptr;
 };
 std::map<jsValue, JsRecord>& JsRegistry() {
   static auto* r = new std::map<jsValue, JsRecord>();
@@ -1696,6 +1712,19 @@ const JsRecord* JsLookup(jsValue v) {
   return it == reg.end() ? nullptr : &it->second;
 }
 
+// The view that owns handle `v`'s window.__mbslots slot, if it's still live;
+// otherwise `fallback` (the caller's es-derived view). Guarding on liveness keeps
+// a stale handle whose owner was destroyed from dereferencing a freed view.
+wkeWebView OwnerView(jsValue v, wkeWebView fallback) {
+  const JsRecord* r = JsLookup(v);
+  if (r && r->owner) {
+    auto& live = LiveViews();
+    if (std::find(live.begin(), live.end(), r->owner) != live.end())
+      return r->owner;
+  }
+  return fallback;
+}
+
 // A JS expression that reproduces jsValue `v` (for embedding it in a call). For a
 // slot-backed value it's the slot ref; for a primitive constructor it's the
 // stored literal; unknown handles read as undefined.
@@ -1718,18 +1747,25 @@ void EvictOldJsRecords() {
   if (reg.size() < kJsRegistrySoftCap)
     return;
   const size_t to_drop = reg.size() - kJsRegistryRetain;
-  std::string del_js;  // prune the evicted slot-backed values from the page heap
+  // Prune each evicted slot-backed value from its OWNING view's page heap (not a
+  // broadcast to every view, which would delete unrelated slots that happen to share
+  // an id in another view).
+  std::map<wkeWebView, std::string> del_by_view;
   size_t dropped = 0;
   for (auto it = reg.begin(); dropped < to_drop && it != reg.end(); ++dropped) {
-    if (it->second.literal.rfind("window.__mbslots[", 0) == 0)
-      del_js += "delete window.__mbslots[" + std::to_string(it->first) + "];";
+    if (it->second.owner &&
+        it->second.literal.rfind("window.__mbslots[", 0) == 0)
+      del_by_view[it->second.owner] +=
+          "delete window.__mbslots[" + std::to_string(it->first) + "];";
     it = reg.erase(it);
   }
-  if (!del_js.empty()) {
-    char tmp[8] = {0};
-    for (wkeWebView lv : LiveViews())
-      if (lv && lv->view)
-        mbEvalJS(lv->view, del_js.c_str(), tmp, sizeof(tmp));
+  char tmp[8] = {0};
+  auto& live = LiveViews();
+  for (auto& kv : del_by_view) {
+    wkeWebView lv = kv.first;
+    if (lv && lv->view && !kv.second.empty() &&
+        std::find(live.begin(), live.end(), lv) != live.end())
+      mbEvalJS(lv->view, kv.second.c_str(), tmp, sizeof(tmp));
   }
 }
 
@@ -1740,7 +1776,7 @@ jsValue MakeLiteral(const std::string& value, const std::string& type,
   auto& reg = JsRegistry();
   EvictOldJsRecords();
   const jsValue h = g_next_js_value++;
-  reg[h] = JsRecord{value, type, literal};
+  reg[h] = JsRecord{value, type, literal, /*owner=*/nullptr};  // primitive: no slot
   return h;
 }
 
@@ -1794,21 +1830,25 @@ jsValue StoreEval(wkeWebView wv, const std::string& script) {
       "=(" + script + "));}catch(e){" + slot + "=undefined;return undefined;}})()";
   std::vector<char> value(1 << 16, 0);  // 64 KiB result cap
   char type[16] = {0};
-  mbEvalJSEx(wv->view, wrapped.c_str(), value.data(),
-             static_cast<int>(value.size()), type, sizeof(type));
+  int n = mbEvalJSEx(wv->view, wrapped.c_str(), value.data(),
+                     static_cast<int>(value.size()), type, sizeof(type));
   bool slotted = true;
   if (type[0] == '\0') {  // wrapper didn't parse (a statement) -> plain eval
     slotted = false;
     std::fill(value.begin(), value.end(), 0);
-    mbEvalJSEx(wv->view, script.c_str(), value.data(),
-               static_cast<int>(value.size()), type, sizeof(type));
+    n = mbEvalJSEx(wv->view, script.c_str(), value.data(),
+                   static_cast<int>(value.size()), type, sizeof(type));
   }
   // A slotted result is navigable/callable via its slot ref; a fallback isn't.
   std::string literal =
       slotted ? ("window.__mbslots[" + std::to_string(handle) + "]")
               : std::string();
-  reg[handle] =
-      JsRecord{std::string(value.data()), std::string(type), std::move(literal)};
+  // Use the returned length so an embedded NUL in a JS string result isn't truncated
+  // (clamped to the buffer: the return reports the full length, which may exceed cap).
+  const size_t vlen =
+      n < 0 ? 0 : std::min(static_cast<size_t>(n), value.size() - 1);
+  reg[handle] = JsRecord{std::string(value.data(), vlen), std::string(type),
+                         std::move(literal), /*owner=*/wv};
   return handle;
 }
 
@@ -1838,9 +1878,13 @@ jsValue StoreEvalInFrame(wkeWebView wv, int frame_index,
   EvictOldJsRecords();  // bound the registry; evicts only OLDEST handles
   const jsValue handle = g_next_js_value++;
   std::vector<char> value(1 << 16, 0);  // 64 KiB result cap
-  mbEvalJSInFrame(wv->view, frame_index, script.c_str(), value.data(),
-                  static_cast<int>(value.size()));
-  reg[handle] = JsRecord{std::string(value.data()), "string", std::string()};
+  const int n = mbEvalJSInFrame(wv->view, frame_index, script.c_str(),
+                                value.data(), static_cast<int>(value.size()));
+  // Use the returned length so an embedded NUL isn't truncated (clamped to the buffer).
+  const size_t vlen =
+      n < 0 ? 0 : std::min(static_cast<size_t>(n), value.size() - 1);
+  reg[handle] = JsRecord{std::string(value.data(), vlen), "string", std::string(),
+                         /*owner=*/wv};
   return handle;
 }
 }  // namespace
@@ -2035,8 +2079,21 @@ void wkeJsBindFunction(wkeWebView webView, const char* name,
 }
 
 namespace {
-// Numeric value of a jsValue, keyed off its JS TYPE. strtod (not atoi/atof) parses the
-// number forms V8 stringifies, including exponential notation ("1e+21") — atoi("1e+21")
+// Parse the leading number from `s` locale-independently. std::from_chars always uses
+// the C locale ('.'-decimal), so "1.5" parses as 1.5 even under a comma-decimal
+// LC_NUMERIC where strtod/atof would stop at "1". Handles exponential notation
+// ("1e+21") and (case-insensitively) inf/nan; 0.0 if nothing parses (matching strtod).
+double ParseCNumber(const std::string& s) {
+  const char* begin = s.c_str();
+  const char* end = begin + s.size();
+  while (begin < end && std::isspace(static_cast<unsigned char>(*begin)))
+    ++begin;
+  double d = 0.0;
+  const auto res = std::from_chars(begin, end, d);
+  return res.ec == std::errc() ? d : 0.0;
+}
+// Numeric value of a jsValue, keyed off its JS TYPE. ParseCNumber (not atoi/atof) parses
+// the number forms V8 stringifies, including exponential notation ("1e+21") — atoi("1e+21")
 // returned 1. boolean -> 1/0; null/undefined/object -> 0/NaN.
 double JsToNumber(const JsRecord* r) {
   if (!r)
@@ -2046,7 +2103,7 @@ double JsToNumber(const JsRecord* r) {
   if (r->type == "null")
     return 0.0;
   if (r->type == "number" || r->type == "string")
-    return std::strtod(r->value.c_str(), nullptr);
+    return ParseCNumber(r->value);
   return std::nan("");  // undefined / object / array / function
 }
 }  // namespace
@@ -2084,7 +2141,7 @@ bool jsToBoolean(jsExecState /*es*/, jsValue v) {
   if (t == "boolean")
     return r->value == "true";
   if (t == "number") {
-    const double d = std::atof(r->value.c_str());
+    const double d = ParseCNumber(r->value);  // C-locale parse ('.'-decimal)
     return d != 0.0 && !std::isnan(d);  // 0, -0, NaN are falsey
   }
   if (t == "string")
@@ -2107,7 +2164,7 @@ const utf8* jsToString(jsExecState es, jsValue v) {
     JsStringBuf().clear();
     return JsStringBuf().c_str();
   }
-  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  wkeWebView wv = OwnerView(v, reinterpret_cast<wkeWebView>(es));
   if (wv && wv->view && !r->literal.empty() &&
       (r->type == "object" || r->type == "array")) {
     std::vector<char> buf(1 << 16, 0);
@@ -2161,20 +2218,24 @@ bool jsIsFalse(jsValue v) {
 }
 
 int jsGetLength(jsExecState es, jsValue object) {
-  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  wkeWebView wv = OwnerView(object, reinterpret_cast<wkeWebView>(es));
   if (!wv || !wv->view)
     return 0;
-  // Read window.__mbslots[object].length safely (0 if not array / not present).
-  const std::string script = "(function(){try{return window.__mbslots[" +
+  // Read window.__mbslots[object].length safely (0 if not present). Gate on
+  // Array.isArray so a non-array (e.g. a function's .length arity, or a string's
+  // length) reads 0 — classic wke's jsGetLength is array-oriented.
+  const std::string script = "(function(){try{var o=window.__mbslots[" +
                              std::to_string(object) +
-                             "].length}catch(e){return 0}})()";
+                             "];return Array.isArray(o)?o.length:0}catch(e){return 0}})()";
   char buf[32] = {0};
   mbEvalJS(wv->view, script.c_str(), buf, sizeof(buf));
-  return std::atoi(buf);
+  int len = 0;
+  std::from_chars(buf, buf + std::strlen(buf), len);  // C-locale int parse
+  return len;
 }
 
 jsValue jsGetAt(jsExecState es, jsValue object, int index) {
-  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  wkeWebView wv = OwnerView(object, reinterpret_cast<wkeWebView>(es));
   if (!wv || !wv->view)
     return 0;
   // Index into the parked value, returning a fresh navigable jsValue (undefined
@@ -2188,7 +2249,7 @@ jsValue jsGetAt(jsExecState es, jsValue object, int index) {
 }
 
 jsValue jsGet(jsExecState es, jsValue object, const char* prop) {
-  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  wkeWebView wv = OwnerView(object, reinterpret_cast<wkeWebView>(es));
   if (!wv || !wv->view || !prop)
     return 0;
   // Read window.__mbslots[object][prop] into a fresh navigable handle.
@@ -2223,7 +2284,7 @@ jsKeys* jsGetKeys(jsExecState es, jsValue object) {
   holder->keys.length = 0;
   holder->keys.keys = nullptr;
 
-  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  wkeWebView wv = OwnerView(object, reinterpret_cast<wkeWebView>(es));
   if (!wv || !wv->view)
     return &holder->keys;
 
@@ -2309,7 +2370,7 @@ void EvalVoid(wkeWebView wv, const std::string& script) {
 }  // namespace
 
 void jsSet(jsExecState es, jsValue object, const char* prop, jsValue value) {
-  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  wkeWebView wv = OwnerView(object, reinterpret_cast<wkeWebView>(es));
   if (!wv || !wv->view || !prop)
     return;
   EvalVoid(wv, "(function(){try{window.__mbslots[" + std::to_string(object) +
@@ -2318,7 +2379,7 @@ void jsSet(jsExecState es, jsValue object, const char* prop, jsValue value) {
 }
 
 void jsSetAt(jsExecState es, jsValue object, int index, jsValue value) {
-  wkeWebView wv = reinterpret_cast<wkeWebView>(es);
+  wkeWebView wv = OwnerView(object, reinterpret_cast<wkeWebView>(es));
   if (!wv || !wv->view)
     return;
   EvalVoid(wv, "(function(){try{window.__mbslots[" + std::to_string(object) +
@@ -2460,6 +2521,25 @@ void WkeSyncResponseHook() {
     mbSetResponseCallback(&WkeDispatchResponse, nullptr);
   else
     mbSetResponseCallback(nullptr, nullptr);
+}
+
+// Drop any process-wide net hooks owned by a view being destroyed, deregistering the
+// matching host callback so a freed wkeWebView can never be invoked on a later request
+// (the hooks are process-global; without this they keep a dangling handle -> UAF).
+void ClearNetHooksForView(wkeWebView wv) {
+  if (g_wke_net_req.wv == wv) {
+    g_wke_net_req = {nullptr, nullptr, nullptr};
+    mbSetRequestCallback(nullptr, nullptr);
+  }
+  if (g_wke_load_begin.wv == wv) {
+    g_wke_load_begin = {nullptr, nullptr, nullptr};
+    mbSetRequestMockCallback(nullptr, nullptr);
+  }
+  if (g_wke_net_resp.wv == wv)
+    g_wke_net_resp = {nullptr, nullptr, nullptr};
+  if (g_wke_load_end.wv == wv)
+    g_wke_load_end = {nullptr, nullptr, nullptr};
+  WkeSyncResponseHook();  // deregister the shared response cb if both sides now clear
 }
 }  // namespace
 

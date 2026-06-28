@@ -4414,6 +4414,181 @@ int main() {
     Expect(ok, "MbShouldRetryFetch: no write retries; 204/304/HEAD not anomalies (#2)");
   }
 
+  // REG #1. IndexedDB open() with NO version must default to version 1, fire
+  // onupgradeneeded (so a store can be created), then a write/read round-trips.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://idbreg.test/");
+    Eval(v,
+         "window.__r1='';window.__up1=0;"
+         "var q=indexedDB.open('regdb1');"  // no explicit version
+         "q.onupgradeneeded=function(e){window.__up1=1;"
+         "e.target.result.createObjectStore('s',{keyPath:'id'});};"
+         "q.onsuccess=function(e){var db=e.target.result;"
+         "var tx=db.transaction('s','readwrite');tx.objectStore('s').put({id:1,v:'hi'});"
+         "tx.oncomplete=function(){var g=db.transaction('s').objectStore('s').get(1);"
+         "g.onsuccess=function(){window.__r1='up'+window.__up1+',v'+db.version+','+"
+         "(g.result?g.result.v:'null');};g.onerror=function(){window.__r1='geterr';};};"
+         "tx.onerror=function(){window.__r1='txerr';};};"
+         "q.onerror=function(){window.__r1='operr';};");
+    mbWaitForFunction(v, "window.__r1!==''", 4000);
+    const std::string r = Eval(v, "window.__r1");
+    Expect(r == "up1,v1,hi",
+           "IndexedDB open() with no version fires upgradeneeded + creates a store",
+           "r1=[" + r + "]");
+  }
+
+  // REG #2. IndexedDB downgrade rejects: open 'regdb2' at v3 (let the upgrade
+  // complete + close the connection), then open the same DB at the LOWER v2 — that
+  // request must fire onerror with a VersionError, never onsuccess.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://idbreg.test/");
+    Eval(v,
+         "window.__r2='';"
+         "var q=indexedDB.open('regdb2',3);"
+         "q.onupgradeneeded=function(e){e.target.result.createObjectStore('s');};"
+         "q.onsuccess=function(e){e.target.result.close();"
+         "var q2=indexedDB.open('regdb2',2);"  // downgrade -> must reject
+         "q2.onsuccess=function(ev){ev.target.result.close();"
+         "window.__r2='unexpected-success';};"
+         "q2.onerror=function(ev){window.__r2='err:'+(ev.target.error?"
+         "ev.target.error.name:'?');};};"
+         "q.onerror=function(){window.__r2='openerr';};");
+    mbWaitForFunction(v, "window.__r2!==''", 4000);
+    const std::string r = Eval(v, "window.__r2");
+    Expect(r == "err:VersionError",
+           "IndexedDB open() at a lower version rejects with VersionError",
+           "r2=[" + r + "]");
+  }
+
+  // REG #3. A Cache handle stays usable after caches.delete() of its storage (no
+  // use-after-free): open, put, delete the named cache, then match() on the dangling
+  // handle must not crash (the page stays scriptable). Also cache.delete() returns
+  // false for a missing entry and true for a present one.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://cachereg.test/");
+    Eval(v,
+         "window.__r3='';"
+         "(async function(){try{"
+         "var c=await caches.open('regc1');"
+         "await c.put('/x',new Response('hi'));"
+         "await caches.delete('regc1');"
+         "var crashed=false;try{await c.match('/x');}catch(e){crashed=true;}"
+         "var c2=await caches.open('regc2');"
+         "var delMissing=await c2.delete('/missing');"  // nothing matched -> false
+         "await c2.put('/present',new Response('p'));"
+         "var delPresent=await c2.delete('/present');"  // matched -> true
+         "window.__r3='crashed:'+crashed+',missing:'+delMissing+',present:'+delPresent;"
+         "}catch(e){window.__r3='err:'+e.name;}})();");
+    mbWaitForFunction(v, "window.__r3!==''", 4000);
+    const std::string r = Eval(v, "window.__r3");
+    const std::string alive = Eval(v, "String(1+1)");  // still scriptable?
+    Expect(r == "crashed:false,missing:false,present:true" && alive == "2",
+           "Cache handle survives caches.delete (no UAF); delete() returns false/true",
+           "r3=[" + r + "] alive=[" + alive + "]");
+  }
+
+  // REG #4. Cache honors Vary: store two responses for the SAME url keyed by a
+  // differing request header (Vary: x-k). match() with the matching header returns
+  // the right entry; a non-matching header misses. (Asserts via response STATUS, not
+  // body text — cached body bytes read empty intermittently, a known cache-body bug;
+  // status distinguishes the two responses reliably.)
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://cachereg.test/");
+    Eval(v,
+         "window.__r4='';"
+         "(async function(){try{"
+         "var c=await caches.open('regc4');var u='/vary';"
+         "await c.put(new Request(u,{headers:{'x-k':'a'}}),"
+         "new Response('A',{status:200,headers:{'Vary':'x-k'}}));"
+         "await c.put(new Request(u,{headers:{'x-k':'b'}}),"
+         "new Response('B',{status:201,headers:{'Vary':'x-k'}}));"
+         "var ra=await c.match(new Request(u,{headers:{'x-k':'a'}}));"
+         "var rb=await c.match(new Request(u,{headers:{'x-k':'b'}}));"
+         "var miss=await c.match(new Request(u,{headers:{'x-k':'zzz'}}));"
+         "window.__r4=(ra?ra.status:'none')+','+(rb?rb.status:'none')+','+"
+         "(miss?'hit':'miss');"
+         "}catch(e){window.__r4='err:'+e.name;}})();");
+    mbWaitForFunction(v, "window.__r4!==''", 4000);
+    const std::string r = Eval(v, "window.__r4");
+    Expect(r == "200,201,miss",
+           "Cache honors Vary: each request header matches its own response; misses on others",
+           "r4=[" + r + "]");
+  }
+
+  // REG #5. OPFS removeEntry recursive flag: removing a NON-EMPTY directory with the
+  // default (recursive:false) must reject with InvalidModificationError; passing
+  // {recursive:true} succeeds.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://opfsreg.test/");
+    Eval(v,
+         "window.__r5='';"
+         "(async function(){try{"
+         "var root=await navigator.storage.getDirectory();"
+         "var d=await root.getDirectoryHandle('reg5',{create:true});"
+         "await d.getFileHandle('f.txt',{create:true});"
+         "var rej='';try{await root.removeEntry('reg5');}catch(e){rej=e.name;}"
+         "var ok='ok';try{await root.removeEntry('reg5',{recursive:true});}"
+         "catch(e){ok='fail:'+e.name;}"
+         "window.__r5=rej+','+ok;"
+         "}catch(e){window.__r5='err:'+e.name;}})();");
+    mbWaitForFunction(v, "window.__r5!==''", 4000);
+    const std::string r = Eval(v, "window.__r5");
+    Expect(r == "InvalidModificationError,ok",
+           "OPFS removeEntry rejects a non-empty dir; recursive:true succeeds",
+           "r5=[" + r + "]");
+  }
+
+  // REG #6. A blob: URL preserves the Blob's Content-Type: fetch()ing the object URL
+  // returns a response whose content-type header carries the type given to the Blob.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://blobreg.test/");
+    Eval(v,
+         "window.__r6='';"
+         "(async function(){try{"
+         "var u=URL.createObjectURL(new Blob(['{}'],{type:'application/json'}));"
+         "var r=await fetch(u);"
+         "window.__r6=String(r.headers.get('content-type'));"
+         "}catch(e){window.__r6='err:'+e.name;}})();");
+    mbWaitForFunction(v, "window.__r6!==''", 4000);
+    const std::string r = Eval(v, "window.__r6");
+    Expect(r.find("application/json") != std::string::npos,
+           "blob: URL keeps the Blob Content-Type through fetch()", "r6=[" + r + "]");
+  }
+
+  // REG #7. Cookie deletion via a NON-epoch past `expires` (one year ago, not the
+  // Unix epoch): set a cookie, confirm it's present, then re-set it empty with a past
+  // expiry — document.cookie must no longer contain it.
+  {
+    mbLoadHTML(v, "<body>x</body>", "https://ckreg.test/");
+    mbRunJS(v, "document.cookie='rk=rv';");
+    mbWait(v, 20);
+    const std::string before = Eval(v, "document.cookie");
+    mbRunJS(v,
+            "document.cookie='rk=; expires='+"
+            "new Date(Date.now()-31536000000).toUTCString();");
+    mbWait(v, 20);
+    const std::string after = Eval(v, "document.cookie");
+    Expect(before.find("rk=rv") != std::string::npos &&
+               after.find("rk=rv") == std::string::npos,
+           "cookie deleted via a non-epoch past expires",
+           "before=[" + before + "] after=[" + after + "]");
+  }
+
+  // REG #8. mbSendText populates KeyboardEvent.key: a keydown listener must see the
+  // typed character ('a'), not "Unidentified" (the dom_key regression).
+  {
+    mbLoadHTML(v, "<body><input id='k'></body>", "about:blank");
+    mbRunJS(v,
+            "window.__key='';var el=document.getElementById('k');"
+            "el.addEventListener('keydown',function(e){window.__key=e.key;});"
+            "el.focus();");
+    mbSendText(v, "a");
+    mbWait(v, 20);
+    const std::string key = Eval(v, "window.__key");
+    Expect(key == "a", "mbSendText sets KeyboardEvent.key (not Unidentified)",
+           "key=[" + key + "]");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

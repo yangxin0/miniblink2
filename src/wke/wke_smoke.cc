@@ -80,6 +80,17 @@ int main() {
   check(!wkeIsLoading(wv) && !wkeIsLoadingCompleted(wv),
         "fresh view: load not yet completed (distinct from a loaded view)");
 
+  // Regression: wkeGetSource on a brand-new view (before ANY navigation) must not
+  // crash and must return a valid (possibly empty) C string, not null — callers
+  // strlen/strstr the result without a null check.
+  {
+    wkeWebView fresh = wkeCreateWebView();
+    const char* fresh_src = wkeGetSource(fresh);
+    check(fresh_src != nullptr,
+          "wkeGetSource on a fresh view returns non-null before any load");
+    wkeDestroyWebView(fresh);
+  }
+
   // A page with a title and a solid blue background (rgb(0,128,255)).
   wkeLoadHTML(wv,
               "<title>WkeTitle</title>"
