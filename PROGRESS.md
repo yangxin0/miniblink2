@@ -81,6 +81,12 @@ watchdog SIGKILL, then `pgrep -x`). Network features verified against PUBLIC hos
   overflow → `RangeError`, infinite `setTimeout` flood → load completes (timers don't block it),
   async waits (`--wait-selector`, network-idle) → bounded timeouts. (Network robustness — proxy /
   ignore-cert / follow-redirects — already had `mb_shot` flags.)
+- **Memory-bomb handling** ✅ verified graceful (2026-06-28, no fix needed): oversized allocations
+  (`'x'.repeat(2**31)`, `new Array(2**32)`, `new ArrayBuffer(2**40)`, `new Uint8Array(2**40)`,
+  doubling-string concat) all throw `RangeError` via V8's own limits; 100k-deep nested JSON parses
+  without crashing. No OOM crash, no hang. **The adversarial-robustness vein is now exhausted** —
+  sync loops, microtask floods, stack overflow, timer floods, memory bombs, and network failure
+  modes are all handled gracefully (terminated, rejected, or bounded-timeout).
 
 ## Deferred follow-ups (post-gap-list — pick highest-value per tick, or stop if none ripe)
 Each is genuinely lower-value than the gap list. Verify tractability before committing to one.
