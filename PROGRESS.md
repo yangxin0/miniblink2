@@ -43,7 +43,7 @@ watchdog SIGKILL, then `pgrep -x`). Network features verified against PUBLIC hos
 | # | Feature | Status |
 |---|---------|--------|
 | **1** | **Software compositor / cc raster → pixels** | **✅ COMPLETE** — a live page rasters through cc → viz::Display → bitmap, in-process headless (opt-in, default off). See below. |
-| 2 | WebRTC (peer connections, getUserMedia) | **NEXT** |
+| 2 | WebRTC | **IN PROGRESS** — SDP/signaling WORKS (RTCPeerConnection + createOffer/Answer + data-channel SDP + two-peer offer/answer handshake to signalingState=stable). Connectivity blocked: ICE gathers **0 candidates** (no P2P UDP socket factory). Plan: bind the REAL `network::P2PSocketManager` in `mb_frame_broker::GetInterface` over a minimal `net::URLRequestContext`. getUserMedia headless = no devices (by design). |
 | 3 | Cache-body large-blob durability | upstream blink bug; likely document-as-unfixable |
 | 4 | Geolocation | deferred |
 | 5 | PWA install | deferred |

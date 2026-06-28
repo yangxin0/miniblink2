@@ -2492,3 +2492,33 @@ never called -> viewport=0x0 -> thread-checker abort):
   components (D1) -> host-lib component (D2a) -> blink hook (D2b-1) -> live InitializeCompositing (D2b-2)
   -> cc raster pipeline (D2b-3) -> LIVE PAGE TO PIXELS (D2b-4). Opt-in (mbSetCompositingEnabled, default
   OFF) so the heavily-tested software-paint screenshot path is untouched. NEXT GAP: #2 WebRTC.
+
+---
+
+[SCOPED — gap #2 WebRTC: SDP works, connectivity blocked at ICE gathering; reuse plan pinned]
+This tick diagnosed #2 empirically (a loopback test, then reverted to keep the battery green):
+  * WORKS: WebRTC SDP/signaling. mb_smoke_render 41p already passes (RTCPeerConnection + create
+    DataChannel + createOffer + setLocalDescription -> valid data-channel SDP offer). A two-peer
+    in-process loopback (offer/answer exchanged both sides) reaches signalingState=stable on both —
+    full SDP negotiation handshake works in-process.
+  * BLOCKED: connectivity. The loopback DataChannel never opens; diagnostic shows
+    cands=0 | iceGatheringState=gathering | iceConnectionState=new. ICE gathers ZERO candidates.
+  * ROOT CAUSE: blink's PeerConnectionDependencyFactory uses IpcPacketSocketFactory +
+    IpcNetworkManager driven by P2PSocketDispatcher, which gets a network::mojom::P2PSocketManager
+    via GetBrowserInterfaceBroker().GetInterface() (socket_dispatcher.cc:113). Our in-process broker
+    (mb_frame_broker.cc GetInterface, ~line 1225) does not bind that interface -> no socket manager
+    -> the port allocator can't create UDP sockets -> no host candidates.
+  * REUSE PLAN (don't reimplement): bind the REAL network::P2PSocketManager (services/network/p2p/
+    socket_manager.{h,cc}) in mb_frame_broker::GetInterface for mojom::P2PSocketManager. Its ctor:
+    (NetworkAnonymizationKey, P2PTrustedSocketManagerClient remote, P2PTrustedSocketManager receiver,
+    P2PSocketManager receiver, DeleteCallback, net::URLRequestContext*). The trusted client/receiver
+    can be dropped no-op endpoints (like the broker's other dropped channels). The one real dep is a
+    net::URLRequestContext — we use libcurl, not the net stack, so build a MINIMAL one via
+    net::URLRequestContextBuilder (host resolver + proxy=direct; P2PSocketManager uses it for the
+    host resolver + net::UDPSocket creation, not the HTTP stack). Link //services/network/p2p (or its
+    enclosing target) + //net. Then StartNetworkNotifications reports local interfaces + CreateSocket
+    binds real UDP sockets + SocketCreated reports the bound address -> libwebrtc forms host
+    candidates -> the loopback DataChannel opens. VERIFY with the (re-added) loopback test asserting
+    'got:ping'. NOTE low headless value (no automation use case for real peer connections); doing it
+    per the strict-order directive. Likely 2-3 ticks (minimal URLRequestContext; broker wiring +
+    linking; loopback verification).
