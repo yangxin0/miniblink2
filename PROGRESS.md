@@ -58,8 +58,8 @@ watchdog SIGKILL, then `pgrep -x`). Network features verified against PUBLIC hos
 | 13 | Video frame stepping (per-currentTime) | **✅ DONE** (stale note) — the player decodes the whole VPX stream, indexes frames by timestamp, and Paint() selects the frame at currentTime; drawImage/screenshot pull it. Test (mb_smoke_render): seeking 0→1.8s shows a DIFFERENT frame. |
 | 14 | Real audio output | **N/A by-design** — audio PROCESSING works (OfflineAudioContext, 41c); real speaker output is meaningless + untestable headless. |
 | 15 | Trusted touch into sub-frames | **✅ DONE** — `mbSendTouchTap` routes a trusted WebPointerEvent(kTouch) into an iframe firing touch-pointerdown, no crash (the SetMouseCapture null-guard from patch 0011 + the child-frame broker cover the touch hit-test/capture path too). Test 35z2. |
-| 16 | Device-emulation visual transform | layout/media-query emulation done; visual transform may use #1 now |
-| 17 | wke request-side interception (`wkeOnLoadUrlBegin`) | drafted earlier, reverted to keep strict order |
+| 16 | Device-emulation visual transform | **Addressed / visual transform N/A headless** — `mbEmulateDevice` does the LAYOUT/media-query emulation (pointer/hover/viewport/dpr — the valuable part). The DevTools `EnableDeviceEmulation` "fit-to-window" VISUAL scale is cosmetic for headless (screenshots already render at device size via resize+DPR) + crashes on the null LayerTreeHost; deferred. |
+| 17 | wke request-side interception (`wkeOnLoadUrlBegin`) | **✅ DONE** — fires per-request with a tagged WkeNetJob; `wkeNetSetData`/`wkeNetSetMIMEType` on a request job serve a canned response with NO network fetch (the classic offline-mock hook), backed by `mbSetRequestMockCallback`. The same setters still rewrite response bodies for `wkeOnLoadUrlEnd` (job kind dispatch). `wkeNetHookRequest` stub for parity. wke_smoke test. |
 | 18 | wke aliases / API variants | deferred |
 
 ## Compositor #1 — COMPLETE (architecture, for reference)

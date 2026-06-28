@@ -2277,6 +2277,28 @@ struct WkeLoadEndHook {
 };
 WkeLoadEndHook g_wke_load_end{nullptr, nullptr, nullptr};
 
+// The miniblink49 net JOB. miniblink49 uses one opaque `void* job` for both the request-begin
+// (wkeOnLoadUrlBegin) and response-end (wkeOnLoadUrlEnd) hooks, and the same wkeNetSetData/
+// SetMIMEType/SetHTTPHeaderField mutate it. We tag the job so those setters dispatch to the right
+// side: a REQUEST job collects a mock (served WITHOUT a network fetch); a RESPONSE job wraps the
+// live mbResponse* (rewrites the already-fetched body).
+struct WkeNetJob {
+  enum Kind { kRequest, kResponse } kind;
+  // kResponse:
+  mbResponse* resp = nullptr;
+  // kRequest (mock the begin-callback fills via wkeNetSetData/wkeNetSetMIMEType):
+  bool req_mocked = false;
+  std::string req_data;
+  std::string req_content_type;
+};
+
+struct WkeLoadBeginHook {
+  wkeWebView wv;
+  wkeLoadUrlBeginCallback cb;
+  void* param;
+};
+WkeLoadBeginHook g_wke_load_begin{nullptr, nullptr, nullptr};
+
 // One mb response callback fans out to both response hooks (read-only wkeNetOnResponse
 // first, then the rewrite-capable wkeOnLoadUrlEnd), so the two coexist instead of the last
 // registration clobbering the other.
@@ -2287,7 +2309,10 @@ void WkeDispatchResponse(mbResponse* r, void*) {
   if (g_wke_net_resp.cb)
     g_wke_net_resp.cb(g_wke_net_resp.wv, g_wke_net_resp.param, url, body, len);
   if (g_wke_load_end.cb) {
-    g_wke_load_end.cb(g_wke_load_end.wv, g_wke_load_end.param, url, r,
+    WkeNetJob job;
+    job.kind = WkeNetJob::kResponse;
+    job.resp = r;
+    g_wke_load_end.cb(g_wke_load_end.wv, g_wke_load_end.param, url, &job,
                       const_cast<char*>(body), len);
   }
 }
@@ -2325,25 +2350,72 @@ void wkeNetOnResponse(wkeWebView webView, wkeNetResponseCallback callback,
 }
 
 // miniblink49 parity: hook a response after its data arrives, with the JOB handle for
-// rewriting it. job == the mbResponse*; pass it to wkeNetSetData to replace the body.
+// rewriting it. The job is a kResponse WkeNetJob; pass it to wkeNetSetData to replace the body.
 void wkeOnLoadUrlEnd(wkeWebView webView, wkeLoadUrlEndCallback callback,
                      void* param) {
   g_wke_load_end = {webView, callback, param};
   WkeSyncResponseHook();
 }
 
-// Replace a response's body from inside a wkeOnLoadUrlEnd callback (job == mbResponse*).
-void wkeNetSetData(void* job, void* buf, int len) {
-  if (job && (buf || len == 0))
-    mbResponseSetBody(static_cast<mbResponse*>(job),
-                      static_cast<const char*>(buf), len);
+// miniblink49 parity: fire a callback BEFORE each request, with a request JOB the callback can
+// turn into a canned response via wkeNetSetData (served with NO network fetch — the classic
+// offline-mock / API-substitution hook). If the callback doesn't set data, the request fetches
+// normally. Backed by the host's per-URL request-mock callback. NULL clears it.
+void wkeOnLoadUrlBegin(wkeWebView webView, wkeLoadUrlBeginCallback callback,
+                       void* param) {
+  g_wke_load_begin = {webView, callback, param};
+  if (callback) {
+    mbSetRequestMockCallback(
+        [](const char* url, mbRequestMock* mock, void*) -> int {
+          if (!g_wke_load_begin.cb)
+            return 0;
+          WkeNetJob job;
+          job.kind = WkeNetJob::kRequest;
+          g_wke_load_begin.cb(g_wke_load_begin.wv, g_wke_load_begin.param, url,
+                              &job);
+          if (!job.req_mocked)
+            return 0;  // callback didn't supply data -> fetch normally
+          mbRequestMockResponse(
+              mock, job.req_data.data(), static_cast<int>(job.req_data.size()),
+              job.req_content_type.empty() ? nullptr
+                                           : job.req_content_type.c_str(),
+              /*status=*/200);
+          return 1;
+        },
+        nullptr);
+  } else {
+    mbSetRequestMockCallback(nullptr, nullptr);
+  }
 }
 
-// Override a response's Content-Type from inside a wkeOnLoadUrlEnd callback (job ==
-// mbResponse*) — e.g. force a payload to be parsed as a different type.
-void wkeNetSetMIMEType(void* job, const char* type) {
-  if (job && type)
-    mbResponseSetHeader(static_cast<mbResponse*>(job), "Content-Type", type);
+// miniblink49 parity: from a wkeOnLoadUrlBegin callback, ask to receive the response (the
+// wkeOnLoadUrlEnd hook already fires for every response process-wide, so this is a no-op marker).
+void wkeNetHookRequest(void* /*job*/) {}
+
+// Set the job's data: for a RESPONSE job (wkeOnLoadUrlEnd) rewrite the fetched body; for a
+// REQUEST job (wkeOnLoadUrlBegin) supply a canned response served without a fetch.
+void wkeNetSetData(void* j, void* buf, int len) {
+  auto* job = static_cast<WkeNetJob*>(j);
+  if (!job)
+    return;
+  if (job->kind == WkeNetJob::kRequest) {
+    job->req_mocked = true;
+    job->req_data.assign(static_cast<const char*>(buf), buf ? len : 0);
+  } else if (buf || len == 0) {
+    mbResponseSetBody(job->resp, static_cast<const char*>(buf), len);
+  }
+}
+
+// Override the Content-Type: a RESPONSE job sets the response header; a REQUEST job sets the
+// canned mock's content type (force a payload to parse as a different type).
+void wkeNetSetMIMEType(void* j, const char* type) {
+  auto* job = static_cast<WkeNetJob*>(j);
+  if (!job || !type)
+    return;
+  if (job->kind == WkeNetJob::kRequest)
+    job->req_content_type = type;
+  else
+    mbResponseSetHeader(job->resp, "Content-Type", type);
 }
 
 namespace {
@@ -2377,10 +2449,20 @@ std::string WkeWideToUtf8(const wchar_t* s) {
 // mbResponse*). Only `response`==true is wired (request-side header mutation needs the
 // request-job model). key/value are wide strings (UTF-32 on this platform) per the
 // miniblink49 signature; converted to UTF-8.
-void wkeNetSetHTTPHeaderField(void* job, wchar_t* key, wchar_t* value, bool response) {
-  if (job && response && key && value)
-    mbResponseSetHeader(static_cast<mbResponse*>(job), WkeWideToUtf8(key).c_str(),
-                        WkeWideToUtf8(value).c_str());
+void wkeNetSetHTTPHeaderField(void* j, wchar_t* key, wchar_t* value, bool response) {
+  auto* job = static_cast<WkeNetJob*>(j);
+  if (!job || !key || !value)
+    return;
+  if (job->kind == WkeNetJob::kResponse) {
+    if (response)  // response-side: inject/override an arbitrary response header
+      mbResponseSetHeader(job->resp, WkeWideToUtf8(key).c_str(),
+                          WkeWideToUtf8(value).c_str());
+  } else {
+    // Request job (wkeOnLoadUrlBegin): the canned-mock API only carries Content-Type, so
+    // honor a Content-Type override; other headers aren't representable on a mock.
+    if (response && WkeWideToUtf8(key) == "Content-Type")
+      job->req_content_type = WkeWideToUtf8(value);
+  }
 }
 
 void wkeOnConsole(wkeWebView webView, wkeConsoleCallback callback, void* param) {

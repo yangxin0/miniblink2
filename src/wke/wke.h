@@ -765,6 +765,17 @@ typedef void (*wkeLoadUrlEndCallback)(wkeWebView webView, void* param,
                                       const utf8* url, void* job, void* buf, int len);
 WKE_API void wkeOnLoadUrlEnd(wkeWebView webView, wkeLoadUrlEndCallback callback,
                              void* param);
+// miniblink49 parity: fire a callback BEFORE each request with a request `job`. From the
+// callback, wkeNetSetData(job, buf, len) supplies a canned response served with NO network
+// fetch (offline mock / API substitution); wkeNetSetMIMEType(job, type) sets its Content-Type.
+// If the callback sets no data, the request fetches normally. NULL clears it.
+typedef void (*wkeLoadUrlBeginCallback)(wkeWebView webView, void* param,
+                                        const utf8* url, void* job);
+WKE_API void wkeOnLoadUrlBegin(wkeWebView webView, wkeLoadUrlBeginCallback callback,
+                               void* param);
+// From a wkeOnLoadUrlBegin callback: request to receive the response too (the wkeOnLoadUrlEnd
+// hook already fires for every response, so this is a no-op compatibility marker).
+WKE_API void wkeNetHookRequest(void* job);
 WKE_API void wkeNetSetData(void* job, void* buf, int len);
 // Override the response Content-Type from a wkeOnLoadUrlEnd callback (job == the response).
 WKE_API void wkeNetSetMIMEType(void* job, const char* type);

@@ -2133,6 +2133,47 @@ int main() {
           "wkeOnLoadUrlEnd + wkeNetSetData rewrite a response body (page applies it)");
   }
 
+  // wkeOnLoadUrlBegin + wkeNetSetData MOCK a request (miniblink49 parity): the callback serves a
+  // canned response with NO network fetch. A <link> to a NON-EXISTENT host is satisfied entirely
+  // by the begin-mock (content-type via wkeNetSetMIMEType), so the page applies the mocked CSS —
+  // proving the request never hit the network. A second load with the hook cleared does NOT apply
+  // it (the host can't be reached), confirming the mock is what served it.
+  {
+    wkeOnLoadUrlBegin(
+        wv,
+        [](wkeWebView, void*, const utf8* url, void* job) {
+          if (std::strstr(url, "wke_begin.css")) {
+            static const char kCss[] = "body{color:rgb(5,6,7)}";
+            wkeNetSetMIMEType(job, "text/css");
+            wkeNetSetData(job, const_cast<char*>(kCss),
+                          static_cast<int>(std::strlen(kCss)));
+          }
+        },
+        nullptr);
+    wkeLoadHtmlWithBaseUrl(
+        wv,
+        "<link rel='stylesheet' href='https://nonexistent.mock/wke_begin.css'>"
+        "<body>x</body>",
+        "https://wkebegin.test/page.html");
+    const bool mocked =
+        std::strcmp(jsToTempString(
+                        es, wkeRunJS(wv, "getComputedStyle(document.body).color")),
+                    "rgb(5, 6, 7)") == 0;
+    wkeOnLoadUrlBegin(wv, nullptr, nullptr);
+    wkeLoadHtmlWithBaseUrl(
+        wv,
+        "<link rel='stylesheet' href='https://nonexistent.mock/wke_begin.css'>"
+        "<body>x</body>",
+        "https://wkebegin.test/page2.html");
+    const bool not_mocked =
+        std::strcmp(jsToTempString(
+                        es, wkeRunJS(wv, "getComputedStyle(document.body).color")),
+                    "rgb(5, 6, 7)") != 0;
+    check(mocked && not_mocked,
+          "wkeOnLoadUrlBegin + wkeNetSetData mock a request (served with no network fetch)");
+    wkeLoadHTML(wv, "<title>JSDoc</title><body>x</body>");  // restore for later cases
+  }
+
   // wkeNetSetHTTPHeaderField overrides a response Content-Type (miniblink49 parity). Module
   // scripts enforce STRICT MIME regardless of origin: a text/plain module (a .txt file) is
   // rejected and does NOT run; forcing its Content-Type to a JS type makes it run.
