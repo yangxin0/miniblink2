@@ -1431,6 +1431,7 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   // statusText: the reason phrase from the final "HTTP/x.y NNN reason" status line
   // (the first line of the captured header block; empty for file/data).
   {
+    std::string reason;
     const std::string::size_type eol = resp_headers.find_first_of("\r\n");
     const std::string status_line = resp_headers.substr(0, eol);
     if (status_line.rfind("HTTP/", 0) == 0) {
@@ -1438,13 +1439,18 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
       const std::string::size_type sp2 =
           sp1 == std::string::npos ? sp1 : status_line.find(' ', sp1 + 1);
       if (sp2 != std::string::npos) {
-        std::string reason = status_line.substr(sp2 + 1);
+        reason = status_line.substr(sp2 + 1);
         while (!reason.empty() && (reason.back() == ' ' || reason.back() == '\t'))
           reason.pop_back();
-        if (!reason.empty())
-          response.SetHttpStatusText(blink::WebString::FromUtf8(reason));
       }
     }
+    // ALWAYS set a non-null statusText. A null one serializes to a null
+    // FetchAPIResponse.status_text and FATAL-crashes blink's mojom validator the
+    // moment the page caches the response (cache.put) — which YouTube does. The
+    // wire reason is present for real HTTP; file/data/mock have no status line, so
+    // fall back to "OK" (they are 200) — a non-null placeholder is what matters.
+    response.SetHttpStatusText(
+        blink::WebString::FromUtf8(reason.empty() ? "OK" : reason));
   }
   response.SetExpectedContentLength(static_cast<int64_t>(contents.size()));
 
@@ -1500,6 +1506,7 @@ void MbURLLoader::StartSse(const std::string& fetch_url,
   response.SetCurrentRequestUrl(ToWebURL(GURL(report_url)));
   response.SetMimeType(blink::WebString::FromUtf8("text/event-stream"));
   response.SetHttpStatusCode(200);
+  response.SetHttpStatusText(blink::WebString::FromUtf8("OK"));  // non-null (cache.put safe)
   response.SetHttpHeaderField(blink::WebString::FromUtf8("Content-Type"),
                               blink::WebString::FromUtf8("text/event-stream"));
   response.SetExpectedContentLength(-1);  // unknown / streaming
