@@ -111,8 +111,9 @@ static void mbUpdateChrome() {
 // converted point is already top-left origin (matching wke/blink).
 - (void)wkePoint:(NSEvent*)e x:(int*)x y:(int*)y flags:(unsigned int*)flags {
     NSPoint p = [self convertPoint:[e locationInWindow] fromView:nil];
-    // The webview viewport is in physical pixels; scale logical points to match.
-    *x = (int)(p.x * g_scale); *y = (int)(p.y * g_scale);
+    // The viewport is LOGICAL (CSS px) with a device scale factor for HiDPI raster,
+    // so input is in logical points (no *g_scale) — matches the layout coordinate space.
+    *x = (int)p.x; *y = (int)p.y;
     unsigned int f = 0;
     NSUInteger m = [e modifierFlags];
     if (m & NSEventModifierFlagShift)   f |= kMK_SHIFT;
@@ -253,8 +254,8 @@ static void onTitleChanged(wkeWebView, void*, const wkeString title) {
 - (void)windowDidResize:(NSNotification*)note {
     NSWindow* win = [note object];
     NSRect cr = [[win contentView] bounds];
-    int w = (int)(cr.size.width * g_scale);
-    int h = (int)((cr.size.height - kToolbarHeight) * g_scale);
+    int w = (int)cr.size.width;                       // LOGICAL viewport (CSS px);
+    int h = (int)(cr.size.height - kToolbarHeight);   // the device scale handles HiDPI
     if (w <= 0 || h <= 0 || !g_webView) return;
     wkeResize(g_webView, w, h);
     [g_contentView setNeedsDisplay:YES];
@@ -332,13 +333,16 @@ int main(int argc, const char** argv) {
 
         // Bring up the engine and load the page. Render at the display's backing
         // scale (Retina) so the page isn't upscaled/blurry: size the viewport in
-        // physical pixels and set the zoom to the scale (wke's devicePixelRatio).
+        // HiDPI: lay out at the LOGICAL window size (CSS px) and set the DEVICE SCALE
+        // FACTOR so the page renders retina-crisp (devicePixelRatio == backing scale).
+        // (Earlier this wrongly used wkeSetZoomFactor — PAGE ZOOM — which scales content
+        // instead of raster resolution; the result was a blurry/zoomed HiDPI display.)
         g_scale = [win backingScaleFactor];
         if (g_scale <= 0) g_scale = 1.0;
         wkeInitialize();
         g_webView = wkeCreateWebView();
-        wkeResize(g_webView, (int)(W * g_scale), (int)(H * g_scale));
-        wkeSetZoomFactor(g_webView, g_scale);
+        wkeResize(g_webView, W, H);                      // LOGICAL viewport
+        wkeSetDeviceScaleFactor(g_webView, g_scale);     // HiDPI raster (not page zoom)
         wkeOnConsole(g_webView, onConsole, nullptr);
         // Chrome wiring: keep the address bar + back/forward state in sync.
         wkeOnURLChanged(g_webView, onURLChanged, nullptr);

@@ -28,8 +28,10 @@ struct _tagWkeString {
 
 struct _tagWkeWebView {
   mbView* view = nullptr;
-  int width = 0;
+  int width = 0;            // LOGICAL (CSS px) viewport size — what Resize sets
   int height = 0;
+  float device_scale = 1.0f;  // HiDPI/retina device pixel ratio (wkeSetDeviceScaleFactor);
+                              // wkePaint rasters into a width*scale x height*scale buffer
   bool last_was_http = false;  // success reporting: http uses the status code
   bool did_load = false;       // a navigation has completed at least once (sync model)
   std::string url_cache;       // backs wkeGetURL's const utf8* return
@@ -809,8 +811,10 @@ void wkeSetDeviceScaleFactor(wkeWebView webView, float scale) {
   // HiDPI/retina: window.devicePixelRatio reports `scale` and paint/PNG output
   // is rasterized at `scale`x (layout stays in CSS px). Size capture buffers at
   // logical_width*scale x logical_height*scale. (Port extension — modern.)
-  if (webView && webView->view && scale > 0.0f)
+  if (webView && webView->view && scale > 0.0f) {
+    webView->device_scale = scale;  // wkePaint rasters into width*scale buffers
     mbSetDeviceScaleFactor(webView->view, scale);
+  }
 }
 
 void wkeSetFollowRedirects(bool follow) {
@@ -1659,12 +1663,17 @@ bool wkeFireKeyPressEvent(wkeWebView webView, unsigned int charCode,
 void wkePaint(wkeWebView webView, void* bits, int pitch) {
   if (!webView || !webView->view || !bits)
     return;
-  const int stride = pitch > 0 ? pitch : webView->width * 4;
+  // HiDPI: the viewport is LOGICAL (webView->width CSS px) but the engine rasters at
+  // device_scale, so the pixel buffer is width*scale x height*scale (retina-crisp).
+  // A host on a 2x display sizes its buffer that way; pitch defaults to the physical row.
+  const int pw = static_cast<int>(webView->width * webView->device_scale);
+  const int ph = static_cast<int>(webView->height * webView->device_scale);
+  const int stride = pitch > 0 ? pitch : pw * 4;
   // INTERACTIVE blit (a windowed host repaints continuously): use the FAST repaint,
   // not mbPaintToBitmap's one-shot screenshot settle — the latter re-drains the whole
   // task queue every call and makes live pages (YouTube) crawl. For a one-shot capture
   // use wkeSavePng (which keeps the settle).
-  mbRepaintToBitmap(webView->view, bits, webView->width, webView->height, stride);
+  mbRepaintToBitmap(webView->view, bits, pw, ph, stride);
 }
 
 bool wkePaintRect(wkeWebView webView, void* bits, int x, int y, int w, int h,

@@ -75,7 +75,7 @@ static bool g_transparent = false;
 }
 - (void)wkePoint:(NSEvent*)e x:(int*)x y:(int*)y flags:(unsigned int*)flags {
     NSPoint p = [self convertPoint:[e locationInWindow] fromView:nil];
-    *x = (int)(p.x * g_scale); *y = (int)(p.y * g_scale);
+    *x = (int)p.x; *y = (int)p.y;  // LOGICAL viewport -> logical input (HiDPI via dsf)
     unsigned int f = 0; NSUInteger m = [e modifierFlags];
     if (m & NSEventModifierFlagShift) f |= kMK_SHIFT;
     if (m & NSEventModifierFlagControl) f |= kMK_CONTROL;
@@ -153,7 +153,7 @@ static void onTitleChanged(wkeWebView, void*, const wkeString title) {  // -> wi
 - (void)windowDidResize:(NSNotification*)note {
     if (!g_webView) return;
     NSRect b = [g_contentView bounds];
-    int w = (int)(b.size.width * g_scale), h = (int)(b.size.height * g_scale);
+    int w = (int)b.size.width, h = (int)b.size.height;  // LOGICAL (dsf handles HiDPI)
     if (w <= 0 || h <= 0) return;
     wkeResize(g_webView, w, h);
     [g_contentView setNeedsDisplay:YES];
@@ -244,8 +244,8 @@ int main(int argc, const char** argv) {
         g_scale = [g_window backingScaleFactor]; if (g_scale <= 0) g_scale = 1.0;
         wkeInitialize();
         g_webView = wkeCreateWebView();
-        wkeResize(g_webView, (int)(W * g_scale), (int)(H * g_scale));
-        wkeSetZoomFactor(g_webView, g_scale);
+        wkeResize(g_webView, W, H);                    // LOGICAL viewport (CSS px)
+        wkeSetDeviceScaleFactor(g_webView, g_scale);   // HiDPI raster, not page zoom
         wkeOnTitleChanged(g_webView, onTitleChanged, nullptr);
         wkeLoadURL(g_webView, url.c_str());
         NSLog(@"[wkexe] loading %s%s", url.c_str(), g_transparent ? "  (transparent)" : "");

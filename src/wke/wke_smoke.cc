@@ -1239,6 +1239,31 @@ int main() {
           "wkeSetDeviceScaleFactor scales devicePixelRatio + raster output (2x)");
   }
 
+  // wkePaint at a HiDPI device scale (the INTERACTIVE path the GUI samples use):
+  // a LOGICAL 50x30 viewport with a 2x device scale must raster into a 100x60
+  // PHYSICAL buffer. The discriminator is a pixel near the bottom-right of the
+  // physical buffer (row 50, col 90): if wkePaint wrongly rastered at logical
+  // size (50x30) the bottom-right physical region stays untouched (zero); only a
+  // true 2x raster fills the whole 100x60 buffer with the body background.
+  {
+    const int sw = wkeGetWidth(wv), sh = wkeGetHeight(wv);  // save viewport
+    wkeResize(wv, 50, 30);                 // logical viewport
+    wkeSetDeviceScaleFactor(wv, 2.0f);     // -> 100x60 physical
+    wkeLoadHTML(wv, "<body style='margin:0;background:rgb(32,64,128)'>hidpi</body>");
+    const int pw = 100, ph = 60, pitch = pw * 4;
+    std::vector<unsigned char> pb(static_cast<size_t>(pitch) * ph, 0);
+    wkePaint(wv, pb.data(), pitch);
+    const size_t off = (static_cast<size_t>(50) * pw + 90) * 4;  // bottom-right px
+    // BGRA byte order for rgb(32,64,128): B=128, G=64, R=32.
+    const bool filled = pb[off] > 100 && pb[off] < 160 &&     // B ~128
+                        pb[off + 1] > 40 && pb[off + 1] < 90 && // G ~64
+                        pb[off + 2] > 10 && pb[off + 2] < 60;   // R ~32
+    wkeSetDeviceScaleFactor(wv, 1.0f);     // restore 1:1 for later captures
+    wkeResize(wv, sw > 0 ? sw : 200, sh > 0 ? sh : 150);  // restore viewport
+    check(filled,
+          "wkePaint rasters the full physical buffer at the device scale (2x)");
+  }
+
   // wkeScrollTo (offline): an absolute scroll moves window.scrollY to the offset.
   {
     wkeLoadHTML(wv,
