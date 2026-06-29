@@ -428,15 +428,18 @@ class MbCurlReactor {
   void Submit(Request req,
               scoped_refptr<base::SequencedTaskRunner> reply_runner,
               base::OnceCallback<void(Result)> on_done) {
+    // Round-robin across the IO lanes — miniblink49 spreads jobs over its 4 IO threads
+    // the same way. Each lane is an independent curl_multi loop on its own thread.
+    Lane* lane = lanes_[next_lane_.fetch_add(1) % lanes_.size()].get();
     {
-      base::AutoLock l(lock_);
-      pending_.push_back(std::make_unique<Pending>(
+      base::AutoLock l(lane->lock);
+      lane->pending.push_back(std::make_unique<Pending>(
           std::move(req), std::move(reply_runner), std::move(on_done)));
     }
     // curl_multi_wakeup is the ONLY curl_multi function safe to call off the owning
-    // thread — it breaks the reactor's curl_multi_poll so the new job is adopted now.
-    if (multi_)
-      curl_multi_wakeup(multi_);
+    // thread — it breaks this lane's curl_multi_poll so the new job is adopted now.
+    if (lane->multi)
+      curl_multi_wakeup(lane->multi);
   }
 
  private:
@@ -456,22 +459,42 @@ class MbCurlReactor {
     scoped_refptr<base::SequencedTaskRunner> reply_runner;
     base::OnceCallback<void(Result)> on_done;
   };
+  // One IO lane: an independent curl_multi event loop on its own dedicated thread.
+  // Each lane owns its multi handle + active jobs (touched only on its thread) and a
+  // lock-guarded pending queue (pushed to by Submit on the main thread).
+  struct Lane {
+    CURLM* multi = nullptr;
+    std::thread thread;
+    base::Lock lock;
+    std::vector<std::unique_ptr<Pending>> pending;  // GUARDED_BY(lock)
+    std::vector<std::unique_ptr<Job>> active;       // lane-thread only
+  };
+
+  // miniblink49 uses 4 dedicated IO threads (BlinkPlatformImpl::getIoThreads). Match it:
+  // one curl_multi loop already multiplexes many sockets, and 4 spread the per-transfer
+  // curl work (TLS, header/body callbacks) across cores under heavy fan-out (YouTube).
+  static constexpr size_t kLaneCount = 4;
 
   MbCurlReactor() {
-    multi_ = curl_multi_init();
-    // The IO thread runs for the process lifetime; the reactor singleton is leaked, so
-    // this std::thread member is never destructed (no join/terminate). Mirrors the
-    // engine's "globals leak, OS reclaims at exit" model (see MbRuntime::Shutdown).
-    thread_ = std::thread([this] { Run(); });
+    for (size_t i = 0; i < kLaneCount; ++i) {
+      auto lane = std::make_unique<Lane>();
+      lane->multi = curl_multi_init();
+      Lane* raw = lane.get();
+      // The lane threads run for the process lifetime; the reactor singleton is leaked,
+      // so these std::thread members are never destructed (no join/terminate). Mirrors
+      // the engine's "globals leak, OS reclaims at exit" model (MbRuntime::Shutdown).
+      lane->thread = std::thread([raw] { RunLane(raw); });
+      lanes_.push_back(std::move(lane));
+    }
   }
 
-  void Run() {
+  static void RunLane(Lane* lane) {
     for (;;) {
-      // 1. Adopt newly-submitted requests into the multi handle (IO thread owns curl).
+      // 1. Adopt newly-submitted requests into this lane's multi handle.
       std::vector<std::unique_ptr<Pending>> batch;
       {
-        base::AutoLock l(lock_);
-        batch.swap(pending_);
+        base::AutoLock l(lane->lock);
+        batch.swap(lane->pending);
       }
       for (auto& p : batch) {
         auto job = std::make_unique<Job>();
@@ -490,17 +513,17 @@ class MbCurlReactor {
             p->req.body, p->req.post_content_type, p->req.method,
             /*follow_redirects=*/false, &job->header_block, &job->body);
         curl_easy_setopt(job->easy, CURLOPT_PRIVATE, job.get());
-        curl_multi_add_handle(multi_, job->easy);
-        active_.push_back(std::move(job));
+        curl_multi_add_handle(lane->multi, job->easy);
+        lane->active.push_back(std::move(job));
       }
 
-      // 2. Drive all in-flight transfers (non-blocking).
+      // 2. Drive all in-flight transfers on this lane (non-blocking).
       int running = 0;
-      curl_multi_perform(multi_, &running);
+      curl_multi_perform(lane->multi, &running);
 
       // 3. Reap completed transfers and deliver each result to its submitter.
       int in_queue = 0;
-      while (CURLMsg* m = curl_multi_info_read(multi_, &in_queue)) {
+      while (CURLMsg* m = curl_multi_info_read(lane->multi, &in_queue)) {
         if (m->msg != CURLMSG_DONE)
           continue;
         CURL* easy = m->easy_handle;
@@ -525,14 +548,14 @@ class MbCurlReactor {
           job->reply_runner->PostTask(
               FROM_HERE, base::BindOnce(std::move(job->on_done), std::move(r)));
         }
-        curl_multi_remove_handle(multi_, easy);
+        curl_multi_remove_handle(lane->multi, easy);
         curl_easy_cleanup(easy);
         if (job && job->headers)
           curl_slist_free_all(job->headers);
         if (job) {
-          for (auto it = active_.begin(); it != active_.end(); ++it) {
+          for (auto it = lane->active.begin(); it != lane->active.end(); ++it) {
             if (it->get() == job) {
-              active_.erase(it);
+              lane->active.erase(it);
               break;
             }
           }
@@ -541,15 +564,12 @@ class MbCurlReactor {
 
       // 4. Block until socket activity, the timeout, or a Submit() wakeup.
       int numfds = 0;
-      curl_multi_poll(multi_, nullptr, 0, /*timeout_ms=*/1000, &numfds);
+      curl_multi_poll(lane->multi, nullptr, 0, /*timeout_ms=*/1000, &numfds);
     }
   }
 
-  CURLM* multi_ = nullptr;
-  std::thread thread_;
-  base::Lock lock_;
-  std::vector<std::unique_ptr<Pending>> pending_;  // GUARDED_BY(lock_)
-  std::vector<std::unique_ptr<Job>> active_;       // IO-thread only
+  std::vector<std::unique_ptr<Lane>> lanes_;
+  std::atomic<unsigned> next_lane_{0};
 };
 }  // namespace
 
