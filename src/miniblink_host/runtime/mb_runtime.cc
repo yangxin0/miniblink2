@@ -39,6 +39,7 @@
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
 #include "third_party/blink/public/platform/web_connection_type.h"
 #include "third_party/blink/public/platform/web_network_state_notifier.h"
+#include "third_party/blink/public/platform/web_runtime_features.h"
 #include "third_party/blink/public/web/blink.h"
 #include "v8/include/v8-isolate.h"
 #include "miniblink_host/runtime/mb_script_watchdog.h"
@@ -196,6 +197,17 @@ MbRuntime::MbRuntime() {
   mojo::BinderMap binder_map;
   blink::Initialize(platform_.get(), &binder_map, main_thread_scheduler_.get());
   isolate_ = v8::Isolate::GetCurrent();
+
+  // Disable casting / second-screen APIs we have no backend for. A page's JS call
+  // (e.g. YouTube's Cast button -> PresentationRequest.reconnect()) creates a
+  // ScriptPromiseResolver, then sends a mojo request to a PresentationService that is
+  // never bound, so the promise stays pending forever; GC of the still-undetached
+  // resolver trips a DCHECK ("ScriptPromiseResolverBase was not properly detached")
+  // and FATAL-crashes. Disabling the feature removes navigator.presentation so the
+  // page never creates the leaked resolver. RemotePlayback (the <video> Cast path)
+  // has the same hazard.
+  blink::WebRuntimeFeatures::EnableFeatureFromString("Presentation", false);
+  blink::WebRuntimeFeatures::EnableFeatureFromString("RemotePlayback", false);
 
   // Initialize network state, or pages reading navigator.onLine/connection DCHECK
   // (network_state_notifier requires connection_initialized).
