@@ -2833,9 +2833,29 @@ bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y,
   // (settle=false is still ~5x cheaper than the old per-frame 5-round settle.)
   const int rounds = settle ? 5 : 1;
   for (int round = 0; round < rounds; ++round) {
-    ServiceAnimations();
-    widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
-    base::RunLoop().RunUntilIdle();
+    // Run the rAF + lifecycle drive INSIDE a scheduler task. rAF callbacks that draw to
+    // a <canvas> call CanvasRenderingContext::DidDraw, which FATAL-NOTREACHEs in
+    // CanvasPerformanceMonitor when it happens outside a task scope: the monitor adds
+    // itself as a TaskTimeObserver expecting a balancing DidProcessTask that never comes,
+    // and the next real task then trips WillProcessTask's NOTREACHED. This is the same
+    // hazard RunInFrameTask guards host JS against — YouTube's rAF canvas animation hits
+    // it on the interactive paint path (only reachable now that the async loader actually
+    // loads the page). Posting the drive as a task brackets the DidDraw with
+    // WillProcessTask/DidProcessTask so the monitor registers + unregisters cleanly.
+    base::RunLoop loop(base::RunLoop::Type::kNestableTasksAllowed);
+    auto runner = base::SingleThreadTaskRunner::GetCurrentDefault();
+    runner->PostTask(
+        FROM_HERE, base::BindOnce(
+                       [](MbWebView* self) {
+                         self->ServiceAnimations();
+                         self->widget_->widget()->UpdateAllLifecyclePhases(
+                             blink::DocumentUpdateReason::kTest);
+                       },
+                       this));
+    // Then drain ready tasks (network completion, due timers, microtasks) and stop when
+    // idle — same draining as the prior RunUntilIdle, with the drive now task-bracketed.
+    runner->PostTask(FROM_HERE, loop.QuitWhenIdleClosure());
+    loop.Run();
   }
   if (settle)  // final paint-clean pass; the interactive tick's lifecycle above is enough
     widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
