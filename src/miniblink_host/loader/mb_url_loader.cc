@@ -1107,6 +1107,13 @@ void MbURLLoader::LoadAsynchronously(
 void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   if (!client_)
     return;
+  // Blink can SYNCHRONOUSLY cancel + delete this loader from inside the client
+  // callbacks below (WillFollowRedirect / DidReceiveResponse) — common when a page
+  // (e.g. YouTube) aborts in-flight requests under load. weak_factory_ guards only
+  // the POSTED task, not reentrancy DURING Deliver, so capture a weak ptr and bail
+  // before touching any member again after such a callback — otherwise Deliver runs
+  // on through freed `this` (the use-after-free that crashed at 0x0 in Deliver+2724).
+  const base::WeakPtr<MbURLLoader> alive = weak_factory_.GetWeakPtr();
   const GURL& url = request->url;     // the page's URL (response.url, log, errors)
   MbRecordRequest(url.spec());        // log the URL the page actually requested
 
@@ -1287,14 +1294,22 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
       bool report_raw_headers = false;
       std::vector<std::string> removed_headers;
       net::HttpRequestHeaders modified_headers;
-      if (!client_->WillFollowRedirect(
-              ToWebURL(next), request->site_for_cookies, blink::WebString(),
-              network::mojom::ReferrerPolicy::kDefault,
-              blink::WebString::FromUtf8(new_method), redirect_response,
-              report_raw_headers, &removed_headers, modified_headers,
-              /*insecure_scheme_was_upgraded=*/false)) {
+      const bool accepted = client_->WillFollowRedirect(
+          ToWebURL(next), request->site_for_cookies, blink::WebString(),
+          network::mojom::ReferrerPolicy::kDefault,
+          blink::WebString::FromUtf8(new_method), redirect_response,
+          report_raw_headers, &removed_headers, modified_headers,
+          /*insecure_scheme_was_upgraded=*/false);
+      // CRITICAL: check this BEFORE acting on `accepted`. When the client declines a
+      // redirect it is usually because it is CANCELING the load, which synchronously
+      // DELETES this loader — so `this`/client_ are already freed. Returning here
+      // (instead of falling through to `if (!ok) client_->DidFail(...)` after the
+      // loop) avoids a virtual call on the freed client_ (the 0x0 crash on YouTube).
+      if (!alive)
+        return;
+      if (!accepted) {
         ok = false;
-        break;  // client declined the redirect
+        break;  // client declined the redirect (and is still alive)
       }
       // Apply blink's header edits for the next hop: drop sensitive headers it wants
       // removed on a cross-origin redirect (Authorization, Cookie, …) and take any
@@ -1449,6 +1464,9 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
     return;
   }
   client_->DidReceiveResponse(response, std::move(consumer), std::nullopt);
+  if (!alive)
+    return;  // blink canceled + deleted this loader during DidReceiveResponse;
+             // do NOT touch data_pipe_producer_/weak_factory_ on freed `this`.
 
   // DataPipeProducer chunk-writes the whole body asynchronously, then we finish.
   data_pipe_producer_ = std::make_unique<mojo::DataPipeProducer>(std::move(producer));
