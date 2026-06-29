@@ -256,6 +256,21 @@ class MbURLLoader : public blink::URLLoader {
     bool redirected = false;        // a real 3xx hop was followed (not a rewrite)
   };
 
+  // ASYNC HTTP(S) fetch state machine (matches miniblink49's model: the blocking
+  // curl transfer runs OFF the main thread; all blink-client calls stay ON it).
+  // FetchState carries the redirect-chain state between threads; HopResult is one
+  // hop's raw transfer output. Both are defined in the .cc (implementation detail).
+  struct FetchState;
+  struct HopResult;
+  // Post ONE hop of `state` to the thread pool (base::MayBlock): the worker runs the
+  // blocking FetchHttp, then posts OnHopComplete back to the main thread. The main
+  // thread NEVER blocks on the socket — the input-freeze fix.
+  void StartHttpFetch(std::unique_ptr<FetchState> state);
+  // Main-thread continuation after a worker hop returns. A final response ->
+  // DeliverResponse; a 3xx -> WillFollowRedirect (on main, so CORS/cancel checks are
+  // preserved) then StartHttpFetch for the next hop.
+  void OnHopComplete(std::unique_ptr<FetchState> state, HopResult hop);
+
   // Posted task: read the resource and push response+body+finish to the client.
   void Deliver(std::unique_ptr<network::ResourceRequest> request);
   // Main-thread delivery of a completed fetch: response hook, WebURLResponse build,

@@ -2087,8 +2087,13 @@ int main() {
     mbLoadHTML(v, "<body>notif</body>", "https://notifhook.test/");
     mbRunJS(v, "new Notification('Hello',{body:'World',tag:'t1',"
                "icon:'https://notifhook.test/i.png'});");
-    mbWaitForFunction(v, "true", 200);  // pump for the async Display call
-    mbWait(v, 60);
+    // Blink fetches the notification icon subresource BEFORE DisplayNonPersistent-
+    // Notification fires our hook. That fetch is now ASYNC (off the main thread), so
+    // pump in slices until the hook actually fires (up to ~3s) rather than a fixed
+    // 60ms — the dead-domain icon's DNS failure can take longer than one tick to
+    // resolve back to the main thread. (Condition-based wait, not a magic sleep.)
+    for (int i = 0; i < 60 && note->empty(); ++i)
+      mbWait(v, 50);
     Expect(*note == "t=Hello b=World tag=t1 icon=https://notifhook.test/i.png",
            "mbOnNotificationShown: a page Notification's fields reach the embedder",
            "[" + *note + "]");

@@ -25,10 +25,12 @@
 #include "base/synchronization/lock.h"
 #include "base/task/bind_post_task.h"
 #include "base/task/single_thread_task_runner.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "net/base/data_url.h"
 #include "net/cookies/cookie_util.h"
+#include "net/cookies/site_for_cookies.h"
 #include "net/base/filename_util.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
@@ -905,19 +907,29 @@ std::vector<HeaderEntry>& HeaderList() {
   static std::vector<HeaderEntry>* h = new std::vector<HeaderEntry>();
   return *h;
 }
+// Guards HeaderList. MbApplyRequestHeaders now runs on the thread-pool worker (inside
+// FetchHttp on the async HTTP path), while the setters run on the main thread — so the
+// per-URL injected-header registry must be locked against that cross-thread access.
+base::Lock& HeaderListLock() {
+  static base::NoDestructor<base::Lock> lock;
+  return *lock;
+}
 }  // namespace
 
 void MbAddRequestHeader(const std::string& substring, const std::string& name,
                         const std::string& value) {
+  base::AutoLock guard(HeaderListLock());
   if (!substring.empty() && !name.empty())
     HeaderList().push_back({substring, name, value});
 }
 
 void MbClearRequestHeaders() {
+  base::AutoLock guard(HeaderListLock());
   HeaderList().clear();
 }
 
 void MbApplyRequestHeaders(const std::string& url, std::string* req_headers) {
+  base::AutoLock guard(HeaderListLock());
   for (const HeaderEntry& e : HeaderList()) {
     if (url.find(e.substring) == std::string::npos)
       continue;
@@ -1104,16 +1116,42 @@ void MbURLLoader::LoadAsynchronously(
                                 std::move(request)));
 }
 
+// ASYNC HTTP(S) state carried between the main thread and the thread-pool worker.
+// Moved (by unique_ptr) into the worker closure and back via PostTask; all members are
+// movable value types, and the worker only touches the request-side fields (never the
+// blink client). Mirrors miniblink49's WebURLLoaderInternal job state.
+struct MbURLLoader::FetchState {
+  GURL original_url;   // the page's request URL (response.url, errors)
+  GURL fetch_url;      // post-rewrite target (mime fallback)
+  std::string cur;     // current hop URL (advances on each followed redirect)
+  std::string method;  // current hop method (303 / POST->GET rewrites it)
+  std::string body;    // request body (cleared on a method->GET rewrite)
+  std::string post_ct; // request Content-Type (carried separately from headers)
+  net::HttpRequestHeaders hop_headers;   // request's own headers (redirect-stripped)
+  net::SiteForCookies site_for_cookies;  // for WillFollowRedirect on the main thread
+  int hop = 0;           // redirect hop count (capped at 20)
+  bool redirected = false;  // a real 3xx hop was followed (vs. a transparent rewrite)
+};
+
+// One hop's raw transfer output, produced on the worker and posted back to the main
+// thread. (FetchHttp fills body/content_type/status/headers/effective-url.)
+struct MbURLLoader::HopResult {
+  bool ok = false;
+  std::string contents;
+  std::string content_type;
+  std::string resp_headers;
+  std::string final_url;  // curl effective URL of this hop
+  int status = 0;
+};
+
 void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   if (!client_)
     return;
-  // Blink can SYNCHRONOUSLY cancel + delete this loader from inside the client
-  // callbacks below (WillFollowRedirect / DidReceiveResponse) — common when a page
-  // (e.g. YouTube) aborts in-flight requests under load. weak_factory_ guards only
-  // the POSTED task, not reentrancy DURING Deliver, so capture a weak ptr and bail
-  // before touching any member again after such a callback — otherwise Deliver runs
-  // on through freed `this` (the use-after-free that crashed at 0x0 in Deliver+2724).
-  const base::WeakPtr<MbURLLoader> alive = weak_factory_.GetWeakPtr();
+  // The synchronous-fetch path here is now local/instant (mock / file: / data:); the
+  // HTTP(S) path runs async (StartHttpFetch -> worker -> OnHopComplete), where the
+  // reentrancy guard against blink synchronously canceling+deleting this loader during
+  // WillFollowRedirect / DidReceiveResponse lives (a stack-local WeakPtr in OnHopComplete
+  // and DeliverResponse). The local branches below never reenter blink before returning.
   const GURL& url = request->url;     // the page's URL (response.url, log, errors)
   MbRecordRequest(url.spec());        // log the URL the page actually requested
 
@@ -1228,99 +1266,25 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
       }
       hop_headers.SetHeader(kv.key, kv.value);
     }
-    // Serialize the current hop's headers for FetchHttp (embedder extra_headers_ persist
-    // across hops; the request's own headers are subject to redirect stripping).
-    auto build_req_headers = [&]() {
-      std::string h = extra_headers_;
-      for (const auto& kv : hop_headers.GetHeaderVector()) {
-        if (!h.empty())
-          h += "\n";
-        h += kv.key + ": " + kv.value;
-      }
-      return h;
-    };
-    // (Per-URL injected headers from mbSetRequestHeader are applied inside FetchHttp,
-    // the shared http chokepoint, so the top-level navigation gets them too.)
-    // Follow redirects MANUALLY (curl auto-follow off) so each hop is reported to
-    // the client via WillFollowRedirect — that updates Blink's url_list_, making
-    // fetch's response.url (the final URL) and response.redirected correct. (You
-    // can't just rewrite the final response URL: fetch_manager DCHECKs that it
-    // equals url_list_.back(), which only the redirect reports advance.)
-    std::string cur = fetch_url.spec();
-    std::string cur_method = request->method;
-    std::string cur_body = post_body;
-    for (int hop = 0; hop <= 20; ++hop) {
-      contents.clear();
-      http_content_type.clear();
-      resp_headers.clear();
-      http_status = 0;
-      const std::string req_headers = build_req_headers();
-      ok = FetchHttp(cur, &contents, &http_content_type, user_agent_, req_headers,
-                     cur_body, post_ct, cur_method, &http_status, &resp_headers,
-                     &final_url, /*follow_redirects=*/false);
-      if (!ok || http_status < 300 || http_status >= 400)
-        break;  // transport error or a final (non-3xx) response
-      const std::string loc = HeaderValueFromBlock(resp_headers, "location");
-      if (loc.empty())
-        break;  // 3xx without Location -> treat as the final response
-      GURL next = GURL(cur).Resolve(loc);
-      // Refuse a redirect to any non-http(s) scheme (file:, ftp:, …): handing such
-      // a target to FetchHttp->curl would let a 302 trigger a local-file read / SSRF.
-      // Treat it as a failed redirect.
-      if (!next.is_valid() || !next.SchemeIsHTTPOrHTTPS() || hop == 20) {
-        ok = false;
-        break;
-      }
-      // Per Fetch: if Location carries no fragment but the previous URL had one,
-      // carry the original fragment onto the redirect target.
-      if (!next.has_ref()) {
-        const GURL prev(cur);
-        if (prev.has_ref()) {
-          GURL::Replacements reps;
-          reps.SetRefStr(prev.ref());
-          next = next.ReplaceComponents(reps);
-        }
-      }
-      // Method rewrite: 303 (and POST on 301/302) becomes a bodyless GET.
-      std::string new_method = cur_method;
-      if (http_status == 303 ||
-          ((http_status == 301 || http_status == 302) && cur_method == "POST")) {
-        new_method = "GET";
-        cur_body.clear();
-      }
-      blink::WebURLResponse redirect_response;
-      redirect_response.SetCurrentRequestUrl(ToWebURL(GURL(cur)));
-      redirect_response.SetHttpStatusCode(http_status);
-      bool report_raw_headers = false;
-      std::vector<std::string> removed_headers;
-      net::HttpRequestHeaders modified_headers;
-      const bool accepted = client_->WillFollowRedirect(
-          ToWebURL(next), request->site_for_cookies, blink::WebString(),
-          network::mojom::ReferrerPolicy::kDefault,
-          blink::WebString::FromUtf8(new_method), redirect_response,
-          report_raw_headers, &removed_headers, modified_headers,
-          /*insecure_scheme_was_upgraded=*/false);
-      // CRITICAL: check this BEFORE acting on `accepted`. When the client declines a
-      // redirect it is usually because it is CANCELING the load, which synchronously
-      // DELETES this loader — so `this`/client_ are already freed. Returning here
-      // (instead of falling through to `if (!ok) client_->DidFail(...)` after the
-      // loop) avoids a virtual call on the freed client_ (the 0x0 crash on YouTube).
-      if (!alive)
-        return;
-      if (!accepted) {
-        ok = false;
-        break;  // client declined the redirect (and is still alive)
-      }
-      // Apply blink's header edits for the next hop: drop sensitive headers it wants
-      // removed on a cross-origin redirect (Authorization, Cookie, …) and take any
-      // overrides (updated Referer/Origin/sec-fetch-*).
-      for (const std::string& rm : removed_headers)
-        hop_headers.RemoveHeader(rm);
-      hop_headers.MergeFrom(modified_headers);
-      cur = next.spec();
-      cur_method = new_method;
-      redirected = true;  // a real 3xx hop was followed (vs. a transparent rewrite)
-    }
+    // ASYNC: run the (blocking) curl transfer on the thread pool, NOT inline on the
+    // main thread — this is the input-freeze fix and the architecture alignment with
+    // miniblink49 (whose WebURLLoaderManager runs curl off-main on IO threads). Each
+    // redirect hop is fetched on a worker; WillFollowRedirect is replayed on the MAIN
+    // thread BETWEEN hops (in OnHopComplete) so url_list_ / response.url / .redirected
+    // stay correct and CORS-redirect + cancel checks are preserved. (Per-URL injected
+    // headers from mbSetRequestHeader are applied inside FetchHttp, the shared
+    // chokepoint, so the top-level navigation gets them too.)
+    auto state = std::make_unique<FetchState>();
+    state->original_url = url;
+    state->fetch_url = fetch_url;
+    state->cur = fetch_url.spec();
+    state->method = request->method;
+    state->body = std::move(post_body);
+    state->post_ct = std::move(post_ct);
+    state->hop_headers = std::move(hop_headers);
+    state->site_for_cookies = request->site_for_cookies;
+    StartHttpFetch(std::move(state));
+    return;  // async — OnHopComplete continues on the main thread when the hop returns
   } else if (fetch_url.SchemeIs("data")) {
     // Decode the data: URL in-process (libcurl doesn't serve it); the parsed
     // mime flows into the response Content-Type below via http_content_type.
@@ -1343,6 +1307,137 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   fr.final_url = std::move(final_url);
   fr.redirected = redirected;
   DeliverResponse(url, fetch_url, std::move(fr));
+}
+
+void MbURLLoader::StartHttpFetch(std::unique_ptr<FetchState> state) {
+  // Serialize THIS hop's request headers on the MAIN thread (reads extra_headers_):
+  // embedder extra_headers_ persist across hops; the request's own headers are subject
+  // to redirect stripping (applied in OnHopComplete via removed_headers/modified_headers).
+  std::string req_headers = extra_headers_;
+  for (const auto& kv : state->hop_headers.GetHeaderVector()) {
+    if (!req_headers.empty())
+      req_headers += "\n";
+    req_headers += kv.key + ": " + kv.value;
+  }
+  std::string ua = user_agent_;
+  auto main_runner = base::SingleThreadTaskRunner::GetCurrentDefault();
+  auto weak = weak_factory_.GetWeakPtr();
+  // Run the BLOCKING curl transfer OFF the main thread; post the raw hop result back.
+  // (The lambda touches only the request-side state + free FetchHttp — never the blink
+  // client or any member — so it is safe off-main. It is defined inside this member so
+  // it may bind the private OnHopComplete.)
+  base::ThreadPool::PostTask(
+      FROM_HERE,
+      {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
+      base::BindOnce(
+          [](std::unique_ptr<FetchState> st, std::string ua, std::string headers,
+             scoped_refptr<base::SingleThreadTaskRunner> runner,
+             base::WeakPtr<MbURLLoader> weak_self) {
+            HopResult hr;
+            hr.ok = FetchHttp(st->cur, &hr.contents, &hr.content_type, ua, headers,
+                              st->body, st->post_ct, st->method, &hr.status,
+                              &hr.resp_headers, &hr.final_url,
+                              /*follow_redirects=*/false);
+            // Hop back to the main thread; if the loader was destroyed meanwhile the
+            // weak ptr no-ops (and `st` is freed) — no use-after-free, the worker never
+            // touched `this`.
+            runner->PostTask(
+                FROM_HERE, base::BindOnce(&MbURLLoader::OnHopComplete, weak_self,
+                                          std::move(st), std::move(hr)));
+          },
+          std::move(state), std::move(ua), std::move(req_headers), main_runner, weak));
+}
+
+void MbURLLoader::OnHopComplete(std::unique_ptr<FetchState> state, HopResult hop) {
+  if (!client_)
+    return;
+  // Blink can SYNCHRONOUSLY cancel + delete this loader from inside WillFollowRedirect
+  // below (it returns false and tears the load down). weak_factory_ guards the posted
+  // task, not reentrancy DURING this call, so capture a weak ptr and bail before
+  // touching any member after that callback.
+  const base::WeakPtr<MbURLLoader> alive = weak_factory_.GetWeakPtr();
+
+  // Helper: finalize this load with the given outcome (success or ERR_FAILED).
+  auto finalize = [&](bool ok) {
+    FetchResult fr;
+    fr.ok = ok;
+    if (ok) {
+      fr.contents = std::move(hop.contents);
+      fr.http_content_type = std::move(hop.content_type);
+      fr.http_status = hop.status;
+      fr.resp_headers = std::move(hop.resp_headers);
+      fr.final_url = std::move(hop.final_url);
+    }
+    fr.redirected = state->redirected;
+    DeliverResponse(state->original_url, state->fetch_url, std::move(fr));
+  };
+
+  // A transport error or a final (non-3xx) response -> deliver it as-is.
+  const bool is_redirect = hop.ok && hop.status >= 300 && hop.status < 400;
+  const std::string loc =
+      is_redirect ? HeaderValueFromBlock(hop.resp_headers, "location") : std::string();
+  if (!is_redirect || loc.empty()) {
+    finalize(hop.ok);  // 3xx without Location is treated as the final response
+    return;
+  }
+
+  // 3xx with Location: resolve + validate the target.
+  GURL next = GURL(state->cur).Resolve(loc);
+  // Refuse a redirect to any non-http(s) scheme (file:, ftp:, …): handing such a target
+  // to FetchHttp->curl would let a 302 trigger a local-file read / SSRF. Cap hops at 20.
+  if (!next.is_valid() || !next.SchemeIsHTTPOrHTTPS() || state->hop >= 20) {
+    finalize(false);
+    return;
+  }
+  // Per Fetch: if Location carries no fragment but the previous URL had one, carry the
+  // original fragment onto the redirect target.
+  if (!next.has_ref()) {
+    const GURL prev(state->cur);
+    if (prev.has_ref()) {
+      GURL::Replacements reps;
+      reps.SetRefStr(prev.ref());
+      next = next.ReplaceComponents(reps);
+    }
+  }
+  // Method rewrite: 303 (and POST on 301/302) becomes a bodyless GET.
+  std::string new_method = state->method;
+  if (hop.status == 303 ||
+      ((hop.status == 301 || hop.status == 302) && state->method == "POST")) {
+    new_method = "GET";
+    state->body.clear();
+  }
+  // Report the hop to the client on the MAIN thread (updates url_list_; enforces CORS
+  // redirect mode + lets the client cancel) BEFORE fetching the next hop.
+  blink::WebURLResponse redirect_response;
+  redirect_response.SetCurrentRequestUrl(ToWebURL(GURL(state->cur)));
+  redirect_response.SetHttpStatusCode(hop.status);
+  bool report_raw_headers = false;
+  std::vector<std::string> removed_headers;
+  net::HttpRequestHeaders modified_headers;
+  const bool accepted = client_->WillFollowRedirect(
+      ToWebURL(next), state->site_for_cookies, blink::WebString(),
+      network::mojom::ReferrerPolicy::kDefault,
+      blink::WebString::FromUtf8(new_method), redirect_response, report_raw_headers,
+      &removed_headers, modified_headers, /*insecure_scheme_was_upgraded=*/false);
+  // CRITICAL: a declined redirect usually means the client is CANCELING the load, which
+  // synchronously DELETES this loader — so bail before touching client_ again.
+  if (!alive)
+    return;
+  if (!accepted) {
+    finalize(false);  // client declined (and is still alive) -> ERR_FAILED
+    return;
+  }
+  // Apply blink's header edits for the next hop: drop sensitive headers it wants removed
+  // on a cross-origin redirect (Authorization, Cookie, …) and take any overrides
+  // (updated Referer/Origin/sec-fetch-*).
+  for (const std::string& rm : removed_headers)
+    state->hop_headers.RemoveHeader(rm);
+  state->hop_headers.MergeFrom(modified_headers);
+  state->cur = next.spec();
+  state->method = new_method;
+  state->redirected = true;  // a real 3xx hop was followed
+  state->hop++;
+  StartHttpFetch(std::move(state));  // fetch the next hop on the thread pool
 }
 
 void MbURLLoader::DeliverResponse(const GURL& url,
