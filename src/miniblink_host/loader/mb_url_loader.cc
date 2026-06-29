@@ -1327,6 +1327,44 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
     std::string charset;
     ok = net::DataURL::Parse(fetch_url, &http_content_type, &charset, &contents);
   }
+
+  // Fetch complete — hand the result to the main-thread delivery path. When the
+  // blocking fetch above moves to a worker thread (to match miniblink49's async
+  // IO-thread network model, where curl_multi runs off-main and results post back via
+  // WebURLLoaderManagerMainTask), THIS is the base::BindPostTask seam: the curl I/O
+  // runs off-main and DeliverResponse runs back on the main thread (blink client calls
+  // must never happen off-main).
+  FetchResult fr;
+  fr.ok = ok;
+  fr.contents = std::move(contents);
+  fr.http_content_type = std::move(http_content_type);
+  fr.http_status = http_status;
+  fr.resp_headers = std::move(resp_headers);
+  fr.final_url = std::move(final_url);
+  fr.redirected = redirected;
+  DeliverResponse(url, fetch_url, std::move(fr));
+}
+
+void MbURLLoader::DeliverResponse(const GURL& url,
+                                  const GURL& fetch_url,
+                                  FetchResult result) {
+  if (!client_)
+    return;
+  // Blink can SYNCHRONOUSLY cancel + delete this loader from inside DidReceiveResponse
+  // below. weak_factory_ guards a posted task, not reentrancy DURING this call, so
+  // capture a weak ptr and bail before touching any member after that callback.
+  const base::WeakPtr<MbURLLoader> alive = weak_factory_.GetWeakPtr();
+  // Unpack into locals so the delivery body below reads unchanged. contents/resp_headers/
+  // http_content_type/final_url are aliased (the response hook rewrites them in place);
+  // ok/http_status/redirected are plain copies (http_status is rewritten via &http_status).
+  const bool ok = result.ok;
+  std::string& contents = result.contents;
+  std::string& http_content_type = result.http_content_type;
+  int http_status = result.http_status;
+  std::string& resp_headers = result.resp_headers;
+  std::string& final_url = result.final_url;
+  const bool redirected = result.redirected;
+
   if (std::getenv("MB_VERBOSE")) {
     std::fprintf(stderr, "[mb_url_loader] %s -> %s (%zu bytes)\n", url.spec().c_str(),
                  ok ? "OK" : "FAIL", contents.size());

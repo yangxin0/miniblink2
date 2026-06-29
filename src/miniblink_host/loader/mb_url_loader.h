@@ -23,6 +23,7 @@
 #include "mojo/public/cpp/system/simple_watcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/url_loader/url_loader.h"
 
+class GURL;  // url/gurl.h — passed by const-ref to DeliverResponse
 namespace network {
 struct ResourceRequest;
 }
@@ -241,8 +242,26 @@ class MbURLLoader : public blink::URLLoader {
   scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunnerForBodyLoader() override;
 
  private:
+  // The outcome of the (blocking) resource fetch — everything DeliverResponse needs
+  // to build the blink WebURLResponse + body. Carrying it in one struct keeps the
+  // fetch (which will move to a worker thread to match miniblink49's async-IO-thread
+  // network model) cleanly separable from the main-thread client delivery.
+  struct FetchResult {
+    bool ok = false;
+    std::string contents;           // the (decoded) response body
+    std::string http_content_type;  // server Content-Type, may carry "; charset=..."
+    int http_status = 0;            // real HTTP status (0 -> treat as 200)
+    std::string resp_headers;       // raw final-response header block (http only)
+    std::string final_url;          // URL after manual redirect following (http)
+    bool redirected = false;        // a real 3xx hop was followed (not a rewrite)
+  };
+
   // Posted task: read the resource and push response+body+finish to the client.
   void Deliver(std::unique_ptr<network::ResourceRequest> request);
+  // Main-thread delivery of a completed fetch: response hook, WebURLResponse build,
+  // DidReceiveResponse + body data-pipe. Split from Deliver so the blocking fetch can
+  // run off-main and post its FetchResult here (the seam for the async network move).
+  void DeliverResponse(const GURL& url, const GURL& fetch_url, FetchResult result);
   void OnBodyWritten(int64_t length, uint32_t /*MojoResult*/ result);
 
   // EventSource / SSE streaming path (Accept: text/event-stream): deliver a
