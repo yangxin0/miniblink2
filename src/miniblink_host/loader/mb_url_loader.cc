@@ -24,8 +24,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/task/bind_post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/task/thread_pool.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "net/base/data_url.h"
@@ -177,18 +177,23 @@ std::string HeaderValueFromBlock(const std::string& block,
   return {};
 }
 
-bool FetchHttp(const std::string& url, std::string* body, std::string* content_type,
-               const std::string& user_agent, const std::string& extra_headers,
-               const std::string& post_body = "",
-               const std::string& post_content_type = "",
-               const std::string& http_method = "", int* out_status = nullptr,
-               std::string* out_headers = nullptr,
-               std::string* out_final_url = nullptr,
-               bool follow_redirects = true,
-               std::string* out_error = nullptr) {
-  CURL* curl = curl_easy_init();
-  if (!curl)
-    return false;
+// Configure an already-initialized curl easy handle for one HTTP(S) transfer: sets every
+// option EXCEPT the perform / multi-add. The caller owns `curl`, `header_block` and `body`
+// (wired as HEADERDATA / WRITEDATA — they must outlive the transfer) and must
+// curl_slist_free_all the returned list afterwards. Shared by the blocking FetchHttp
+// (top-level navigation, MbFetchUrl) and the async curl_multi reactor (subresources/fetch).
+// follow_redirects=false on the reactor path (the loader follows redirects per-hop on the
+// main thread so each is reported to WillFollowRedirect).
+curl_slist* ConfigureCurlEasy(CURL* curl,
+                              const std::string& url,
+                              const std::string& user_agent,
+                              const std::string& extra_headers,
+                              const std::string& post_body,
+                              const std::string& post_content_type,
+                              const std::string& http_method,
+                              bool follow_redirects,
+                              std::string* header_block,
+                              std::string* body) {
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   // Restrict to http(s) on BOTH the initial request and any libcurl-followed
   // redirect, so a "302 Location: file:///etc/passwd" (or other non-web scheme)
@@ -216,9 +221,8 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
   }
-  std::string header_block;  // final response's raw header lines (for the caller)
   curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, CurlHeaderWrite);
-  curl_easy_setopt(curl, CURLOPT_HEADERDATA, &header_block);
+  curl_easy_setopt(curl, CURLOPT_HEADERDATA, header_block);
   // Method + body. A non-GET verb (form submit, fetch/XHR POST/PUT/DELETE…) or a
   // non-empty body makes this a write request. COPYPOSTFIELDS copies the body so
   // it survives retries; CUSTOMREQUEST sets the exact verb (POST is otherwise
@@ -256,7 +260,8 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   std::string lines = extra_headers;
   // Per-URL injected headers (mbSetRequestHeader) — conditional on the URL. Done here
   // so BOTH the top-level navigation (MbFetchUrl) and subresources/fetch (Deliver),
-  // which share this function, get them.
+  // which share this function, get them. (HeaderList is lock-guarded; this runs on the
+  // reactor IO thread for the subresource path.)
   mb::MbApplyRequestHeaders(url, &lines);
   lines.push_back('\n');  // sentinel so the last line flushes
   for (char c : lines) {
@@ -297,6 +302,30 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   }
   if (header_list)
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
+  return header_list;
+}
+
+bool FetchHttp(const std::string& url, std::string* body, std::string* content_type,
+               const std::string& user_agent, const std::string& extra_headers,
+               const std::string& post_body = "",
+               const std::string& post_content_type = "",
+               const std::string& http_method = "", int* out_status = nullptr,
+               std::string* out_headers = nullptr,
+               std::string* out_final_url = nullptr,
+               bool follow_redirects = true,
+               std::string* out_error = nullptr) {
+  CURL* curl = curl_easy_init();
+  if (!curl)
+    return false;
+  std::string header_block;  // final response's raw header lines (for the caller)
+  curl_slist* header_list = ConfigureCurlEasy(
+      curl, url, user_agent, extra_headers, post_body, post_content_type,
+      http_method, follow_redirects, &header_block, body);
+  // Re-derive the effective method (same rule ConfigureCurlEasy uses) for the retry
+  // decision below — only SAFE methods are retried.
+  std::string method = http_method;
+  if (method.empty() && !post_body.empty())
+    method = "POST";
 
   constexpr int kMaxAttempts = 3;
   CURLcode rc = CURLE_OK;
@@ -360,6 +389,168 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   }
   return ok;
 }
+
+// ---------------------------------------------------------------------------
+// MbCurlReactor — a libcurl curl_multi event loop on ONE dedicated IO thread.
+//
+// THE architecture match with miniblink49's WebURLLoaderManager: instead of one blocking
+// curl_easy_perform per thread-pool worker, a single dedicated thread runs curl_multi and
+// MULTIPLEXES many concurrent transfers (non-blocking). The main thread never blocks on a
+// socket; each transfer's result posts back to the submitter's task runner — mirroring
+// WebURLLoaderManagerMainTask. (miniblink49 spreads jobs over 4 such IO threads; one
+// curl_multi loop already drives hundreds of sockets, so we start with one reactor thread
+// and could round-robin across N later for CPU parallelism.)
+//
+// A whole-response buffer is accumulated per transfer (like the prior blocking path), so
+// the loader's existing per-hop redirect chain (OnHopComplete) and DeliverResponse are
+// reused unchanged — only HOW one hop is transferred moves from a blocking pool task to
+// this reactor.
+class MbCurlReactor {
+ public:
+  struct Result {
+    bool ok = false;
+    long http_status = 0;
+    std::string body;           // accumulated response body (decoded)
+    std::string headers;        // raw final-response header block
+    std::string content_type;   // curl CONTENT_TYPE (may be empty)
+    std::string effective_url;  // curl EFFECTIVE_URL
+  };
+  struct Request {
+    std::string url, method, body, post_content_type, user_agent, extra_headers;
+  };
+
+  static MbCurlReactor* Get() {
+    static MbCurlReactor* instance = new MbCurlReactor();  // leaked (process lifetime)
+    return instance;
+  }
+
+  // Thread-safe; returns immediately. `on_done` runs on `reply_runner` with the Result.
+  void Submit(Request req,
+              scoped_refptr<base::SequencedTaskRunner> reply_runner,
+              base::OnceCallback<void(Result)> on_done) {
+    {
+      base::AutoLock l(lock_);
+      pending_.push_back(std::make_unique<Pending>(
+          std::move(req), std::move(reply_runner), std::move(on_done)));
+    }
+    // curl_multi_wakeup is the ONLY curl_multi function safe to call off the owning
+    // thread — it breaks the reactor's curl_multi_poll so the new job is adopted now.
+    if (multi_)
+      curl_multi_wakeup(multi_);
+  }
+
+ private:
+  struct Pending {
+    Request req;
+    scoped_refptr<base::SequencedTaskRunner> reply_runner;
+    base::OnceCallback<void(Result)> on_done;
+    Pending(Request r,
+            scoped_refptr<base::SequencedTaskRunner> run,
+            base::OnceCallback<void(Result)> cb)
+        : req(std::move(r)), reply_runner(std::move(run)), on_done(std::move(cb)) {}
+  };
+  struct Job {
+    CURL* easy = nullptr;
+    curl_slist* headers = nullptr;
+    std::string body, header_block;  // WRITEDATA / HEADERDATA targets (outlive transfer)
+    scoped_refptr<base::SequencedTaskRunner> reply_runner;
+    base::OnceCallback<void(Result)> on_done;
+  };
+
+  MbCurlReactor() {
+    multi_ = curl_multi_init();
+    // The IO thread runs for the process lifetime; the reactor singleton is leaked, so
+    // this std::thread member is never destructed (no join/terminate). Mirrors the
+    // engine's "globals leak, OS reclaims at exit" model (see MbRuntime::Shutdown).
+    thread_ = std::thread([this] { Run(); });
+  }
+
+  void Run() {
+    for (;;) {
+      // 1. Adopt newly-submitted requests into the multi handle (IO thread owns curl).
+      std::vector<std::unique_ptr<Pending>> batch;
+      {
+        base::AutoLock l(lock_);
+        batch.swap(pending_);
+      }
+      for (auto& p : batch) {
+        auto job = std::make_unique<Job>();
+        job->reply_runner = std::move(p->reply_runner);
+        job->on_done = std::move(p->on_done);
+        job->easy = curl_easy_init();
+        if (!job->easy) {
+          // Report the failure to the caller and drop the job.
+          job->reply_runner->PostTask(
+              FROM_HERE, base::BindOnce(std::move(job->on_done), Result{}));
+          continue;
+        }
+        // follow_redirects=false: the loader follows per-hop on the main thread.
+        job->headers = ConfigureCurlEasy(
+            job->easy, p->req.url, p->req.user_agent, p->req.extra_headers,
+            p->req.body, p->req.post_content_type, p->req.method,
+            /*follow_redirects=*/false, &job->header_block, &job->body);
+        curl_easy_setopt(job->easy, CURLOPT_PRIVATE, job.get());
+        curl_multi_add_handle(multi_, job->easy);
+        active_.push_back(std::move(job));
+      }
+
+      // 2. Drive all in-flight transfers (non-blocking).
+      int running = 0;
+      curl_multi_perform(multi_, &running);
+
+      // 3. Reap completed transfers and deliver each result to its submitter.
+      int in_queue = 0;
+      while (CURLMsg* m = curl_multi_info_read(multi_, &in_queue)) {
+        if (m->msg != CURLMSG_DONE)
+          continue;
+        CURL* easy = m->easy_handle;
+        Job* job = nullptr;
+        curl_easy_getinfo(easy, CURLINFO_PRIVATE, &job);
+        if (job) {
+          Result r;
+          long code = 0;
+          curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &code);
+          r.http_status = code;
+          // A complete HTTP response of ANY status (incl. 4xx/5xx) is success; only a
+          // transport error (no response) is a failure (matches FetchHttp).
+          r.ok = (m->data.result == CURLE_OK && code > 0);
+          const char* ct = nullptr;
+          if (curl_easy_getinfo(easy, CURLINFO_CONTENT_TYPE, &ct) == CURLE_OK && ct)
+            r.content_type = ct;
+          const char* eu = nullptr;
+          if (curl_easy_getinfo(easy, CURLINFO_EFFECTIVE_URL, &eu) == CURLE_OK && eu)
+            r.effective_url = eu;
+          r.body = std::move(job->body);
+          r.headers = std::move(job->header_block);
+          job->reply_runner->PostTask(
+              FROM_HERE, base::BindOnce(std::move(job->on_done), std::move(r)));
+        }
+        curl_multi_remove_handle(multi_, easy);
+        curl_easy_cleanup(easy);
+        if (job && job->headers)
+          curl_slist_free_all(job->headers);
+        if (job) {
+          for (auto it = active_.begin(); it != active_.end(); ++it) {
+            if (it->get() == job) {
+              active_.erase(it);
+              break;
+            }
+          }
+        }
+      }
+
+      // 4. Block until socket activity, the timeout, or a Submit() wakeup.
+      int numfds = 0;
+      curl_multi_poll(multi_, nullptr, 0, /*timeout_ms=*/1000, &numfds);
+    }
+  }
+
+  CURLM* multi_ = nullptr;
+  std::thread thread_;
+  base::Lock lock_;
+  std::vector<std::unique_ptr<Pending>> pending_;  // GUARDED_BY(lock_)
+  std::vector<std::unique_ptr<Job>> active_;       // IO-thread only
+};
 }  // namespace
 
 namespace mb {
@@ -1319,33 +1510,37 @@ void MbURLLoader::StartHttpFetch(std::unique_ptr<FetchState> state) {
       req_headers += "\n";
     req_headers += kv.key + ": " + kv.value;
   }
-  std::string ua = user_agent_;
+  MbCurlReactor::Request req;
+  req.url = state->cur;
+  req.method = state->method;
+  req.body = state->body;
+  req.post_content_type = state->post_ct;
+  req.user_agent = user_agent_;
+  req.extra_headers = std::move(req_headers);
+
   auto main_runner = base::SingleThreadTaskRunner::GetCurrentDefault();
   auto weak = weak_factory_.GetWeakPtr();
-  // Run the BLOCKING curl transfer OFF the main thread; post the raw hop result back.
-  // (The lambda touches only the request-side state + free FetchHttp — never the blink
-  // client or any member — so it is safe off-main. It is defined inside this member so
-  // it may bind the private OnHopComplete.)
-  base::ThreadPool::PostTask(
-      FROM_HERE,
-      {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
+  // Submit ONE hop to the curl_multi reactor (non-blocking, off-main). When it completes,
+  // the reactor posts the result back to the MAIN thread; we map it into a HopResult and
+  // resume OnHopComplete (per-hop redirect chain). If the loader was destroyed meanwhile
+  // the weak ptr no-ops and `state` is freed — the reactor never touched `this`.
+  MbCurlReactor::Get()->Submit(
+      std::move(req), main_runner,
       base::BindOnce(
-          [](std::unique_ptr<FetchState> st, std::string ua, std::string headers,
-             scoped_refptr<base::SingleThreadTaskRunner> runner,
-             base::WeakPtr<MbURLLoader> weak_self) {
+          [](base::WeakPtr<MbURLLoader> weak_self, std::unique_ptr<FetchState> st,
+             MbCurlReactor::Result r) {
+            if (!weak_self)
+              return;
             HopResult hr;
-            hr.ok = FetchHttp(st->cur, &hr.contents, &hr.content_type, ua, headers,
-                              st->body, st->post_ct, st->method, &hr.status,
-                              &hr.resp_headers, &hr.final_url,
-                              /*follow_redirects=*/false);
-            // Hop back to the main thread; if the loader was destroyed meanwhile the
-            // weak ptr no-ops (and `st` is freed) — no use-after-free, the worker never
-            // touched `this`.
-            runner->PostTask(
-                FROM_HERE, base::BindOnce(&MbURLLoader::OnHopComplete, weak_self,
-                                          std::move(st), std::move(hr)));
+            hr.ok = r.ok;
+            hr.status = static_cast<int>(r.http_status);
+            hr.contents = std::move(r.body);
+            hr.resp_headers = std::move(r.headers);
+            hr.content_type = std::move(r.content_type);
+            hr.final_url = std::move(r.effective_url);
+            weak_self->OnHopComplete(std::move(st), std::move(hr));
           },
-          std::move(state), std::move(ua), std::move(req_headers), main_runner, weak));
+          weak, std::move(state)));
 }
 
 void MbURLLoader::OnHopComplete(std::unique_ptr<FetchState> state, HopResult hop) {
