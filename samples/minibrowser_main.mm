@@ -354,7 +354,7 @@ int main(int argc, const char** argv) {
         __block int ticks = 0;
         [NSTimer scheduledTimerWithTimeInterval:1.0/60.0 repeats:YES block:^(NSTimer*) {
             ++ticks;
-            [g_contentView setNeedsDisplay:YES];  // synchronous render -> just repaint
+            [g_contentView setNeedsDisplay:YES];  // drawRect -> wkePaint drives+blits
             if (ticks % 15 == 0) mbUpdateChrome();   // keep nav buttons/URL fresh
             if (ticks % 60 == 0)
                 NSLog(@"[minibrowser] tick=%d loading=%d complete=%d", ticks,

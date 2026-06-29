@@ -2824,20 +2824,21 @@ bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y,
                           bool apply_device_scale, bool settle) {
   if (!widget_ || !widget_->widget() || !main_frame_)
     return false;
-  // Interleave lifecycle + task draining: layout issues subresource requests (images
-  // load lazily during layout), the loads complete async, then a later lifecycle applies
-  // them. A few rounds settle CSS + images before the final paint. Service rAF each
-  // round so animation-driven DOM changes are reflected. ONLY for one-shot captures
-  // (settle=true). The INTERACTIVE path (wkePaint @ ~60fps, settle=false) skips this: a
-  // nested RunUntilIdle per frame re-drains the entire task queue (network/timers) inside
-  // drawRect and makes live pages (YouTube) crawl. Its lifecycle is already advanced by
-  // the host's run loop, so a single UpdateAllLifecyclePhases below suffices.
-  for (int round = 0; settle && round < 5; ++round) {
+  // One "drive tick" = ServiceAnimations (rAF + IntersectionObserver, which lazy/SPA
+  // renderers like YouTube depend on) + a lifecycle update + RunUntilIdle (drain ready
+  // tasks: network completion, timers, microtasks). The page only ADVANCES if it is
+  // driven, so the interactive path (settle=false, wkePaint) MUST do one tick per frame —
+  // otherwise an SPA freezes on its first frame (the YouTube skeleton). One-shot captures
+  // (settle=true, mb_shot/wkeSavePng) do 5 rounds to fully settle freshly-loaded content.
+  // (settle=false is still ~5x cheaper than the old per-frame 5-round settle.)
+  const int rounds = settle ? 5 : 1;
+  for (int round = 0; round < rounds; ++round) {
     ServiceAnimations();
     widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
     base::RunLoop().RunUntilIdle();
   }
-  widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
+  if (settle)  // final paint-clean pass; the interactive tick's lifecycle above is enough
+    widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
 
   auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
   blink::LocalFrame* frame = impl->GetFrame();

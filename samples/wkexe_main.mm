@@ -251,7 +251,7 @@ int main(int argc, const char** argv) {
         NSLog(@"[wkexe] loading %s%s", url.c_str(), g_transparent ? "  (transparent)" : "");
 
         [NSTimer scheduledTimerWithTimeInterval:1.0/60.0 repeats:YES block:^(NSTimer*) {
-            [g_contentView setNeedsDisplay:YES];  // synchronous render -> just repaint
+            [g_contentView setNeedsDisplay:YES];  // drawRect -> wkePaint drives+blits
         }];
         [NSApp run];
     }
