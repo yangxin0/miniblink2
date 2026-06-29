@@ -1660,7 +1660,11 @@ void wkePaint(wkeWebView webView, void* bits, int pitch) {
   if (!webView || !webView->view || !bits)
     return;
   const int stride = pitch > 0 ? pitch : webView->width * 4;
-  mbPaintToBitmap(webView->view, bits, webView->width, webView->height, stride);
+  // INTERACTIVE blit (a windowed host repaints continuously): use the FAST repaint,
+  // not mbPaintToBitmap's one-shot screenshot settle — the latter re-drains the whole
+  // task queue every call and makes live pages (YouTube) crawl. For a one-shot capture
+  // use wkeSavePng (which keeps the settle).
+  mbRepaintToBitmap(webView->view, bits, webView->width, webView->height, stride);
 }
 
 bool wkePaintRect(wkeWebView webView, void* bits, int x, int y, int w, int h,

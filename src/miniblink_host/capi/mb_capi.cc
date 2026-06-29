@@ -1303,6 +1303,16 @@ int mbPaintToBitmap(mbView* v, void* out_bgra, int width, int height, int stride
   return v->impl->PaintToBitmap(out_bgra, width, height, stride) ? 1 : 0;
 }
 
+int mbRepaintToBitmap(mbView* v, void* out_bgra, int width, int height, int stride) {
+  if (!v || !v->impl || !out_bgra)
+    return 0;
+  // Fast INTERACTIVE paint (no one-shot lifecycle settle / task-queue drain) — for a
+  // host that repaints continuously (a windowed browser blitting at ~60fps). Use
+  // mbPaintToBitmap for a one-shot screenshot of freshly-loaded content.
+  return v->impl->PaintToBitmap(out_bgra, width, height, stride, /*settle=*/false) ? 1
+                                                                                   : 0;
+}
+
 int mbSavePng(mbView* v, const char* path, int width, int height) {
   if (!v || !v->impl || !path)
     return 0;

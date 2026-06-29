@@ -2821,14 +2821,18 @@ void MbWebView::ServiceAnimations() {
 }
 
 bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y,
-                          bool apply_device_scale) {
+                          bool apply_device_scale, bool settle) {
   if (!widget_ || !widget_->widget() || !main_frame_)
     return false;
   // Interleave lifecycle + task draining: layout issues subresource requests (images
   // load lazily during layout), the loads complete async, then a later lifecycle applies
   // them. A few rounds settle CSS + images before the final paint. Service rAF each
-  // round so animation-driven DOM changes are reflected.
-  for (int round = 0; round < 5; ++round) {
+  // round so animation-driven DOM changes are reflected. ONLY for one-shot captures
+  // (settle=true). The INTERACTIVE path (wkePaint @ ~60fps, settle=false) skips this: a
+  // nested RunUntilIdle per frame re-drains the entire task queue (network/timers) inside
+  // drawRect and makes live pages (YouTube) crawl. Its lifecycle is already advanced by
+  // the host's run loop, so a single UpdateAllLifecyclePhases below suffices.
+  for (int round = 0; settle && round < 5; ++round) {
     ServiceAnimations();
     widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
     base::RunLoop().RunUntilIdle();
@@ -2865,7 +2869,7 @@ bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y,
   return true;
 }
 
-bool MbWebView::PaintToBitmap(void* out_bgra, int w, int h, int stride) {
+bool MbWebView::PaintToBitmap(void* out_bgra, int w, int h, int stride, bool settle) {
   if (!out_bgra || w <= 0 || h <= 0)
     return false;
   // Compositing view: copy the compositor's captured frame (cc -> viz::Display ->
@@ -2905,7 +2909,7 @@ bool MbWebView::PaintToBitmap(void* out_bgra, int w, int h, int stride) {
     return false;
   }
   SkCanvas canvas(bitmap);
-  return PaintInto(canvas);
+  return PaintInto(canvas, 0, 0, /*apply_device_scale=*/true, settle);
 }
 
 bool MbWebView::PaintRectToBitmap(void* out_bgra, int x, int y, int w, int h,

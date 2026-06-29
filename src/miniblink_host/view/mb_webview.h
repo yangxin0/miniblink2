@@ -563,7 +563,9 @@ class MbWebView {
   // (Puppeteer networkidle) — for SPAs that fetch after the initial load. True
   // once idle, false at timeout_ms. Reads the process-wide request log.
   bool WaitForNetworkIdle(int idle_ms, int timeout_ms);
-  bool PaintToBitmap(void* out_bgra, int w, int h, int stride);
+  // settle=true: one-shot screenshot (full lifecycle settle). settle=false: fast
+  // interactive paint (wkePaint) — single lifecycle update + paint, no task-queue drain.
+  bool PaintToBitmap(void* out_bgra, int w, int h, int stride, bool settle = true);
   bool SavePng(const char* path, int w, int h);  // render + encode PNG to disk
   // Render the full view to a w×h PNG held in memory (encoded_png_) — for
   // embedders that want the bytes (serve over HTTP, store in a DB) without a temp
@@ -622,8 +624,14 @@ class MbWebView {
   // origin — used for clip/region capture; (0,0) renders from the top-left as usual.
   // apply_device_scale=false renders 1:1 (no dsf scale) — for the caller-buffer region
   // path (PaintRectToBitmap), whose ABI contract is a w x h px buffer with dsf NOT applied.
+  // settle=true runs the screenshot-grade lifecycle settle (5 rounds of
+  // UpdateAllLifecyclePhases + RunUntilIdle) so a ONE-SHOT capture reflects fully
+  // loaded/laid-out content. settle=false is the INTERACTIVE path (wkePaint, called
+  // ~60x/s): a single lifecycle update + paint, NO nested RunUntilIdle — the host's
+  // run loop already pumps blink's scheduler, so re-draining the task queue inside
+  // every paint is what made live pages (YouTube) crawl.
   bool PaintInto(SkCanvas& canvas, int origin_x = 0, int origin_y = 0,
-                 bool apply_device_scale = true);
+                 bool apply_device_scale = true, bool settle = true);
 
   std::unique_ptr<MbViewClient> view_client_;
   std::unique_ptr<MbFrameClient> frame_client_;

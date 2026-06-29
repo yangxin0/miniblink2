@@ -999,6 +999,16 @@ MB_EXPORT int mbPaintToBitmap(mbView*,
                               int height,
                               int stride);
 
+// Fast INTERACTIVE repaint: same BGRA8888 output as mbPaintToBitmap but WITHOUT the
+// one-shot lifecycle settle (no nested task-queue drain). For a host that blits the
+// view continuously (a windowed browser at ~60fps) — mbPaintToBitmap's per-call
+// settle makes that crawl on live pages. Use mbPaintToBitmap for a one-shot capture.
+MB_EXPORT int mbRepaintToBitmap(mbView*,
+                                void* out_bgra,
+                                int width,
+                                int height,
+                                int stride);
+
 // Render the current frame and encode it to `path`. The image format follows the
 // extension: .jpg/.jpeg -> JPEG (quality 90), anything else -> PNG. Returns 1 on success.
 MB_EXPORT int mbSavePng(mbView*, const char* path, int width, int height);
