@@ -52,8 +52,11 @@ static bool g_transparent = false;
 
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGContextRef ctx = (CGContextRef)[[NSGraphicsContext currentContext] CGContext];
+    // The engine renders BGRA8888 (byte 0 = B). Read it as such: AlphaFirst + 32-little
+    // makes the word ARGB, whose little-endian bytes are B,G,R,A = BGRA. (The previous
+    // AlphaLast|32Big read it as RGBA, swapping R<->B — red logos showed up blue/purple.)
     CGContextRef bmp = CGBitmapContextCreate(buf.data(), w, h, 8, pitch, cs,
-        kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
     CGImageRef img = CGBitmapContextCreateImage(bmp);
     CGContextSaveGState(ctx);
     CGContextTranslateCTM(ctx, 0, lh);
