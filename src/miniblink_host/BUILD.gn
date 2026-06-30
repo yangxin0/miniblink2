@@ -62,6 +62,8 @@ component("miniblink_host") {
     "loader/mb_url_loader.h",
     "media/mb_audio_player.cc",
     "media/mb_audio_player.h",
+    "media/mb_media_player.cc",
+    "media/mb_media_player.h",
     "platform/mb_gpu_thread.cc",
     "platform/mb_gpu_thread.h",
     "platform/mb_compositor.cc",
@@ -113,6 +115,13 @@ component("miniblink_host") {
     "//components/language_detection/content/common:common_blink",  # LanguageDetector broker stub
     "//components/webcrypto",  # WebCrypto impl for Platform::Crypto() (SubtleCrypto)
     "//media",  # media::AudioRendererSink / OutputDeviceStatus for CreateAudioDevice
+    # Real video playback (media/mb_media_player.cc): blink::WebMediaPlayerImpl +
+    # WebMediaPlayerBuilder + VideoFrameCompositor. The internal
+    # //third_party/blink/renderer/platform/media:media restricts visibility, so depend
+    # on the PUBLIC wrapper (no visibility list), which public_deps the builder header +
+    # deps the impl. Brings the full MSE pipeline (ChunkDemuxer) + RendererImpl + software
+    # VP9/Opus decoders (NOT in platform:platform, which only has the watch-time target).
+    "//third_party/blink/public/platform/media:media",
     # <audio>/<video> container metadata (media/mb_audio_player.cc): FFmpegGlue (in
     # //media) + the FFmpeg headers directly (media/ffmpeg is visibility-restricted to
     # //media). //third_party/ffmpeg's public config adds the libav* include path.

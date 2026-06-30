@@ -31,6 +31,7 @@
 
 namespace blink {
 class HistoryItem;
+class WebMediaPlayerBuilder;
 struct UserAgentMetadata;
 }  // namespace blink
 
@@ -303,6 +304,9 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   std::string extra_headers_;  // newline-separated "Name: Value" request headers
   std::vector<std::string> console_;  // captured console messages
   blink::WebLocalFrame* web_frame_ = nullptr;       // this client's frame
+  // Owns the UrlIndex (media resource cache) for this frame's WebMediaPlayerImpls; must
+  // outlive them (they hold it by raw pointer). Lazily created in CreateMediaPlayer.
+  std::unique_ptr<blink::WebMediaPlayerBuilder> media_player_builder_;
   std::unique_ptr<MbFrameClient> self_owned_;        // set for child frames only
   network::mojom::WebSandboxFlags sandbox_flags_ =
       network::mojom::WebSandboxFlags::kNone;        // child <iframe sandbox>

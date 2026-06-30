@@ -16,6 +16,7 @@
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
+#include "base/debug/stack_trace.h"
 #include "base/feature_list.h"
 #include "base/i18n/icu_util.h"
 #include "base/run_loop.h"
@@ -122,6 +123,11 @@ MbRuntime::MbRuntime() {
   // 1. base bootstrap.
   MB_STEP("1 AtExitManager");
   at_exit_ = std::make_unique<base::AtExitManager>();
+  // Print a symbolized backtrace on a fatal signal (SIGSEGV/SIGABRT). Opt-in via
+  // MB_STACK_DUMP so default runs are unaffected; invaluable for diagnosing native
+  // crashes (e.g. media-pipeline bring-up) when an attached debugger isn't available.
+  if (std::getenv("MB_STACK_DUMP"))
+    base::debug::EnableInProcessStackDumping();
   MB_STEP("2 CommandLine::Init");
   base::CommandLine::Init(0, nullptr);
   MB_STEP("3 InitializeICU");

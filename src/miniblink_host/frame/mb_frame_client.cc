@@ -19,6 +19,9 @@
 #include "miniblink_host/frame/mb_local_frame_host.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/media/mb_audio_player.h"
+#include "miniblink_host/media/mb_media_player.h"
+#include "third_party/blink/public/platform/media/web_media_player_builder.h"
+#include "third_party/blink/public/platform/web_media_player_source.h"  // source.IsURL/GetAsURL
 #include "miniblink_host/view/mb_webview.h"
 #include "miniblink_host/worker/mb_worker_fetch_context.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
@@ -604,7 +607,7 @@ std::unique_ptr<blink::URLLoader> MbFrameClient::CreateURLLoaderForTesting() {
 }
 
 std::unique_ptr<blink::WebMediaPlayer> MbFrameClient::CreateMediaPlayer(
-    const blink::WebMediaPlayerSource&,
+    const blink::WebMediaPlayerSource& source,
     blink::WebMediaPlayerClient* client,
     blink::MediaInspectorContext*,
     blink::WebMediaPlayerEncryptedMediaClient*,
@@ -612,7 +615,28 @@ std::unique_ptr<blink::WebMediaPlayer> MbFrameClient::CreateMediaPlayer(
     const blink::WebString& /*sink_id*/,
     const cc::LayerTreeSettings* /*settings*/,
     scoped_refptr<base::TaskRunner> /*compositor_worker_task_runner*/) {
-  // Audio-only player; runs on the frame's (main) thread.
+  // Real playback path: Chromium's WebMediaPlayerImpl (full MSE + software VP9/Opus
+  // pipeline) so <video> (YouTube) actually plays. Used for real resource schemes
+  // (http/https/file/blob: — including YouTube's MSE blob: source).
+  //
+  // data: media URLs go to the lightweight MbAudioPlayer instead: WMPI's network
+  // DataSource doesn't drive a non-network (data:) scheme to completion and spins, and
+  // MbAudioPlayer already handles self-contained data: audio + video metadata. (Also the
+  // fallback if media support can't initialize.)
+  const std::string src_url =
+      source.IsURL() ? source.GetAsURL().GetString().Utf8() : std::string();
+  const bool is_data_uri = src_url.rfind("data:", 0) == 0;
+  // The builder owns this frame's UrlIndex (resource cache) and MUST outlive the players
+  // it builds — keep one per frame (mirrors content's RenderFrameImpl::media_player_builder_).
+  if (web_frame_ && !is_data_uri) {
+    if (!media_player_builder_) {
+      media_player_builder_ = std::make_unique<blink::WebMediaPlayerBuilder>(
+          *web_frame_, base::SingleThreadTaskRunner::GetCurrentDefault());
+    }
+    if (auto player =
+            MbCreateWebMediaPlayer(*media_player_builder_, web_frame_, client))
+      return player;
+  }
   return std::make_unique<MbAudioPlayer>(
       client, base::SingleThreadTaskRunner::GetCurrentDefault());
 }
