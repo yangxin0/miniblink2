@@ -1916,8 +1916,22 @@ void MbWebView::OnPageDownloadFetch(const std::string& url,
 
 void MbWebView::OnCreateNewWindow(const std::string& url,
                                   const std::string& name) {
-  if (on_new_window_)
+  if (on_new_window_) {
     on_new_window_(url, name);
+    return;
+  }
+  // Single-window default: a page asking for a new window/tab (a target=_blank link,
+  // window.open) has no popup target here. Rather than drop it — which makes e.g.
+  // baidu.com's target=_blank navbar links (新闻/hao123/地图/…) appear unclickable —
+  // open the URL in THIS view. POSTED: we are inside blink's CreateNewWindow during the
+  // click handler, where synchronously committing a new document reenters navigation
+  // unsafely. Skip empty/about:blank opens (a JS-populated popup), which we can't host.
+  if (url.empty() || url == "about:blank")
+    return;
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE,
+      base::BindOnce([](MbWebView* self, std::string u) { self->LoadURL(u.c_str()); },
+                     this, url));
 }
 
 void MbWebView::SetNewWindowCallback(NewWindowFn cb) {

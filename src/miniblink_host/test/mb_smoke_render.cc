@@ -2157,24 +2157,31 @@ static void RunCases(mbView* v, int W, int H) {
            std::string("probe=") + probe);
   }
 
-  // 62-popup. Popup / new-window safety: a scraped or automated page that calls
-  // window.open or activates a target=_blank link must never crash the
-  // single-process host. Modern Blink (M150) has no WebViewClient::CreateView to
-  // override — the factory methods migrated out of that interface — and the
-  // default denies the popup, so window.open returns null and the _blank
-  // activation is a safe no-op here. This locks that in: a crash would take down
-  // any embedder that runs untrusted pages.
+  // 62-popup. Popup / new-window: with no host new-window handler registered, a
+  // target=_blank link (or window.open to a real URL) opens in THIS view — the
+  // single-window default — so the link still works instead of being a dead no-op
+  // (e.g. baidu.com's target=_blank navbar links). window.open('about:blank') is still
+  // denied (returns null): we can't host a JS-populated blank popup. Neither path may
+  // crash the single-process host. (Uses a data: href so the in-place navigation is
+  // instant + offline and doesn't bleed a real fetch into later tests.)
   {
     mbLoadHTML(v,
-        "<body><a id='b' href='https://example.com/' target='_blank'>x</a>"
+        "<body><a id='b' href='data:text/html,<title>popped</title>hi' "
+        "target='_blank'>x</a>"
         "<script>window.__r=String(window.open('about:blank'));</script></body>",
         "about:blank");
-    const std::string opened = Eval(v, "window.__r");  // "null" == popup denied
-    const int clicked = mbClickSelector(v, "#b");       // must not crash the host
-    const std::string alive = Eval(v, "'alive'");       // host still responsive
-    Expect(opened == "null" && clicked == 1 && alive == "alive",
-           "popup safety: window.open -> null; _blank click doesn't crash the host",
-           std::string("open=") + opened + " click=" + std::to_string(clicked));
+    const std::string opened = Eval(v, "window.__r");  // "null" == blank popup denied
+    mbClickSelector(v, "#b");  // _blank link -> opens its href in this view
+    std::string title;
+    for (int i = 0; i < 100; ++i) {
+      mbWait(v, 25);
+      title = Eval(v, "document.title");
+      if (title == "popped")
+        break;
+    }
+    Expect(opened == "null" && title == "popped",
+           "popup: window.open(blank)->null; target=_blank link opens in the view",
+           std::string("open=") + opened + " title=[" + title + "]");
   }
 
   // 62-csp. A strict Content-Security-Policy blocks the PAGE's own scripts but NOT
