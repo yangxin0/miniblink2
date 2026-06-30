@@ -180,6 +180,13 @@ component("miniblink_host") {
   # install_name lets the linked binaries find it at runtime without an rpath.
   lib_dirs = [ "/Users/yangxin/dennis/chrome/miniblink-modern/third_party/curl/lib" ]
   libs = [ "curl" ]  # -> third_party/curl/lib/libcurl.dylib (HTTP(S) + ws/wss)
+  # Real audio output (media/mb_media_player.cc MbCoreAudioSink): a DefaultOutput
+  # AudioUnit pulls decoded samples to the system audio device.
+  frameworks = [
+    "AudioToolbox.framework",
+    "AudioUnit.framework",
+    "CoreAudio.framework",
+  ]
 }
 
 # Runtime smoke test: exercises mbInitialize() against the real engine.

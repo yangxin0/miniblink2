@@ -20,6 +20,14 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/thread.h"
+#include <AudioToolbox/AudioToolbox.h>
+#include <AudioUnit/AudioUnit.h>
+#include <CoreAudio/CoreAudio.h>
+
+#include <algorithm>
+#include <atomic>
+#include <cstring>
+
 #include "media/base/audio_bus.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/audio_renderer_sink.h"
@@ -118,6 +126,170 @@ class MbSilentAudioSink : public media::SwitchableAudioRendererSink {
   bool playing_ = false;
 };
 
+// A REAL audio output sink (Step 2): pulls decoded samples from the media renderer and
+// plays them through a macOS DefaultOutput AudioUnit. media's AudioRendererImpl matches
+// its buffer size to our GetOutputDeviceInfo() params, so the AudioUnit's per-slice frame
+// count lines up with the AudioBus the renderer fills — no FIFO/resample needed. Falls
+// back to silent (MbSilentAudioSink) if the AudioUnit can't be opened. No SequenceChecker
+// (created on main, used on the media + CoreAudio threads). Volume applied in software.
+class MbCoreAudioSink : public media::SwitchableAudioRendererSink {
+ public:
+  explicit MbCoreAudioSink(scoped_refptr<base::SequencedTaskRunner> runner)
+      : task_runner_(std::move(runner)) {}
+
+  // Returns false if the output unit couldn't be created (caller falls back to silent).
+  bool Opened() const { return au_ != nullptr; }
+
+  void Initialize(const media::AudioParameters& params,
+                  RenderCallback* callback) override {
+    callback_ = callback;
+    bus_ = media::AudioBus::Create(params);
+    channels_ = params.channels();
+
+    AudioComponentDescription desc = {kAudioUnitType_Output,
+                                      kAudioUnitSubType_DefaultOutput,
+                                      kAudioUnitManufacturer_Apple, 0, 0};
+    AudioComponent comp = AudioComponentFindNext(nullptr, &desc);
+    if (!comp || AudioComponentInstanceNew(comp, &au_) != noErr) {
+      au_ = nullptr;
+      return;
+    }
+    // Non-interleaved float32 input matching the renderer's planar AudioBus.
+    AudioStreamBasicDescription fmt = {};
+    fmt.mSampleRate = params.sample_rate();
+    fmt.mFormatID = kAudioFormatLinearPCM;
+    fmt.mFormatFlags = kAudioFormatFlagIsFloat |
+                       kAudioFormatFlagIsNonInterleaved |
+                       kAudioFormatFlagIsPacked;
+    fmt.mBitsPerChannel = 32;
+    fmt.mChannelsPerFrame = params.channels();
+    fmt.mFramesPerPacket = 1;
+    fmt.mBytesPerFrame = sizeof(float);
+    fmt.mBytesPerPacket = sizeof(float);
+    AudioUnitSetProperty(au_, kAudioUnitProperty_StreamFormat,
+                         kAudioUnitScope_Input, 0, &fmt, sizeof(fmt));
+    AURenderCallbackStruct rc = {&MbCoreAudioSink::RenderThunk, this};
+    AudioUnitSetProperty(au_, kAudioUnitProperty_SetRenderCallback,
+                         kAudioUnitScope_Input, 0, &rc, sizeof(rc));
+    if (AudioUnitInitialize(au_) != noErr) {
+      AudioComponentInstanceDispose(au_);
+      au_ = nullptr;
+    }
+    // Fallback clock driver when there's no usable audio output (headless / no device):
+    // a FakeAudioWorker still pulls the renderer at real time so playback advances
+    // (silently) instead of stalling.
+    if (!au_) {
+      fake_worker_ = std::make_unique<media::FakeAudioWorker>(task_runner_, params);
+      fixed_delay_ = media::FakeAudioWorker::ComputeFakeOutputDelay(params);
+    }
+  }
+  void Start() override {}
+  void Play() override {
+    if (playing_.exchange(true))
+      return;
+    if (au_)
+      AudioOutputUnitStart(au_);
+    else if (fake_worker_)
+      fake_worker_->Start(base::BindRepeating(
+          &MbCoreAudioSink::CallRenderSilent, base::Unretained(this)));
+  }
+  void Pause() override {
+    if (!playing_.exchange(false))
+      return;
+    if (au_)
+      AudioOutputUnitStop(au_);  // blocks until any in-flight render returns
+    else if (fake_worker_)
+      fake_worker_->Stop();
+  }
+  void Stop() override {
+    if (playing_.exchange(false)) {
+      if (au_)
+        AudioOutputUnitStop(au_);
+      else if (fake_worker_)
+        fake_worker_->Stop();
+    }
+    if (au_) {
+      AudioUnitUninitialize(au_);
+      AudioComponentInstanceDispose(au_);
+      au_ = nullptr;
+    }
+  }
+  void Flush() override {}
+  bool SetVolume(double v) override {
+    volume_.store(static_cast<float>(v));
+    return true;
+  }
+  media::OutputDeviceInfo GetOutputDeviceInfo() override {
+    return media::OutputDeviceInfo(media::OUTPUT_DEVICE_STATUS_OK);
+  }
+  void GetOutputDeviceInfoAsync(OutputDeviceInfoCB cb) override {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(cb), GetOutputDeviceInfo()));
+  }
+  bool IsOptimizedForHardwareParameters() override { return false; }
+  bool CurrentThreadIsRenderingThread() override { return false; }
+  void SwitchOutputDevice(const std::string&,
+                          media::OutputDeviceStatusCB cb) override {
+    std::move(cb).Run(media::OUTPUT_DEVICE_STATUS_ERROR_INTERNAL);
+  }
+
+ protected:
+  ~MbCoreAudioSink() override {
+    if (au_) {
+      AudioUnitUninitialize(au_);
+      AudioComponentInstanceDispose(au_);
+    }
+  }
+
+ private:
+  static OSStatus RenderThunk(void* ref,
+                              AudioUnitRenderActionFlags*,
+                              const AudioTimeStamp*,
+                              UInt32 /*bus*/,
+                              UInt32 frames,
+                              AudioBufferList* io) {
+    return static_cast<MbCoreAudioSink*>(ref)->Render(frames, io);
+  }
+  // Silent fallback pull (FakeAudioWorker thread) — advances the clock, discards audio.
+  void CallRenderSilent(base::TimeTicks ideal_time, base::TimeTicks /*now*/) {
+    if (callback_)
+      callback_->Render(fixed_delay_, ideal_time, {}, bus_.get());
+  }
+  // Runs on the CoreAudio real-time thread.
+  OSStatus Render(UInt32 frames, AudioBufferList* io) {
+    const int want = std::min<int>(static_cast<int>(frames), bus_->frames());
+    const int got =
+        callback_ ? callback_->Render(base::TimeDelta(), base::TimeTicks::Now(),
+                                      {}, bus_.get())
+                  : 0;
+    const float vol = volume_.load();
+    for (UInt32 ch = 0; ch < io->mNumberBuffers; ++ch) {
+      float* out = static_cast<float*>(io->mBuffers[ch].mData);
+      if (static_cast<int>(ch) < bus_->channels() && got > 0) {
+        const float* in = bus_->channel(static_cast<int>(ch)).data();
+        const int n = std::min(want, got);
+        for (int i = 0; i < n; ++i)
+          out[i] = in[i] * vol;
+        for (int i = n; i < static_cast<int>(frames); ++i)
+          out[i] = 0.0f;
+      } else {
+        std::memset(out, 0, io->mBuffers[ch].mDataByteSize);
+      }
+    }
+    return noErr;
+  }
+
+  scoped_refptr<base::SequencedTaskRunner> task_runner_;
+  AudioUnit au_ = nullptr;
+  std::unique_ptr<media::FakeAudioWorker> fake_worker_;  // silent fallback driver
+  base::TimeDelta fixed_delay_;
+  std::unique_ptr<media::AudioBus> bus_;
+  int channels_ = 2;
+  RenderCallback* callback_ = nullptr;
+  std::atomic<bool> playing_{false};
+  std::atomic<float> volume_{1.0f};
+};
+
 // Minimal WebMediaPlayerDelegate: we don't track page/frame visibility or media-session
 // state (single view, always "visible"). AddObserver hands back a unique id WMPI keys its
 // later calls on; everything else is a no-op / negative.
@@ -208,10 +380,10 @@ std::unique_ptr<blink::WebMediaPlayer> MbCreateWebMediaPlayer(
           // captions); we don't support that, so pass none.
           /*speech_recognition_client=*/nullptr));
 
-  // Silent sink that still drives the playback clock (so video advances at real speed).
-  // Step 2 replaces this with a real CoreAudio output sink for sound.
+  // Real audio output via a macOS DefaultOutput AudioUnit; degrades to a silent clock
+  // driver (FakeAudioWorker) when there's no usable output device (headless).
   auto audio_sink =
-      base::MakeRefCounted<MbSilentAudioSink>(support.media_task_runner());
+      base::MakeRefCounted<MbCoreAudioSink>(support.media_task_runner());
 
   // MbEmptyBroker has no MediaMetricsProvider, so leave the remote disconnected (its
   // receiver end is dropped) — WMPI binds it and metric calls are silently discarded.
