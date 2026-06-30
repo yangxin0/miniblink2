@@ -189,6 +189,33 @@ component("miniblink_host") {
   ]
 }
 
+# ---------------------------------------------------------------------------
+# Redistributable single-file libraries: libminiblink2.{dylib,a}
+#
+# These are only meaningful in a NON-component build (is_component_build=false):
+# the whole engine (Blink, V8, skia, base, ...) links statically into ONE file,
+# instead of the ~286 sibling component dylibs a default build produces. Drive
+# them with tools/build-lib.sh, which provisions a dedicated non-component out dir.
+# In a component build they still "work" but each just wraps the component graph.
+
+# libminiblink2.dylib — self-contained shared library. The whole engine is linked
+# in; the dylib exports exactly mb_capi's MB_EXPORT (default-visibility) surface.
+# force_load pulls in ALL of miniblink_host's objects even though nothing in this
+# target references them (a static_library otherwise contributes only objects that
+# resolve an undefined symbol); their transitive engine deps then link normally.
+# deps=[:miniblink_host] also propagates curl + the Audio* frameworks to this link.
+shared_library("miniblink2") {
+  output_name = "miniblink2"
+  deps = [ ":miniblink_host" ]
+  ldflags = [ "-Wl,-force_load," +
+              rebase_path("$target_out_dir/libminiblink_host.a", root_build_dir) ]
+}
+
+# The single complete archive libminiblink2.a is produced by tools/build-lib.sh
+# (--static), which libtool-merges every input archive of the miniblink2 link into
+# one .a. (GN's static_library template does not forward complete_static_library,
+# so the merge is done as a post-link step instead of a GN target.)
+
 # Runtime smoke test: exercises mbInitialize() against the real engine.
 executable("mb_smoke") {
   sources = [ "test/mb_smoke.cc" ]
