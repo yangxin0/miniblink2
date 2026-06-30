@@ -268,6 +268,8 @@ class MbCoreAudioSink : public media::SwitchableAudioRendererSink {
   // Runs on the CoreAudio real-time thread.
   OSStatus Render(UInt32 frames, AudioBufferList* io) {
     const int need = static_cast<int>(frames);
+    if (need <= 0)
+      return noErr;  // AudioBus CHECKs frames_>0; nothing to render anyway
     // Pull whole media buffers into the FIFO until it can satisfy this request, so media
     // advances its clock by exactly the frames the device consumes (no fast playback).
     while (fifo_ && static_cast<int>(fifo_->frames()) < need &&
@@ -281,13 +283,15 @@ class MbCoreAudioSink : public media::SwitchableAudioRendererSink {
       fifo_->Push(bus_.get(), got);  // push exactly the frames media rendered
     }
     // Hand the AudioUnit exactly `frames`, wrapping its non-interleaved buffers directly.
+    // set_frames() MUST precede SetChannelData() (the latter CHECKs frames_ is set and
+    // that each span's size equals it).
     auto out = media::AudioBus::CreateWrapper(channels_);
     const int chans = std::min<int>(static_cast<int>(io->mNumberBuffers), channels_);
+    out->set_frames(need);
     for (int ch = 0; ch < chans; ++ch)
       out->SetChannelData(
           ch, base::span<float>(static_cast<float*>(io->mBuffers[ch].mData),
                                 static_cast<size_t>(need)));
-    out->set_frames(need);
     const int avail =
         fifo_ ? std::min(need, static_cast<int>(fifo_->frames())) : 0;
     if (avail > 0)
