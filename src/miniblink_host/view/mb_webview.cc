@@ -577,19 +577,34 @@ void MbWebView::PostURL(const char* utf8_url, const char* utf8_body,
   }
 }
 
+// Input dispatch (mouse/keyboard/IME) is bracketed in a scheduler task via RunInFrameTask:
+// we are driven from the embedder's AppKit/NSEvent path (NOT a task), and a page handler
+// the event fires may draw to a <canvas>. An out-of-task canvas draw registers
+// CanvasPerformanceMonitor as a stray TaskTimeObserver with no balancing DidProcessTask and
+// FATAL-NOTREACHEs on the next task — the same hazard ServiceAnimations brackets for rAF.
+// (Verified: with the wrapping removed, an input-handler canvas draw aborts at
+// canvas_performance_monitor.cc; with it, clean.) RunInFrameTask blocks until the task
+// runs, so the bound const char* args stay valid. settle=false: just bracket the dispatch.
 void MbWebView::SendMouseClick(int x, int y) {
   if (widget_)
-    widget_->SendMouseClick(x, y);
+    RunInFrameTask(base::BindOnce(&MbWidget::SendMouseClick,
+                                  base::Unretained(widget_.get()), x, y),
+                   /*settle=*/false);
 }
 
 void MbWebView::SendMouseClickEx(int x, int y, int button, int modifiers) {
   if (widget_)
-    widget_->SendMouseClickEx(x, y, button, modifiers);
+    RunInFrameTask(
+        base::BindOnce(&MbWidget::SendMouseClickEx,
+                       base::Unretained(widget_.get()), x, y, button, modifiers),
+        /*settle=*/false);
 }
 
 void MbWebView::SendMouseDown(int x, int y) {
   if (widget_)
-    widget_->SendMouseDown(x, y);
+    RunInFrameTask(base::BindOnce(&MbWidget::SendMouseDown,
+                                  base::Unretained(widget_.get()), x, y),
+                   /*settle=*/false);
 }
 
 void MbWebView::SendTouchTap(int x, int y) {
@@ -640,7 +655,9 @@ void MbWebView::SendTouchSwipe(int x1, int y1, int x2, int y2) {
 
 void MbWebView::SendMouseUp(int x, int y) {
   if (widget_)
-    widget_->SendMouseUp(x, y);
+    RunInFrameTask(base::BindOnce(&MbWidget::SendMouseUp,
+                                  base::Unretained(widget_.get()), x, y),
+                   /*settle=*/false);
 }
 
 bool MbWebView::ScrollIntoView(const char* css_selector) {
@@ -980,8 +997,12 @@ bool MbWebView::SetFileForSelector(const char* css_selector,
 }
 
 void MbWebView::SendMouseMove(int x, int y) {
+  // mousemove fires very often during interaction; a hover/move handler that draws to
+  // <canvas> is a prime out-of-task trigger (see SendMouseClick for the full rationale).
   if (widget_)
-    widget_->SendMouseMove(x, y);
+    RunInFrameTask(base::BindOnce(&MbWidget::SendMouseMove,
+                                  base::Unretained(widget_.get()), x, y),
+                   /*settle=*/false);
 }
 
 void MbWebView::SendWheel(int x, int y, int delta_x, int delta_y, int modifiers) {
@@ -2088,50 +2109,67 @@ void MbWebView::SetDeviceScaleFactor(float scale) {
   }
 }
 
+// Keyboard/IME input is task-bracketed for the same reason as the mouse methods (see
+// SendMouseClick): a key handler that draws to <canvas> out-of-task leaks the
+// CanvasPerformanceMonitor observer.
 void MbWebView::SendKey(const char* key_name) {
   if (widget_)
-    widget_->SendKey(key_name);
+    RunInFrameTask(base::BindOnce(&MbWidget::SendKey,
+                                  base::Unretained(widget_.get()), key_name),
+                   /*settle=*/false);
 }
 
 void MbWebView::SendKeyEx(const char* key, int modifiers) {
   if (widget_)
-    widget_->SendKeyEx(key, modifiers);
+    RunInFrameTask(base::BindOnce(&MbWidget::SendKeyEx,
+                                  base::Unretained(widget_.get()), key, modifiers),
+                   /*settle=*/false);
 }
 
 void MbWebView::SendKeyUp(int windows_key_code) {
   if (widget_)
-    widget_->SendKeyUp(windows_key_code);
+    RunInFrameTask(base::BindOnce(&MbWidget::SendKeyUp,
+                                  base::Unretained(widget_.get()), windows_key_code),
+                   /*settle=*/false);
 }
 
 void MbWebView::SendIme(const char* composing, const char* committed) {
   if (widget_)
-    widget_->SendIme(composing, committed);
+    RunInFrameTask(base::BindOnce(&MbWidget::SendIme,
+                                  base::Unretained(widget_.get()), composing, committed),
+                   /*settle=*/false);
 }
 
 void MbWebView::SendText(const char* utf8) {
   if (widget_)
-    widget_->SendText(utf8);
+    RunInFrameTask(base::BindOnce(&MbWidget::SendText,
+                                  base::Unretained(widget_.get()), utf8),
+                   /*settle=*/false);
 }
 
 void MbWebView::SendScroll(int x, int y, int dx, int dy) {
-  // Modern Blink routes gesture/wheel scrolls through the compositor input
-  // pipeline; the main-thread WebFrameWidgetImpl::HandleGestureEvent CHECKs that
-  // scroll events never reach it. A non-compositing offscreen widget has no such
-  // pipeline, so we scroll the layout viewport programmatically on the main
-  // thread. This moves the viewport, updates window.scrollY, and fires the
-  // 'scroll' event — what a headless capture/automation host needs. (x,y) is
-  // accepted for API symmetry with input events but unused: the document
-  // viewport is the scroll target. Positive dy scrolls the page downward.
-  (void)x;
-  (void)y;
+  // A wheel/gesture scroll targets the element UNDER THE CURSOR (real-browser
+  // behavior): walk up from elementFromPoint(x,y) to the nearest scrollable ancestor
+  // and scroll that, falling back to the document viewport. This is why it previously
+  // looked broken on sites whose content scrolls inside an overflow:auto container
+  // (e.g. baidu tieba) rather than the window — scrolling only the window did nothing.
+  //
+  // Done via JS scrollBy on the main thread: the modern non-compositing offscreen
+  // widget has no compositor input pipeline to route a real wheel event through
+  // (WebFrameWidgetImpl::HandleGestureEvent CHECKs that scrolls never reach it). This
+  // moves the target, updates scrollTop/scrollY, and fires the 'scroll' event. Positive
+  // dy scrolls downward.
   if (!main_frame_)
     return;
-  auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
-  blink::LocalFrame* frame = impl->GetFrame();
-  if (!frame || !frame->DomWindow())
-    return;
-  frame->DomWindow()->scrollByForTesting(static_cast<double>(dx),
-                                         static_cast<double>(dy));
+  const std::string js =
+      "(function(x,y,dx,dy){var el=document.elementFromPoint(x,y);"
+      "while(el){var o=getComputedStyle(el).overflowY;"
+      "if((o==='auto'||o==='scroll')&&el.scrollHeight>el.clientHeight){"
+      "el.scrollBy(dx,dy);return;}el=el.parentElement;}"
+      "window.scrollBy(dx,dy);})(" +
+      std::to_string(x) + "," + std::to_string(y) + "," + std::to_string(dx) +
+      "," + std::to_string(dy) + ")";
+  EvalToString(js.c_str());
 }
 
 void MbWebView::ScrollTo(int x, int y) {
@@ -2816,22 +2854,36 @@ bool MbWebView::WaitForNetworkIdle(int idle_ms, int timeout_ms) {
 }
 
 void MbWebView::ServiceAnimations() {
-  // Run rAF callbacks. The compositor normally drives this via BeginMainFrame; with
-  // no compositor we call the page animator directly so requestAnimationFrame fires
-  // (animation libraries, framework schedulers, lazy renderers all depend on it).
-  if (web_view_ && web_view_->GetPage()) {
-    web_view_->GetPage()->Animator().ServiceScriptedAnimations(
-        base::TimeTicks::Now());
-  }
-  // Force IntersectionObserver computation. The normal lifecycle step skips it for
-  // a throttled frame, and our offscreen widget reads as throttled — so observers
-  // (lazy-load, infinite scroll, viewability) would never fire. This bypasses the
-  // throttle gate; the queued notifications are then delivered by the loop pump.
-  if (main_frame_) {
-    auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
-    if (impl->GetFrame() && impl->GetFrame()->View())
-      impl->GetFrame()->View()->ForceUpdateViewportIntersections();
-  }
+  // Run rAF + IntersectionObserver INSIDE a scheduler task. rAF callbacks routinely draw
+  // to a <canvas> (CanvasRenderingContext::DidDraw); if that draw happens outside any
+  // task, CanvasPerformanceMonitor registers a stray TaskTimeObserver with no balancing
+  // DidProcessTask and FATAL-NOTREACHEs on the very next task. We are called from several
+  // drive paths that are NOT themselves tasks (PaintInto, WaitMs, WaitForNetworkIdle), so
+  // bracket HERE — the single chokepoint where rAF runs — instead of at every caller.
+  // (RunInFrameTask runs synchronously, so the page still advances in-line.)
+  RunInFrameTask(
+      base::BindOnce(
+          [](MbWebView* self) {
+            // Run rAF callbacks. The compositor normally drives this via BeginMainFrame;
+            // with no compositor we call the page animator directly so
+            // requestAnimationFrame fires (animation libs, framework schedulers, lazy
+            // renderers all depend on it).
+            if (self->web_view_ && self->web_view_->GetPage()) {
+              self->web_view_->GetPage()->Animator().ServiceScriptedAnimations(
+                  base::TimeTicks::Now());
+            }
+            // Force IntersectionObserver computation. The normal lifecycle step skips it
+            // for a throttled frame, and our offscreen widget reads as throttled — so
+            // observers (lazy-load, infinite scroll, viewability) would never fire. This
+            // bypasses the throttle gate; queued notifications are delivered by the pump.
+            if (self->main_frame_) {
+              auto* impl = blink::To<blink::WebLocalFrameImpl>(self->main_frame_);
+              if (impl->GetFrame() && impl->GetFrame()->View())
+                impl->GetFrame()->View()->ForceUpdateViewportIntersections();
+            }
+          },
+          this),
+      /*settle=*/false);
 }
 
 bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y,
@@ -2847,29 +2899,13 @@ bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y,
   // (settle=false is still ~5x cheaper than the old per-frame 5-round settle.)
   const int rounds = settle ? 5 : 1;
   for (int round = 0; round < rounds; ++round) {
-    // Run the rAF + lifecycle drive INSIDE a scheduler task. rAF callbacks that draw to
-    // a <canvas> call CanvasRenderingContext::DidDraw, which FATAL-NOTREACHEs in
-    // CanvasPerformanceMonitor when it happens outside a task scope: the monitor adds
-    // itself as a TaskTimeObserver expecting a balancing DidProcessTask that never comes,
-    // and the next real task then trips WillProcessTask's NOTREACHED. This is the same
-    // hazard RunInFrameTask guards host JS against — YouTube's rAF canvas animation hits
-    // it on the interactive paint path (only reachable now that the async loader actually
-    // loads the page). Posting the drive as a task brackets the DidDraw with
-    // WillProcessTask/DidProcessTask so the monitor registers + unregisters cleanly.
-    base::RunLoop loop(base::RunLoop::Type::kNestableTasksAllowed);
-    auto runner = base::SingleThreadTaskRunner::GetCurrentDefault();
-    runner->PostTask(
-        FROM_HERE, base::BindOnce(
-                       [](MbWebView* self) {
-                         self->ServiceAnimations();
-                         self->widget_->widget()->UpdateAllLifecyclePhases(
-                             blink::DocumentUpdateReason::kTest);
-                       },
-                       this));
-    // Then drain ready tasks (network completion, due timers, microtasks) and stop when
-    // idle — same draining as the prior RunUntilIdle, with the drive now task-bracketed.
-    runner->PostTask(FROM_HERE, loop.QuitWhenIdleClosure());
-    loop.Run();
+    // ServiceAnimations() task-brackets its own rAF (canvas-draw) work internally (it is
+    // the single chokepoint, shared with WaitMs et al.), so the CanvasPerformanceMonitor
+    // hazard is handled there. UpdateAllLifecyclePhases is layout/paint only (no canvas
+    // DidDraw), so the rest of the tick can run directly.
+    ServiceAnimations();
+    widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
+    base::RunLoop().RunUntilIdle();
   }
   if (settle)  // final paint-clean pass; the interactive tick's lifecycle above is enough
     widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);

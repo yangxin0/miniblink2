@@ -1015,6 +1015,31 @@ int main() {
     Expect(sy == 250, "mbScrollTo moves the viewport to an absolute Y",
            std::to_string(sy));
   }
+  // 11c. Inner-container wheel: a wheel over an overflow:auto element scrolls THAT
+  // element (element-under-cursor), not the window — the behavior sites whose content
+  // lives in a scroll container (e.g. baidu tieba) rely on. Exercises the
+  // elementFromPoint walk in mbSendScroll; window must stay put.
+  mbLoadHTML(v,
+             "<body style='margin:0'>"
+             "<div id='box' style='position:absolute;left:0;top:0;width:200px;"
+             "height:200px;overflow:auto'><div style='height:3000px'></div></div>"
+             "<div style='height:5000px'></div></body>",
+             "about:blank");
+  {
+    std::vector<uint8_t> tmp(static_cast<size_t>(W) * H * 4, 0);
+    mbPaintToBitmap(v, tmp.data(), W, H, W * 4);  // layout so both are scrollable
+  }
+  mbSendScroll(v, 100, 100, 0, 300);  // wheel at (100,100) — inside #box
+  {
+    int box_top = std::atoi(
+        Eval(v, "String(Math.round(document.getElementById('box').scrollTop))")
+            .c_str());
+    int win_y = std::atoi(Eval(v, "String(Math.round(window.scrollY))").c_str());
+    Expect(box_top > 0 && win_y == 0,
+           "input: wheel over an overflow:auto box scrolls the box, not the window",
+           std::string("box.scrollTop=") + std::to_string(box_top) +
+               " window.scrollY=" + std::to_string(win_y));
+  }
 
   // 12. Mouse move: hover over an element fires mouseover (and :hover applies).
   mbLoadHTML(v,
