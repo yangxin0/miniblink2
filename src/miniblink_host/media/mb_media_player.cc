@@ -29,6 +29,7 @@
 #include <cstring>
 
 #include "media/base/audio_bus.h"
+#include "media/base/audio_fifo.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/audio_renderer_sink.h"
 #include "media/base/fake_audio_worker.h"
@@ -175,6 +176,15 @@ class MbCoreAudioSink : public media::SwitchableAudioRendererSink {
       AudioComponentInstanceDispose(au_);
       au_ = nullptr;
     }
+    if (au_) {
+      // Bridge media's fixed-size Render (bus_->frames()) to CoreAudio's variable
+      // per-callback request: media fills `bus_`, we FIFO it, and hand the AudioUnit
+      // exactly the frames it asks for. Without this, media's clock counts a whole
+      // buffer as played each callback while only part is actually output -> playback
+      // races (fast). Capacity covers several media buffers + a large device request.
+      fifo_capacity_ = std::max(params.frames_per_buffer(), 4096) * 8;
+      fifo_ = std::make_unique<media::AudioFifo>(params.channels(), fifo_capacity_);
+    }
     // Fallback clock driver when there's no usable audio output (headless / no device):
     // a FakeAudioWorker still pulls the renderer at real time so playback advances
     // (silently) instead of stalling.
@@ -257,23 +267,39 @@ class MbCoreAudioSink : public media::SwitchableAudioRendererSink {
   }
   // Runs on the CoreAudio real-time thread.
   OSStatus Render(UInt32 frames, AudioBufferList* io) {
-    const int want = std::min<int>(static_cast<int>(frames), bus_->frames());
-    const int got =
-        callback_ ? callback_->Render(base::TimeDelta(), base::TimeTicks::Now(),
-                                      {}, bus_.get())
-                  : 0;
+    const int need = static_cast<int>(frames);
+    // Pull whole media buffers into the FIFO until it can satisfy this request, so media
+    // advances its clock by exactly the frames the device consumes (no fast playback).
+    while (fifo_ && static_cast<int>(fifo_->frames()) < need &&
+           static_cast<int>(fifo_->frames()) + bus_->frames() <= fifo_capacity_) {
+      const int got =
+          callback_ ? callback_->Render(fixed_delay_, base::TimeTicks::Now(), {},
+                                        bus_.get())
+                    : 0;
+      if (got <= 0)
+        break;  // underrun (paused / EOS) — output what we have + silence
+      fifo_->Push(bus_.get(), got);  // push exactly the frames media rendered
+    }
+    // Hand the AudioUnit exactly `frames`, wrapping its non-interleaved buffers directly.
+    auto out = media::AudioBus::CreateWrapper(channels_);
+    const int chans = std::min<int>(static_cast<int>(io->mNumberBuffers), channels_);
+    for (int ch = 0; ch < chans; ++ch)
+      out->SetChannelData(
+          ch, base::span<float>(static_cast<float*>(io->mBuffers[ch].mData),
+                                static_cast<size_t>(need)));
+    out->set_frames(need);
+    const int avail =
+        fifo_ ? std::min(need, static_cast<int>(fifo_->frames())) : 0;
+    if (avail > 0)
+      fifo_->Consume(out.get(), 0, avail);
+    if (avail < need)
+      out->ZeroFramesPartial(avail, need - avail);  // underrun -> silence
     const float vol = volume_.load();
-    for (UInt32 ch = 0; ch < io->mNumberBuffers; ++ch) {
-      float* out = static_cast<float*>(io->mBuffers[ch].mData);
-      if (static_cast<int>(ch) < bus_->channels() && got > 0) {
-        const float* in = bus_->channel(static_cast<int>(ch)).data();
-        const int n = std::min(want, got);
-        for (int i = 0; i < n; ++i)
-          out[i] = in[i] * vol;
-        for (int i = n; i < static_cast<int>(frames); ++i)
-          out[i] = 0.0f;
-      } else {
-        std::memset(out, 0, io->mBuffers[ch].mDataByteSize);
+    if (vol != 1.0f) {
+      for (int ch = 0; ch < chans; ++ch) {
+        float* d = out->channel(ch).data();
+        for (int i = 0; i < need; ++i)
+          d[i] *= vol;
       }
     }
     return noErr;
@@ -282,6 +308,8 @@ class MbCoreAudioSink : public media::SwitchableAudioRendererSink {
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   AudioUnit au_ = nullptr;
   std::unique_ptr<media::FakeAudioWorker> fake_worker_;  // silent fallback driver
+  std::unique_ptr<media::AudioFifo> fifo_;  // bridges media buffers -> AU requests
+  int fifo_capacity_ = 0;
   base::TimeDelta fixed_delay_;
   std::unique_ptr<media::AudioBus> bus_;
   int channels_ = 2;
