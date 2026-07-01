@@ -60,7 +60,8 @@ if [ "$FORM" = dyn ] || [ "$FORM" = both ]; then
     -L "$DIST" -lminiblink2 -Wl,-rpath,@loader_path \
     -framework Cocoa \
     -o "$DIST/minibrowser_dyn"
-  echo "    -> $DIST/minibrowser_dyn"
+  [ "$MODE" != debug ] && strip -x "$DIST/minibrowser_dyn"   # drop local symbols (release)
+  echo "    -> $DIST/minibrowser_dyn ($(du -h "$DIST/minibrowser_dyn" | cut -f1))"
 fi
 
 # --- static: libminiblink2.a is the COMPLETE engine archive, so the consumer must supply
@@ -129,7 +130,11 @@ if [ "$FORM" = static ] || [ "$FORM" = both ]; then
     -L "$HERE/third_party/curl/lib" -lcurl \
     -lresolv -lsandbox -lbsm \
     -o "$DIST/minibrowser_static"
-  echo "    -> $DIST/minibrowser_static"
+  # Strip local symbols (release): the static link retains ~500k of them (~67MB of __LINKEDIT),
+  # which is why an unstripped minibrowser_static (173MB) dwarfs the dylib (97MB, already
+  # stripped). Stripped it's ~110MB — i.e. the engine code + the sample, no symbol-table bloat.
+  [ "$MODE" != debug ] && strip -x "$DIST/minibrowser_static"
+  echo "    -> $DIST/minibrowser_static ($(du -h "$DIST/minibrowser_static" | cut -f1))"
 fi
 
 echo "==> done. run FROM the dist dir so runtime data is found:"
