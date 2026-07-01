@@ -282,13 +282,15 @@ for f in blink_resources.pak icudtl.dat snapshot_blob.bin v8_context_snapshot.bi
   [ -f "$REF/$f" ] && cp "$REF/$f" "$DIST/"
 done
 
-# GL driver dylibs (ANGLE + SwiftShader). The engine dlopen's these from the executable's own
-# directory at runtime for WebGL / GPU-accelerated <canvas> — the GL implementation is
-# deliberately NOT statically linked (Chromium's standard GL loading). They're built by the
-# monolith in $OUT and are self-contained (only reference each other via @rpath). Without them
-# in dist/, GL init fails ("Failed to load libGLESv2.dylib") and WebGL falls back to none;
-# software layout/paint + 2D canvas (Skia raster, in the lib) are unaffected.
-for f in libEGL.dylib libGLESv2.dylib libvk_swiftshader.dylib; do
+# GL driver dylibs (ANGLE + SwiftShader) + the SwiftShader Vulkan ICD manifest. The engine
+# dlopen's the GL implementation from the executable's own directory at runtime for WebGL /
+# GPU-accelerated <canvas> — it is deliberately NOT statically linked (Chromium's standard GL
+# loading). Built by the monolith in $OUT; the dylibs are self-contained (reference each other
+# via @rpath). vk_swiftshader_icd.json is REQUIRED too: it's the Vulkan ICD manifest that tells
+# the loader where libvk_swiftshader.dylib is (relative "./" path) and which surface extensions
+# it provides — without it SwANGLE's eglInitialize fails the VK_KHR_surface/VK_EXT_metal_surface
+# check and WebGL gets no display (2D canvas + layout/paint via Skia raster are unaffected).
+for f in libEGL.dylib libGLESv2.dylib libvk_swiftshader.dylib vk_swiftshader_icd.json; do
   [ -f "$CHROMIUM/$OUT/$f" ] && cp "$CHROMIUM/$OUT/$f" "$DIST/"
 done
 # the engine loads "v8_context_snapshot.bin"; provide it if only the arch-suffixed exists
