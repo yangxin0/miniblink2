@@ -2,8 +2,11 @@
 # build-lib.sh — build a self-contained libminiblink2 (single .dylib and/or .a),
 # release or debug, from the miniblink-modern sources.
 #
-#   scripts/build-lib.sh [--shared|--static|--both] [--release|--debug]
+#   scripts/build-lib.sh [--shared|--static|--both] [--release|--debug] [--webgpu]
 #                      [--chromium DIR] [--depot DIR] [--no-stage] [--print-only]
+#
+# --webgpu links WebGPU (Dawn, ~97MB) into the .dylib AND the .a; omitted by default to
+# keep the library smaller (navigator.gpu.requestAdapter() then resolves to null).
 #
 # CHROMIUM (the Chromium checkout) and DEPOT (depot_tools) default to siblings of this
 # project; override with env vars (CHROMIUM=… DEPOT=…) or the --chromium/--depot flags.
@@ -38,6 +41,7 @@ FORM=shared          # shared | static | both
 MODE=release         # release | debug
 STAGE=1
 PRINT_ONLY=0
+WEBGPU=0             # WebGPU (Dawn) OFF by default (smaller lib); --webgpu links it in
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -50,6 +54,7 @@ while [ $# -gt 0 ]; do
     --depot) DEPOT="$2"; shift ;;
     --no-stage) STAGE=0 ;;          # skip the source sync (sources already staged)
     --print-only) PRINT_ONLY=1 ;;   # gn gen + ninja dry-run, no compile
+    --webgpu) WEBGPU=1 ;;           # include WebGPU (Dawn ~97MB); default excludes it
     -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build-lib.sh: unknown arg '$1'" >&2; exit 2 ;;
   esac
@@ -82,12 +87,29 @@ DEST="$CHROMIUM/third_party/blink/renderer/miniblink_host"
 WKE_DEST="$CHROMIUM/third_party/blink/renderer/wke"
 GN_PATH="third_party/blink/renderer/miniblink_host"
 
+# Serialize builds that share this out dir. Two concurrent build-lib.sh runs would race —
+# one's `rm -rf`/rsync staging + gn gen while the other is compiling, and two ninjas in the
+# same dir corrupt .ninja_deps ("premature end of file"), which then forces a near-full
+# rebuild. mkdir is atomic, so it's a portable lock; the trap frees it on any normal exit or
+# signal. (If a run was SIGKILLed it may leave a stale lock — the message says how to clear.)
+LOCK="$CHROMIUM/$OUT.build-lib.lock"
+if ! mkdir "$LOCK" 2>/dev/null; then
+  echo "error: another build-lib.sh is already building $OUT." >&2
+  echo "  (lock: $LOCK — if no build is running, remove it: rmdir '$LOCK')" >&2
+  exit 1
+fi
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+
 # 1. Stage sources into the donor tree (same contract as build.sh) unless --no-stage.
 if [ "$STAGE" = 1 ]; then
   echo "==> staging host + wke sources -> $DEST"
-  rm -rf "$DEST" "$WKE_DEST"
-  cp -R "$HERE/src/miniblink_host" "$DEST"
-  cp -R "$HERE/src/wke" "$WKE_DEST"
+  # rsync, NOT rm -rf + cp -R: rsync preserves mtimes and copies ONLY changed files, so
+  # ninja's incremental build reuses every unchanged .o. (cp -R stamps every file with a
+  # fresh mtime, forcing ninja to recompile all ~60 host objects on every run.) Trailing
+  # slashes sync directory CONTENTS; --delete prunes files removed from src.
+  mkdir -p "$DEST" "$WKE_DEST"
+  rsync -a --delete "$HERE/src/miniblink_host/" "$DEST/"
+  rsync -a --delete "$HERE/src/wke/" "$WKE_DEST/"
   echo "==> applying blink compatibility patches"
   for p in "$HERE"/patches/*.patch; do
     [ -f "$p" ] || continue
@@ -104,11 +126,18 @@ fi
 
 # 2. Provision the NON-component out dir (the one switch that makes a single file).
 if [ "$MODE" = debug ]; then IS_DEBUG=true; SYM=2; BSYM=1; else IS_DEBUG=false; SYM=1; BSYM=0; fi
+[ "$WEBGPU" = 1 ] && USE_DAWN=true || USE_DAWN=false
 mkdir -p "$CHROMIUM/$OUT"
 cat > "$CHROMIUM/$OUT/args.gn" <<EOF
 is_debug = $IS_DEBUG
 is_component_build = false        # single-file: statically link the whole engine
 use_siso = false                  # siso binary is wrong-arch here; use ninja backend
+use_dawn = $USE_DAWN              # WebGPU/Dawn — off unless --webgpu (Dawn native ~97MB).
+                                  # Gates WebGPU out of BOTH the .dylib and the merged .a
+                                  # (the static merge reads the actual link inputs).
+skia_use_dawn = $USE_DAWN         # must track use_dawn (SKIA_USE_DAWN without USE_DAWN is a
+                                  # compile #error); Skia falls back to Ganesh-over-GL, which
+                                  # is what mb_gpu_thread already selects (gr_context_type=kGL).
 symbol_level = $SYM
 blink_symbol_level = $BSYM
 use_system_xcode = true

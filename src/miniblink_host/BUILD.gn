@@ -11,6 +11,7 @@
 # url_loader), not just //third_party/blink/public — like blink's own test support.
 
 import("//build/config/ui.gni")
+import("//ui/gl/features.gni")  # use_dawn — gates WebGPU (Dawn) in/out of the library
 
 component("miniblink_host") {
   output_name = "miniblink_host"
@@ -72,10 +73,7 @@ component("miniblink_host") {
     "platform/mb_platform.h",
     "platform/mb_webgl.cc",
     "platform/mb_webgl.h",
-    "platform/mb_webgpu.cc",
-    "platform/mb_webgpu.h",
-    "platform/mb_webgpu_context.cc",
-    "platform/mb_webgpu_context.h",
+    # platform/mb_webgpu*.{cc,h} are added below only when use_dawn (WebGPU) is enabled.
     "runtime/mb_runtime.cc",
     "runtime/mb_runtime.h",
     "runtime/mb_script_watchdog.cc",
@@ -135,17 +133,12 @@ component("miniblink_host") {
     "//gpu/config",
     "//gpu/ipc:gl_in_process_context",
     "//gpu/ipc:gpu_thread_holder",
-    # In-process WebGPU (platform/mb_webgpu*.cc): the WebGPU command-buffer client + the
-    # dawn native/wire/proc libs for the in-process client+service proc-table coordination.
+    # In-process GPU command buffer client/service — shared by the compositor
+    # (platform/mb_compositor.cc) and the OPTIONAL WebGPU path (added, with the Dawn
+    # native/wire/proc libs, in the `if (use_dawn)` block at the end of this target).
     "//gpu/command_buffer/client:client",
-    "//gpu/command_buffer/client:webgpu",
-    "//gpu/command_buffer/client:webgpu_interface",
     "//gpu/command_buffer/service",
     "//gpu/ipc/common",
-    "//third_party/dawn/include/dawn:cpp_headers",
-    "//third_party/dawn/src/dawn:proc",
-    "//third_party/dawn/src/dawn/native",
-    "//third_party/dawn/src/dawn/wire",
     "//ui/gl",
     "//ui/gl/init",
     "//gin",
@@ -187,6 +180,30 @@ component("miniblink_host") {
     "AudioUnit.framework",
     "CoreAudio.framework",
   ]
+
+  # Optional WebGPU (Dawn). Gated on the standard //ui/gl:use_dawn arg. It's OFF in the
+  # libminiblink2 SDK build by default (scripts/build-lib.sh, to save size — Dawn native
+  # is ~97MB of objects); pass --webgpu to flip use_dawn=true. When OFF, mb_platform still
+  # overrides CreateWebGPUGraphicsContext3DProviderAsync but resolves it to a null provider
+  # (see MINIBLINK_ENABLE_WEBGPU in mb_platform.cc), so navigator.gpu.requestAdapter()
+  # returns null ("WebGPU unavailable") rather than hanging; pages fall back to WebGL.
+  if (use_dawn) {
+    sources += [
+      "platform/mb_webgpu.cc",
+      "platform/mb_webgpu.h",
+      "platform/mb_webgpu_context.cc",
+      "platform/mb_webgpu_context.h",
+    ]
+    deps += [
+      "//gpu/command_buffer/client:webgpu",
+      "//gpu/command_buffer/client:webgpu_interface",
+      "//third_party/dawn/include/dawn:cpp_headers",
+      "//third_party/dawn/src/dawn:proc",
+      "//third_party/dawn/src/dawn/native",
+      "//third_party/dawn/src/dawn/wire",
+    ]
+    defines = [ "MINIBLINK_ENABLE_WEBGPU=1" ]
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -209,6 +226,29 @@ shared_library("miniblink2") {
   deps = [ ":miniblink_host" ]
   ldflags = [ "-Wl,-force_load," +
               rebase_path("$target_out_dir/libminiblink_host.a", root_build_dir) ]
+
+  if (!use_dawn) {
+    # WebGPU OFF: gpu's gles2 / shared-image layer (kept for WebGL + the compositor)
+    # references these Dawn shared-texture symbols, which Chromium does NOT gate on
+    # use_dawn. They're unreachable at runtime with WebGPU off (no Dawn context; Skia uses
+    # Ganesh-over-GL), so allow exactly these to resolve dynamically instead of failing the
+    # link. (Mangled names are pinned to this Chromium; on an uprev, regenerate from the
+    # link's undefined-symbol list: nm -u libminiblink2.dylib | grep -i dawn.)
+    ldflags += [
+      "-Wl,-U,__ZN3gpu22DawnSharedTextureCache20GetCachedWGPUTextureERKN4wgpu6DeviceENS1_12TextureUsageES5_RKNSt4__Cr6vectorINS1_13TextureFormatENS6_9allocatorIS8_EEEE",
+      "-Wl,-U,__ZN3gpu22DawnSharedTextureCache21EraseDataIfDeviceLostEv",
+      "-Wl,-U,__ZN3gpu22DawnSharedTextureCache21MaybeCacheWGPUTextureERKN4wgpu6DeviceERKNS1_7TextureENS1_12TextureUsageES8_RKNSt4__Cr6vectorINS1_13TextureFormatENS9_9allocatorISB_EEEE",
+      "-Wl,-U,__ZN3gpu22DawnSharedTextureCache22GetSharedTextureMemoryERKN4wgpu6DeviceE",
+      "-Wl,-U,__ZN3gpu22DawnSharedTextureCache26RemoveWGPUTextureFromCacheERKN4wgpu6DeviceERKNS1_7TextureE",
+      "-Wl,-U,__ZN3gpu22DawnSharedTextureCache29DestroyWGPUTextureIfNotCachedERKN4wgpu6DeviceERKNS1_7TextureE",
+      "-Wl,-U,__ZN3gpu22DawnSharedTextureCache29MaybeCacheSharedTextureMemoryERKN4wgpu6DeviceERKNS1_19SharedTextureMemoryE",
+      "-Wl,-U,__ZN3gpu22DawnSharedTextureCacheC1Ev",
+      "-Wl,-U,__ZN3gpu22DawnSharedTextureCacheD1Ev",
+      "-Wl,-U,__ZN3gpu31DawnFallbackImageRepresentationC1EPNS_18SharedImageManagerEPNS_18SharedImageBackingEPNS_17MemoryTypeTrackerEN4wgpu6DeviceENS7_13TextureFormatENSt4__Cr6vectorIS9_NSA_9allocatorIS9_EEEE",
+      "-Wl,-U,__ZN4dawn6native5metal12GetMTLDeviceEP14WGPUDeviceImpl",
+      "-Wl,-U,__ZNK3gpu19DawnContextProvider9GetDeviceEv",
+    ]
+  }
 }
 
 # The single complete archive libminiblink2.a is produced by scripts/build-lib.sh

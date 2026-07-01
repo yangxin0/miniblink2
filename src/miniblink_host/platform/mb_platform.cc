@@ -34,7 +34,9 @@
 #include "miniblink_host/blob/mb_blob_registry.h"
 #include "miniblink_host/frame/mb_dom_storage.h"
 #include "miniblink_host/platform/mb_webgl.h"
+#if defined(MINIBLINK_ENABLE_WEBGPU)
 #include "miniblink_host/platform/mb_webgpu.h"
+#endif
 #include "miniblink_host/worker/mb_dedicated_worker_host.h"
 #include "third_party/blink/public/mojom/blob/blob_registry.mojom-blink.h"
 #include "third_party/blink/public/mojom/dom_storage/dom_storage.mojom-blink.h"
@@ -295,8 +297,15 @@ void MbPlatform::CreateWebGPUGraphicsContext3DProviderAsync(
   // command-buffer client binds to this thread, which is where blink builds its
   // DawnControlClientHolder and makes wgpu calls. Hand it back posted (not reentrant).
   // Null on GPU-init failure -> blink resolves requestAdapter() to null (degrades).
+#if defined(MINIBLINK_ENABLE_WEBGPU)
   std::unique_ptr<blink::WebGraphicsContext3DProvider> provider =
       MakeWebGPUContextProvider();
+#else
+  // WebGPU (Dawn) excluded from this build (use_dawn=false). Resolve with no provider so
+  // navigator.gpu.requestAdapter() returns null ("WebGPU unavailable") instead of hanging;
+  // pages feature-detect and fall back (e.g. to WebGL).
+  std::unique_ptr<blink::WebGraphicsContext3DProvider> provider;
+#endif
   base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE, base::BindOnce(std::move(callback), std::move(provider)));
 }
