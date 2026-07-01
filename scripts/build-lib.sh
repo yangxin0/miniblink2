@@ -252,7 +252,27 @@ if [ "$FORM" != shared ]; then
   echo "obj/$GN_PATH/libminiblink_host.a" >> "$LIST"
   sort -u "$LIST" -o "$LIST"
   echo "  merging $(wc -l < "$LIST") inputs (rlibs: $(grep -c '\.rlib$' "$LIST"))"
-  ( cd "$CHROMIUM/$OUT" && libtool -static -o "$DIST/libminiblink2.a" -filelist "$LIST" 2>/dev/null )
+  # Merge with llvm-ar via an MRI script: ADDLIB flattens each input archive's members,
+  # ADDMOD adds loose objects, into ONE uniform archive. Apple `libtool` can't do this for a
+  # --size-optimized build: its objects are ThinLTO BITCODE, and libtool emits a FAT archive
+  # splitting bitcode (cputype 0) from native (arm64) objects, so an arm64 link sees only the
+  # native slice and every wke*/mb* symbol comes up undefined. llvm-ar treats bitcode + native
+  # uniformly, so the .a is consumable (scripts/build-samples.sh --static). Fall back to
+  # libtool if llvm-ar is absent (a native, non-LTO .a links fine either way).
+  LLVM_AR="$CHROMIUM/third_party/llvm-build/Release+Asserts/bin/llvm-ar"
+  rm -f "$DIST/libminiblink2.a"
+  if [ -x "$LLVM_AR" ]; then
+    MRI="$(mktemp)"
+    { echo "create $DIST/libminiblink2.a"
+      while IFS= read -r m; do
+        case "$m" in *.a|*.rlib) echo "addlib $m" ;; *.o) echo "addmod $m" ;; esac
+      done < "$LIST"
+      echo "save"; echo "end"; } > "$MRI"
+    ( cd "$CHROMIUM/$OUT" && "$LLVM_AR" -M < "$MRI" )
+    rm -f "$MRI"
+  else
+    ( cd "$CHROMIUM/$OUT" && libtool -static -o "$DIST/libminiblink2.a" -filelist "$LIST" 2>/dev/null )
+  fi
   rm -f "$LIST"
 fi
 

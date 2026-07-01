@@ -106,10 +106,25 @@ if [ "$FORM" = static ] || [ "$FORM" = both ]; then
              Accessibility CoreMediaIO; do FW+=(-framework "$f"); done
   fi
 
+  # The Rust global-allocator glue (rust_allocator_internal::*) is DEFINED in a bitcode object
+  # (build/rust/allocator/allocator_impls.o) but REFERENCED only by the native Rust allocator
+  # rlib. In a --size-optimized (ThinLTO) link, LTO sees no bitcode user and internalizes/drops
+  # those defs, so the native rlib's references come up undefined. Pin them with -u so LTO keeps
+  # them live and pulls the defining member. (Regenerate on an uprev:
+  #   nm out/.../obj/build/rust/allocator/liballocator_*.rlib | grep rust_allocator_internal)
+  UFLAGS=(
+    -Wl,-u,__ZN23rust_allocator_internal5allocEmm
+    -Wl,-u,__ZN23rust_allocator_internal7deallocEPhmm
+    -Wl,-u,__ZN23rust_allocator_internal7reallocEPhmmm
+    -Wl,-u,__ZN23rust_allocator_internal12alloc_zeroedEmm
+    -Wl,-u,__ZN23rust_allocator_internal24alloc_error_handler_implEv
+  )
   echo "==> minibrowser_static  (links libminiblink2.a; ${#FW[@]} frameworks; $(basename "$CLANGXX") + lld)"
+  echo "    (ThinLTO codegen of the reachable engine — slow; give it several min)"
   "$CLANGXX" "${CXXFLAGS[@]}" "$SRC" \
     "$DIST/libminiblink2.a" \
-    -fuse-ld=lld -Wl,-ObjC \
+    -fuse-ld=lld -Wl,-ObjC -Wl,-dead_strip \
+    "${UFLAGS[@]}" \
     "${FW[@]}" \
     -L "$HERE/third_party/curl/lib" -lcurl \
     -lresolv -lsandbox -lbsm \
