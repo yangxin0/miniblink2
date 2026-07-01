@@ -3,11 +3,12 @@
 # release or debug, from the miniblink-modern sources.
 #
 #   scripts/build-lib.sh [--shared|--static|--both] [--release|--debug]
-#                      [--webgpu] [--video] [--wasm]
+#                      [--webgpu] [--video] [--wasm] [--ml]
 #                      [--chromium DIR] [--depot DIR] [--no-stage] [--print-only]
 #
 # Feature flags are include-only (default OFF, to trim toward miniblink49's footprint):
 #   --webgpu  WebGPU/Dawn      --video  <video> decode (audio is always on)  --wasm  WebAssembly
+#   --ml      WebNN on-device ML (TFLite/LiteRT/XNNPACK backend)
 #
 # --webgpu links WebGPU (Dawn, ~97MB) into the .dylib AND the .a; omitted by default to
 # keep the library smaller (navigator.gpu.requestAdapter() then resolves to null).
@@ -48,6 +49,7 @@ PRINT_ONLY=0
 WEBGPU=0             # WebGPU (Dawn) OFF by default (smaller lib); --webgpu links it in
 VIDEO=0              # <video> decode OFF by default (audio stays on); --video adds it
 WASM=0               # WebAssembly OFF by default; --wasm adds it
+ML=0                 # WebNN on-device ML (TFLite/LiteRT/XNNPACK) OFF by default; --ml adds it
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -63,6 +65,7 @@ while [ $# -gt 0 ]; do
     --webgpu) WEBGPU=1 ;;           # include WebGPU (Dawn ~97MB); default excludes it
     --video) VIDEO=1 ;;             # include <video> decode (ffmpeg video + AV1); default off
     --wasm) WASM=1 ;;               # include WebAssembly; default off
+    --ml) ML=1 ;;                   # include WebNN on-device ML (TFLite backend); default off
     -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build-lib.sh: unknown arg '$1'" >&2; exit 2 ;;
   esac
@@ -137,6 +140,7 @@ if [ "$MODE" = debug ]; then IS_DEBUG=true; SYM=2; BSYM=1; else IS_DEBUG=false; 
 [ "$WEBGPU" = 1 ] && USE_DAWN=true || USE_DAWN=false
 [ "$VIDEO" = 1 ] && VID=true || VID=false        # video decoders (audio stays regardless)
 [ "$WASM" = 1 ] && WASM_GN=true || WASM_GN=false
+[ "$ML" = 1 ] && MLV=true || MLV=false           # WebNN TFLite/LiteRT/XNNPACK backend
 mkdir -p "$CHROMIUM/$OUT"
 cat > "$CHROMIUM/$OUT/args.gn" <<EOF
 is_debug = $IS_DEBUG
@@ -157,6 +161,12 @@ enable_ffmpeg_video_decoders = $VID
 media_use_libvpx = $VID
 # WebAssembly — off by default; --wasm adds it.
 v8_enable_webassembly = $WASM_GN
+# WebNN on-device ML (navigator.ml) — off by default; --ml adds the TFLite/LiteRT backend.
+# Absent in miniblink49. Off drops most of //services/webnn's TFLite+XNNPACK (~79% of its
+# input files); WebNN's LiteRT core still links a remainder. WebNN's mojo interface stays.
+webnn_use_tflite = $MLV
+webnn_use_litert = $MLV
+build_tflite_with_xnnpack = $MLV
 symbol_level = $SYM
 blink_symbol_level = $BSYM
 use_system_xcode = true
