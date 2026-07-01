@@ -187,7 +187,14 @@ clang_use_chrome_plugins = false
 use_clang_modules = false
 enable_precompiled_headers = false
 mac_sdk_min = "26.0"
-angle_enable_metal = false
+angle_enable_metal = false         # Metal = hardware-GPU WebGL, but building ANGLE's Metal
+                                  # backend needs the Metal shader compiler (`xcrun metal`),
+                                  # which ships ONLY with full Xcode.app — this toolchain has
+                                  # just CommandLineTools, so it can't build. Left false: WebGL
+                                  # runs on SwiftShader (software/CPU) — correct but slow, and
+                                  # its software GL rejects some framebuffer attachments
+                                  # (glFramebufferRenderbuffer GL_INVALID_ENUM). To get GPU
+                                  # WebGL: install Xcode, xcode-select it, then set this true.
 EOF
 echo "==> gn gen $OUT  (is_debug=$IS_DEBUG, is_component_build=false)"
 ( cd "$CHROMIUM" && gn gen "$OUT" >/dev/null )
