@@ -20,6 +20,31 @@
 #include "miniblink_host/runtime/mb_runtime.h"
 #include "miniblink_host/view/mb_webview.h"
 
+// --- ThinLTO keep-alive for the Rust global allocator ------------------------------------
+// rust_allocator_internal::{alloc,dealloc,realloc,alloc_zeroed,alloc_error_handler_impl} are
+// DEFINED in build/rust/allocator/allocator_impls.o (bitcode) but REFERENCED only by the NATIVE
+// Rust allocator rlib. In a --size-optimized (ThinLTO) build LTO sees no *bitcode* user and
+// internalizes/drops them, so a static libminiblink2.a link leaves the native rlib's references
+// undefined (the dylib is unaffected — it never force-pulls that rlib). This mb_capi object is
+// ALWAYS pulled into any consumer link (every wke*/mb* entry point lives here), so referencing
+// the allocator from it forces LTO to keep the real definitions live — the static .a is then
+// self-sufficient with NO consumer -Wl,-u. This is NOT a trap stub (cf. mb_dawn_stubs.cc): these
+// run on every Rust allocation and must resolve to the real PartitionAlloc-backed functions.
+namespace rust_allocator_internal {
+unsigned char* alloc(size_t size, size_t align);
+void dealloc(unsigned char* p, size_t size, size_t align);
+unsigned char* realloc(unsigned char* p, size_t old_size, size_t align, size_t new_size);
+unsigned char* alloc_zeroed(size_t size, size_t align);
+void alloc_error_handler_impl();
+}  // namespace rust_allocator_internal
+extern "C" __attribute__((used, retain)) void* const mb_rust_alloc_keep[] = {
+    reinterpret_cast<void*>(&rust_allocator_internal::alloc),
+    reinterpret_cast<void*>(&rust_allocator_internal::dealloc),
+    reinterpret_cast<void*>(&rust_allocator_internal::realloc),
+    reinterpret_cast<void*>(&rust_allocator_internal::alloc_zeroed),
+    reinterpret_cast<void*>(&rust_allocator_internal::alloc_error_handler_impl),
+};
+
 // Opaque handle: wraps the C++ view.
 struct mbView {
   std::unique_ptr<mb::MbWebView> impl;
