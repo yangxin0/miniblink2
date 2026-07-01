@@ -29,6 +29,14 @@ curl -sL "https://curl.se/download/curl-$CURL_VER.tar.gz" -o "$WORK/curl.tar.gz"
 tar xzf "$WORK/curl.tar.gz" -C "$WORK"
 cd "$WORK/curl-$CURL_VER"
 
+# Pin the deployment target so the vendored dylib's minos matches the engine's build
+# (-mmacos-version-min=12.0). Without this, curl builds for the host SDK (e.g. macOS 26),
+# and lld — the linker the --size-optimized ThinLTO build uses — hard-errors on a dylib
+# newer than the 12.0 target (the system ld only warns). Existing dylibs can be patched:
+#   vtool -set-build-version macos 12.0 <sdk> -replace -output libcurl.4.dylib libcurl.4.dylib
+#   codesign -s - -f libcurl.4.dylib
+export MACOSX_DEPLOYMENT_TARGET=12.0
+
 echo "==> configure (shared, websockets, OpenSSL)"
 ./configure \
   --enable-shared --disable-static \

@@ -3,12 +3,13 @@
 # release or debug, from the miniblink-modern sources.
 #
 #   scripts/build-lib.sh [--shared|--static|--both] [--release|--debug]
-#                      [--webgpu] [--video] [--wasm] [--ml]
+#                      [--webgpu] [--video] [--ml] [--size-optimized]
 #                      [--chromium DIR] [--depot DIR] [--no-stage] [--print-only]
 #
 # Feature flags are include-only (default OFF, to trim toward miniblink49's footprint):
-#   --webgpu  WebGPU/Dawn      --video  <video> decode (audio is always on)  --wasm  WebAssembly
+#   --webgpu  WebGPU/Dawn      --video  <video> decode (audio is always on)
 #   --ml      WebNN on-device ML (TFLite/LiteRT/XNNPACK backend)
+#   --size-optimized  size-optimized ship build (ThinLTO + -Oz + no DCHECKs; release only, slow)
 #
 # --webgpu links WebGPU (Dawn, ~97MB) into the .dylib AND the .a; omitted by default to
 # keep the library smaller (navigator.gpu.requestAdapter() then resolves to null).
@@ -48,8 +49,8 @@ STAGE=1
 PRINT_ONLY=0
 WEBGPU=0             # WebGPU (Dawn) OFF by default (smaller lib); --webgpu links it in
 VIDEO=0              # <video> decode OFF by default (audio stays on); --video adds it
-WASM=0               # WebAssembly OFF by default; --wasm adds it
 ML=0                 # WebNN on-device ML (TFLite/LiteRT/XNNPACK) OFF by default; --ml adds it
+SIZE=0               # --size-optimized: ThinLTO + size opt + no DCHECKs ship build (release only, slow)
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -64,8 +65,8 @@ while [ $# -gt 0 ]; do
     --print-only) PRINT_ONLY=1 ;;   # gn gen + ninja dry-run, no compile
     --webgpu) WEBGPU=1 ;;           # include WebGPU (Dawn ~97MB); default excludes it
     --video) VIDEO=1 ;;             # include <video> decode (ffmpeg video + AV1); default off
-    --wasm) WASM=1 ;;               # include WebAssembly; default off
     --ml) ML=1 ;;                   # include WebNN on-device ML (TFLite backend); default off
+    --size-optimized) SIZE=1 ;;               # size-optimized ship build: ThinLTO + -Oz + no DCHECKs
     -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build-lib.sh: unknown arg '$1'" >&2; exit 2 ;;
   esac
@@ -139,8 +140,20 @@ fi
 if [ "$MODE" = debug ]; then IS_DEBUG=true; SYM=2; BSYM=1; else IS_DEBUG=false; SYM=1; BSYM=0; fi
 [ "$WEBGPU" = 1 ] && USE_DAWN=true || USE_DAWN=false
 [ "$VIDEO" = 1 ] && VID=true || VID=false        # video decoders (audio stays regardless)
-[ "$WASM" = 1 ] && WASM_GN=true || WASM_GN=false
 [ "$ML" = 1 ] && MLV=true || MLV=false           # WebNN TFLite/LiteRT/XNNPACK backend
+# --size-optimized: the size-optimized ship config. Release only (ThinLTO is a slow full-rebuild link;
+# debug stays fast + keeps DCHECKs). The default build is a fast DEV release (-O2, no LTO, no
+# dedup, DCHECKs on) — this trades build time for a much smaller dylib.
+if [ "$SIZE" = 1 ] && [ "$MODE" != debug ]; then
+  SIZE_ARGS='optimize_for_size = true          # -Oz/-Os instead of -O2/-O3
+dcheck_always_on = false          # compile out every DCHECK assertion + its message string
+use_thin_lto = true               # cross-module dead-code elimination + inlining + ICF
+thin_lto_enable_optimizations = true
+exclude_unwind_tables = true      # drop C++ unwind tables (no in-process crash backtraces)'
+  SYM=0; BSYM=0                    # stripped anyway; 0 also speeds the LTO build
+else
+  SIZE_ARGS='# size-opt off — pass --size-optimized (release) for the small ThinLTO ship build'
+fi
 mkdir -p "$CHROMIUM/$OUT"
 cat > "$CHROMIUM/$OUT/args.gn" <<EOF
 is_debug = $IS_DEBUG
@@ -153,20 +166,20 @@ skia_use_dawn = $USE_DAWN         # must track use_dawn (SKIA_USE_DAWN without U
                                   # compile #error); Skia falls back to Ganesh-over-GL, which
                                   # is what mb_gpu_thread already selects (gr_context_type=kGL).
 # <video> decode — off by default (audio stays on); --video adds it. Keeps ffmpeg AUDIO
-# decoders + the media pipeline; drops ffmpeg VIDEO decoders (H.264 etc.) + media's VP8/9.
-# NOTE: AV1 (dav1d) is left ENABLED regardless — the macOS VideoToolbox AV1 accelerator
-# (media/gpu/mac/video_toolbox_av1_accelerator.cc) is compiled unconditionally and needs
-# libgav1, so disabling AV1 breaks the build. Fully dropping AV1 would need a donor patch.
+# decoders + the media pipeline; drops ffmpeg VIDEO decoders (H.264 etc.) via the cleanly
+# gated enable_ffmpeg_video_decoders. NOTE: media_use_libvpx (VP8/9) is left ENABLED — the
+# media decoder factory references media::VpxVideoDecoder's ctor at STARTUP, so disabling it
+# only made the symbol undefined (a -U masked the link error, but dyld crashes at load).
+# libvpx is shared with WebRTC, so keeping it costs ~nothing. AV1 (dav1d) is likewise left on
+# (the macOS VideoToolbox AV1 accelerator is compiled unconditionally and needs libgav1).
 enable_ffmpeg_video_decoders = $VID
-media_use_libvpx = $VID
-# WebAssembly — off by default; --wasm adds it.
-v8_enable_webassembly = $WASM_GN
 # WebNN on-device ML (navigator.ml) — off by default; --ml adds the TFLite/LiteRT backend.
 # Absent in miniblink49. Off drops most of //services/webnn's TFLite+XNNPACK (~79% of its
 # input files); WebNN's LiteRT core still links a remainder. WebNN's mojo interface stays.
 webnn_use_tflite = $MLV
 webnn_use_litert = $MLV
 build_tflite_with_xnnpack = $MLV
+$SIZE_ARGS
 symbol_level = $SYM
 blink_symbol_level = $BSYM
 use_system_xcode = true
