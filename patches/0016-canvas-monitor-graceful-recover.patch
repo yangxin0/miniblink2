@@ -1,0 +1,34 @@
+diff --git a/third_party/blink/renderer/core/html/canvas/canvas_performance_monitor.cc b/third_party/blink/renderer/core/html/canvas/canvas_performance_monitor.cc
+index cb3d2d7..e6b551f 100644
+--- a/third_party/blink/renderer/core/html/canvas/canvas_performance_monitor.cc
++++ b/third_party/blink/renderer/core/html/canvas/canvas_performance_monitor.cc
+@@ -172,13 +172,22 @@ void CanvasPerformanceMonitor::CurrentTaskDrawsToContext(
+ }
+ 
+ void CanvasPerformanceMonitor::WillProcessTask(TimeTicks start_time) {
+-  // If this method is ever called within Chrome, there's a serious
+-  // programming error somewhere.  If it is called in a unit test, it probably
+-  // means that either the failing test or a test that ran before it called
+-  // CanvasRenderingContext::DidDraw outside the scope of a task runner.
+-  // To resolve the problem, try calling this in the test's tear-down:
+-  // CanvasRenderingContext::GetCanvasPerformanceMonitor().ResetForTesting()
+-  NOTREACHED();
++  // Upstream this is NOTREACHED(): reaching it means a CanvasRenderingContext::DidDraw
++  // ran outside the scope of a SequenceManager task, so this monitor registered itself
++  // as a TaskTimeObserver but never got the balancing DidProcessTask — and now a new
++  // task is starting with the stray registration still live.
++  //
++  // miniblink port: the single-process host drives a few legitimate draw paths (host
++  // JS eval, the interactive paint/animation pump) that can run outside the scheduler's
++  // task flow, especially under the live AppKit run loop. This monitor is metrics-only
++  // (UMA histograms), so instead of aborting the whole process we recover: unregister
++  // and reset, dropping just this one render-task measurement. Mirrors DidProcessTask's
++  // teardown minus RecordMetrics.
++  Thread::Current()->RemoveTaskTimeObserver(this);
++  is_render_task_ = false;
++  draw_types_ = 0;
++  rendering_context_descriptions_.clear();
++  measure_current_task_ = false;
+ }
+ 
+ void CanvasPerformanceMonitor::RecordMetrics(TimeTicks start_time,

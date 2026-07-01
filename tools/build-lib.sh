@@ -16,8 +16,11 @@
 # The first build of a given mode is a full from-scratch compile of the engine in
 # non-component mode (slow; shares nothing with out/Release). Re-runs are incremental.
 #
-# Runtime data the engine loads at startup is staged alongside the lib:
-#   blink_resources.pak, icudtl.dat, snapshot_blob.bin, v8_context_snapshot.bin.
+# Each dist/<mode>/ is a self-contained SDK:
+#   libminiblink2.{dylib,a}            the library (exposes mb_capi + the wke API)
+#   include/miniblink2/{wke.h,mb_capi.h}  public headers
+#   blink_resources.pak, icudtl.dat, snapshot_blob.bin, v8_context_snapshot.bin
+#                               runtime data the engine loads at startup
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"   # repo root (this script lives in tools/)
@@ -109,53 +112,61 @@ fi
 echo "==> $NINJA -C $OUT $SHARED   (first build is a full non-component compile — slow)"
 ( cd "$TREE" && "$NINJA" -C "$OUT" "$SHARED" )
 
-# Runtime data the engine loads at startup (best-effort; names vary by config).
-echo "==> building runtime data files"
-for f in blink_resources.pak icudtl.dat snapshot_blob.bin v8_context_snapshot.bin; do
-  ( cd "$TREE" && "$NINJA" -C "$OUT" "$f" >/dev/null 2>&1 ) && echo "  built $f" || true
-done
+# Runtime data the engine loads at startup is copied from a reference build (REF,
+# default out/Release), NOT rebuilt: these are architecture/version-neutral data
+# files, and building them in a fresh non-component out dir drags in a huge resource
+# pipeline for no benefit. Verified compatible — the monolith's V8 (same chromium-150
+# source + release flags) loads out/Release's v8_context_snapshot.
+REF="${REF:-$TREE/out/Release}"
 
 DIST="$HERE/dist/$MODE"
-mkdir -p "$DIST"
+mkdir -p "$DIST/include/miniblink2"
+
+# Public API headers — the SDK surface, grouped under one miniblink2/ namespace. The
+# library exposes BOTH the mb_capi C API and the wke compatibility API; both headers
+# are self-contained (standard-library includes only). Consumer:
+#   -Idist/<mode>/include   +   #include "miniblink2/wke.h" / "miniblink2/mb_capi.h"
+cp "$HERE/src/wke/wke.h"                     "$DIST/include/miniblink2/wke.h"
+cp "$HERE/src/miniblink_host/capi/mb_capi.h" "$DIST/include/miniblink2/mb_capi.h"
 
 # 4a. Shared deliverable: the self-contained dylib straight from the link.
 if [ "$FORM" != static ]; then
   cp "$TREE/$OUT/libminiblink2.dylib" "$DIST/"
 fi
 
-# 4b. Static deliverable: merge every archive/object that fed the dylib link into
-#     ONE complete libminiblink2.a (GN can't, so do it with libtool). Follows an
-#     @response file if the link rule uses one.
+# 4b. Static deliverable: merge ALL the dylib's link inputs into one complete
+#     libminiblink2.a. The exact set is the solink edge's $in (.a/.o) PLUS its
+#     separate `rlibs =` variable (Chromium links Rust via that, not $in) PLUS the
+#     force_loaded host archive. (The post-link .rsp is deleted by ninja, and GN's
+#     static_library template won't forward complete_static_library, so we read the
+#     edge directly.) libtool must run from $OUT — the paths are relative to it.
 if [ "$FORM" != shared ]; then
-  echo "==> merging link archives -> libminiblink2.a"
-  LINKCMD="$( cd "$TREE" && ninja -C "$OUT" -t commands "$SHARED" | tail -1 )"
-  INPUTS="$LINKCMD"
-  for tok in $LINKCMD; do
-    case "$tok" in
-      @*.rsp) rsp="${tok#@}"; [ -f "$TREE/$OUT/$rsp" ] && INPUTS="$INPUTS $(cat "$TREE/$OUT/$rsp")" ;;
-    esac
-  done
-  ARCHIVES=()
-  for tok in $INPUTS; do
-    case "$tok" in
-      -Wl,-force_load,*) f="${tok#-Wl,-force_load,}" ;;
-      *.a|*.o)           f="$tok" ;;
-      *) continue ;;
-    esac
-    [ -f "$TREE/$OUT/$f" ] && ARCHIVES+=("$TREE/$OUT/$f")
-  done
-  if [ "${#ARCHIVES[@]}" -eq 0 ]; then
-    echo "  WARNING: found no input archives to merge (link rule format changed?)" >&2
-  else
-    echo "  merging ${#ARCHIVES[@]} archives/objects"
-    libtool -static -o "$DIST/libminiblink2.a" "${ARCHIVES[@]}" 2>/dev/null
-  fi
+  echo "==> merging link inputs -> libminiblink2.a"
+  NJ="$TREE/$OUT/obj/$GN_PATH/miniblink2.ninja"
+  LIST="$(mktemp)"
+  # $in: everything after "solink", up to the first " |"
+  grep ": solink " "$NJ" | head -1 | sed -E 's/^.*: solink //; s/ \|.*$//' \
+    | tr ' ' '\n' | grep -E "\.(a|o)$" > "$LIST"
+  # rlibs variable
+  sed -n '/: solink /,/^$/p' "$NJ" | grep "^  rlibs =" | sed 's/^  rlibs = //' \
+    | tr ' ' '\n' | grep -E "\.rlib$" >> "$LIST"
+  # force_loaded host archive (in case it isn't already in $in)
+  echo "obj/$GN_PATH/libminiblink_host.a" >> "$LIST"
+  sort -u "$LIST" -o "$LIST"
+  echo "  merging $(wc -l < "$LIST") inputs (rlibs: $(grep -c '\.rlib$' "$LIST"))"
+  ( cd "$TREE/$OUT" && libtool -static -o "$DIST/libminiblink2.a" -filelist "$LIST" 2>/dev/null )
+  rm -f "$LIST"
 fi
 
-# 4c. Runtime data.
-for f in blink_resources.pak icudtl.dat snapshot_blob.bin v8_context_snapshot.bin; do
-  [ -f "$TREE/$OUT/$f" ] && cp "$TREE/$OUT/$f" "$DIST/"
+# 4c. Runtime data — copied from the reference build (see REF note above).
+for f in blink_resources.pak icudtl.dat snapshot_blob.bin v8_context_snapshot.bin \
+         v8_context_snapshot.arm64.bin media_controls_resources_100_percent.pak; do
+  [ -f "$REF/$f" ] && cp "$REF/$f" "$DIST/"
 done
+# the engine loads "v8_context_snapshot.bin"; provide it if only the arch-suffixed exists
+[ ! -f "$DIST/v8_context_snapshot.bin" ] && [ -f "$REF/v8_context_snapshot.arm64.bin" ] \
+  && cp "$REF/v8_context_snapshot.arm64.bin" "$DIST/v8_context_snapshot.bin"
 
-echo "==> done. dist: $DIST"
-ls -lh "$DIST"
+echo "==> done. dist tree ($DIST):"
+( cd "$DIST" && find . -type f | sort | while read -r f; do
+    printf '   %-7s %s\n' "$(ls -lh "$f" | awk '{print $5}')" "${f#./}"; done )

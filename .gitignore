@@ -15,3 +15,6 @@
 # reference while developing the host. Keep it out of the repo (it's a verbatim
 # copy of Chromium source, not our code):
 vendor/reference/
+
+# build output of tools/build-lib.sh (libminiblink2 SDK)
+dist/
