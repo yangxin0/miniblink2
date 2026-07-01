@@ -13,7 +13,7 @@
 # runtime (present via `brew install openssl@3`). For a fully self-contained dylib,
 # statically fold OpenSSL in or bundle+repath the two dylibs (follow-up).
 #
-# Usage: tools/build-curl-macos.sh [curl-version]   (default: 8.21.0)
+# Usage: scripts/build-curl-macos.sh [curl-version]   (default: 8.21.0)
 set -euo pipefail
 
 CURL_VER="${1:-8.21.0}"

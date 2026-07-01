@@ -2,7 +2,7 @@
 # build-lib.sh — build a self-contained libminiblink2 (single .dylib and/or .a),
 # release or debug, from the miniblink-modern sources.
 #
-#   tools/build-lib.sh [--shared|--static|--both] [--release|--debug]
+#   scripts/build-lib.sh [--shared|--static|--both] [--release|--debug]
 #                      [--tree DIR] [--no-stage] [--print-only]
 #
 # Unlike the default build (is_component_build=true), this links the WHOLE engine
@@ -23,7 +23,7 @@
 #                               runtime data the engine loads at startup
 set -euo pipefail
 
-HERE="$(cd "$(dirname "$0")/.." && pwd)"   # repo root (this script lives in tools/)
+HERE="$(cd "$(dirname "$0")/.." && pwd)"   # repo root (this script lives in scripts/)
 TREE="${TREE:-/Users/yangxin/dennis/chrome/chromium-150.0.7871.24}"
 FORM=shared          # shared | static | both
 MODE=release         # release | debug
@@ -132,6 +132,12 @@ cp "$HERE/src/miniblink_host/capi/mb_capi.h" "$DIST/include/miniblink2/mb_capi.h
 # 4a. Shared deliverable: the self-contained dylib straight from the link.
 if [ "$FORM" != static ]; then
   cp "$TREE/$OUT/libminiblink2.dylib" "$DIST/"
+  # Release: strip local/debug symbols — keeps the exported mb*/wke* dynamic symbols
+  # (so consumers still link), drops the ~120MB symbol table (~330MB -> ~210MB). Debug
+  # keeps them for readable backtraces (MB_STACK_DUMP).
+  if [ "$MODE" != debug ]; then
+    strip -x "$DIST/libminiblink2.dylib" && echo "  stripped dylib (local symbols removed)"
+  fi
 fi
 
 # 4b. Static deliverable: merge ALL the dylib's link inputs into one complete

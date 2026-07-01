@@ -175,7 +175,7 @@ component("miniblink_host") {
     "//v8:external_startup_data",  # defines V8_USE_EXTERNAL_STARTUP_DATA -> gin snapshot API
   ]
 
-  # Vendored WebSocket-enabled libcurl (tools/build-curl-macos.sh): a dylib so its
+  # Vendored WebSocket-enabled libcurl (scripts/build-curl-macos.sh): a dylib so its
   # OpenSSL TLS stays isolated from BoringSSL (two-level namespace). Its absolute
   # install_name lets the linked binaries find it at runtime without an rpath.
   lib_dirs = [ "/Users/yangxin/dennis/chrome/miniblink-modern/third_party/curl/lib" ]
@@ -195,7 +195,7 @@ component("miniblink_host") {
 # These are only meaningful in a NON-component build (is_component_build=false):
 # the whole engine (Blink, V8, skia, base, ...) links statically into ONE file,
 # instead of the ~286 sibling component dylibs a default build produces. Drive
-# them with tools/build-lib.sh, which provisions a dedicated non-component out dir.
+# them with scripts/build-lib.sh, which provisions a dedicated non-component out dir.
 # In a component build they still "work" but each just wraps the component graph.
 
 # libminiblink2.dylib — self-contained shared library. The whole engine is linked
@@ -211,7 +211,7 @@ shared_library("miniblink2") {
               rebase_path("$target_out_dir/libminiblink_host.a", root_build_dir) ]
 }
 
-# The single complete archive libminiblink2.a is produced by tools/build-lib.sh
+# The single complete archive libminiblink2.a is produced by scripts/build-lib.sh
 # (--static), which libtool-merges every input archive of the miniblink2 link into
 # one .a. (GN's static_library template does not forward complete_static_library,
 # so the merge is done as a post-link step instead of a GN target.)

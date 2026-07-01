@@ -16,5 +16,5 @@
 # copy of Chromium source, not our code):
 vendor/reference/
 
-# build output of tools/build-lib.sh (libminiblink2 SDK)
+# build output of scripts/build-lib.sh (libminiblink2 SDK)
 dist/

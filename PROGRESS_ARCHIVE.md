@@ -548,7 +548,7 @@ ENTIRE non-system dependency closure is bundled into `third_party/curl/lib/` wit
 references: libssl + libcrypto + libnghttp2 + libidn2 + libunistring + libintl, each re-id'd to
 @loader_path/<name>, their cross-refs rewritten, and ad-hoc re-signed (install_name_tool invalidates
 signatures -> dyld would reject them on arm64). `otool -L` shows ZERO /opt/homebrew refs; the project
-runs with no Homebrew present. tools/build-curl-macos.sh now does this automatically (a recursive
+runs with no Homebrew present. scripts/build-curl-macos.sh now does this automatically (a recursive
 bundle_deps walk + re-sign). Verified: offline mb_smoke 140, and net 156/0 — real-TLS HTTPS (httpbin)
 + real WebSocket (echo.websocket.org) both work through the bundled OpenSSL, no leaks. (~9 MB of dylibs
 vendored; HTTP/2 + IDN retained, unlike a leaner --without-nghttp2/libidn2 rebuild.)
@@ -574,7 +574,7 @@ vendored path (deps stay @loader_path) + re-signed. build-curl-macos.sh was alre
 bundle_deps re-ids deps, not the root), so only the committed dylib needed the fix.
 [SUPERSEDED: WebSocket — step 1 curl foundation] The macOS SYSTEM libcurl (8.7.1)
 is compiled WITHOUT ws/wss (Apple disables it), so curl_ws_send/recv are unusable. Built our own
-WebSocket-enabled libcurl and vendored it: `tools/build-curl-macos.sh` downloads curl 8.21.0 and
+WebSocket-enabled libcurl and vendored it: `scripts/build-curl-macos.sh` downloads curl 8.21.0 and
 builds it `--enable-websockets --with-openssl` (curl 8.21 removed SecureTransport) as a DYLIB —
 shared so its OpenSSL TLS stays isolated from Chromium's static BoringSSL via macOS two-level
 namespace (the same reason the old system libcurl+LibreSSL coexisted). Vendored to
