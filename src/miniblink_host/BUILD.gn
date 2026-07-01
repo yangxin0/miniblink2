@@ -227,28 +227,32 @@ shared_library("miniblink2") {
   ldflags = [ "-Wl,-force_load," +
               rebase_path("$target_out_dir/libminiblink_host.a", root_build_dir) ]
 
-  if (!use_dawn) {
-    # WebGPU OFF: gpu's gles2 / shared-image layer (kept for WebGL + the compositor)
-    # references these Dawn shared-texture symbols, which Chromium does NOT gate on
-    # use_dawn. They're unreachable at runtime with WebGPU off (no Dawn context; Skia uses
-    # Ganesh-over-GL), so allow exactly these to resolve dynamically instead of failing the
-    # link. (Mangled names are pinned to this Chromium; on an uprev, regenerate from the
-    # link's undefined-symbol list: nm -u libminiblink2.dylib | grep -i dawn.)
-    ldflags += [
-      "-Wl,-U,__ZN3gpu22DawnSharedTextureCache20GetCachedWGPUTextureERKN4wgpu6DeviceENS1_12TextureUsageES5_RKNSt4__Cr6vectorINS1_13TextureFormatENS6_9allocatorIS8_EEEE",
-      "-Wl,-U,__ZN3gpu22DawnSharedTextureCache21EraseDataIfDeviceLostEv",
-      "-Wl,-U,__ZN3gpu22DawnSharedTextureCache21MaybeCacheWGPUTextureERKN4wgpu6DeviceERKNS1_7TextureENS1_12TextureUsageES8_RKNSt4__Cr6vectorINS1_13TextureFormatENS9_9allocatorISB_EEEE",
-      "-Wl,-U,__ZN3gpu22DawnSharedTextureCache22GetSharedTextureMemoryERKN4wgpu6DeviceE",
-      "-Wl,-U,__ZN3gpu22DawnSharedTextureCache26RemoveWGPUTextureFromCacheERKN4wgpu6DeviceERKNS1_7TextureE",
-      "-Wl,-U,__ZN3gpu22DawnSharedTextureCache29DestroyWGPUTextureIfNotCachedERKN4wgpu6DeviceERKNS1_7TextureE",
-      "-Wl,-U,__ZN3gpu22DawnSharedTextureCache29MaybeCacheSharedTextureMemoryERKN4wgpu6DeviceERKNS1_19SharedTextureMemoryE",
-      "-Wl,-U,__ZN3gpu22DawnSharedTextureCacheC1Ev",
-      "-Wl,-U,__ZN3gpu22DawnSharedTextureCacheD1Ev",
-      "-Wl,-U,__ZN3gpu31DawnFallbackImageRepresentationC1EPNS_18SharedImageManagerEPNS_18SharedImageBackingEPNS_17MemoryTypeTrackerEN4wgpu6DeviceENS7_13TextureFormatENSt4__Cr6vectorIS9_NSA_9allocatorIS9_EEEE",
-      "-Wl,-U,__ZN4dawn6native5metal12GetMTLDeviceEP14WGPUDeviceImpl",
-      "-Wl,-U,__ZNK3gpu19DawnContextProvider9GetDeviceEv",
-    ]
-  }
+  # Optional-feature ungated references: with a feature OFF, some KEPT Chromium code still
+  # references its symbols — gpu/gles2 -> Dawn (WebGPU), blink -> v8::WasmModuleCompilation
+  # (WebAssembly), media -> media::VpxVideoDecoder (VP8/9). Those symbols are unreachable at
+  # runtime when the feature is off, so allow exactly these to resolve dynamically. When the
+  # feature is ON the symbols are defined and -U is a no-op. (Names pinned to this Chromium;
+  # on an uprev regenerate: relink with -undefined dynamic_lookup, then nm -u | grep the set.)
+  ldflags += [
+    "-Wl,-U,__ZN2v821WasmModuleCompilation15OnBytesReceivedEPKhm",
+    "-Wl,-U,__ZN2v821WasmModuleCompilation5AbortEv",
+    "-Wl,-U,__ZN2v821WasmModuleCompilation6FinishEPNS_7IsolateERKNSt4__Cr8functionIFvRNS_13WasmStreaming22ModuleCachingInterfaceEEEERKNS4_IFvNS3_7variantIJNS_5LocalINS_16WasmModuleObjectEEENSD_INS_5ValueEEEEEEEEE",
+    "-Wl,-U,__ZN2v821WasmModuleCompilationC1Ev",
+    "-Wl,-U,__ZN2v821WasmModuleCompilationD1Ev",
+    "-Wl,-U,__ZN3gpu22DawnSharedTextureCache20GetCachedWGPUTextureERKN4wgpu6DeviceENS1_12TextureUsageES5_RKNSt4__Cr6vectorINS1_13TextureFormatENS6_9allocatorIS8_EEEE",
+    "-Wl,-U,__ZN3gpu22DawnSharedTextureCache21EraseDataIfDeviceLostEv",
+    "-Wl,-U,__ZN3gpu22DawnSharedTextureCache21MaybeCacheWGPUTextureERKN4wgpu6DeviceERKNS1_7TextureENS1_12TextureUsageES8_RKNSt4__Cr6vectorINS1_13TextureFormatENS9_9allocatorISB_EEEE",
+    "-Wl,-U,__ZN3gpu22DawnSharedTextureCache22GetSharedTextureMemoryERKN4wgpu6DeviceE",
+    "-Wl,-U,__ZN3gpu22DawnSharedTextureCache26RemoveWGPUTextureFromCacheERKN4wgpu6DeviceERKNS1_7TextureE",
+    "-Wl,-U,__ZN3gpu22DawnSharedTextureCache29DestroyWGPUTextureIfNotCachedERKN4wgpu6DeviceERKNS1_7TextureE",
+    "-Wl,-U,__ZN3gpu22DawnSharedTextureCache29MaybeCacheSharedTextureMemoryERKN4wgpu6DeviceERKNS1_19SharedTextureMemoryE",
+    "-Wl,-U,__ZN3gpu22DawnSharedTextureCacheC1Ev",
+    "-Wl,-U,__ZN3gpu22DawnSharedTextureCacheD1Ev",
+    "-Wl,-U,__ZN3gpu31DawnFallbackImageRepresentationC1EPNS_18SharedImageManagerEPNS_18SharedImageBackingEPNS_17MemoryTypeTrackerEN4wgpu6DeviceENS7_13TextureFormatENSt4__Cr6vectorIS9_NSA_9allocatorIS9_EEEE",
+    "-Wl,-U,__ZN4dawn6native5metal12GetMTLDeviceEP14WGPUDeviceImpl",
+    "-Wl,-U,__ZN5media15VpxVideoDecoderC1ENS_23OffloadableVideoDecoder12OffloadStateE",
+    "-Wl,-U,__ZNK3gpu19DawnContextProvider9GetDeviceEv",
+  ]
 }
 
 # The single complete archive libminiblink2.a is produced by scripts/build-lib.sh

@@ -2,8 +2,12 @@
 # build-lib.sh — build a self-contained libminiblink2 (single .dylib and/or .a),
 # release or debug, from the miniblink-modern sources.
 #
-#   scripts/build-lib.sh [--shared|--static|--both] [--release|--debug] [--webgpu]
+#   scripts/build-lib.sh [--shared|--static|--both] [--release|--debug]
+#                      [--webgpu] [--video] [--wasm]
 #                      [--chromium DIR] [--depot DIR] [--no-stage] [--print-only]
+#
+# Feature flags are include-only (default OFF, to trim toward miniblink49's footprint):
+#   --webgpu  WebGPU/Dawn      --video  <video> decode (audio is always on)  --wasm  WebAssembly
 #
 # --webgpu links WebGPU (Dawn, ~97MB) into the .dylib AND the .a; omitted by default to
 # keep the library smaller (navigator.gpu.requestAdapter() then resolves to null).
@@ -42,6 +46,8 @@ MODE=release         # release | debug
 STAGE=1
 PRINT_ONLY=0
 WEBGPU=0             # WebGPU (Dawn) OFF by default (smaller lib); --webgpu links it in
+VIDEO=0              # <video> decode OFF by default (audio stays on); --video adds it
+WASM=0               # WebAssembly OFF by default; --wasm adds it
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -55,6 +61,8 @@ while [ $# -gt 0 ]; do
     --no-stage) STAGE=0 ;;          # skip the source sync (sources already staged)
     --print-only) PRINT_ONLY=1 ;;   # gn gen + ninja dry-run, no compile
     --webgpu) WEBGPU=1 ;;           # include WebGPU (Dawn ~97MB); default excludes it
+    --video) VIDEO=1 ;;             # include <video> decode (ffmpeg video + AV1); default off
+    --wasm) WASM=1 ;;               # include WebAssembly; default off
     -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build-lib.sh: unknown arg '$1'" >&2; exit 2 ;;
   esac
@@ -127,6 +135,8 @@ fi
 # 2. Provision the NON-component out dir (the one switch that makes a single file).
 if [ "$MODE" = debug ]; then IS_DEBUG=true; SYM=2; BSYM=1; else IS_DEBUG=false; SYM=1; BSYM=0; fi
 [ "$WEBGPU" = 1 ] && USE_DAWN=true || USE_DAWN=false
+[ "$VIDEO" = 1 ] && VID=true || VID=false        # video decoders (audio stays regardless)
+[ "$WASM" = 1 ] && WASM_GN=true || WASM_GN=false
 mkdir -p "$CHROMIUM/$OUT"
 cat > "$CHROMIUM/$OUT/args.gn" <<EOF
 is_debug = $IS_DEBUG
@@ -138,6 +148,15 @@ use_dawn = $USE_DAWN              # WebGPU/Dawn — off unless --webgpu (Dawn na
 skia_use_dawn = $USE_DAWN         # must track use_dawn (SKIA_USE_DAWN without USE_DAWN is a
                                   # compile #error); Skia falls back to Ganesh-over-GL, which
                                   # is what mb_gpu_thread already selects (gr_context_type=kGL).
+# <video> decode — off by default (audio stays on); --video adds it. Keeps ffmpeg AUDIO
+# decoders + the media pipeline; drops ffmpeg VIDEO decoders (H.264 etc.) + media's VP8/9.
+# NOTE: AV1 (dav1d) is left ENABLED regardless — the macOS VideoToolbox AV1 accelerator
+# (media/gpu/mac/video_toolbox_av1_accelerator.cc) is compiled unconditionally and needs
+# libgav1, so disabling AV1 breaks the build. Fully dropping AV1 would need a donor patch.
+enable_ffmpeg_video_decoders = $VID
+media_use_libvpx = $VID
+# WebAssembly — off by default; --wasm adds it.
+v8_enable_webassembly = $WASM_GN
 symbol_level = $SYM
 blink_symbol_level = $BSYM
 use_system_xcode = true
