@@ -10,6 +10,7 @@
 #   --webgpu  WebGPU/Dawn      --video  <video> decode (audio is always on)
 #   --ml      WebNN on-device ML (TFLite/LiteRT/XNNPACK backend)
 #   --wasm    WebAssembly (V8 wasm engine: Liftoff + wasm TurboFan + builtins)
+#   --av1-encode  AV1 encoding via libaom (WebCodecs/MediaRecorder/WebRTC send; decode stays)
 #   --size-optimized  size-optimized ship build (ThinLTO + -Oz + no DCHECKs; release only, slow)
 #
 # --webgpu links WebGPU (Dawn, ~97MB) into the .dylib AND the .a; omitted by default to
@@ -52,6 +53,7 @@ WEBGPU=0             # WebGPU (Dawn) OFF by default (smaller lib); --webgpu link
 VIDEO=0              # <video> decode OFF by default (audio stays on); --video adds it
 ML=0                 # WebNN on-device ML (TFLite/LiteRT/XNNPACK) OFF by default; --ml adds it
 WASM=0               # WebAssembly OFF by default (window.WebAssembly absent); --wasm adds it
+AV1ENC=0             # AV1 encoding (libaom) OFF by default; --av1-encode adds it
 SIZE=0               # --size-optimized: ThinLTO + size opt + no DCHECKs ship build (release only, slow)
 
 while [ $# -gt 0 ]; do
@@ -69,6 +71,7 @@ while [ $# -gt 0 ]; do
     --video) VIDEO=1 ;;             # include <video> decode (ffmpeg video + AV1); default off
     --ml) ML=1 ;;                   # include WebNN on-device ML (TFLite backend); default off
     --wasm) WASM=1 ;;               # include WebAssembly (V8 wasm engine); default off
+    --av1-encode) AV1ENC=1 ;;       # include AV1 encoding (libaom); default off
     --size-optimized) SIZE=1 ;;               # size-optimized ship build: ThinLTO + -Oz + no DCHECKs
     -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build-lib.sh: unknown arg '$1'" >&2; exit 2 ;;
@@ -145,6 +148,7 @@ if [ "$MODE" = debug ]; then IS_DEBUG=true; SYM=2; BSYM=1; else IS_DEBUG=false; 
 [ "$VIDEO" = 1 ] && VID=true || VID=false        # video decoders (audio stays regardless)
 [ "$ML" = 1 ] && MLV=true || MLV=false           # WebNN TFLite/LiteRT/XNNPACK backend
 [ "$WASM" = 1 ] && WASMV=true || WASMV=false     # V8 WebAssembly engine
+[ "$AV1ENC" = 1 ] && AOMV=true || AOMV=false     # libaom AV1 encoder
 # --size-optimized: the size-optimized ship config. Release only (ThinLTO is a slow full-rebuild link;
 # debug stays fast + keeps DCHECKs). The default build is a fast DEV release (-O2, no LTO, no
 # dedup, DCHECKs on) — this trades build time for a much smaller dylib.
@@ -189,6 +193,12 @@ build_tflite_with_xnnpack = $MLV
 # Blink's unconditional references (WasmStreaming, WasmModuleObject, SetWasm*Callback)
 # still link; window.WebAssembly is simply absent at runtime. Absent in miniblink49 too.
 v8_enable_webassembly = $WASMV
+# AV1 ENCODING (libaom, ~1MB incl. av1/aom asm) — off by default; --av1-encode adds it.
+# Only feeds WebCodecs VideoEncoder, MediaRecorder and WebRTC AV1 *send*; AV1 DECODE is
+# untouched (dav1d + the unconditional VideoToolbox/libgav1 path stay in — see the
+# enable_ffmpeg_video_decoders note above). Cleanly GN-gated in media/, webcodecs/ and
+# webrtc/modules/video_coding/codecs/av1/.
+enable_libaom = $AOMV
 $SIZE_ARGS
 symbol_level = $SYM
 blink_symbol_level = $BSYM
