@@ -1,0 +1,57 @@
+diff --git a/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc b/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
+index ce8231f..d375f02 100644
+--- a/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
++++ b/third_party/blink/renderer/core/html/canvas/html_canvas_element.cc
+@@ -1222,8 +1222,14 @@ void HTMLCanvasElement::PaintInternal(GraphicsContext& context,
+   }
+ 
+   // Grab a snapshot.
++  // miniblink-modern (patch 0018): read the BACK buffer. A kFrontBuffer read is
++  // present-and-export semantics: it arms DrawingBuffer's "clear needed" flag, so
++  // the NEXT paint's ClearIfComposited() wipes the canvas before copying — in this
++  // compositor-less embedder (canvases paint inline, patch 0008) that made every
++  // WebGL canvas blank after its first paint. The live back buffer has the actual
++  // pixels and reading it does not arm the clear.
+   scoped_refptr<StaticBitmapImage> snapshot =
+-      context_->PaintRenderingResultsToSnapshot(kFrontBuffer);
++      context_->PaintRenderingResultsToSnapshot(kBackBuffer);
+ 
+   if (snapshot) {
+     SkBlendMode composite_operator =
+diff --git a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
+index 11841ee..45438cd 100644
+--- a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
++++ b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
+@@ -2070,7 +2070,16 @@ WebGLRenderingContextBase::PaintRenderingResultsToSnapshot(
+     // top-left origin (the orientation that is used by
+     // `CanvasResourceProvider::Snapshot()` when it is not passed an
+     // orientation explicitly).
+-    if (!cached_snapshot_) {
++    //
++    // miniblink-modern (patch 0018): REFRESH the snapshot when the canvas has
++    // been drawn to since the last copy (`must_paint_to_canvas_`) instead of
++    // returning the first-ever snapshot forever. Upstream only populates
++    // `cached_snapshot_` once; combined with GetSharedImageResourceProvider()
++    // returning null whenever `cached_snapshot_` is set, every WebGL frame
++    // after the first paint was invisible in this embedder's non-composited
++    // canvas path (patch 0008): map engines (MapLibre, Baidu MapGL) render
++    // fine into the drawing buffer but the screen kept the day-one snapshot.
++    if (!cached_snapshot_ || must_paint_to_canvas_) {
+       cached_snapshot_ = CopyRenderingResultsToUnacceleratedStaticBitmapImage(
+           source_buffer, viz::SharedImageFormat::N32Format(),
+           kPremul_SkAlphaType, kTopLeft_GrSurfaceOrigin);
+@@ -2079,6 +2088,14 @@ WebGLRenderingContextBase::PaintRenderingResultsToSnapshot(
+     if (cached_snapshot_) {
+       // We successfully painted the canvas' contents.
+       must_paint_to_canvas_ = false;
++      // Re-arm draw notifications: MarkContextChanged() only fires
++      // HTMLCanvasElement::DidDraw (paint invalidation) when
++      // `marked_canvas_dirty_` is false, and nothing resets it in the
++      // non-composited path (the compositor's frame-consumed reset never
++      // runs). Without this, only the FIRST draw ever invalidates the
++      // element, so later frames are painted only if something else happens
++      // to repaint the canvas.
++      marked_canvas_dirty_ = false;
+     }
+ 
+     // Whether the snapshot was successfully created or not, there is nothing
