@@ -115,6 +115,45 @@ Adversarial-content sweep (2026-06-28) — every case is handled gracefully:
 
 ---
 
+## E. Binary-size pruning — remaining candidates (measured 2026-07-02)
+
+Context: the size-pruning pass (see the `--wasm`/`--av1-encode`/`--tracing`/`--swiftshader`/
+`--icu-full` toggles in `scripts/build-lib.sh`, plus patch 0019) covered every cut with a
+supported GN seam. Measurement tool: `scripts/sizemap.py` (nm-based per-component attribution
+of the unstripped dylib). Numbers below are from the 97 MB pre-prune release dylib (82 MB
+attributed `__text`). These are the *patch-level* leftovers, hardest-first:
+
+### E1. WebRTC stack — ~3.3 MB (2.6 core + 0.7 Blink RTC bindings) — DO NOT cut blindly
+- **Tension:** A2 above — SDP/signaling **works and is a shipped feature** (RTCPeerConnection,
+  offer/answer, data-channel SDP). Cutting WebRTC removes a working capability, unlike the other
+  prunes which only dropped never-used code.
+- **No upstream GN seam:** the old `enable_webrtc` arg is long gone; `modules/peerconnection` +
+  `modules/mediastream` compile unconditionally and reference `webrtc::` symbols directly, and the
+  generated V8 bindings reference the module classes. A cut needs bindings-level surgery
+  (IDL list gating), not a component stub like 0019.
+- **If ever done:** own toggle (`--webrtc`, include-only), and per the A2 rationale the default
+  probably stays ON given signaling is a feature. Revisit only if 3.3 MB matters more than that.
+
+### E2. Inspector / DevTools protocol — ~1.3 MB (0.9 Blink inspector + 0.36 v8_inspector)
+- No GN off-switch upstream (inspector is unconditional in Blink core). Would need a
+  `--devtools`-style include-toggle patch that stubs the InspectorAgent registration + drops
+  the protocol dispatcher. Only worth it if wke devtools support is definitively out of scope.
+
+### E3. WebXR bindings — ~0.27 MB; device APIs (USB/BT/serial/HID/NFC) — ~0.23 MB
+- Dead on macOS headless, but wired through generated bindings like E1 (small payoff, same
+  surgery class). Bundle with E1/E2 if that work ever happens.
+
+### E4. Misc measured, no seam yet
+- **perfetto core** ~0.5 MB (client library is mandatory in M150 base; only the
+  OPTIONAL_TRACE_EVENT layer is gated — that's the `--tracing` toggle).
+- **zstd** ~0.33 MB (Content-Encoding: zstd / shared-dictionary support in the fetch stack).
+- **Rust crabbyavif + dav1d** ~1 MB (AVIF decode; entangled with the unconditional
+  VideoToolbox/libgav1 AV1 path — same landmine as the VpxVideoDecoder startup reference).
+- **cnv converters in icudtl.dat** ~0.9 MB (legacy charset decoding for real-web HTML —
+  kept deliberately; trimming risks mojibake on GBK/Big5/Shift-JIS pages).
+
+---
+
 ## Summary
 
 | Bucket | Count | Net |
