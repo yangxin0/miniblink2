@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # build-lib.sh — build a self-contained libminiblink2 (single .dylib and/or .a),
-# release or debug, from the miniblink-modern sources.
+# release or debug, from the miniblink2 sources.
 #
 #   scripts/build-lib.sh [--shared|--static|--both] [--release|--debug]
 #                      [--webgpu] [--video] [--ml] [--wasm] [--size-optimized]
@@ -244,13 +244,16 @@ if [ "$PRINT_ONLY" = 1 ]; then
   exit 0
 fi
 echo "==> $NINJA -C $OUT $SHARED   (first build is a full non-component compile — slow)"
-( cd "$CHROMIUM" && "$NINJA" -C "$OUT" "$SHARED" )
+# v8_context_snapshot.arm64.bin is built HERE too (not taken from REF): V8 snapshots
+# are BUILD-FLAG-DEPENDENT — the serialized-data magic embeds V8's flag configuration,
+# so a snapshot from a wasm-on reference build makes a wasm-off engine SIGTRAP in the
+# deserializer inside mbInitialize (Check failed: magic_number_ == kMagicNumber).
+( cd "$CHROMIUM" && "$NINJA" -C "$OUT" "$SHARED" v8_context_snapshot.arm64.bin )
 
-# Runtime data the engine loads at startup is copied from a reference build (REF,
-# default out/Release), NOT rebuilt: these are architecture/version-neutral data
-# files, and building them in a fresh non-component out dir drags in a huge resource
-# pipeline for no benefit. Verified compatible — the monolith's V8 (same chromium-150
-# source + release flags) loads out/Release's v8_context_snapshot.
+# Flag-NEUTRAL runtime data (resource paks, ICU data) is copied from a reference build
+# (REF, default out/Release), NOT rebuilt: building those in a fresh non-component out
+# dir drags in a huge resource pipeline for no benefit. The V8 snapshots are NOT taken
+# from REF — see the flag-dependence note above; they come from $OUT below.
 REF="${REF:-$CHROMIUM/out/Release}"
 
 DIST="$HERE/dist/$MODE"
@@ -318,10 +321,15 @@ if [ "$FORM" != shared ]; then
   rm -f "$LIST"
 fi
 
-# 4c. Runtime data — copied from the reference build (see REF note above).
-for f in blink_resources.pak icudtl.dat snapshot_blob.bin v8_context_snapshot.bin \
-         v8_context_snapshot.arm64.bin media_controls_resources_100_percent.pak; do
+# 4c. Runtime data. Flag-neutral files come from the reference build (see REF note
+# above); the V8 snapshots MUST come from this out dir — they are flag-dependent
+# (v8_enable_webassembly etc. change the snapshot magic; a REF snapshot traps a
+# differently-flagged engine at mbInitialize).
+for f in blink_resources.pak icudtl.dat media_controls_resources_100_percent.pak; do
   [ -f "$REF/$f" ] && cp "$REF/$f" "$DIST/"
+done
+for f in snapshot_blob.bin v8_context_snapshot.bin v8_context_snapshot.arm64.bin; do
+  [ -f "$CHROMIUM/$OUT/$f" ] && cp "$CHROMIUM/$OUT/$f" "$DIST/"
 done
 # ICU locale trim (10.4MB -> ~6.3MB): drop per-locale collation/display-name bundles for
 # locales outside MB_ICU_KEEP (default root+en+zh). ICU falls back to root for a missing
@@ -354,9 +362,11 @@ fi
 for f in $GL_DYLIBS; do
   [ -f "$CHROMIUM/$OUT/$f" ] && cp "$CHROMIUM/$OUT/$f" "$DIST/"
 done
-# the engine loads "v8_context_snapshot.bin"; provide it if only the arch-suffixed exists
-[ ! -f "$DIST/v8_context_snapshot.bin" ] && [ -f "$REF/v8_context_snapshot.arm64.bin" ] \
-  && cp "$REF/v8_context_snapshot.arm64.bin" "$DIST/v8_context_snapshot.bin"
+# the engine loads "v8_context_snapshot.bin"; derive it from the arch-suffixed file
+# just copied from $OUT. Unconditional overwrite: dist may hold a STALE plain-named
+# copy from an earlier differently-flagged build (V8 snapshots are flag-dependent).
+[ -f "$DIST/v8_context_snapshot.arm64.bin" ] \
+  && cp "$DIST/v8_context_snapshot.arm64.bin" "$DIST/v8_context_snapshot.bin"
 
 echo "==> done. dist tree ($DIST):"
 ( cd "$DIST" && find . -type f | sort | while read -r f; do
