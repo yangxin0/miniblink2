@@ -1,0 +1,46 @@
+diff --git a/v8/src/api/api.cc b/v8/src/api/api.cc
+index 92690e5..d20fcb0 100644
+--- a/v8/src/api/api.cc
++++ b/v8/src/api/api.cc
+@@ -12161,6 +12161,41 @@ std::shared_ptr<WasmStreaming> WasmStreaming::Unpack(Isolate* v8_isolate,
+                                                      Local<Value> value) {
+   FATAL("WebAssembly is disabled");
+ }
++
++// miniblink (patch 0020): the no-wasm stub block above covers WasmStreaming
++// but not the newer WasmModuleCompilation API. Blink's background script
++// streamer constructs one for every wasm-MIME module response
++// (script_streamer.cc holds it as a member initializer, reachable when the
++// JavaScriptSourcePhaseImports feature is on), so unlike WasmStreaming these
++// must be graceful: construction and byte feeding succeed, and Finish()
++// reports a compile error — the module load fails the same way an invalid
++// wasm module would, instead of crashing the process.
++
++class WasmModuleCompilation::Impl {};
++
++WasmModuleCompilation::WasmModuleCompilation() = default;
++
++WasmModuleCompilation::~WasmModuleCompilation() = default;
++
++void WasmModuleCompilation::OnBytesReceived(const uint8_t*, size_t) {}
++
++void WasmModuleCompilation::Finish(
++    Isolate* isolate, const ModuleCachingCallback& caching_callback,
++    const std::function<void(std::variant<Local<WasmModuleObject>, Local<Value>>
++                                 module_or_error)>& resolution_callback) {
++  HandleScope scope(isolate);
++  resolution_callback(Exception::Error(String::NewFromUtf8Literal(
++      isolate, "WebAssembly is disabled in this build")));
++}
++
++void WasmModuleCompilation::Abort() {}
++
++void WasmModuleCompilation::SetHasCompiledModuleBytes() {}
++
++void WasmModuleCompilation::SetMoreFunctionsCanBeSerializedCallback(
++    std::function<void(CompiledWasmModule)>) {}
++
++void WasmModuleCompilation::SetUrl(const char*, size_t) {}
+ #endif  // !V8_ENABLE_WEBASSEMBLY
+ 
+ namespace internal {
