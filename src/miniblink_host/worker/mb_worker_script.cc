@@ -19,7 +19,12 @@
 #include "services/network/public/mojom/url_response_head.mojom.h"
 #include "url/gurl.h"
 
+#include <vector>
+
+#include "base/synchronization/waitable_event.h"
+#include "miniblink_host/blob/mb_blob_registry.h"
 #include "miniblink_host/loader/mb_url_loader.h"
+#include "miniblink_host/runtime/mb_runtime.h"
 
 namespace mb {
 namespace {
@@ -74,8 +79,40 @@ class MbWorkerScript : public network::mojom::URLLoader {
 std::unique_ptr<blink::WorkerMainScriptLoadParameters> MakeWorkerMainScriptParams(
     const std::string& url) {
   std::string body, content_type;
-  if (!MbFetchUrl(url, &body, &content_type))
+  if (url.rfind("blob:", 0) == 0) {
+    // `new Worker(URL.createObjectURL(blob))` — the bundler-standard way to spawn a
+    // worker (Baidu MapGL's tile worker, webpack worker-loader, ...). The script bytes
+    // live in our in-process blob registry on the SERVICE thread, not anywhere curl can
+    // fetch — so resolve there and wait. This runs on the main thread while the registry
+    // lives on the service thread, so the brief sync wait cannot deadlock (same
+    // off-thread-service reasoning as the [Sync] BlobRegistry.Register handshake).
+    // Before this, a blob: worker hung forever with no error event: MbFetchUrl failed,
+    // OnScriptLoadStartFailed was reported, but the page-visible symptom was silence.
+    base::WaitableEvent done;
+    std::vector<uint8_t> bytes;
+    MbRuntime::ServiceTaskRunner()->PostTask(
+        FROM_HERE,
+        base::BindOnce(
+            [](const std::string& u, std::vector<uint8_t>* out,
+               base::WaitableEvent* done) {
+              MbResolveBlobUrlBytes(
+                  u, base::BindOnce(
+                         [](std::vector<uint8_t>* out, base::WaitableEvent* done,
+                            std::vector<uint8_t> b) {
+                           *out = std::move(b);
+                           done->Signal();
+                         },
+                         out, done));
+            },
+            url, &bytes, &done));
+    done.Wait();
+    if (bytes.empty())
+      return nullptr;  // unknown/revoked blob URL
+    body.assign(bytes.begin(), bytes.end());
+    content_type = "text/javascript";
+  } else if (!MbFetchUrl(url, &body, &content_type)) {
     return nullptr;
+  }
   std::string mime = content_type.substr(0, content_type.find(';'));
   if (mime.empty())
     mime = "text/javascript";
