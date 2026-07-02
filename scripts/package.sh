@@ -83,7 +83,16 @@ mkdir -p "$STAGE/lib" "$STAGE/include/miniblink2" "$STAGE/resources"
 echo "==> [$MODE] staging vendored libcurl chain"
 for f in libcurl.4.dylib libnghttp2.14.dylib libidn2.0.dylib libssl.3.dylib \
          libcrypto.3.dylib libintl.8.dylib libunistring.5.dylib; do
-  [ -f "$CURL_LIB/$f" ] && cp "$CURL_LIB/$f" "$STAGE/lib/"
+  [ -f "$CURL_LIB/$f" ] || continue
+  cp "$CURL_LIB/$f" "$STAGE/lib/"
+  # Strip local symbols from the STAGED copies (the vendored originals keep
+  # theirs) — ~10k locals across the chain, libcrypto being most of it. These
+  # are NOT Chromium linker-signed binaries, so strip invalidates their ad-hoc
+  # signature (dyld then SIGKILLs the consumer at load) — re-sign every one.
+  if [ "$MODE" != debug ]; then
+    strip -x "$STAGE/lib/$f"
+    codesign --force --sign - "$STAGE/lib/$f" 2>/dev/null
+  fi
 done
 ln -s libcurl.4.dylib "$STAGE/lib/libcurl.dylib"   # so -lcurl resolves
 # libcurl's own install id is an absolute build-machine path; make it portable.

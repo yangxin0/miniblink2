@@ -116,7 +116,7 @@ scripts/package.sh [--release|--debug] [--dynamic|--static|--both] [--out ZIP]
 ```
 
 The miniblink49 `tools/package-macos.sh` equivalent: stages `dist/<mode>/` into
-`miniblink2-macos-arm64-<mode>[-kind].zip` (48 MB for release dynamic) with
+`miniblink2-macos-arm64-<mode>[-kind].zip` (47 MB for release dynamic) with
 `lib/` + `include/` + `resources/` + a generated README containing the exact
 link lines. The staged dylibs are made **portable**: the vendored-curl reference
 is rewritten from the build machine's absolute path to `@loader_path`, install

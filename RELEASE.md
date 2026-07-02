@@ -8,7 +8,8 @@ Release notes for miniblink2. Each release is an annotated git tag
 ## v0.2 — 2026-07-02 (unreleased)
 
 **Binary-size pruning.** The ship dylib drops **97 → 88 MB** and the shipped
-SDK footprint **~153 → ~112 MB**, with every cut an include-only toggle in
+SDK footprint **~153 → ~105 MB** (incl. stripping ANGLE's libGLESv2 18.3 →
+11.9 MB), with every cut an include-only toggle in
 `scripts/build-lib.sh` (nothing deleted — each flag restores its feature):
 
 - **`--wasm`** (default off, ~4.5 MB): V8's wasm engine compiled out;

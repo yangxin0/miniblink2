@@ -360,7 +360,13 @@ else
   rm -f "$DIST/libvk_swiftshader.dylib" "$DIST/vk_swiftshader_icd.json"  # drop stale copies
 fi
 for f in $GL_DYLIBS; do
-  [ -f "$CHROMIUM/$OUT/$f" ] && cp "$CHROMIUM/$OUT/$f" "$DIST/"
+  [ -f "$CHROMIUM/$OUT/$f" ] || continue
+  cp "$CHROMIUM/$OUT/$f" "$DIST/"
+  # Release: strip local symbols from the GL driver dylibs too (same rationale as
+  # the engine dylib above) — libGLESv2 alone carries ~51k locals, 18.3MB -> 11.9MB.
+  case "$f" in *.dylib)
+    [ "$MODE" != debug ] && strip -x "$DIST/$f" && echo "  stripped $f" ;;
+  esac
 done
 # the engine loads "v8_context_snapshot.bin"; derive it from the arch-suffixed file
 # just copied from $OUT. Unconditional overwrite: dist may hold a STALE plain-named
