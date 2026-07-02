@@ -12,6 +12,7 @@
 #   --wasm    WebAssembly (V8 wasm engine: Liftoff + wasm TurboFan + builtins)
 #   --av1-encode  AV1 encoding via libaom (WebCodecs/MediaRecorder/WebRTC send; decode stays)
 #   --tracing  OPTIONAL_TRACE_EVENT instrumentation (extra trace-event coverage + strings)
+#   --swiftshader  ship SwiftShader software Vulkan in dist/ (headless/CI/no-GPU fallback)
 #   --size-optimized  size-optimized ship build (ThinLTO + -Oz + no DCHECKs; release only, slow)
 #
 # --webgpu links WebGPU (Dawn, ~97MB) into the .dylib AND the .a; omitted by default to
@@ -56,6 +57,7 @@ ML=0                 # WebNN on-device ML (TFLite/LiteRT/XNNPACK) OFF by default
 WASM=0               # WebAssembly OFF by default (window.WebAssembly absent); --wasm adds it
 AV1ENC=0             # AV1 encoding (libaom) OFF by default; --av1-encode adds it
 TRACING=0            # OPTIONAL_TRACE_EVENT macros OFF by default; --tracing adds them
+SWIFTSHADER=0        # SwiftShader NOT shipped in dist by default; --swiftshader adds it
 SIZE=0               # --size-optimized: ThinLTO + size opt + no DCHECKs ship build (release only, slow)
 
 while [ $# -gt 0 ]; do
@@ -75,6 +77,7 @@ while [ $# -gt 0 ]; do
     --wasm) WASM=1 ;;               # include WebAssembly (V8 wasm engine); default off
     --av1-encode) AV1ENC=1 ;;       # include AV1 encoding (libaom); default off
     --tracing) TRACING=1 ;;         # include OPTIONAL_TRACE_EVENT coverage; default off
+    --swiftshader) SWIFTSHADER=1 ;; # ship SwiftShader software Vulkan in dist; default off
     --size-optimized) SIZE=1 ;;               # size-optimized ship build: ThinLTO + -Oz + no DCHECKs
     -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build-lib.sh: unknown arg '$1'" >&2; exit 2 ;;
@@ -314,15 +317,25 @@ for f in blink_resources.pak icudtl.dat snapshot_blob.bin v8_context_snapshot.bi
   [ -f "$REF/$f" ] && cp "$REF/$f" "$DIST/"
 done
 
-# GL driver dylibs (ANGLE + SwiftShader) + the SwiftShader Vulkan ICD manifest. The engine
-# dlopen's the GL implementation from the executable's own directory at runtime for WebGL /
-# GPU-accelerated <canvas> — it is deliberately NOT statically linked (Chromium's standard GL
-# loading). Built by the monolith in $OUT; the dylibs are self-contained (reference each other
-# via @rpath). vk_swiftshader_icd.json is REQUIRED too: it's the Vulkan ICD manifest that tells
-# the loader where libvk_swiftshader.dylib is (relative "./" path) and which surface extensions
-# it provides — without it SwANGLE's eglInitialize fails the VK_KHR_surface/VK_EXT_metal_surface
-# check and WebGL gets no display (2D canvas + layout/paint via Skia raster are unaffected).
-for f in libEGL.dylib libGLESv2.dylib libvk_swiftshader.dylib vk_swiftshader_icd.json; do
+# GL driver dylibs (ANGLE, + SwiftShader if --swiftshader) + the SwiftShader Vulkan ICD
+# manifest. The engine dlopen's the GL implementation from the executable's own directory at
+# runtime for WebGL / GPU-accelerated <canvas> — it is deliberately NOT statically linked
+# (Chromium's standard GL loading). Built by the monolith in $OUT; the dylibs are
+# self-contained (reference each other via @rpath).
+GL_DYLIBS="libEGL.dylib libGLESv2.dylib"
+if [ "$SWIFTSHADER" = 1 ]; then
+  # SwiftShader = the --use-angle=swiftshader software fallback (headless/CI/no-GPU; also
+  # Dawn's WebGPU fallback adapter). ~20MB. The default Metal path never loads it, so the
+  # shipped SDK omits it unless --swiftshader. vk_swiftshader_icd.json is REQUIRED alongside:
+  # it's the Vulkan ICD manifest that tells the loader where libvk_swiftshader.dylib is
+  # (relative "./" path) and which surface extensions it provides — without it SwANGLE's
+  # eglInitialize fails the VK_KHR_surface/VK_EXT_metal_surface check and WebGL gets no
+  # display (2D canvas + layout/paint via Skia raster are unaffected).
+  GL_DYLIBS="$GL_DYLIBS libvk_swiftshader.dylib vk_swiftshader_icd.json"
+else
+  rm -f "$DIST/libvk_swiftshader.dylib" "$DIST/vk_swiftshader_icd.json"  # drop stale copies
+fi
+for f in $GL_DYLIBS; do
   [ -f "$CHROMIUM/$OUT/$f" ] && cp "$CHROMIUM/$OUT/$f" "$DIST/"
 done
 # the engine loads "v8_context_snapshot.bin"; provide it if only the arch-suffixed exists
