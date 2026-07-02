@@ -6,7 +6,7 @@ index ce8231f..d375f02 100644
    }
  
    // Grab a snapshot.
-+  // miniblink-modern (patch 0018): read the BACK buffer. A kFrontBuffer read is
++  // miniblink2 (patch 0018): read the BACK buffer. A kFrontBuffer read is
 +  // present-and-export semantics: it arms DrawingBuffer's "clear needed" flag, so
 +  // the NEXT paint's ClearIfComposited() wipes the canvas before copying — in this
 +  // compositor-less embedder (canvases paint inline, patch 0008) that made every
@@ -28,7 +28,7 @@ index 11841ee..45438cd 100644
      // orientation explicitly).
 -    if (!cached_snapshot_) {
 +    //
-+    // miniblink-modern (patch 0018): REFRESH the snapshot when the canvas has
++    // miniblink2 (patch 0018): REFRESH the snapshot when the canvas has
 +    // been drawn to since the last copy (`must_paint_to_canvas_`) instead of
 +    // returning the first-ever snapshot forever. Upstream only populates
 +    // `cached_snapshot_` once; combined with GetSharedImageResourceProvider()

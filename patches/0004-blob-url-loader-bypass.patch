@@ -8,7 +8,7 @@ index 1ff4a0c..ab70ebf 100644
    CHECK(frame);
 -  if (std::unique_ptr<URLLoader> loader = frame->CreateURLLoaderForTesting()) {
 -    return loader;
-+  // miniblink-modern: skip the host's URLLoader for blob: URLs so Blink's native
++  // miniblink2: skip the host's URLLoader for blob: URLs so Blink's native
 +  // blob path (PublicURLManager.Resolve -> BlobURLStore.ResolveAsURLLoaderFactory)
 +  // serves them; the host loader (MbURLLoader) can't read a blob: URL.
 +  if (!network_request.url.SchemeIsBlob()) {

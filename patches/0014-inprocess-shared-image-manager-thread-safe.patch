@@ -7,7 +7,7 @@ index 456310e..939deb7 100644
    sync_point_manager_ = std::make_unique<SyncPointManager>();
    scheduler_ = std::make_unique<Scheduler>(sync_point_manager_.get());
 -  shared_image_manager_ = std::make_unique<SharedImageManager>();
-+  // miniblink-modern patch: the in-process software compositor's viz::Display + Software
++  // miniblink2 patch: the in-process software compositor's viz::Display + Software
 +  // Renderer read shared images on a DIFFERENT thread (the embedder's main thread) than the
 +  // GPU thread that produces them, so the SharedImageManager must be thread-safe and know its
 +  // display context is on another thread. Default (false,false) thread-checks and aborts.

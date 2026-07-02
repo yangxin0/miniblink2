@@ -6,7 +6,7 @@ index 85f178d..30eadcd 100644
      mojo::PendingReceiver<mojom::blink::Blob> blob_receiver =
          blob_remote.InitWithNewPipeAndPassReceiver();
  
-+    // miniblink-modern: BlobURLStore.Register is the ONLY [Sync] method on the
++    // miniblink2: BlobURLStore.Register is the ONLY [Sync] method on the
 +    // store. The store remote is bound through the frame's navigation-associated
 +    // interface channel (GetRemoteNavigationAssociatedInterfaces), which the host
 +    // services in-process: MbFrameClient returns an AssociatedInterfaceProvider

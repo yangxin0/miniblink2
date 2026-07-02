@@ -1,4 +1,4 @@
-// mb_frame_client — real blink::WebLocalFrameClient for miniblink-modern.
+// mb_frame_client — real blink::WebLocalFrameClient for miniblink2.
 //
 // Modeled on TestWebFrameClient (vendor/reference/frame_test_helpers.h:516). The
 // minimal override set to load + render a main frame, with real behavior:

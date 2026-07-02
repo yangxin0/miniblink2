@@ -1,4 +1,4 @@
-// mb_platform.cc — real blink::Platform overrides for miniblink-modern.
+// mb_platform.cc — real blink::Platform overrides for miniblink2.
 //
 // Mirrors the SMALL override set of TestingPlatformSupport
 // (vendor/reference/testing_platform_support.cc). Base blink::Platform defaults the

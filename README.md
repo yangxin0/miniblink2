@@ -1,4 +1,4 @@
-# miniblink-modern
+# miniblink2
 
 A **standalone, single-process embedder of modern Blink** (Chromium M150 / V8 15) — a
 hand-written tiny "content layer" that boots the real Blink engine in-process and renders
@@ -362,7 +362,7 @@ waiting on a message loop. A complete automation example is `src/wke/wke_demo.cc
 
   ```
   <parent>/
-  ├── miniblink-modern/        (this repo)
+  ├── miniblink2/        (this repo)
   ├── chromium-150.0.7871.24/  (donor source tree)
   └── depot_tools/
   ```

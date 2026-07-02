@@ -7,7 +7,7 @@ index a536e2d..3f122ea 100644
      layer_tree_host->QueueImageDecode(image, std::move(callback), speculative);
    } else {
 -    std::move(callback).Run(false);
-+    // miniblink-modern patch: no compositor. Resolve ASYNC — callers such as
++    // miniblink2 patch: no compositor. Resolve ASYNC — callers such as
 +    // ImageLoader::DispatchDecodeRequestsIfComplete invoke this while iterating their
 +    // decode-request list; running the callback synchronously mutates it -> crash.
 +    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
@@ -20,7 +20,7 @@ index a536e2d..3f122ea 100644
  
  void WebFrameWidgetImpl::SetHaveScrollEventHandlers(bool has_handlers) {
 -  widget_base_->LayerTreeHost()->SetHaveScrollEventHandlers(has_handlers);
-+  // miniblink-modern patch: non-compositing offscreen widgets have no LayerTreeHost,
++  // miniblink2 patch: non-compositing offscreen widgets have no LayerTreeHost,
 +  // yet a page adding a 'scroll' listener still reaches here. Guard the null deref.
 +  if (widget_base_->LayerTreeHost())
 +    widget_base_->LayerTreeHost()->SetHaveScrollEventHandlers(has_handlers);

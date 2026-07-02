@@ -1,6 +1,6 @@
 # Releases
 
-Release notes for miniblink-modern. Each release is an annotated git tag
+Release notes for miniblink2. Each release is an annotated git tag
 (`v*`). `PROGRESS.md` has the day-to-day development journal.
 
 ---

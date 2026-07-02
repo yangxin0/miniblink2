@@ -1,4 +1,4 @@
-// miniblink-modern public C ABI — the GN<->CMake seam.
+// miniblink2 public C ABI — the GN<->CMake seam.
 //
 // This is the ONLY surface the CMake-built outer shell (wke/mb, port/) links
 // against. Everything below it is GN-built C++ that touches Blink/base/mojo.

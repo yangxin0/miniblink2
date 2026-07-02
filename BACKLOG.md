@@ -1,4 +1,4 @@
-# miniblink-modern — Backlog: what is NOT done, and why
+# miniblink2 — Backlog: what is NOT done, and why
 
 > Consolidated reference for everything that is **missing, deferred, low-value/unfixable,
 > or accepted by-design**. The numbered gap list (#1–#18) and all high-value follow-ups are

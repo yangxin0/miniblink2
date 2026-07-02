@@ -2,7 +2,7 @@ Make a WebGL canvas paint INLINE (not composited) so its output reaches the soft
 page paint / screenshots in this compositor-less embedder.
 
 WebGLRenderingContextBase::IsComposited() is hardcoded true, so blink gives the canvas
-a cc::Layer that only the compositor draws. miniblink-modern is single-process with a
+a cc::Layer that only the compositor draws. miniblink2 is single-process with a
 non-compositing software paint (mbPaintToBitmap), which skips composited layers -> a
 WebGL canvas renders to its drawing buffer (gl.readPixels works) but is BLANK in
 screenshots. Returning false routes the canvas through HTMLCanvasElement::PaintInternal
@@ -20,7 +20,7 @@ index 6fa192f..14a7a1a 100644
  
    // CanvasRenderingContext implementation.
 -  bool IsComposited() const override { return true; }
-+  // miniblink-modern: a WebGL canvas is normally composited (a cc_layer the
++  // miniblink2: a WebGL canvas is normally composited (a cc_layer the
 +  // compositor draws). This embedder has NO compositor (single-process software
 +  // paint), so a composited canvas is skipped at paint time and screenshots show it
 +  // blank. Returning false routes the canvas through inline snapshot painting

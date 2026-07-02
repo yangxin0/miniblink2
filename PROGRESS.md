@@ -1,4 +1,4 @@
-# miniblink-modern — plan & loop state
+# miniblink2 — plan & loop state
 
 > A **standalone, single-process embedder of modern Blink (Chromium M150)**: a
 > hand-written tiny "content layer" (`miniblink_host`) that boots the real Blink
@@ -151,7 +151,7 @@ screenshot path", DONE). Remaining polish if ever wanted: non-yellow/complex-pag
 ---
 
 ## Operational facts
-- **Project:** `/Users/yangxin/dennis/chrome/miniblink-modern/`, include-root `src/`
+- **Project:** `/Users/yangxin/dennis/chrome/miniblink2/`, include-root `src/`
   (`src/miniblink_host/` = host + `mb_capi`; `src/wke/` = wke layer; `patches/` = donor patches).
 - **Donor tree (already builds):** `/Users/yangxin/dennis/chrome/chromium-150.0.7871.24`,
   `out/Release` gen'd, `is_component_build=true`, macOS SDK, gn at `buildtools/mac/gn`.

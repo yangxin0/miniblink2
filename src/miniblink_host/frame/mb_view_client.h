@@ -1,4 +1,4 @@
-// mb_view_client — minimal blink::WebViewClient for miniblink-modern.
+// mb_view_client — minimal blink::WebViewClient for miniblink2.
 //
 // WebViewClient is a small interface (most of the old surface migrated to other
 // clients/Mojo). For an offscreen single-view host the needed overrides are few:

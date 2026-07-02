@@ -1,4 +1,4 @@
-// mb_smoke — capability test suite for the miniblink-modern engine. Each case loads
+// mb_smoke — capability test suite for the miniblink2 engine. Each case loads
 // content and ASSERTS engine behavior (mostly via mbEvalJS / getComputedStyle, which is
 // robust; plus one pixel check). Prints PASS/FAIL per case and a summary; exit 0 iff all pass.
 #include "miniblink_host/test/mb_smoke_harness.h"

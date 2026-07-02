@@ -7,7 +7,7 @@ index 00e308a..3825f59 100644
    DCHECK(!initialized_);
    // WidgetBase users implicitly expect one default ScreenInfo to exist.
 -  screen_infos_ = display::ScreenInfos(display::ScreenInfo());
-+  // miniblink-modern patch: give a headless non-compositing widget a realistic desktop
++  // miniblink2 patch: give a headless non-compositing widget a realistic desktop
 +  // monitor (1920x1080, 25px menu bar, 24-bit) instead of the 0x0 default. A 0x0
 +  // window.screen is both a glaring automation tell and breaks size-based site logic;
 +  // it can't be set later because UpdateScreenInfo dispatches into the (not yet existent)
@@ -38,7 +38,7 @@ index 00e308a..3825f59 100644
 -  } else {
 -    LayerTreeHost()->SetDisplayColorSpaces(
 -        screen_infos_.current().display_color_spaces);
-+  // miniblink-modern patch: a headless non-compositing widget has no LayerTreeHost
++  // miniblink2 patch: a headless non-compositing widget has no LayerTreeHost
 +  // (LayerTreeHost() is null), but the embedder still updates screen_infos_ above so
 +  // window.screen / matchMedia size queries return realistic values instead of 0x0.
 +  // Guard the compositor-only updates so that path doesn't null-deref.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build.sh — build miniblink-modern against a Chromium M150 component checkout.
+# build.sh — build miniblink2 against a Chromium M150 component checkout.
 #
 # Usage: ./build.sh /path/to/chromium-150.x.y.z
 #

@@ -1,4 +1,4 @@
-// mb_widget — frame widget for miniblink-modern (non-compositing, offscreen).
+// mb_widget — frame widget for miniblink2 (non-compositing, offscreen).
 //
 // We use the NON-compositing widget path: InitializeFrameWidget (with no-op Mojo
 // channels) + InitializeNonCompositing(this). This avoids LayerTreeHost / frame-sink /

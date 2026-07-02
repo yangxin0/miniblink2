@@ -1,4 +1,4 @@
-// mb_platform — the real (non-test) blink::Platform for miniblink-modern.
+// mb_platform — the real (non-test) blink::Platform for miniblink2.
 //
 // Modeled on third_party/blink/renderer/platform/testing/testing_platform_support.h
 // (see vendor/reference/). KEY FINDING: the base blink::Platform provides default

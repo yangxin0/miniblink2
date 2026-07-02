@@ -1,4 +1,4 @@
-// mb_runtime — process-wide Blink bring-up for miniblink-modern.
+// mb_runtime — process-wide Blink bring-up for miniblink2.
 //
 // Mirrors the init sequence in blink's ScopedUnittestsEnvironmentSetup
 // (vendor/reference/testing_platform_support.{h,cc}) but as a real, persistent
