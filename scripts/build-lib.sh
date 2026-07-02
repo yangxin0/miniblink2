@@ -3,12 +3,13 @@
 # release or debug, from the miniblink-modern sources.
 #
 #   scripts/build-lib.sh [--shared|--static|--both] [--release|--debug]
-#                      [--webgpu] [--video] [--ml] [--size-optimized]
+#                      [--webgpu] [--video] [--ml] [--wasm] [--size-optimized]
 #                      [--chromium DIR] [--depot DIR] [--no-stage] [--print-only]
 #
 # Feature flags are include-only (default OFF, to trim toward miniblink49's footprint):
 #   --webgpu  WebGPU/Dawn      --video  <video> decode (audio is always on)
 #   --ml      WebNN on-device ML (TFLite/LiteRT/XNNPACK backend)
+#   --wasm    WebAssembly (V8 wasm engine: Liftoff + wasm TurboFan + builtins)
 #   --size-optimized  size-optimized ship build (ThinLTO + -Oz + no DCHECKs; release only, slow)
 #
 # --webgpu links WebGPU (Dawn, ~97MB) into the .dylib AND the .a; omitted by default to
@@ -50,6 +51,7 @@ PRINT_ONLY=0
 WEBGPU=0             # WebGPU (Dawn) OFF by default (smaller lib); --webgpu links it in
 VIDEO=0              # <video> decode OFF by default (audio stays on); --video adds it
 ML=0                 # WebNN on-device ML (TFLite/LiteRT/XNNPACK) OFF by default; --ml adds it
+WASM=0               # WebAssembly OFF by default (window.WebAssembly absent); --wasm adds it
 SIZE=0               # --size-optimized: ThinLTO + size opt + no DCHECKs ship build (release only, slow)
 
 while [ $# -gt 0 ]; do
@@ -66,6 +68,7 @@ while [ $# -gt 0 ]; do
     --webgpu) WEBGPU=1 ;;           # include WebGPU (Dawn ~97MB); default excludes it
     --video) VIDEO=1 ;;             # include <video> decode (ffmpeg video + AV1); default off
     --ml) ML=1 ;;                   # include WebNN on-device ML (TFLite backend); default off
+    --wasm) WASM=1 ;;               # include WebAssembly (V8 wasm engine); default off
     --size-optimized) SIZE=1 ;;               # size-optimized ship build: ThinLTO + -Oz + no DCHECKs
     -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build-lib.sh: unknown arg '$1'" >&2; exit 2 ;;
@@ -141,6 +144,7 @@ if [ "$MODE" = debug ]; then IS_DEBUG=true; SYM=2; BSYM=1; else IS_DEBUG=false; 
 [ "$WEBGPU" = 1 ] && USE_DAWN=true || USE_DAWN=false
 [ "$VIDEO" = 1 ] && VID=true || VID=false        # video decoders (audio stays regardless)
 [ "$ML" = 1 ] && MLV=true || MLV=false           # WebNN TFLite/LiteRT/XNNPACK backend
+[ "$WASM" = 1 ] && WASMV=true || WASMV=false     # V8 WebAssembly engine
 # --size-optimized: the size-optimized ship config. Release only (ThinLTO is a slow full-rebuild link;
 # debug stays fast + keeps DCHECKs). The default build is a fast DEV release (-O2, no LTO, no
 # dedup, DCHECKs on) — this trades build time for a much smaller dylib.
@@ -179,6 +183,12 @@ enable_ffmpeg_video_decoders = $VID
 webnn_use_tflite = $MLV
 webnn_use_litert = $MLV
 build_tflite_with_xnnpack = $MLV
+# WebAssembly — off by default (~3-5MB of V8: Liftoff, wasm TurboFan pipeline, wasm
+# builtins); --wasm adds it. Safe to disable: V8 keeps the whole external Wasm API as
+# UNREACHABLE()/no-op stubs when off (api.cc "#if !V8_ENABLE_WEBASSEMBLY" block), so
+# Blink's unconditional references (WasmStreaming, WasmModuleObject, SetWasm*Callback)
+# still link; window.WebAssembly is simply absent at runtime. Absent in miniblink49 too.
+v8_enable_webassembly = $WASMV
 $SIZE_ARGS
 symbol_level = $SYM
 blink_symbol_level = $BSYM
