@@ -13,6 +13,8 @@
 #   --av1-encode  AV1 encoding via libaom (WebCodecs/MediaRecorder/WebRTC send; decode stays)
 #   --tracing  OPTIONAL_TRACE_EVENT instrumentation (extra trace-event coverage + strings)
 #   --swiftshader  ship SwiftShader software Vulkan in dist/ (headless/CI/no-GPU fallback)
+#   --icu-full  ship the untrimmed icudtl.dat (all ~90 locales, 10.4MB); default trims
+#               to root+en+zh (6.3MB) — override the keep list with MB_ICU_KEEP=en,zh,ja
 #   --size-optimized  size-optimized ship build (ThinLTO + -Oz + no DCHECKs; release only, slow)
 #
 # --webgpu links WebGPU (Dawn, ~97MB) into the .dylib AND the .a; omitted by default to
@@ -58,6 +60,7 @@ WASM=0               # WebAssembly OFF by default (window.WebAssembly absent); -
 AV1ENC=0             # AV1 encoding (libaom) OFF by default; --av1-encode adds it
 TRACING=0            # OPTIONAL_TRACE_EVENT macros OFF by default; --tracing adds them
 SWIFTSHADER=0        # SwiftShader NOT shipped in dist by default; --swiftshader adds it
+ICUFULL=0            # icudtl.dat trimmed to root+en+zh by default; --icu-full ships all locales
 SIZE=0               # --size-optimized: ThinLTO + size opt + no DCHECKs ship build (release only, slow)
 
 while [ $# -gt 0 ]; do
@@ -78,6 +81,7 @@ while [ $# -gt 0 ]; do
     --av1-encode) AV1ENC=1 ;;       # include AV1 encoding (libaom); default off
     --tracing) TRACING=1 ;;         # include OPTIONAL_TRACE_EVENT coverage; default off
     --swiftshader) SWIFTSHADER=1 ;; # ship SwiftShader software Vulkan in dist; default off
+    --icu-full) ICUFULL=1 ;;        # ship untrimmed icudtl.dat (all locales); default trims
     --size-optimized) SIZE=1 ;;               # size-optimized ship build: ThinLTO + -Oz + no DCHECKs
     -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build-lib.sh: unknown arg '$1'" >&2; exit 2 ;;
@@ -316,6 +320,15 @@ for f in blink_resources.pak icudtl.dat snapshot_blob.bin v8_context_snapshot.bi
          v8_context_snapshot.arm64.bin media_controls_resources_100_percent.pak; do
   [ -f "$REF/$f" ] && cp "$REF/$f" "$DIST/"
 done
+# ICU locale trim (10.4MB -> ~6.3MB): drop per-locale collation/display-name bundles for
+# locales outside MB_ICU_KEEP (default root+en+zh). ICU falls back to root for a missing
+# bundle, so other-locale pages still render — they lose locale-tailored Intl output only.
+# brkitr (incl. the CJK segmentation dictionary), converters, normalization and the
+# res_index/pool infrastructure are always kept. --icu-full ships the whole file instead.
+if [ "$ICUFULL" = 0 ] && [ -f "$REF/icudtl.dat" ]; then
+  python3 "$HERE/scripts/trim_icu.py" --keep "${MB_ICU_KEEP:-en,zh}" \
+    "$REF/icudtl.dat" "$DIST/icudtl.dat"
+fi
 
 # GL driver dylibs (ANGLE, + SwiftShader if --swiftshader) + the SwiftShader Vulkan ICD
 # manifest. The engine dlopen's the GL implementation from the executable's own directory at
