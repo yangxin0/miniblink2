@@ -194,7 +194,10 @@ skia_use_dawn = $USE_DAWN         # must track use_dawn (SKIA_USE_DAWN without U
 enable_ffmpeg_video_decoders = $VID
 # WebNN on-device ML (navigator.ml) — off by default; --ml adds the TFLite/LiteRT backend.
 # Absent in miniblink49. Off drops most of //services/webnn's TFLite+XNNPACK (~79% of its
-# input files); WebNN's LiteRT core still links a remainder. WebNN's mojo interface stays.
+# input files); WebNN's mojo interface stays. webnn_use_tflite doubles as the umbrella
+# on-device-ML switch: patches/0019 swaps the TFLite language-detection model (Blink's
+# LanguageDetector / translation API backend — the last renderer TFLite user, ~1MB of
+# tflite + tflite_support + tflite_kernels) for an always-unavailable stub when off.
 webnn_use_tflite = $MLV
 webnn_use_litert = $MLV
 build_tflite_with_xnnpack = $MLV

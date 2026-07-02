@@ -1,0 +1,184 @@
+diff --git a/components/language_detection/core/BUILD.gn b/components/language_detection/core/BUILD.gn
+index 1c29480..182381d 100644
+--- a/components/language_detection/core/BUILD.gn
++++ b/components/language_detection/core/BUILD.gn
+@@ -3,6 +3,7 @@
+ # found in the LICENSE file.
+ 
+ import("//build/config/features.gni")
++import("//services/webnn/features.gni")
+ 
+ # We need a component because this gives access to a per-process
+ # singleton instance of the model. Without a component, we end up an
+@@ -14,7 +15,6 @@ component("core") {
+     "constants.h",
+     "features.cc",
+     "features.h",
+-    "language_detection_model.cc",
+     "language_detection_model.h",
+   ]
+   if (use_blink) {
+@@ -24,13 +24,26 @@ component("core") {
+     ]
+   }
+   deps = [
+-    ":internals",
+     "//base",
+     "//components/optimization_guide/core:features",
+-    "//third_party/tflite",
+-    "//third_party/tflite_support",
+-    "//third_party/tflite_support:tflite_support_proto",
+   ]
++
++  # miniblink: reuse webnn_use_tflite as the umbrella "on-device ML" switch
++  # (build-lib.sh --ml). Off swaps the TFLite-backed language-detection model
++  # for a permanently-unavailable stub, dropping tflite + tflite_support +
++  # tflite_kernels (~1MB) — the only remaining TFLite users in the renderer
++  # link. The LanguageDetector web API then reports "unavailable" at runtime.
++  if (webnn_use_tflite) {
++    sources += [ "language_detection_model.cc" ]
++    deps += [
++      ":internals",
++      "//third_party/tflite",
++      "//third_party/tflite_support",
++      "//third_party/tflite_support:tflite_support_proto",
++    ]
++  } else {
++    sources += [ "language_detection_model_stub.cc" ]
++  }
+   defines = [ "IS_LANGUAGE_DETECTION_IMPL" ]
+ }
+ 
+diff --git a/components/language_detection/core/language_detection_model_stub.cc b/components/language_detection/core/language_detection_model_stub.cc
+new file mode 100644
+index 0000000..d159790
+--- /dev/null
++++ b/components/language_detection/core/language_detection_model_stub.cc
+@@ -0,0 +1,127 @@
++// Copyright 2024 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// miniblink: no-TFLite implementation of LanguageDetectionModel, compiled
++// instead of language_detection_model.cc when webnn_use_tflite=false. The
++// model never becomes available (IsAvailable() == false), so the
++// LanguageDetector / translation web APIs cleanly report "unavailable" at
++// runtime, and nothing here references TFLite — dropping ~1MB of
++// tflite + tflite_support + tflite_kernels from the link.
++//
++// The callback semantics mirror the real implementation exactly:
++// UpdateWithFile* still fires the model-loaded callbacks (with the model
++// left unavailable), so callers' state machines progress to their
++// "model unavailable" paths instead of waiting forever.
++
++#include "components/language_detection/core/language_detection_model.h"
++
++#include <algorithm>
++#include <utility>
++
++#include "base/check.h"
++#include "base/functional/bind.h"
++#include "base/functional/callback.h"
++#include "base/location.h"
++#include "base/task/sequenced_task_runner.h"
++#include "components/language_detection/core/constants.h"
++
++namespace tflite::task::text::nlclassifier {
++// The header holds a std::unique_ptr<NLClassifier> member, whose destructor
++// needs a complete type. The real class lives in tflite_support, which is not
++// in this build (that is the point), so provide the complete type here. The
++// pointer is always null in this configuration.
++class NLClassifier {};
++}  // namespace tflite::task::text::nlclassifier
++
++namespace language_detection {
++
++namespace {
++// Matches language_detection_model.cc.
++constexpr char kTFLiteModelVersion[] = "TFLite_v1";
++}  // namespace
++
++Prediction TopPrediction(const std::vector<Prediction>& predictions) {
++  auto elem = std::max_element(predictions.begin(), predictions.end());
++  CHECK(elem != predictions.end());
++  return *elem;
++}
++
++LanguageDetectionModel::LanguageDetectionModel() = default;
++
++LanguageDetectionModel::~LanguageDetectionModel() = default;
++
++std::vector<Prediction> LanguageDetectionModel::Predict(
++    std::u16string_view contents) const {
++  // Same result the real implementation returns when !IsAvailable().
++  return {Prediction(kUnknownLanguageCode, 0.0)};
++}
++
++std::vector<Prediction> LanguageDetectionModel::PredictWithScan(
++    std::u16string_view contents) const {
++  return {Prediction(kUnknownLanguageCode, 0.0)};
++}
++
++Prediction LanguageDetectionModel::PredictTopLanguageWithSamples(
++    std::u16string_view contents) const {
++  return Prediction(kUnknownLanguageCode, 0.0);
++}
++
++void LanguageDetectionModel::UpdateWithFile(base::File model_file) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  // The file is discarded and the model stays unavailable; loaded-callbacks
++  // still fire (see file comment).
++  NotifyModelLoaded();
++}
++
++void LanguageDetectionModel::UpdateWithFileAsync(base::File model_file,
++                                                 base::OnceClosure callback) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  UpdateWithFile(std::move(model_file));
++  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE, std::move(callback));
++}
++
++bool LanguageDetectionModel::IsAvailable() const {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  return false;
++}
++
++int64_t LanguageDetectionModel::GetModelSize() const {
++  // Never available, so always 0 (model_file_size_ is never set).
++  return model_file_size_;
++}
++
++std::string LanguageDetectionModel::GetModelVersion() const {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  return kTFLiteModelVersion;
++}
++
++void LanguageDetectionModel::AddOnModelLoadedCallback(
++    ModelLoadedCallback callback) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  if (loaded_ || model_loaded_callbacks_.size() >= kMaxPendingCallbacksCount) {
++    std::move(callback).Run(*this);
++  } else {
++    model_loaded_callbacks_.emplace_back(std::move(callback));
++  }
++}
++
++void LanguageDetectionModel::NotifyModelLoaded() {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  for (auto&& callback : model_loaded_callbacks_) {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(
++                       [](ModelLoadedCallback callback,
++                          base::WeakPtr<LanguageDetectionModel> model) {
++                         if (model) {
++                           std::move(callback).Run(*model);
++                         }
++                       },
++                       std::move(callback), weak_factory_.GetWeakPtr()));
++  }
++  loaded_ = true;
++  model_loaded_callbacks_.clear();
++}
++
++}  // namespace language_detection
