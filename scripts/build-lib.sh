@@ -11,6 +11,7 @@
 #   --ml      WebNN on-device ML (TFLite/LiteRT/XNNPACK backend)
 #   --wasm    WebAssembly (V8 wasm engine: Liftoff + wasm TurboFan + builtins)
 #   --av1-encode  AV1 encoding via libaom (WebCodecs/MediaRecorder/WebRTC send; decode stays)
+#   --tracing  OPTIONAL_TRACE_EVENT instrumentation (extra trace-event coverage + strings)
 #   --size-optimized  size-optimized ship build (ThinLTO + -Oz + no DCHECKs; release only, slow)
 #
 # --webgpu links WebGPU (Dawn, ~97MB) into the .dylib AND the .a; omitted by default to
@@ -54,6 +55,7 @@ VIDEO=0              # <video> decode OFF by default (audio stays on); --video a
 ML=0                 # WebNN on-device ML (TFLite/LiteRT/XNNPACK) OFF by default; --ml adds it
 WASM=0               # WebAssembly OFF by default (window.WebAssembly absent); --wasm adds it
 AV1ENC=0             # AV1 encoding (libaom) OFF by default; --av1-encode adds it
+TRACING=0            # OPTIONAL_TRACE_EVENT macros OFF by default; --tracing adds them
 SIZE=0               # --size-optimized: ThinLTO + size opt + no DCHECKs ship build (release only, slow)
 
 while [ $# -gt 0 ]; do
@@ -72,6 +74,7 @@ while [ $# -gt 0 ]; do
     --ml) ML=1 ;;                   # include WebNN on-device ML (TFLite backend); default off
     --wasm) WASM=1 ;;               # include WebAssembly (V8 wasm engine); default off
     --av1-encode) AV1ENC=1 ;;       # include AV1 encoding (libaom); default off
+    --tracing) TRACING=1 ;;         # include OPTIONAL_TRACE_EVENT coverage; default off
     --size-optimized) SIZE=1 ;;               # size-optimized ship build: ThinLTO + -Oz + no DCHECKs
     -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build-lib.sh: unknown arg '$1'" >&2; exit 2 ;;
@@ -149,6 +152,7 @@ if [ "$MODE" = debug ]; then IS_DEBUG=true; SYM=2; BSYM=1; else IS_DEBUG=false; 
 [ "$ML" = 1 ] && MLV=true || MLV=false           # WebNN TFLite/LiteRT/XNNPACK backend
 [ "$WASM" = 1 ] && WASMV=true || WASMV=false     # V8 WebAssembly engine
 [ "$AV1ENC" = 1 ] && AOMV=true || AOMV=false     # libaom AV1 encoder
+[ "$TRACING" = 1 ] && TRACEV=true || TRACEV=false # OPTIONAL_TRACE_EVENT macros
 # --size-optimized: the size-optimized ship config. Release only (ThinLTO is a slow full-rebuild link;
 # debug stays fast + keeps DCHECKs). The default build is a fast DEV release (-O2, no LTO, no
 # dedup, DCHECKs on) — this trades build time for a much smaller dylib.
@@ -199,6 +203,12 @@ v8_enable_webassembly = $WASMV
 # enable_ffmpeg_video_decoders note above). Cleanly GN-gated in media/, webcodecs/ and
 # webrtc/modules/video_coding/codecs/av1/.
 enable_libaom = $AOMV
+# TRACING — the perfetto client library itself is mandatory in M150 base (the old
+# enable_base_tracing off-switch is gone), but OPTIONAL_TRACE_EVENT macros are a
+# documented size knob (Chromium ships Android/ChromeOS with them off). Off drops that
+# instrumentation + its string literals; --tracing restores full trace coverage for
+# perf work. Trimming perfetto core further would need patches (Tier 2).
+optional_trace_events_enabled = $TRACEV
 $SIZE_ARGS
 symbol_level = $SYM
 blink_symbol_level = $BSYM
