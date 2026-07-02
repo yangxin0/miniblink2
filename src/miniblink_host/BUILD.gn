@@ -230,7 +230,9 @@ shared_library("miniblink2") {
   ldflags = [ "-Wl,-force_load," +
               rebase_path("$target_out_dir/libminiblink_host.a", root_build_dir) ]
   # No -Wl,-U and no stubs: Dawn references are gated out at COMPILE time when !use_dawn
-  # (patches/0017), and media_use_libvpx + wasm stay ON — the link resolves cleanly and
+  # (patches/0017), media_use_libvpx stays ON, and wasm-off is safe because V8 compiles
+  # its external Wasm API as UNREACHABLE()/no-op stubs when v8_enable_webassembly=false
+  # (api.cc "#if !V8_ENABLE_WEBASSEMBLY") — the link resolves cleanly either way and
   # dyld never hits a missing symbol at load.
 }
 
