@@ -27,9 +27,15 @@ class MbWebGLContextProvider : public blink::WebGraphicsContext3DProvider {
     if (!holder)
       return nullptr;
     auto context = std::make_unique<gpu::GLInProcessContext>();
-    // WebGL 2 needs an ES3 context; WebGL 1 keeps the proven ES2 path.
+    // Use the WEBGL context types, not plain OPENGLES2/3: IsWebGLContextType() is what makes
+    // the service create the ANGLE context with EGL_CONTEXT_WEBGL_COMPATIBILITY_ANGLE
+    // (service_utils.cc -> gl_context_egl.cc), i.e. ANGLE's context->isWebGL(). Without it
+    // ANGLE enforces strict ES2 rules on WebGL content — e.g. it rejects the WebGL1-legal
+    // GL_DEPTH_STENCIL_ATTACHMENT in glFramebufferRenderbuffer (GL_INVALID_ENUM "Invalid
+    // Attachment Type"), so pages using depth-stencil renderbuffers (map.baidu.com's map
+    // layer) never complete their framebuffers and render nothing.
     const gpu::ContextType type =
-        want_webgl2 ? gpu::CONTEXT_TYPE_OPENGLES3 : gpu::CONTEXT_TYPE_OPENGLES2;
+        want_webgl2 ? gpu::CONTEXT_TYPE_WEBGL2 : gpu::CONTEXT_TYPE_WEBGL1;
     if (context->Initialize(holder->GetTaskExecutor(), type) !=
         gpu::ContextResult::kSuccess) {
       return nullptr;
