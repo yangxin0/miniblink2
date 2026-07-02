@@ -2,8 +2,8 @@
 
 A **standalone, single-process embedder of modern Blink** (Chromium M150 / V8 15) — a
 hand-written tiny "content layer" that boots the real Blink engine in-process and renders
-HTML/CSS/JavaScript to a bitmap through a small C ABI. **No CEF**, no separate browser
-process, no Mojo IPC across processes.
+HTML/CSS/JavaScript through a small C ABI. **No CEF**, no separate browser process, no
+cross-process Mojo IPC.
 
 It is the spiritual successor to [miniblink49](https://github.com/weolar/miniblink49)
 (whose Blink froze at ~M47/2015), rebuilt against the M150 engine. The old miniblink
@@ -11,57 +11,149 @@ embedding model — call straight into `WebViewImpl` — no longer exists in mod
 (everything routes through Mojo + `//content`). This project provides the *minimum* host
 that satisfies modern Blink so it runs without the full browser.
 
-## What works today (verified by a 400+ case automated test battery)
+**The deliverable is a self-contained SDK**: one `libminiblink2.dylib` (or one complete
+`libminiblink2.a`) + C headers + the engine's runtime data. An app links one library and
+gets the whole modern web platform — GPU-accelerated WebGL on Metal included
+(`map.baidu.com` and MapLibre GL render their full vector maps).
+
+> New here? `include/miniblink2/wke.h` (classic miniblink API) and
+> `include/miniblink2/mb_capi.h` (the native ABI) are the two public headers.
+> Quick start below; `PROGRESS.md` has the development journal.
+
+---
+
+## Quick start
+
+Prerequisites (see [Requirements](#requirements)): a configured Chromium M150 checkout and
+depot_tools as **siblings** of this repo, plus full Xcode (for the Metal shader compiler).
+
+```sh
+# 1. Build the self-contained SDK -> dist/release/
+scripts/build-lib.sh --both --release --size-optimized
+
+# 2. Build the sample browsers against it
+scripts/build-samples.sh --both
+
+# 3. Run (from the dist dir — runtime data is loaded from beside the binary)
+cd dist/release
+./minibrowser_dyn    https://map.baidu.com     # links the .dylib (89 KB app)
+./minibrowser_static https://map.baidu.com     # fully self-contained (no dylib dep)
+```
+
+A Cocoa window opens and renders the page — WebGL vector maps run on the **Metal GPU**.
+
+## The SDK (`dist/<release|debug>/`)
+
+| File | What it is |
+|---|---|
+| `libminiblink2.dylib` | the whole engine as ONE shared library (exports `wke*` + `mb*`) |
+| `libminiblink2.a` | the same engine as ONE complete static archive |
+| `include/miniblink2/{wke.h, mb_capi.h}` | the two public C headers |
+| `blink_resources.pak`, `media_controls_…pak` | Blink resources (UA stylesheet, …) |
+| `icudtl.dat`, `v8_context_snapshot.bin` | ICU data + the V8 context snapshot |
+| `libEGL.dylib`, `libGLESv2.dylib` | **ANGLE** — the GL/WebGL driver (→ Metal) |
+| `libvk_swiftshader.dylib`, `vk_swiftshader_icd.json` | software-GL fallback (optional) |
+| `minibrowser_dyn`, `minibrowser_static`, `mb_shot` | sample apps (see below) |
+
+Deployment rules:
+
+- The runtime data files load **from the executable's directory** — ship them next to
+  your binary.
+- The ANGLE dylibs are **`dlopen()`ed at runtime** (Chromium's standard GL loading), so
+  they never appear in `otool -L` — but WebGL is unavailable without them. The
+  SwiftShader pair is only needed if you run with `--use-angle=swiftshader`
+  (headless CI / GPU-less VMs); desktop-only distributions can drop those ~20 MB.
+- The `--size-optimized` `.a` contains **ThinLTO bitcode**: link it with an LTO-capable
+  toolchain (`scripts/build-samples.sh` shows the exact invocation — Chromium's
+  `clang++` + `lld`).
+
+### `scripts/build-lib.sh` — building the SDK
+
+```sh
+scripts/build-lib.sh [--shared|--static|--both] [--release|--debug]
+                     [--size-optimized] [--webgpu] [--video] [--ml]
+                     [--chromium DIR] [--depot DIR] [--no-stage] [--print-only]
+```
+
+| Flag | Effect | Size impact (release dylib, stripped) |
+|---|---|---|
+| *(default dev build)* | fast `-O2`, DCHECKs on, no LTO | 186 MB |
+| `--size-optimized` | **ship build**: ThinLTO + `-Oz` + ICF + DCHECKs off | **97 MB** (`.a`: 2.4 GB → 162 MB) |
+| `--webgpu` | include WebGPU (Dawn); off = Dawn completely absent from the binary | +~9 MB |
+| `--video` | include `<video>` decode (H.264/ffmpeg-video). Off = **audio still plays** (miniblink49 parity) | +~8 MB |
+| `--ml` | include WebNN on-device ML (TFLite/LiteRT/XNNPACK) | +~3 MB |
+
+Feature flags are include-only and **default off** — the default SDK is the trimmed,
+miniblink49-like profile (audio on; video/webgpu/ml off). For comparison: miniblink49
+ships 78 MB *unstripped* (~45 MB stripped); this is the full 2025 engine at ~2× its code.
+
+The first build of a mode is a full engine compile (slow); re-runs are incremental
+(staging uses rsync, builds are lock-serialized, flag flips rebuild only what changed).
+
+### `scripts/build-samples.sh` — sample apps against the SDK
+
+```sh
+scripts/build-samples.sh [--dyn|--static|--both] [--release|--debug]
+```
+
+- `minibrowser_dyn` — a Cocoa mini-browser (toolbar + address bar) linking the `.dylib`.
+  The app itself is **89 KB**.
+- `minibrowser_static` — the same browser statically linked: a **110 MB single binary**
+  with zero engine dylib dependencies.
+
+## GPU architecture (macOS)
+
+```
+2D  (Skia Ganesh)  ─┐
+3D  (WebGL 1+2)    ─┼──► GL ES ──► ANGLE ──► Metal (GPU)
+                    │                └─ or SwiftShader (CPU) via --use-angle=swiftshader
+WebGPU (--webgpu)  ────► Dawn ──► Metal
+```
+
+- WebGL runs on the **real GPU** through ANGLE's Metal backend
+  (`ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro …)`) — verified end-to-end with
+  Baidu Maps and MapLibre GL rendering full vector maps (tiles parsed in `blob:` Web
+  Workers, drawn via WebGL, composited into the page).
+- Without `--webgpu`, **Dawn is completely absent** — no code, no symbol references, no
+  runtime probing (`patches/0017`); `navigator.gpu.requestAdapter()` resolves null.
+- Canvases paint **inline** (no display compositor): the drawing buffer is snapshotted
+  into the software page paint (`patches/0008` + `0018`), which is what makes WebGL
+  content appear in `wkePaint`/`mbPaintToBitmap`/`mb_shot` screenshots.
+
+## What works (verified by a 400+ case automated battery)
 
 | Subsystem | Status |
 |---|---|
-| Build modern Blink as GN libraries, link into a standalone host via a C ABI | ✅ |
 | Engine boot in-process: V8 isolate + Oilpan/cppgc + main-thread scheduler | ✅ |
-| WebView + main LocalFrame + (non-compositing) WebFrameWidget | ✅ |
-| HTML parsing, UA stylesheet, CSS cascade | ✅ |
-| Fonts + text (CoreText), real glyph rasterization | ✅ |
-| **Modern CSS**: Grid, Flexbox+gap, gradients, border-radius, box-shadow, 2D transforms | ✅ |
-| **Cutting-edge CSS**: `:has()`, native nesting, `@container`, `color-mix()`, `oklch()` | ✅ |
-| **Web Components**: Custom Elements v1 + Shadow DOM (encapsulated) | ✅ |
-| **JavaScript** (V8) + DOM mutation → style recalc → relayout → repaint | ✅ |
-| `<canvas>` 2D drawing via JS (shapes, gradients, text → skia) | ✅ |
-| `mbLoadURL("file://…")` — load a document from disk | ✅ |
-| Image decode + SVG rendering (data: URIs **and external files**) | ✅ |
-| **Subresource loading** (external `<link>` CSS, `<img>`) via a `blink::URLLoader` | ✅ |
-| In-process `MimeRegistry` (so `file://` stylesheets validate) | ✅ |
-| **HTTP/HTTPS loading of live websites** via system libcurl | ✅ |
-| Paint readback to a BGRA8888 bitmap + PNG; **PDF export** (paginated, via Blink print) | ✅ |
-| Input events (click, move/hover, type, scroll), HiDPI, custom UA | ✅ |
-| **DOM storage** (`localStorage` / `sessionStorage`, in-memory) | ✅ |
-| `requestAnimationFrame` (serviced without a compositor) | ✅ |
-| Observers: Mutation, **Intersection** (forced past offscreen throttling), Resize | ✅ |
-| Web/CSS Animations advance (clock serviced); `XMLHttpRequest` + `fetch` | ✅ |
-| `structuredClone`; Web Crypto (`SubtleCrypto.digest`, in a secure-context page) | ✅ |
-| Console capture (`console.log`/`warn`/`error` → host) | ✅ |
-| Init scripts (`evaluateOnNewDocument`: run JS before page scripts) | ✅ |
-| Isolated-world eval (content-script model: separate globals, shared DOM) | ✅ |
-| **Cookies**: HTTP jar + JS `document.cookie`; JS→jar bridge; jar export (`mbGetCookies`) | ✅ |
-| Custom request headers + default `Accept-Language` | ✅ |
-| **WebGL 1 + 2** — in-process command buffer over ANGLE/SwiftShader (software, headless); shaders, buffers, draws, `readPixels`, and **composite into screenshots**; `OffscreenCanvas` + worker WebGL | ✅ |
-| **WebGPU** — `navigator.gpu.requestAdapter()`/`requestDevice()` return a real adapter+device via in-process Dawn over SwiftShader (the full blink → dawn-wire → command-buffer → Dawn-native path) | ✅ |
-| **IndexedDB** — full in-process `IDBFactory` backend: object stores, indexes, transactions, Blob/File values, **per-origin isolation**, and **save/load persistence to disk** | ✅ |
-| **Web Workers** — dedicated + shared, fully serviced (own V8 isolate + scheduler), with `fetch`, IndexedDB, and BroadcastChannel | ✅ |
-| **Service / Shared Workers + BroadcastChannel** (origin-scoped); **Notifications** (shown → host callback) | ✅ |
-| **OPFS** (Origin-Private File System) + **Cache Storage** + **Cookie Store API** — all persist to disk | ✅ |
-| **WebSocket** (connect/echo); `EventSource`/SSE; streaming `fetch` | ✅ |
-| **Media**: `<audio>`/`<video>` decode + playback (FFmpeg), frame paint into canvas/screenshot, **WebCodecs**, **Web Audio** (OfflineAudioContext DSP, `decodeAudioData`) | ✅ |
-| **History + Navigation API** — `pushState`/`replaceState`, `history.back/forward/go` (same-doc traversal + `popstate`), `navigation.navigate/back/forward` | ✅ |
-| **Network interception** — block / mock / rewrite by URL or resource-type; request hook (method+headers+body) + response hook (status+headers+body rewrite) | ✅ |
-| **Synthetic input incl. sub-frames** — click/move/wheel/drag/context-menu/keyboard route into iframes; **cross-origin iframe** load + per-frame eval/fill | ✅ |
-| **Editor commands** (`ExecuteEditCommand` + value variants) + **clipboard** read/write; **file upload** (`mbSetFileForSelector` sets `<input type=file>` files) | ✅ |
-| **Find-in-page** (highlight, next, active-match rect); **accessibility tree** export (`mbGetAXTree`) | ✅ |
-| **Screenshots**: PNG/JPEG, transparent, element/region clip, full-page; **page zoom**; mobile/device **layout emulation** (viewport + media queries) | ✅ |
-| Threaded/GPU **compositor** (`cc::LayerTreeHost`) — only needed for DevTools device-mode *visual* transform + off-main-thread animation; **not** required for headless capture (software paint already composites all layers correctly) | ⏳ roadmap |
-| Child-frame *independent* session history; full WebRTC | ⏳ roadmap |
+| HTML parsing, UA stylesheet, CSS cascade; fonts + text via CoreText | ✅ |
+| **Modern CSS**: Grid, Flexbox+gap, gradients, transforms, `:has()`, nesting, `@container`, `color-mix()`, `oklch()` | ✅ |
+| **Web Components**: Custom Elements v1 + Shadow DOM | ✅ |
+| JavaScript (V8) + DOM mutation → style recalc → relayout → repaint | ✅ |
+| `<canvas>` 2D; image decode + SVG (data: URIs and external files) | ✅ |
+| **HTTP/HTTPS** via vendored libcurl (WebSocket-enabled); subresource loading | ✅ |
+| Paint readback to BGRA bitmap + PNG/JPEG; **PDF export** (paginated) | ✅ |
+| Input events (click/move/type/scroll/drag, sub-frame routing), HiDPI, custom UA | ✅ |
+| DOM storage, cookies (jar + `document.cookie`), History/Navigation API | ✅ |
+| `requestAnimationFrame`; Mutation/Intersection/Resize observers; Web/CSS animations | ✅ |
+| `structuredClone`; Web Crypto; console capture; init scripts; isolated-world eval | ✅ |
+| **WebGL 1 + 2 on the Metal GPU** (ANGLE, WebGL-compat contexts, multi-context) | ✅ |
+| **WebGL map engines**: `map.baidu.com`, MapLibre GL — full vector maps render | ✅ |
+| **WebGPU** (`--webgpu` builds): real adapter/device via in-process Dawn→Metal | ✅ |
+| **IndexedDB** — full in-process backend (stores, indexes, transactions, Blob values) | ✅ |
+| **Web Workers** — dedicated + shared, own isolate/scheduler; **`blob:`/`data:` worker scripts**; worker `fetch`/XHR/`importScripts`/wasm/OffscreenCanvas/transferables | ✅ |
+| Service/Shared Workers + BroadcastChannel; Notifications | ✅ |
+| **OPFS** + Cache Storage + Cookie Store API (persist to disk) | ✅ |
+| WebSocket; EventSource/SSE; streaming `fetch` | ✅ |
+| **Media**: `<audio>` playback always; `<video>` decode with `--video`; WebCodecs; MSE | ✅ |
+| **WebAssembly** (always on — required by full Blink) | ✅ |
+| Network interception (block/mock/rewrite + request hook) | ✅ |
+| Editor commands + clipboard; file upload; find-in-page; AX-tree export | ✅ |
+| Screenshots: PNG/JPEG, transparent, element/region clip, full-page, zoom, mobile emulation | ✅ |
+| Threaded/GPU display compositor; child-frame independent history; full WebRTC | ⏳ roadmap |
 
-## Tool: `mb_shot` (headless HTML → PNG)
+## Tool: `mb_shot` (headless HTML → PNG/JPEG/PDF)
 
-The deliverable example app — a standalone headless screenshot renderer:
+A standalone headless renderer/scraper CLI over the same engine:
 
 ```sh
 mb_shot \
@@ -78,172 +170,50 @@ mb_shot \
   [--css STYLES] [--auto-scroll] [--scroll-to Y] [--scroll-to-selector CSS] \
   # extract (to stdout)
   [--title] [--url] [--cookies URL] [--local-storage KEY] [--session-storage KEY] \
-  [--text] [--html] [--html-for CSS] [--eval JS] [--eval-json JS] [--frame N] [--value CSS] [--checked CSS] [--count CSS] [--visible CSS] \
-  [--rect CSS] [--style CSS PROP] [--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] \
+  [--text] [--html] [--html-for CSS] [--eval JS] [--eval-json JS] [--frame N] \
+  [--value CSS] [--checked CSS] [--count CSS] [--visible CSS] [--rect CSS] \
+  [--style CSS PROP] [--text-all CSS] [--attr CSS NAME] [--attr-all CSS NAME] \
   [--requests] [--console] [--headers] \
   # capture
   [--full] [--scale N] [--mobile] [--clip x,y,w,h | --selector CSS] [--transparent] \
+  [--pdf-size letter|a4|legal|a3|tabloid|WxH] [--landscape] [--pdf-scale N] [--pdf-margin PT] \
   # assert (scripting)
   [--require CSS] \
-  <input.html | file://URL | http(s)://URL> <out.png> [width height]
+  <input.html | file://URL | http(s)://URL> <out.(png|jpg|pdf)> [width height]
 ```
 
-`--mobile` presets a phone emulation in one flag: a 390×844 viewport, `devicePixelRatio`
-3, and an iPhone Safari User-Agent — so responsive sites serve their mobile layout
-(width media queries track the view size; an explicit width/height, `--scale`, or
-`--user-agent` each still overrides its part). Example: `mb_shot --mobile https://news.site shot.png`.
+Highlights (each flag documented in `src/miniblink_host/tools/mb_shot.cc`):
 
-For scripting, `--require CSS` makes the run **assert** the page contains a match for
-`CSS` after all waits/interaction — exit `3` if it doesn't (the capture is still
-written for debugging). This turns "the data is here" vs "the page didn't load / the
-element never appeared" into a reliable exit code, which the warn-only `--wait-*` flags
-and a successful-but-empty local-file load otherwise don't signal. (Exit codes: `0` ok,
-`1` load/capture failed — including a missing local input file, `2` usage error,
-`3` `--require` unmet.)
-
-`--full` captures the entire document height (the view is resized to the page's
-`scrollHeight` before rendering, capped at 20000px), like Puppeteer's `fullPage` — e.g.
-`mb_shot --full https://go.dev out.png` produces a 1200×3969 image of the whole page
-instead of just the 1200×900 viewport.
-
-`--scale N` renders at a device pixel ratio of N: the page lays out at `[width height]`
-CSS px but `window.devicePixelRatio == N` and the PNG is `width*N × height*N` — retina-crisp
-text and 2x `srcset`/`min-resolution` media-query selection. The flags compose, e.g.
-`mb_shot --full --scale 2 https://go.dev out.png` → a 2400×7938 whole-page @2x capture.
-
-`--clip x,y,w,h` captures only that logical rectangle; `--selector CSS` captures only the
-bounding box of the first element matching the selector (an element screenshot) — e.g.
-`mb_shot --selector "#card" page.html card.png` writes a PNG sized exactly to that element.
-Clip/selector compose with `--scale` (the output is `w*N × h*N`).
-
-`--transparent` captures with a transparent background (Puppeteer's `omitBackground`): areas
-the page doesn't paint keep alpha 0, so the PNG can be composited over other content.
-
-`--wait-selector CSS` waits (driving timers/async) until an element matching the selector
-exists before capturing — for JS-rendered content (Puppeteer's `waitForSelector`); `--wait-ms
-N` just settles the page for N ms. Both compose with the capture options. `--fill CSS TEXT`
-types `TEXT` into the field matching the selector (firing `input`/`change`, so frameworks
-react), and `--click CSS` clicks the matching element before capturing (e.g. fill a search
-box then click submit, expand a menu, dismiss a banner). `--fill` runs before `--click`.
-`--drag FROM TO` mouse-drags one element's center onto another's (slider, sortable,
-map pan); `--dispatch CSS EVT` fires a synthetic DOM event (e.g. `mouseover` to open
-a hover menu, or a custom event) that click/fill don't. `--press KEY` presses a named
-non-text key as a trusted event so its default action fires — `Enter` to submit
-(`--fill q --press Enter`), `Tab` to advance focus, `Escape`, arrows; it runs last in
-the interact phase, after `--fill`/`--click`.
-
-Beyond `--wait-selector`, the synchronization set covers the appear/disappear/quiet
-lifecycle: `--wait-visible CSS` waits until the element is actually shown (not just
-present — `display:none`/`opacity:0` don't count), `--wait-hidden CSS` waits until it
-goes away (the "spinner disappeared" signal), `--wait-eval JS` waits until an arbitrary
-JS expression is truthy (Puppeteer's `waitForFunction`, e.g. `window.appReady` or
-`items.length>10` — any condition a selector can't express), and `--wait-idle` waits
-until the page stops making network requests (Puppeteer's `networkidle`, for SPAs that
-lazy-fetch).
-`--css STYLES` injects a stylesheet (hide cookie banners / ads / sticky headers before
-a shot), `--auto-scroll` scrolls the page to trigger lazy-loaded / infinite-scroll
-content, and `--scroll-to-selector CSS` brings a specific element into the viewport
-(in context, vs `--selector`'s element-only clip). `--user-agent UA` (alias `--ua`) overrides the
-User-Agent (many sites serve different markup to mobile vs desktop), and `--block
-SUBSTR` (repeatable) drops any request whose URL contains the substring (ads,
-trackers, images) for faster, cleaner captures.
-
-The extraction flags read structured data to stdout: `--value CSS` (a control's live
-`.value`), `--checked CSS` (checkbox/radio `1`/`0`), `--count CSS` (number of matches,
-`querySelectorAll` length), `--visible CSS` (`1`/`0`/`-1`),
-`--rect CSS` (`x,y,w,h`), `--style CSS PROP` (a resolved computed style), `--attr CSS
-NAME` (the first match's attribute — an `href`/`src`/`content`), `--text-all
-CSS` / `--attr-all CSS NAME` (a JSON array across *all* matches — one-shot list
-scraping), and `--requests` (the subresource URLs the page fetched).
-
-`--console` prints the page's captured console output (`console.log`/`warn`/`error`) to
-stderr — useful for debugging a page or scripting against its logs. `--headers` prints the
-server's HTTP response headers (Content-Type, caching, custom/API headers) to stderr.
-
-`--title` prints `document.title` and `--url` prints the current document URL (the
-landing URL after any redirects) to stdout — the basic page-metadata fields. `--cookies
-URL` prints the jar's cookies for that origin (`name=value; name2=value2`) — the
-inspection peer of `--set-cookie`/`--save-cookies`, e.g. read a session token after a
-login flow. `--local-storage KEY` / `--session-storage KEY` print a Web Storage value
-for the document's origin (an SPA's auth token / app state); an absent key prints an
-empty line and warns on stderr. `--text`
-prints the page's visible text (post-JS `document.body.innerText`) to stdout, so
-`mb_shot` doubles as a simple scraper/text extractor. `--html` prints the rendered
-(post-JS) DOM as serialized HTML — useful for SPAs whose fetched source is near-empty —
-and `--html-for CSS` prints just the first match's `outerHTML` (one fragment: an article
-body, a table, a card) instead of the whole document.
-`--eval JS` runs an arbitrary JS expression against the settled page and prints its string
-result to stdout — the whole scripting surface from the command line, e.g.
-`mb_shot --eval "document.querySelectorAll('.item').length" page.html out.png` for a count,
-or reading a computed style / attribute. Compose with `--fill`/`--click`/`--wait-*` to
-interact first, then extract. `--eval-json JS` is the structured-scraping variant — it
-`JSON.stringify`s the expression, so an object or array comes back as real JSON instead
-of `[object Object]` or a lossy comma-join; e.g.
-`mb_shot --eval-json "[...document.querySelectorAll('.item')].map(e=>({t:e.textContent,href:e.querySelector('a').href}))"`
-yields a JSON array of records ready to pipe into `jq`. `--frame N` makes `--eval` /
-`--eval-json` run inside the N-th child frame (iframe; 0-based, document order) instead
-of the main frame — host-privileged, so it scrapes even a cross-origin iframe whose
-content the page itself can't read; e.g. `mb_shot page.html out.png --frame 0 --eval
-"document.body.textContent"`.
-
-`--no-images` disables network image loading (faster text/HTML scraping; inline `data:`
-images are unaffected). `--dark` emulates `prefers-color-scheme: dark` so pages render their
-dark theme. `--lang "fr-FR,fr,en"` sets `navigator.language(s)` for locale-aware pages, and
-`--tz "America/New_York"` overrides the timezone for `Date`/`Intl`. `--proxy
-"http://host:port"` (or `socks5://host:port`) routes all network fetches through a proxy.
-`--load-cookies FILE` / `--save-cookies FILE` restore and persist the cookie jar (Netscape
-format) so a login survives across runs — log in once with `--save-cookies`, then reuse it
-with `--load-cookies` on later runs. `--insecure` skips TLS certificate verification (like
-`curl -k`), for sites with self-signed, expired, or otherwise invalid certs.
-`--no-follow` stops at a 3xx redirect instead of following it, so `--headers`
-shows the `Location` (resolve a shortener / inspect a redirect without following).
-
-The output format follows the file extension: `.png` (lossless, alpha), `.jpg`/`.jpeg`
-(quality 90, much smaller), or `.pdf` (a paginated US-Letter PDF via Blink's print path) —
-e.g. `mb_shot https://example.com out.jpg` or `mb_shot article.html article.pdf`.
-
-PDF page geometry is customizable: `--pdf-size letter|a4|legal|a3|tabloid|WxH` (page size in
-points; `WxH` for a custom size), `--landscape` (swap width/height), `--pdf-scale N` (content
-scale, 0.1–5), and `--pdf-margin PT` (uniform margin in points) — e.g.
-`mb_shot article.html out.pdf --pdf-size a4 --landscape --pdf-margin 36`.
+- **Capture**: `--full` (whole document, Puppeteer `fullPage`), `--scale N` (retina @N×),
+  `--clip`/`--selector` (region/element shots), `--transparent`, `--mobile` (390×844,
+  dpr 3, iPhone UA in one flag). Output format by extension: `.png`, `.jpg`, or `.pdf`
+  (paginated via Blink print; `--pdf-size/--landscape/--pdf-scale/--pdf-margin`).
+- **Synchronize**: `--wait-selector/-visible/-hidden` (appear / shown / gone),
+  `--wait-eval JS` (arbitrary condition), `--wait-idle` (network-idle), `--wait-ms`.
+- **Interact**: `--fill`, `--click`, `--drag FROM TO`, `--dispatch CSS EVT`,
+  `--press Enter|Tab|Escape|…` (trusted key with default action).
+- **Extract**: page (`--title/--url/--text/--html`), element (`--html-for/--value/
+  --checked/--count/--visible/--rect/--style/--attr`), lists (`--text-all/--attr-all`
+  → JSON arrays), storage/cookies, `--eval` / `--eval-json` (structured scraping,
+  pipe into `jq`), `--frame N` (evaluate inside an iframe, even cross-origin),
+  `--requests`/`--console`/`--headers` diagnostics.
+- **Scripting**: `--require CSS` asserts the page reached the expected state — exit `3`
+  if not (exit codes: `0` ok, `1` load/capture failure, `2` usage, `3` require unmet).
 
 Rendered by `mb_shot` from an HTML file (gradient, CSS grid, translucent cards, a
-rotated card, and JS-injected text — all modern Blink, headless, no CEF):
+rotated card, JS-injected text — all modern Blink, headless, no CEF):
 
 ![mb_shot](docs/demos/mb_shot.png)
 
-**Live websites over HTTPS**, fetched via system libcurl and rendered by modern Blink.
-`mb_shot https://news.ycombinator.com out.png` — the real Hacker News front page, with its
-external `news.css`, `hn.js`, and SVG/image subresources all loaded through the host:
+**Live websites over HTTPS** — `mb_shot https://news.ycombinator.com out.png`:
 
 ![hacker news](docs/demos/hacker-news.png)
 
-`mb_shot https://example.com out.png`:
-
-![live website](docs/demos/live-website.png)
-
-Verified rendering a sweep of diverse real sites (example.org, danluu, gnu.org, lite.cnn,
-Hacker News, rust-lang, Wikipedia, MDN, w3.org, python.org — **10/10**), including
-`fetch()`-heavy, web-font, and `<video>`-containing pages. A handful of minimal blink
-compatibility shims for the non-compositing offscreen widget live in `patches/` (applied
-by `build.sh`).
-
-### Demos
-
-Modern CSS (grid + flexbox + gradient + transform + shadow) — none of which M47 could render:
+More demos — modern CSS, JS mutating the DOM, `file://` + SVG, `<canvas>` 2D:
 
 ![modern css](docs/demos/modern-css.png)
-
-JavaScript mutating the DOM (bg→blue, text→"JS WORKS"):
-
 ![javascript](docs/demos/javascript.png)
-
-`file://` load + inline SVG `<img>` decode in a flex row:
-
 ![file and image](docs/demos/file-and-image.png)
-
-`<canvas>` 2D drawn via JavaScript (rects, arc, linear gradient, text):
-
 ![canvas 2d](docs/demos/canvas-2d.png)
 
 ## Architecture
@@ -253,28 +223,34 @@ JavaScript mutating the DOM (bg→blue, text→"JS WORKS"):
 │  the classic miniblink `wke` C API on modern Blink      │
 └──────────── wraps the mb_capi ABI ▼ ────────────────────┘
 ┌─ miniblink_host (GN target, src/miniblink_host) ────────┐
-│  mb_capi      extern "C" ABI (the seam)                 │
-│  mb_runtime   engine bring-up (V8 snapshot, ThreadPool, │
-│               ResourceBundle, scheduler, blink::Initialize)
-│  mb_platform  blink::Platform (locale, broker, resources)│
-│  mb_view*     WebView::Create + CreateMainFrame handshake│
-│  mb_widget    non-compositing frame widget               │
-│  paint        GetPaintRecord().Playback → SkBitmap       │
+│  capi/      extern "C" ABI (the seam)                   │
+│  runtime/   engine bring-up (V8 snapshot, ThreadPool,   │
+│             ResourceBundle, scheduler, blink::Initialize)│
+│  platform/  blink::Platform, in-process GPU thread,     │
+│             WebGL/WebGPU context providers, compositor  │
+│  frame/     LocalFrameHost + per-frame mojo services    │
+│             (storage, IndexedDB, OPFS, notifications…)  │
+│  loader/    URLLoader over vendored libcurl (+ ws/wss)  │
+│  worker/    dedicated/shared worker hosts + script fetch│
+│  media/     WebMediaPlayerImpl glue (audio out, MSE)    │
+│  view/ widget/  WebView + non-compositing frame widget  │
 ├─────────────────────────────────────────────────────────┤
-│  modern Blink + substrate (base, mojo, cc, skia, v8…)   │  built as-is by GN
+│  modern Blink + substrate (base, mojo, cc, skia, v8,    │
+│  ANGLE, ffmpeg, BoringSSL, ICU…) — built as-is by GN    │
 └─────────────────────────────────────────────────────────┘
 ```
 
-The **C ABI** dissolves the GN↔CMake build mismatch: GN builds everything that touches
-Blink/base/mojo C++ types; the outer shell links only the pure-C `mb_capi.h`.
+The **C ABI** dissolves the GN↔consumer build mismatch: GN builds everything that
+touches Blink/base/mojo C++ types; an app links only against the pure-C headers.
 
-See `PROGRESS.md` for the current state, plan, and build/test commands; the full
-per-tick build journal lives in the git history.
+**Donor patches** (`patches/`, 18): small, documented Chromium patches the build
+applies automatically — offscreen-widget compat, in-process GPU de-testonly, the
+non-composited canvas paint path (`0008`/`0018`), gating Dawn out of the mac GPU path
+when WebGPU is off (`0017`), and similar. Each patch header explains the exact reason.
 
-## Public C ABI (`src/miniblink_host/capi/mb_capi.h`)
+## Public C ABI (`include/miniblink2/mb_capi.h`)
 
-108 functions; the header has the full, commented signatures. The canonical flow —
-boot, render, read back, screenshot, shut down:
+108 functions; the header has the full, commented signatures. The canonical flow:
 
 ```c
 mbInitialize();
@@ -287,126 +263,75 @@ mbDestroyView(v);
 mbShutdown();
 ```
 
-A complete, runnable C-ABI example (fill → read value → dispatch a custom event →
-wait for network idle → scrape text/HTML → request log → element screenshot) is
-`src/miniblink_host/tools/mb_demo.cc` (the `mb_demo` target) — the C counterpart
-to `wke_demo`.
+A complete runnable example (fill → read value → dispatch event → wait for network
+idle → scrape → element screenshot) is `src/miniblink_host/tools/mb_demo.cc`.
 
-Grouped overview (see `mb_capi.h` for the exact signatures):
+Grouped overview (see the header for exact signatures):
 
 - **Lifecycle / pump:** `mbInitialize` `mbShutdown` `mbCreateView` `mbDestroyView`
   `mbResize` `mbPumpMessages` `mbWait` `mbWaitForSelector` `mbWaitForFunction`
-  `mbWaitForVisibleSelector` (waits for actual visibility, not just existence)
-  `mbWaitForSelectorHidden` (waits for gone/hidden — the spinner-disappeared signal)
-  `mbWaitForNetworkIdle` (waits for fetches to settle — Puppeteer networkidle)
+  `mbWaitForVisibleSelector` `mbWaitForSelectorHidden` `mbWaitForNetworkIdle`
 - **Load / navigation:** `mbLoadHTML` `mbLoadURL` `mbPostURL` `mbReload`
   `mbGoBack`/`mbGoForward`/`mbCanGoBack`/`mbCanGoForward` `mbGetURL` `mbGetTitle`
   `mbGetHttpStatus` `mbGetResponseHeaders`
-- **Scripting:** `mbRunJS` `mbSetInitScript` `mbInsertCSS` (addStyleTag) `mbEvalJS`
-  `mbEvalJSEx` (value + JS
-  type) `mbEvalJSIsolated` `mbDrainConsole` `mbJsBindFunction` (native C function
-  callable from JS; returns string/number/boolean/null/JSON-object)
+- **Scripting:** `mbRunJS` `mbSetInitScript` `mbInsertCSS` `mbEvalJS` `mbEvalJSEx`
+  `mbEvalJSIsolated` `mbDrainConsole` `mbJsBindFunction`
 - **Scraping:** `mbGetText` `mbGetHTML` `mbGetTextForSelector`
-  `mbGetAllTextForSelector` (JSON array, all matches)
-  `mbGetAllValueForSelector` (JSON array of live values — form serialization)
-  `mbGetHtmlForSelector` (element outerHTML) `mbSetHtmlForSelector` (set innerHTML)
-  `mbGetAttribute`
-  `mbGetAllAttributeForSelector` (JSON array of an attr, all matches)
-  `mbSetAttribute` `mbGetValueForSelector` (live `.value`) `mbGetCheckedForSelector`
-  (`.checked`) `mbIsVisibleForSelector` `mbGetComputedStyle` `mbCountSelector`
-  `mbGetElementRect` `mbGetContentSize` `mbGetViewSize` (viewport read-back)
-- **Input:** `mbSendMouseClick` `mbSendMouseDown`/`mbSendMouseUp` (drag)
-  `mbSendMouseMove` `mbSendTouchTap`/`mbSendTouchSwipe` (touch) `mbSendText` `mbSendKey`
-  `mbSendScroll` `mbScrollTo` `mbScrollToBottom` (auto-scroll to load lazy content);
-  by selector `mbClickSelector`
-  `mbDoubleClickSelector` `mbRightClickSelector` `mbHoverSelector`
-  `mbFocusSelector` `mbBlurSelector` `mbFillSelector` `mbSelectOption`
-  `mbDispatchEvent` (synthetic DOM events) `mbDragSelector` (drag from→to)
-  `mbScrollIntoView`
+  `mbGetAllTextForSelector` `mbGetAllValueForSelector` `mbGetHtmlForSelector`
+  `mbSetHtmlForSelector` `mbGetAttribute` `mbGetAllAttributeForSelector`
+  `mbSetAttribute` `mbGetValueForSelector` `mbGetCheckedForSelector`
+  `mbIsVisibleForSelector` `mbGetComputedStyle` `mbCountSelector`
+  `mbGetElementRect` `mbGetContentSize` `mbGetViewSize`
+- **Input:** `mbSendMouseClick`/`Down`/`Up`/`Move` `mbSendTouchTap`/`Swipe`
+  `mbSendText` `mbSendKey` `mbSendScroll` `mbScrollTo` `mbScrollToBottom`; by
+  selector: `mbClickSelector` `mbDoubleClickSelector` `mbRightClickSelector`
+  `mbHoverSelector` `mbFocusSelector` `mbBlurSelector` `mbFillSelector`
+  `mbSelectOption` `mbDispatchEvent` `mbDragSelector` `mbScrollIntoView`
 - **Capture / output:** `mbPaintToBitmap` `mbPaintRectToBitmap` `mbSavePng`
-  `mbSavePngRect` `mbSaveElementPng` (one element by selector) `mbSavePdf`
-  `mbEncodePng` (in-memory PNG bytes)
-- **Cookies / session:** `mbGetCookies` `mbGetCookie` (one by name) `mbGetAllCookies`
-  (whole jar) `mbSetCookie` `mbClearCookies` `mbSaveCookies`/`mbLoadCookies` (file jar)
-  `mbGetLocalStorage`/`mbSetLocalStorage` `mbGetSessionStorage`/`mbSetSessionStorage`
-  `mbClearStorage` (origin-scoped Web Storage — auth/state injection + reset)
+  `mbSavePngRect` `mbSaveElementPng` `mbSavePdf` `mbEncodePng`
+- **Cookies / session:** `mbGetCookies` `mbGetCookie` `mbGetAllCookies` `mbSetCookie`
+  `mbClearCookies` `mbSaveCookies`/`mbLoadCookies`
+  `mbGet`/`mbSetLocalStorage` `mbGet`/`mbSetSessionStorage` `mbClearStorage`
 - **Network config:** `mbSetProxy` `mbSetIgnoreCertErrors` `mbSetFollowRedirects`
   `mbSetExtraHeaders` `mbSetUserAgent` `mbGetUserAgent` `mbSetLoadImages`
-  `mbGetRequestLog`/`mbClearRequestLog` (subresource fetch log)
-  `mbBlockUrl`/`mbClearUrlBlocks` (block URLs by substring — ads/trackers/images)
+  `mbGetRequestLog`/`mbClearRequestLog` `mbBlockUrl`/`mbClearUrlBlocks`
 - **Page config:** `mbSetDeviceScaleFactor` `mbSetTransparentBackground`
-  `mbSetDarkMode` `mbSetLocale` `mbSetTimezone` `mbSetFocus` (window focus)
+  `mbSetDarkMode` `mbSetLocale` `mbSetTimezone` `mbSetFocus`
 
-## wke compatibility layer (`src/wke/wke.h`)
+## wke compatibility layer (`include/miniblink2/wke.h`)
 
-A drop-in subset of [miniblink](https://github.com/weolar/miniblink49)'s classic
-`wke` C API, implemented on top of `mb_capi`, so an existing headless `wke` app
-runs on modern Blink with the original signatures (`utf8`, `wkeWebView`, `jsValue`,
-…). It is built into `libminiblink_host`; an embedder includes just `wke/wke.h`.
-
-Supported today (every item verified by `wke_smoke` — 96 default cases, plus
-over-the-network cases under `MB_NET_TESTS=1`). Functions marked *(ext)* are
-port extensions over `mb_capi` beyond the classic `wke` surface:
+A drop-in subset of classic miniblink's `wke` C API implemented on top of `mb_capi`,
+so an existing `wke` app runs on modern Blink with the original signatures (`utf8`,
+`wkeWebView`, `jsValue`, …). Verified by `wke_smoke` (96 default cases). Functions
+marked *(ext)* are port extensions beyond the classic surface.
 
 - **Lifecycle / load:** `wkeInitialize`/`wkeFinalize`, `wkeCreateWebView`/
-  `wkeDestroyWebView`, `wkeLoadURL`/`wkeLoadHTML`/`wkeLoadHtmlWithBaseUrl`
-  (base origin → relative URLs + secure context), `wkePostURL`, `wkeReload`, the
-  loading-state pollers (`wkeIsLoading`, `wkeIsLoadingCompleted`,
-  `wkeIsLoadingSucceeded`, `wkeIsLoadingFailed`, `wkeIsDocumentReady`).
-- **Geometry / rendering:** `wkeResize`, `wkeGetWidth`/`wkeGetHeight`/`wkeWidth`/
-  `wkeHeight`, `wkeGetContentWidth`/`wkeGetContentHeight`,
-  `wkeSetTransparent`/`wkeIsTransparent`,
-  `wkeSetZoomFactor`/`wkeGetZoomFactor`, `wkeSetEditable`, `wkeSetDarkMode` *(ext)*,
-  `wkeSetDeviceScaleFactor` *(ext)*, `wkeScrollTo` *(ext)*, `wkeScrollToBottom`
-  (auto-scroll to load lazy content) *(ext)*, `wkeSetFocus`/`wkeKillFocus`.
-- **Capture / output:** `wkePaint` (into a caller BGRA buffer), and *(ext)*
-  `wkePaintRect` (a region → BGRA buffer), `wkeSavePng`/`wkeSavePngRect`
-  `wkeSaveElementPng` (one element by selector) (PNG/JPEG by extension),
-  `wkeSavePdf`, `wkeEncodePng` (in-memory bytes).
-- **Accessors / view-state:** `wkeGetURL`/`wkeGetTitle`/`wkeGetSource`/`wkeGetText`,
-  `wkeSetUserAgent`/`wkeGetUserAgent`, `wkeSetLoadImages`, `wkeSetName`/`wkeGetName`,
-  `wkeSetUserKeyValue`/`wkeGetUserKeyValue`.
-- **Navigation:** `wkeCanGoBack`/`wkeGoBack`/`wkeCanGoForward`/`wkeGoForward`.
-- **Input:** `wkeFireMouseEvent`, `wkeFireMouseWheelEvent`, `wkeFireKeyDownEvent`/
-  `wkeFireKeyUpEvent`/`wkeFireKeyPressEvent`.
+  `wkeDestroyWebView`, `wkeLoadURL`/`wkeLoadHTML`/`wkeLoadHtmlWithBaseUrl`,
+  `wkePostURL`, `wkeReload`, the loading-state pollers.
+- **Geometry / rendering:** `wkeResize`, width/height/content-size getters,
+  `wkeSetTransparent`, `wkeSetZoomFactor`, `wkeSetEditable`, `wkeSetDarkMode` *(ext)*,
+  `wkeSetDeviceScaleFactor` *(ext)*, `wkeScrollTo`/`wkeScrollToBottom` *(ext)*,
+  `wkeSetFocus`/`wkeKillFocus`.
+- **Capture:** `wkePaint` (caller BGRA buffer) + *(ext)* `wkePaintRect`,
+  `wkeSavePng`/`wkeSavePngRect`/`wkeSaveElementPng`, `wkeSavePdf`, `wkeEncodePng`.
+- **Input:** `wkeFireMouseEvent`, `wkeFireMouseWheelEvent`,
+  `wkeFireKeyDown/Up/PressEvent`.
 - **Scripting (full string-backed `jsValue` model):** `wkeRunJS` + `wkeGlobalExec`;
-  classify `jsTypeOf` + `jsIsNumber`/`String`/`Boolean`/`Object`/`Array`/`Function`/
-  `Undefined`/`Null`/`True`/`False`; coerce `jsToInt`/`jsToFloat`/`jsToDouble`/
-  `jsToBoolean`/`jsToTempString`/`jsToString` (JSON for objects); construct `jsInt`/
-  `jsDouble`/`jsBoolean`/`jsString`/`jsUndefined`/`jsNull`; read `jsGetLength`/
-  `jsGetAt`/`jsGet`/`jsGetGlobal`/`jsGetKeys`; build `jsEmptyObject`/`jsEmptyArray`
-  + `jsSet`/`jsSetAt`/`jsSetGlobal`; call `jsCall`/`jsCallGlobal`; plus
-  `wkeSetInitScript` (evaluateOnNewDocument), `wkeInsertCSS` (addStyleTag) *(ext)*,
-  `wkeRunJsInIsolatedWorld` (content-script eval: own globals, shared DOM) *(ext)*,
-  and `wkeOnJsBridge` (page↔host bridge) *(ext)*.
-- **DOM automation** *(ext, Puppeteer-style)* — query `wkeCountSelector`/
-  `wkeGetTextForSelector`/`wkeGetAllTextForSelector`/`wkeGetHtmlForSelector`/
-  `wkeSetHtmlForSelector`/`wkeGetAttribute`/`wkeSetAttribute`/
-  `wkeGetAllAttributeForSelector`/`wkeGetValueForSelector`/
-  `wkeGetAllValueForSelector`/`wkeGetCheckedForSelector`/`wkeIsVisibleForSelector`/
-  `wkeGetElementRect`/`wkeGetComputedStyle`; act `wkeClickSelector`/
-  `wkeDoubleClickSelector`/`wkeRightClickSelector`/`wkeHoverSelector`/
-  `wkeFocusSelector`/`wkeBlurSelector`/`wkeFillSelector`/`wkeSelectOption`/
-  `wkeDispatchEvent` (synthetic events)/`wkeDragSelector` (drag from→to)/
-  `wkeScrollIntoView`; wait `wkeWaitForSelector`/`wkeWaitForFunction`/
-  `wkeWaitForVisibleSelector`/`wkeWaitForSelectorHidden`/`wkeWaitForNetworkIdle`.
-- **Storage** *(ext)* — `wkeGetLocalStorage`/`wkeSetLocalStorage`,
-  `wkeGetSessionStorage`/`wkeSetSessionStorage` (origin-scoped Web Storage).
-- **Networking:** cookies `wkeGetCookie`/`wkeSetCookie`/`wkeGetAllCookie`/
-  `wkePerformCookieCommand` + jar persistence `wkeSetCookieJarPath`; `wkeSetProxy`
-  (HTTP/SOCKS + auth); and *(ext)* `wkeSetExtraHeaders`, `wkeSetLocale`/
-  `wkeSetTimezone`, `wkeSetFollowRedirects`, `wkeSetIgnoreCertErrors`,
-  `wkeGetHttpStatusCode`/`wkeGetResponseHeaders`,
-  `wkeGetRequestLog`/`wkeClearRequestLog` (subresource fetch log),
-  `wkeBlockUrl`/`wkeClearUrlBlocks` (block URLs by substring).
+  the `jsTypeOf`/`jsIs*`/`jsTo*`/`js*` constructor-accessor set; `jsGet`/`jsSet`/
+  `jsCall`/`jsCallGlobal`; `wkeSetInitScript`, `wkeInsertCSS` *(ext)*,
+  `wkeRunJsInIsolatedWorld` *(ext)*, `wkeOnJsBridge` *(ext)*,
+  `wkeJsBindFunction` (native C functions callable from JS, typed args + return).
+- **DOM automation** *(ext, Puppeteer-style)*: the full query/act/wait selector set
+  (`wkeCountSelector`, `wkeGetTextForSelector`, `wkeClickSelector`, `wkeFillSelector`,
+  `wkeWaitForSelector`, `wkeWaitForNetworkIdle`, …).
+- **Networking:** cookies + jar persistence, `wkeSetProxy`, and *(ext)*
+  `wkeSetExtraHeaders`, locale/timezone, redirect/cert toggles, HTTP status +
+  response headers, request log, URL blocking.
 - **Callbacks:** `wkeOnLoadingFinish`, `wkeOnTitleChanged`, `wkeOnConsole`,
-  `wkeOnDocumentReady` (+ `wkeString`/`wkeGetString`).
-
-A complete, runnable example of the automation surface (fill → select → click →
-wait → scrape → screenshot) is `src/wke/wke_demo.cc` (the `wke_demo` target).
+  `wkeOnDocumentReady` (+ `wkeString` helpers).
 
 ```c
-#include "wke/wke.h"
+#include "wke.h"
 
 wkeInitialize();
 wkeWebView wv = wkeCreateWebView();
@@ -418,68 +343,57 @@ if (wkeIsLoadingSucceeded(wv)) {
     printf("links: %d\n", jsToInt(wkeGlobalExec(wv), n));
     int w = wkeGetWidth(wv), h = wkeGetHeight(wv);
     void* bits = malloc((size_t)w * h * 4);   // BGRA
-    wkePaint(wv, bits, w * 4);                 // … then encode/save bits …
+    wkePaint(wv, bits, w * 4);
     free(bits);
 }
 wkeDestroyWebView(wv);
 wkeFinalize();
 ```
 
-Loading is synchronous here, so a `wke` app can poll `wkeIsLoadingCompleted`
-(always true after `wkeLoadURL` returns) instead of waiting on a message loop.
-The `jsValue` object model is implemented as a JS-side slot store (objects/arrays
-are parked in the page and navigated by `jsGet`/`jsGetAt`/`jsCall`), not raw V8
-handles. Native function binding (`wkeJsBindFunction`) is supported: a C function
-is installed on `window` (via v8 `CreateDataProperty` at document-element-available
-— the public `Object::Set` API traps in this sandboxed build) and called
-synchronously from JS, reading args with `jsArg`/`jsArgCount` (each argument
-carries its JS type, so `jsTypeOf`/`jsIsNumber` are accurate). The returned
-`jsValue`'s type is preserved too (number/boolean/null/string), so JS gets a real
-value back — e.g. `window.fn(2,3) + 1` does arithmetic.
+Loading is synchronous here, so a `wke` app can poll `wkeIsLoadingCompleted` instead of
+waiting on a message loop. A complete automation example is `src/wke/wke_demo.cc`.
 
-## Build
+## Requirements
 
-Currently built as a GN target inside a configured Chromium M150 checkout (the engine is
-too large to vendor as source). See `build.sh` and `PROGRESS.md`. The
-"standalone" deliverable = this project's source + the GN-built `libminiblink_host.dylib`
-+ `blink_resources.pak` (vendored next to the binary).
+- **macOS arm64** (Apple Silicon).
+- A **Chromium M150 checkout** (`chromium-150.0.7871.24`) and **depot_tools**, as
+  siblings of this repo (override with `CHROMIUM=`/`DEPOT=` env or
+  `--chromium`/`--depot`):
 
-Requirements: a Chromium M150 source tree with a component `out/Release`
-(`is_component_build=true`), macOS arm64, the matching `blink_resources.pak`.
+  ```
+  <parent>/
+  ├── miniblink-modern/        (this repo)
+  ├── chromium-150.0.7871.24/  (donor source tree)
+  └── depot_tools/
+  ```
+- **Full Xcode** (not just CommandLineTools) with the license accepted and the Metal
+  toolchain installed — ANGLE's Metal backend compiles `.metal` shaders at build time:
 
-```sh
-./build.sh /path/to/chromium-150.x.y.z   # stages host into the tree, gn gen, ninja, runs the suite
-```
+  ```sh
+  sudo xcode-select -s /Applications/Xcode.app
+  sudo xcodebuild -license accept
+  xcodebuild -downloadComponent MetalToolchain   # newer macOS: separate download
+  ```
+- The vendored WebSocket-enabled libcurl builds via `scripts/build-curl-macos.sh`
+  (pinned to `MACOSX_DEPLOYMENT_TARGET=12.0` to match the engine link).
 
-`mb_smoke` is a 179-check capability + regression suite covering
-HTML/DOM, JS, CSS computed style, UA stylesheet, the `mbRunJS`+`mbEvalJS` bridge,
-`<canvas>` getImageData, external `<link>` CSS via the subresource loader,
-paint-to-bitmap, synthesized click, typed text (ASCII + UTF-8 accent/CJK/emoji),
-programmatic scroll, mouse-move/hover, embedded-NUL document integrity, full-page
-capture (resize → reflow → render below the fold), HiDPI (devicePixelRatio +
-resolution media queries), User-Agent, clip/region capture, transparent
-background, wait-for-selector/function, DOM storage, `requestAnimationFrame`,
-observer delivery (Mutation/Intersection/Resize), time-based animation (WAAPI/XHR),
-console capture, the selector automation set (click/dblclick/right-click/hover/
-focus/blur/fill/select/scrollIntoView), computed-style/attribute/text scraping,
-cookie jar save/load, PDF/PNG/in-memory-PNG export, and native function binding
-(`mbJsBindFunction`). It prints PASS/FAIL per case and exits non-zero on any
-failure, so it doubles as a regression test. A handful of over-the-network checks
-(POST, the cookie jar, request headers, proxy, redirect/cert toggles, image
-loading, HTTP status) are opt-in via `MB_NET_TESTS=1`, kept out of the default
-run so an unreachable host can't make it crawl. The `wke` layer has its own
-`wke_smoke` (96 default checks) and a runnable `wke_demo` example.
+## Development workflow
 
-`build.sh` also runs `src/miniblink_host/test/mb_shot_smoke.sh`, a CLI regression
-test that drives the `mb_shot` binary against a local fixture and asserts the exact
-stdout of the extraction flags (`--title`/`--count`/`--attr`/`--text`/`--eval`/
-`--visible`/`--value`/`--checked`/`--style`/`--html`/`--html-for`/`--rect`/`--local-storage`/
-`--session-storage`/`--url`/`--cookies`/`--click`/`--press`/`--wait-eval`) plus the
-bad-size guard, the capture modes (PNG dimensions for default/`--scale`/`--clip`/
-`--selector`, and `.jpg`/`.pdf` output formats read from the file header), and an
-end-to-end `fill`→`click`→`wait-selector`→`eval` integration flow (the canonical
-scrape, extracting result rows as JSON) — coverage the C++ suites can't give the
-command-line tool itself. It runs 62 deterministic offline cases by default;
-`MB_NET_TESTS=1` adds reachability-gated live-network cases (loading `example.com`;
-`--header`/`--post` echoed by httpbin; `--no-follow` stopping at a 3xx; `--insecure`
-loading a self-signed cert site).
+`build.sh /path/to/chromium` is the inner-loop build: it stages `src/` into the donor
+tree, applies `patches/`, runs GN + ninja against the **component** `out/Release`, and
+executes the full test battery:
+
+- `mb_smoke` — 179-check capability + regression suite over the C ABI.
+- `wke_smoke` — 96 checks over the wke layer.
+- `mb_shot_smoke.sh` — 62 offline CLI cases asserting `mb_shot`'s exact stdout,
+  capture geometry, and an end-to-end fill→click→wait→eval scrape.
+- `MB_NET_TESTS=1` adds the live-network cases (POST/cookies/proxy/redirects/certs).
+
+`scripts/build-lib.sh` (the SDK build) uses a separate non-component out dir
+(`out/mono-release`), so the dev and ship builds don't interfere.
+
+## Credits
+
+Classic engine, the `wke`/`mb` API design, and years of groundwork by **weolar** —
+<https://github.com/weolar/miniblink49> · <http://miniblink.net>. This project is an
+independent re-implementation of that embedding model on modern Blink.
