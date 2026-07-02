@@ -109,6 +109,21 @@ scripts/build-samples.sh [--dyn|--static|--both] [--release|--debug]
 - `minibrowser_static` — the same browser statically linked: a **110 MB single binary**
   with zero engine dylib dependencies.
 
+### `scripts/package.sh` — zip the SDK for distribution
+
+```sh
+scripts/package.sh [--release|--debug] [--dynamic|--static|--both] [--out ZIP]
+```
+
+The miniblink49 `tools/package-macos.sh` equivalent: stages `dist/<mode>/` into
+`miniblink2-macos-arm64-<mode>[-kind].zip` (48 MB for release dynamic) with
+`lib/` + `include/` + `resources/` + a generated README containing the exact
+link lines. The staged dylibs are made **portable**: the vendored-curl reference
+is rewritten from the build machine's absolute path to `@loader_path`, install
+ids become `@rpath`, and everything is ad-hoc re-signed. `include/wke/wke.h`
+ships as a miniblink49-compatible alias. Verified by compiling and booting the
+sample browser from an unpacked zip in a clean directory.
+
 ## GPU architecture (macOS)
 
 ```
