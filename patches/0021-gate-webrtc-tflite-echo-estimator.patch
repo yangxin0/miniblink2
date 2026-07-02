@@ -1,0 +1,55 @@
+diff --git a/media/webrtc/BUILD.gn b/media/webrtc/BUILD.gn
+index 93cc120..deef5fd 100644
+--- a/media/webrtc/BUILD.gn
++++ b/media/webrtc/BUILD.gn
+@@ -3,6 +3,7 @@
+ # found in the LICENSE file.
+ 
+ import("//media/media_options.gni")
++import("//services/webnn/features.gni")
+ import("//third_party/webrtc/webrtc.gni")
+ 
+ component("webrtc") {
+@@ -30,7 +31,14 @@ component("webrtc") {
+     "//third_party/webrtc_overrides:webrtc_component",
+   ]
+ 
+-  if (!is_fuchsia) {
++  # miniblink (patch 0021): the op resolver registers every TFLite builtin
++  # kernel; gate it (and the neural residual echo estimator that needs it —
++  # see helpers.cc) on the on-device-ML build switch, mirroring the Fuchsia
++  # size exclusion above it. tflite stays a public_dep for the
++  # FlatBufferModel* in the public API; as a static library its unreferenced
++  # objects don't reach the link.
++  if (!is_fuchsia && webnn_use_tflite) {
++    defines += [ "MB_TFLITE_ECHO_ESTIMATOR" ]
+     deps += [ "//components/optimization_guide/core/inference:op_resolver" ]
+   }
+ 
+diff --git a/media/webrtc/helpers.cc b/media/webrtc/helpers.cc
+index 0fb952d..afd1934 100644
+--- a/media/webrtc/helpers.cc
++++ b/media/webrtc/helpers.cc
+@@ -151,7 +151,12 @@ CreateWebRtcAudioProcessingModule(
+   // Fuchsia does not use the optimization guide.
+   // Avoid linking the op resolver to keep Fuchsia binary size down.
+   // TODO(crbug.com/450466837): Investigate if this build guard can be avoided.
+-#if !BUILDFLAG(IS_FUCHSIA)
++  // miniblink (patch 0021): same size rationale as Fuchsia — the op resolver
++  // registers every TFLite builtin kernel (~1MB of tflite + tflite_kernels).
++  // Only compiled in when the build enables on-device ML (webnn_use_tflite,
++  // build-lib.sh --ml); without it the APM runs without the neural residual
++  // echo estimator — the upstream behavior whenever the model is unavailable.
++#if !BUILDFLAG(IS_FUCHSIA) && defined(MB_TFLITE_ECHO_ESTIMATOR)
+   if (residual_echo_estimator_model) {
+     optimization_guide::TFLiteOpResolver op_resolver;
+     echo_estimator = webrtc::CreateNeuralResidualEchoEstimator(
+@@ -160,7 +165,7 @@ CreateWebRtcAudioProcessingModule(
+       LOG(ERROR) << "Failed to initialize neural residual echo estimator.";
+     }
+   }
+-#endif  // !BUILDFLAG(IS_FUCHSIA)
++#endif  // !BUILDFLAG(IS_FUCHSIA) && defined(MB_TFLITE_ECHO_ESTIMATOR)
+ 
+ #if BUILDFLAG(SYSTEM_LOOPBACK_AS_AEC_REFERENCE)
+   if (settings.use_loopback_aec_reference) {
