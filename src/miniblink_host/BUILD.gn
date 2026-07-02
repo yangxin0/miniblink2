@@ -203,14 +203,10 @@ component("miniblink_host") {
       "//third_party/dawn/src/dawn/wire",
     ]
     defines = [ "MINIBLINK_ENABLE_WEBGPU=1" ]
-  } else {
-    # WebGPU OFF: kept gpu/gles2 + shared-image code references a handful of Dawn symbols
-    # (DawnSharedTextureCache, DawnContextProvider, dawn::native::metal::GetMTLDevice, ...)
-    # UNGATED. They're never CALLED with no Dawn adapter, but must be DEFINED or dyld aborts
-    # at load when GPU init binds them (a -Wl,-U only defers that to a deterministic load
-    # crash under the ThinLTO/lld link). mb_dawn_stubs.cc defines them as trap-aliases.
-    sources += [ "platform/mb_dawn_stubs.cc" ]
   }
+  # WebGPU OFF needs no stubs or -U: patches/0017 gates the mac GPU path's Dawn references
+  # (iosurface_image_backing + the SkiaGraphite feature default) on BUILDFLAG(SKIA_USE_DAWN),
+  # so with use_dawn=false Dawn is COMPLETELY absent — no code, no references, no runtime path.
 }
 
 # ---------------------------------------------------------------------------
@@ -233,9 +229,9 @@ shared_library("miniblink2") {
   deps = [ ":miniblink_host" ]
   ldflags = [ "-Wl,-force_load," +
               rebase_path("$target_out_dir/libminiblink_host.a", root_build_dir) ]
-  # No -Wl,-U here: every ungated cross-feature reference is now satisfied by a real
-  # definition (Dawn via mb_dawn_stubs.cc when !use_dawn; media_use_libvpx + wasm kept ON),
-  # so the link resolves cleanly and dyld never hits a missing symbol at load.
+  # No -Wl,-U and no stubs: Dawn references are gated out at COMPILE time when !use_dawn
+  # (patches/0017), and media_use_libvpx + wasm stay ON — the link resolves cleanly and
+  # dyld never hits a missing symbol at load.
 }
 
 # The single complete archive libminiblink2.a is produced by scripts/build-lib.sh

@@ -34,12 +34,17 @@ gpu::InProcessGpuThreadHolder* GetSharedGpuThreadHolder() {
     // Graphite+Dawn, which needs a dawn_context_provider this holder doesn't set up).
     p->use_passthrough_cmd_decoder = true;
     p->gr_context_type = gpu::GrContextType::kGL;
-    // Also enable WebGPU so the SAME service serves navigator.gpu (mb_webgpu.cc). These
-    // are inert until a WebGPU command buffer is requested; the WebGL ES2/ES3 path is
-    // unaffected. adapter_blocklist is disabled so the SwiftShader fallback is allowed.
+    // Enable WebGPU in the GPU service ONLY when Dawn is actually built (--webgpu). Otherwise
+    // Dawn is trap-stubbed (mb_dawn_stubs.cc), and turning enable_webgpu on makes the
+    // shared-image system pick a Dawn/WGPU texture representation on the GPU (Metal) path ->
+    // it calls gpu::DawnSharedTextureCache::* -> the stub traps (SIGTRAP). The SwiftShader
+    // path never took that representation, which is why it didn't crash. So gate it on the
+    // real Dawn build; with WebGPU off the WebGL ES2/ES3 (ANGLE) path is unaffected.
+#if defined(MINIBLINK_ENABLE_WEBGPU)
     p->enable_webgpu = true;
     p->enable_unsafe_webgpu = true;
     p->disabled_dawn_features_list = {"adapter_blocklist"};
+#endif
     return h;
   }();
   return holder;

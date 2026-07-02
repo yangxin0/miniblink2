@@ -1,0 +1,280 @@
+diff --git a/gpu/command_buffer/service/shared_image/iosurface_image_backing.h b/gpu/command_buffer/service/shared_image/iosurface_image_backing.h
+index 166f980..4cac149 100644
+--- a/gpu/command_buffer/service/shared_image/iosurface_image_backing.h
++++ b/gpu/command_buffer/service/shared_image/iosurface_image_backing.h
+@@ -11,7 +11,10 @@
+ #include "base/task/single_thread_task_runner.h"
+ #include "build/build_config.h"
+ #include "gpu/command_buffer/common/shared_image_info.h"
++#include "skia/buildflags.h"
++#if BUILDFLAG(SKIA_USE_DAWN)
+ #include "gpu/command_buffer/service/shared_image/dawn_shared_texture_cache.h"
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+ #include "gpu/command_buffer/service/shared_image/shared_image_backing.h"
+ #include "gpu/command_buffer/service/texture_manager.h"
+ #include "gpu/config/gpu_preferences.h"
+@@ -168,11 +171,14 @@ class GPU_GLES2_EXPORT IOSurfaceImageBacking
+ 
+  private:
+   class GLTextureIRepresentation;
++#if BUILDFLAG(SKIA_USE_DAWN)
+   class DawnRepresentation;
+   class SkiaGraphiteDawnMetalRepresentation;
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+   class SkiaGaneshRepresentation;
+   class OverlayRepresentation;
+ 
++#if BUILDFLAG(SKIA_USE_DAWN)
+   class DawnBufferCopyRepresentation final : public DawnBufferRepresentation {
+    public:
+     DawnBufferCopyRepresentation(
+@@ -193,6 +199,7 @@ class GPU_GLES2_EXPORT IOSurfaceImageBacking
+     std::unique_ptr<DawnImageRepresentation> dawn_image_representation_;
+     wgpu::Buffer buffer_;
+   };
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+ 
+   // SharedImageBacking:
+   base::trace_event::MemoryAllocatorDump* OnMemoryDump(
+@@ -211,6 +218,7 @@ class GPU_GLES2_EXPORT IOSurfaceImageBacking
+   std::unique_ptr<OverlayImageRepresentation> ProduceOverlay(
+       SharedImageManager* manager,
+       MemoryTypeTracker* tracker) final;
++#if BUILDFLAG(SKIA_USE_DAWN)
+   std::unique_ptr<DawnImageRepresentation> ProduceDawn(
+       SharedImageManager* manager,
+       MemoryTypeTracker* tracker,
+@@ -218,6 +226,7 @@ class GPU_GLES2_EXPORT IOSurfaceImageBacking
+       wgpu::BackendType backend_type,
+       std::vector<wgpu::TextureFormat> view_formats,
+       scoped_refptr<SharedContextState> context_state) final;
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+   std::unique_ptr<SkiaGaneshImageRepresentation> ProduceSkiaGanesh(
+       SharedImageManager* manager,
+       MemoryTypeTracker* tracker,
+@@ -233,12 +242,14 @@ class GPU_GLES2_EXPORT IOSurfaceImageBacking
+   std::unique_ptr<WebNNTensorRepresentation> ProduceWebNNTensor(
+       SharedImageManager* manager,
+       MemoryTypeTracker* tracker) override;
++#if BUILDFLAG(SKIA_USE_DAWN)
+   std::unique_ptr<DawnBufferRepresentation> ProduceDawnBuffer(
+       SharedImageManager* manager,
+       MemoryTypeTracker* tracker,
+       const wgpu::Device& device,
+       wgpu::BackendType backend_type,
+       scoped_refptr<SharedContextState> context_state) override;
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+ 
+   // IOSurfaceBackingEGLState::Client:
+   bool IOSurfaceBackingEGLStateBeginAccess(IOSurfaceBackingEGLState* egl_state,
+@@ -274,6 +285,7 @@ class GPU_GLES2_EXPORT IOSurfaceImageBacking
+   const gfx::Size io_surface_size_;
+   const uint32_t io_surface_format_;
+ 
++#if BUILDFLAG(SKIA_USE_DAWN)
+   // DawnSharedTextureCache that keeps an internal cache of per-device
+   // SharedTextureData that vends WebGPU textures for the underlying IOSurface.
+   scoped_refptr<DawnSharedTextureCache> dawn_texture_cache_ GUARDED_BY(lock_);
+@@ -305,6 +317,7 @@ class GPU_GLES2_EXPORT IOSurfaceImageBacking
+   // texture after ending this access.
+   int TrackEndAccessToWGPUTexture(wgpu::Texture texture)
+       EXCLUSIVE_LOCKS_REQUIRED(lock_);
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+ 
+   const GLenum gl_target_;
+   const bool framebuffer_attachment_angle_;
+diff --git a/gpu/command_buffer/service/shared_image/iosurface_image_backing.mm b/gpu/command_buffer/service/shared_image/iosurface_image_backing.mm
+index 9ddfc7e..11cfebe 100644
+--- a/gpu/command_buffer/service/shared_image/iosurface_image_backing.mm
++++ b/gpu/command_buffer/service/shared_image/iosurface_image_backing.mm
+@@ -12,9 +12,11 @@
+ #include <EGL/egl.h>
+ #include <EGL/eglext.h>
+ #import <Metal/Metal.h>
++#if BUILDFLAG(SKIA_USE_DAWN)
+ #include <dawn/native/MetalBackend.h>
+ #include <dawn/webgpu_cpp.h>
+ #include <dawn/webgpu_cpp_print.h>
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+ 
+ #include "base/apple/scoped_cftyperef.h"
+ #include "base/apple/scoped_nsobject.h"
+@@ -28,14 +30,20 @@
+ #include "gpu/command_buffer/common/shared_image_info.h"
+ #include "gpu/command_buffer/common/shared_image_trace_utils.h"
+ #include "gpu/command_buffer/common/shared_image_usage.h"
++#if BUILDFLAG(SKIA_USE_DAWN)
+ #include "gpu/command_buffer/service/dawn_context_provider.h"
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+ #include "gpu/command_buffer/service/shared_context_state.h"
+ #include "gpu/command_buffer/service/shared_image/copy_image_plane.h"
++#if BUILDFLAG(SKIA_USE_DAWN)
+ #include "gpu/command_buffer/service/shared_image/dawn_fallback_image_representation.h"
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+ #include "gpu/command_buffer/service/shared_image/iosurface_image_backing_factory.h"
+ #include "gpu/command_buffer/service/shared_image/shared_image_format_service_utils.h"
+ #include "gpu/command_buffer/service/shared_image/shared_image_gl_utils.h"
++#if BUILDFLAG(SKIA_USE_DAWN)
+ #include "gpu/command_buffer/service/shared_image/skia_graphite_dawn_image_representation.h"
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+ #include "gpu/command_buffer/service/skia_utils.h"
+ #include "gpu/config/gpu_finch_features.h"
+ #include "third_party/angle/include/EGL/eglext_angle.h"
+@@ -60,9 +68,11 @@
+ 
+ namespace {
+ using GraphiteTextureHolder = SkiaImageRepresentation::GraphiteTextureHolder;
++#if BUILDFLAG(SKIA_USE_DAWN)
+ 
+ // Alignment required by `CopyBufferToTexture` and `CopyTextureToBuffer`.
+ constexpr uint32_t kTextureBytesPerRowAlignment = 256u;
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+ 
+ struct ScopedIOSurfaceLock {
+   ScopedIOSurfaceLock(IOSurfaceRef iosurface, IOSurfaceLockOptions options)
+@@ -105,6 +115,7 @@
+   NOTREACHED();
+ }
+ 
++#if BUILDFLAG(SKIA_USE_DAWN)
+ wgpu::Texture CreateWGPUTexture(wgpu::SharedTextureMemory shared_texture_memory,
+                                 SharedImageUsageSet shared_image_usage,
+                                 const gfx::Size& io_surface_size,
+@@ -136,6 +147,7 @@
+ 
+   return shared_texture_memory.CreateTexture(&texture_descriptor);
+ }
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+ 
+ id<MTLDevice> QueryMetalDeviceFromANGLE(EGLDisplay display) {
+   id<MTLDevice> metal_device = nil;
+@@ -157,6 +169,7 @@
+ 
+ }  // namespace
+ 
++#if BUILDFLAG(SKIA_USE_DAWN)
+ IOSurfaceImageBacking::DawnBufferCopyRepresentation::
+     DawnBufferCopyRepresentation(
+         SharedImageManager* manager,
+@@ -291,6 +304,7 @@
+   wgpu::CommandBuffer command_buffer = encoder.Finish();
+   device_.GetQueue().Submit(1, &command_buffer);
+ }
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+ 
+ WebNNIOSurfaceTensorRepresentation::WebNNIOSurfaceTensorRepresentation(
+     SharedImageManager* manager,
+@@ -716,6 +730,7 @@ void EndAccess() override {
+   return IOSurfaceIsInUse(io_surface_.get());
+ }
+ 
++#if BUILDFLAG(SKIA_USE_DAWN)
+ ///////////////////////////////////////////////////////////////////////////////
+ // DawnRepresentation
+ 
+@@ -969,6 +984,7 @@ void EndAccess() override {
+     SupportsMultipleConcurrentReadAccess() {
+   return true;
+ }
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+ 
+ ///////////////////////////////////////////////////////////////////////////////
+ // IOSurfaceImageBacking
+@@ -993,7 +1009,9 @@ void EndAccess() override {
+       io_surface_size_(IOSurfaceGetWidth(io_surface_.get()),
+                        IOSurfaceGetHeight(io_surface_.get())),
+       io_surface_format_(IOSurfaceGetPixelFormat(io_surface_.get())),
++#if BUILDFLAG(SKIA_USE_DAWN)
+       dawn_texture_cache_(base::MakeRefCounted<DawnSharedTextureCache>()),
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+       gl_target_(gl_target),
+       framebuffer_attachment_angle_(framebuffer_attachment_angle),
+       weak_factory_(this) {
+@@ -1266,6 +1284,7 @@ new IOSurfaceBackingEGLState(this, egl_display, context,
+                                                  io_surface_);
+ }
+ 
++#if BUILDFLAG(SKIA_USE_DAWN)
+ int IOSurfaceImageBacking::TrackBeginAccessToWGPUTexture(
+     wgpu::Texture texture) {
+   AssertLockAcquired();
+@@ -1296,6 +1315,7 @@ new IOSurfaceBackingEGLState(this, egl_display, context,
+   AssertLockAcquired();
+   return dawn_texture_cache_;
+ }
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+ 
+ void IOSurfaceImageBacking::WaitForCommandsToBeScheduled(
+     id<MTLDevice> waiting_device) {
+@@ -1304,6 +1324,7 @@ new IOSurfaceBackingEGLState(this, egl_display, context,
+   base::TimeDelta dawn_wait_time;
+   base::TimeDelta angle_wait_time;
+ 
++#if BUILDFLAG(SKIA_USE_DAWN)
+   base::flat_map<wgpu::Device, wgpu::Future, WGPUDeviceCompare> futures_to_keep;
+   for (const auto& [device, future] : wgpu_commands_scheduled_futures_) {
+     id<MTLDevice> mtl_device = dawn::native::metal::GetMTLDevice(device.Get());
+@@ -1323,6 +1344,7 @@ new IOSurfaceBackingEGLState(this, egl_display, context,
+     dawn_wait_time += base::TimeTicks::Now() - start_time;
+   }
+   wgpu_commands_scheduled_futures_ = std::move(futures_to_keep);
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+ 
+   base::flat_map<EGLDisplay, std::unique_ptr<gl::GLFenceEGL>> fences_to_keep;
+   for (auto& [display, fence] : egl_commands_scheduled_fences_) {
+@@ -1372,6 +1394,7 @@ new IOSurfaceBackingEGLState(this, egl_display, context,
+   return io_surface_.get();
+ }
+ 
++#if BUILDFLAG(SKIA_USE_DAWN)
+ std::unique_ptr<DawnImageRepresentation> IOSurfaceImageBacking::ProduceDawn(
+     SharedImageManager* manager,
+     MemoryTypeTracker* tracker,
+@@ -1464,6 +1487,7 @@ new IOSurfaceBackingEGLState(this, egl_display, context,
+       manager, this, tracker, wgpu::Device(device), wgpu_format,
+       std::move(view_formats));
+ }
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+ 
+ std::unique_ptr<SkiaGaneshImageRepresentation>
+ IOSurfaceImageBacking::ProduceSkiaGanesh(
+@@ -1613,6 +1637,7 @@ new IOSurfaceBackingEGLState(this, egl_display, context,
+   EndAccess(/*readonly=*/false);
+ }
+ 
++#if BUILDFLAG(SKIA_USE_DAWN)
+ std::unique_ptr<DawnBufferRepresentation>
+ IOSurfaceImageBacking::ProduceDawnBuffer(
+     SharedImageManager* manager,
+@@ -1629,6 +1654,7 @@ new IOSurfaceBackingEGLState(this, egl_display, context,
+   return std::make_unique<DawnBufferCopyRepresentation>(
+       manager, this, tracker, device, std::move(dawn_image_representation));
+ }
++#endif  // BUILDFLAG(SKIA_USE_DAWN)
+ 
+ bool IOSurfaceImageBacking::BeginAccess(bool readonly) {
+   AssertLockAcquired();
+diff --git a/gpu/config/gpu_finch_features.cc b/gpu/config/gpu_finch_features.cc
+index 0a1deaa..a382001 100644
+--- a/gpu/config/gpu_finch_features.cc
++++ b/gpu/config/gpu_finch_features.cc
+@@ -13,6 +13,7 @@
+ #include "build/build_config.h"
+ #include "gpu/config/gpu_feature_info.h"
+ #include "gpu/config/gpu_switches.h"
++#include "skia/buildflags.h"
+ #include "ui/gl/gl_features.h"
+ #include "ui/gl/gl_surface_egl.h"
+ #include "ui/gl/gl_switches.h"
+@@ -304,7 +305,10 @@ const base::FeatureParam<std::string> kDrDcBlockListByAndroidBuildFP{
+ // --disable-skia-graphite which take precedence over the feature flag, and the
+ // Dawn backend can be overridden with the --skia-graphite-dawn-backend flag.
+ BASE_FEATURE(kSkiaGraphite,
+-#if BUILDFLAG(IS_APPLE)
++// Graphite requires a Dawn backend (see GetGrContextType: without SKIA_USE_DAWN
++// it can only fall back to Ganesh, after probing Dawn at GPU init — which a
++// no-Dawn build must never do). Gate the default on the Dawn build flag.
++#if BUILDFLAG(IS_APPLE) && BUILDFLAG(SKIA_USE_DAWN)
+              base::FEATURE_ENABLED_BY_DEFAULT
+ #else
+              base::FEATURE_DISABLED_BY_DEFAULT
