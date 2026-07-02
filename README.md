@@ -71,21 +71,29 @@ Deployment rules:
 
 ```sh
 scripts/build-lib.sh [--shared|--static|--both] [--release|--debug]
-                     [--size-optimized] [--webgpu] [--video] [--ml]
+                     [--size-optimized] [--webgpu] [--video] [--ml] [--wasm]
+                     [--av1-encode] [--tracing] [--swiftshader] [--icu-full]
                      [--chromium DIR] [--depot DIR] [--no-stage] [--print-only]
 ```
 
 | Flag | Effect | Size impact (release dylib, stripped) |
 |---|---|---|
-| *(default dev build)* | fast `-O2`, DCHECKs on, no LTO | 186 MB |
-| `--size-optimized` | **ship build**: ThinLTO + `-Oz` + ICF + DCHECKs off | **97 MB** (`.a`: 2.4 GB → 162 MB) |
+| *(default dev build)* | fast `-O2`, DCHECKs on, no LTO | 183 MB |
+| `--size-optimized` | **ship build**: ThinLTO + `-Oz` + ICF + DCHECKs off | **88 MB** (`.a`: 1.9 GB ThinLTO bitcode) |
 | `--webgpu` | include WebGPU (Dawn); off = Dawn completely absent from the binary | +~9 MB |
 | `--video` | include `<video>` decode (H.264/ffmpeg-video). Off = **audio still plays** (miniblink49 parity) | +~8 MB |
-| `--ml` | include WebNN on-device ML (TFLite/LiteRT/XNNPACK) | +~3 MB |
+| `--wasm` | include WebAssembly (V8 wasm engine). Off = `window.WebAssembly` absent (miniblink49 parity) | +~4.5 MB |
+| `--ml` | include WebNN on-device ML (TFLite/LiteRT/XNNPACK) + the TFLite language-detection model + WebRTC's neural echo estimator (patches 0019/0021) | +~4 MB |
+| `--av1-encode` | include AV1 *encoding* (libaom: WebCodecs/MediaRecorder/WebRTC send; decode always in) | +~1 MB |
+| `--tracing` | include OPTIONAL_TRACE_EVENT instrumentation (perf-investigation builds) | +~0.5 MB |
+| `--swiftshader` | ship SwiftShader software Vulkan in `dist/` (headless/CI/no-GPU `--use-angle=swiftshader`) | +20 MB (dist) |
+| `--icu-full` | ship untrimmed `icudtl.dat` (all ~90 locales); default trims to root+en+zh (`MB_ICU_KEEP=en,zh,ja` to customize) | +4.1 MB (dist) |
 
 Feature flags are include-only and **default off** — the default SDK is the trimmed,
-miniblink49-like profile (audio on; video/webgpu/ml off). For comparison: miniblink49
-ships 78 MB *unstripped* (~45 MB stripped); this is the full 2025 engine at ~2× its code.
+miniblink49-like profile (audio on; video/webgpu/ml/wasm off). For comparison: miniblink49
+ships 78 MB *unstripped* (~53 MB stripped); this is the full 2026 engine at ~1.7× its size.
+Per-component size attribution for further pruning: `nm -n <out>/libminiblink2.dylib |
+scripts/sizemap.py` (see `BACKLOG.md` §E for the measured, deliberately-not-cut leftovers).
 
 The first build of a mode is a full engine compile (slow); re-runs are incremental
 (staging uses rsync, builds are lock-serialized, flag flips rebuild only what changed).
