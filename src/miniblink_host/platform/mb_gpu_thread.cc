@@ -14,10 +14,14 @@ gpu::InProcessGpuThreadHolder* GetSharedGpuThreadHolder() {
     base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
     if (!cmd->HasSwitch(switches::kUseGL))
       cmd->AppendSwitchASCII(switches::kUseGL, gl::kGLImplementationANGLEName);
+    // Default WebGL to ANGLE's Metal backend (hardware GPU). Needs the Metal backend built
+    // (angle_enable_metal=true, which needs full Xcode's `metal` shader compiler). Overridable
+    // with --use-angle=swiftshader for headless/CI/no-GPU contexts (deterministic software).
     if (!cmd->HasSwitch(switches::kUseANGLE)) {
       cmd->AppendSwitchASCII(switches::kUseANGLE,
-                             gl::kANGLEImplementationSwiftShaderName);
+                             gl::kANGLEImplementationMetalName);
     }
+    // Still allow SwiftShader if it's the one selected (the --use-angle override above).
     if (!cmd->HasSwitch(switches::kEnableUnsafeSwiftShader))
       cmd->AppendSwitch(switches::kEnableUnsafeSwiftShader);
     // The GPU thread reads the process-wide GL implementation; set it on the main
