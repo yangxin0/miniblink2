@@ -11,7 +11,7 @@
 # Run a built sample FROM dist/<mode>/ — it loads icudtl.dat / the paks / the V8 snapshot
 # from beside the binary:  (cd dist/release && ./minibrowser_dyn https://example.com)
 #
-# NOTE: a --size-optimized static .a is ThinLTO BITCODE, so the static link re-runs LTO
+# NOTE: if dist holds a LEGACY ThinLTO bitcode .a (pre---ship builds), the static link re-runs LTO
 # codegen and needs an LTO-capable linker — this script uses the Chromium clang++/lld for it
 # (hence --chromium / CHROMIUM, defaulting to a sibling checkout, like build-lib.sh). The
 # dynamic build just uses the system clang++ (the dylib is an ordinary native library).
@@ -68,25 +68,26 @@ fi
 # --- static: libminiblink2.a is the COMPLETE engine archive, so the consumer must supply
 # --- every system framework/lib it uses. Derive that set from the dylib's load commands when
 # --- present (kept in sync automatically), plus vendored libcurl. -Wl,-ObjC forces ObjC
-# --- category objects in. lld handles the ThinLTO bitcode a --size-optimized .a contains.
+# --- category objects in. (--release --ship produces a NATIVE .a; lld also handles a
+# --- legacy ThinLTO bitcode archive if dist still holds one.)
 if [ "$FORM" = static ] || [ "$FORM" = both ]; then
   [ -f "$DIST/libminiblink2.a" ] || {
     echo "error: no $DIST/libminiblink2.a — build it first: scripts/build-lib.sh --static ${MODE:+--$MODE}" >&2; exit 1; }
   CLANGXX="$CHROMIUM/third_party/llvm-build/Release+Asserts/bin/clang++"
   [ -x "$CLANGXX" ] || CLANGXX=clang++   # system clang++ works for a non-LTO (native) .a
 
-  # A --size-optimized .a is ThinLTO BITCODE. build-lib.sh merges it with Apple `libtool`,
-  # which can't put bitcode + native objects in one uniform archive: it emits a FAT archive
-  # with the bitcode in a cputype(0) slice and the native objects in an arm64 slice. Linking
+  # Defensive: a LEGACY ThinLTO bitcode .a merged with Apple `libtool` (pre-llvm-ar
+  # builds) is a FAT archive with the bitcode in a cputype(0) slice and the native
+  # objects in an arm64 slice. Linking
   # for arm64 then reads ONLY the arm64 slice and reports every mb* symbol undefined.
   # Detect that and stop with guidance rather than a wall of "undefined symbol" errors.
   if lipo -info "$DIST/libminiblink2.a" 2>/dev/null | grep -q "cputype (0)"; then
-    echo "error: $DIST/libminiblink2.a is a ThinLTO (--size-optimized) bitcode archive; it" >&2
+    echo "error: $DIST/libminiblink2.a is a legacy libtool-merged bitcode archive; it" >&2
     echo "       can't be static-linked as-is (bitcode lands in a cputype(0) fat slice the" >&2
     echo "       linker ignores). Options:" >&2
     echo "         - use the dynamic library instead:  scripts/build-samples.sh --dyn" >&2
-    echo "         - rebuild the archive WITHOUT --size-optimized (native objects):" >&2
-    echo "               scripts/build-lib.sh --static   # then re-run --static here" >&2
+    echo "         - rebuild the archive (native objects):" >&2
+    echo "               scripts/build-lib.sh --release --ship   # then re-run --static here" >&2
     exit 1
   fi
 
@@ -109,7 +110,7 @@ if [ "$FORM" = static ] || [ "$FORM" = both ]; then
   fi
 
   echo "==> minibrowser_static  (links libminiblink2.a; ${#FW[@]} frameworks; $(basename "$CLANGXX") + lld)"
-  echo "    (ThinLTO codegen of the reachable engine — slow; give it several min)"
+  echo "    (a native .a links in ~a minute; a legacy bitcode .a re-runs LTO — several min)"
   "$CLANGXX" "${CXXFLAGS[@]}" "$SRC" \
     "$DIST/libminiblink2.a" \
     -fuse-ld=lld -Wl,-ObjC -Wl,-dead_strip \
@@ -121,6 +122,16 @@ if [ "$FORM" = static ] || [ "$FORM" = both ]; then
   # which is why an unstripped minibrowser_static (173MB) dwarfs the dylib (97MB, already
   # stripped). Stripped it's ~110MB — i.e. the engine code + the sample, no symbol-table bloat.
   [ "$MODE" != debug ] && strip -x "$DIST/minibrowser_static"
+  # The tracked repo libcurl carries whatever install id it was BUILT with (the tracked
+  # binary is never modified — no git churn), which may be a stale path from before a
+  # folder rename. Retarget the RECORDED reference in the produced binary to this repo's
+  # copy, then re-sign (arm64 kills invalidly-signed images at load).
+  CURL_REF="$(otool -L "$DIST/minibrowser_static" | awk '/third_party\/curl/{print $1}')"
+  if [ -n "$CURL_REF" ] && [ "$CURL_REF" != "$HERE/third_party/curl/lib/libcurl.4.dylib" ]; then
+    install_name_tool -change "$CURL_REF" "$HERE/third_party/curl/lib/libcurl.4.dylib" \
+        "$DIST/minibrowser_static" 2>/dev/null
+  fi
+  codesign --force --sign - "$DIST/minibrowser_static" 2>/dev/null
   echo "    -> $DIST/minibrowser_static ($(du -h "$DIST/minibrowser_static" | cut -f1))"
 fi
 

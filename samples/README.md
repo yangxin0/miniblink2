@@ -23,7 +23,7 @@ Two ways, depending on which library you want to exercise:
 ./samples/build.sh /path/to/chromium-150.0.7871.24   # -> out/Release/minibrowser
 
 # 2. against the packaged SDK in dist/<mode>/ — what consumers get
-scripts/build-lib.sh --both --release          # SDK first
+scripts/build-lib.sh --release --ship          # SDK first (dylib + .a)
 scripts/build-samples.sh                       # -> dist/release/minibrowser_{dyn,static}
 ```
 

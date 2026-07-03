@@ -1,10 +1,25 @@
 #!/usr/bin/env bash
-# build-lib.sh — build a self-contained libminiblink2 (single .dylib and/or .a),
-# release or debug, from the miniblink2 sources.
+# build-lib.sh — build the self-contained libminiblink2 SDK from the miniblink2 sources.
 #
-#   scripts/build-lib.sh [--shared|--static|--both] [--release|--debug]
-#                      [--webgpu] [--video] [--ml] [--wasm] [--size-optimized]
-#                      [--chromium DIR] [--depot DIR] [--no-stage] [--print-only]
+#   scripts/build-lib.sh [--release|--debug] [--ship]
+#                        [--webgpu] [--video] [--ml] [--wasm] [--av1-encode]
+#                        [--tracing] [--swiftshader] [--icu-full]
+#                        [--chromium DIR] [--depot DIR] [--no-stage] [--print-only]
+#
+# Profiles (each with its own out dir — see the "one out dir per profile" note below):
+#   --debug           debugger build: no optimization, full symbols, DCHECKs.
+#                     -> dist/debug/libminiblink2.dylib          (out/mono-debug)
+#   --release         dev release: -O2, DCHECK assertions COMPILED IN (Chromium's
+#                     developer convention — fast, but internal bugs abort loudly).
+#                     -> dist/release/libminiblink2.{dylib,a}    (out/mono-release)
+#   --release --ship  the publishable SDK. Each artifact gets the strategy that makes
+#                     IT smallest; both are -Oz, DCHECKs compiled out, stripped:
+#                       dylib: ThinLTO (whole-program opt at OUR link)
+#                                                        (out/mono-release-dynamic)
+#                       .a:    native machine code, NO ThinLTO — an archive never
+#                              goes through our linker, so bitcode would just bloat
+#                              it 8x and force lld on consumers; native -Oz links
+#                              with ANY toolchain          (out/mono-release-static)
 #
 # Feature flags are include-only (default OFF, to trim toward miniblink49's footprint):
 #   --webgpu  WebGPU/Dawn      --video  <video> decode (audio is always on)
@@ -15,24 +30,14 @@
 #   --swiftshader  ship SwiftShader software Vulkan in dist/ (headless/CI/no-GPU fallback)
 #   --icu-full  ship the untrimmed icudtl.dat (all ~90 locales, 10.4MB); default trims
 #               to root+en+zh (6.3MB) — override the keep list with MB_ICU_KEEP=en,zh,ja
-#   --size-optimized  size-optimized ship build (ThinLTO + -Oz + no DCHECKs; release only, slow)
-#
-# --webgpu links WebGPU (Dawn, ~97MB) into the .dylib AND the .a; omitted by default to
-# keep the library smaller (navigator.gpu.requestAdapter() then resolves to null).
 #
 # CHROMIUM (the Chromium checkout) and DEPOT (depot_tools) default to siblings of this
 # project; override with env vars (CHROMIUM=… DEPOT=…) or the --chromium/--depot flags.
 #
 # Unlike the default build (is_component_build=true), this links the WHOLE engine
 # (Blink, V8, skia, base, ...) statically into ONE artifact instead of ~286 sibling
-# component dylibs:
-#
-#   --shared  -> dist/<mode>/libminiblink2.dylib   (self-contained shared library)
-#   --static  -> dist/<mode>/libminiblink2.a       (one complete archive)
-#   --both    -> both of the above
-#
-# The first build of a given mode is a full from-scratch compile of the engine in
-# non-component mode (slow; shares nothing with out/Release). Re-runs are incremental.
+# component dylibs. The first build of a given profile is a full from-scratch compile
+# (slow); re-runs are incremental.
 #
 # Each dist/<mode>/ is a self-contained SDK:
 #   libminiblink2.{dylib,a}            the library (exposes the miniblink2 mb* C API)
@@ -49,8 +54,8 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"   # repo root (this script lives in scr
 PARENT="$(dirname "$HERE")"
 CHROMIUM="${CHROMIUM:-$PARENT/chromium-150.0.7871.24}"
 DEPOT="${DEPOT:-$PARENT/depot_tools}"
-FORM=shared          # shared | static | both
 MODE=release         # release | debug
+SHIP=0               # --ship: publishable artifacts (release only) — see header
 STAGE=1
 PRINT_ONLY=0
 WEBGPU=0             # WebGPU (Dawn) OFF by default (smaller lib); --webgpu links it in
@@ -61,15 +66,12 @@ AV1ENC=0             # AV1 encoding (libaom) OFF by default; --av1-encode adds i
 TRACING=0            # OPTIONAL_TRACE_EVENT macros OFF by default; --tracing adds them
 SWIFTSHADER=0        # SwiftShader NOT shipped in dist by default; --swiftshader adds it
 ICUFULL=0            # icudtl.dat trimmed to root+en+zh by default; --icu-full ships all locales
-SIZE=0               # --size-optimized: ThinLTO + size opt + no DCHECKs ship build (release only, slow)
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --shared) FORM=shared ;;
-    --static) FORM=static ;;
-    --both)   FORM=both ;;
     --release) MODE=release ;;
     --debug)   MODE=debug ;;
+    --ship) SHIP=1 ;;               # publishable SDK (release only): -Oz, no DCHECKs, stripped
     --chromium) CHROMIUM="$2"; shift ;;
     --depot) DEPOT="$2"; shift ;;
     --no-stage) STAGE=0 ;;          # skip the source sync (sources already staged)
@@ -82,12 +84,22 @@ while [ $# -gt 0 ]; do
     --tracing) TRACING=1 ;;         # include OPTIONAL_TRACE_EVENT coverage; default off
     --swiftshader) SWIFTSHADER=1 ;; # ship SwiftShader software Vulkan in dist; default off
     --icu-full) ICUFULL=1 ;;        # ship untrimmed icudtl.dat (all locales); default trims
-    --size-optimized) SIZE=1 ;;               # size-optimized ship build: ThinLTO + -Oz + no DCHECKs
-    -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --shared|--static|--both|--size-optimized)
+      echo "build-lib.sh: '$1' was removed. Every run builds the profile's artifacts:" >&2
+      echo "  --release        -> dev dylib + dev .a" >&2
+      echo "  --release --ship -> ThinLTO dylib + native -Oz .a (the publishable SDK)" >&2
+      echo "  --debug          -> debug dylib" >&2
+      exit 2 ;;
+    -h|--help) sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "build-lib.sh: unknown arg '$1'" >&2; exit 2 ;;
   esac
   shift
 done
+
+if [ "$SHIP" = 1 ] && [ "$MODE" = debug ]; then
+  echo "build-lib.sh: --ship applies to --release only (a debug build is not a ship artifact)." >&2
+  exit 2
+fi
 
 [ -d "$CHROMIUM/third_party/blink/renderer" ] || {
   echo "error: not a Chromium checkout: $CHROMIUM" >&2
@@ -110,30 +122,37 @@ command -v gn >/dev/null 2>&1 || {
 }
 NINJA="ninja"
 
-# One out dir PER PROFILE: --size-optimized changes every compile command
-# (-Oz/ThinLTO/no-DCHECK vs -O2/DCHECK), and ninja keys rebuilds on the command
-# hash — sharing one dir made every dev<->ship switch a full ~28k-object
-# recompile even though all the .o files were present. A dedicated dir keeps
-# each profile incremental; the cost is a second ~60GB build tree on disk.
-OUT="out/mono-$MODE"
-if [ "$SIZE" = 1 ] && [ "$MODE" != debug ]; then OUT="out/mono-$MODE-ship"; fi
 DEST="$CHROMIUM/third_party/blink/renderer/miniblink_host"
 MB2_DEST="$CHROMIUM/third_party/blink/renderer/miniblink2"
 CURL_DEST="$CHROMIUM/third_party/blink/renderer/miniblink2_curl"
 GN_PATH="third_party/blink/renderer/miniblink_host"
+SHARED="$GN_PATH:miniblink2"
+DIST="$HERE/dist/$MODE"
 
-# Serialize builds that share this out dir. Two concurrent build-lib.sh runs would race —
-# one's `rm -rf`/rsync staging + gn gen while the other is compiling, and two ninjas in the
-# same dir corrupt .ninja_deps ("premature end of file"), which then forces a near-full
-# rebuild. mkdir is atomic, so it's a portable lock; the trap frees it on any normal exit or
-# signal. (If a run was SIGKILLed it may leave a stale lock — the message says how to clear.)
-LOCK="$CHROMIUM/$OUT.build-lib.lock"
-if ! mkdir "$LOCK" 2>/dev/null; then
-  echo "error: another build-lib.sh is already building $OUT." >&2
-  echo "  (lock: $LOCK — if no build is running, remove it: rmdir '$LOCK')" >&2
-  exit 1
-fi
-trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+# One out dir PER PROFILE: profile flags change every compile command (-Oz/ThinLTO/
+# no-DCHECK vs -O2/DCHECK), and ninja keys rebuilds on the command hash — sharing one
+# dir makes every profile switch a full ~28k-object recompile even though all the .o
+# files are present. A dedicated dir keeps each profile incremental; the cost is disk
+# (~10GB per tree). --ship uses TWO dirs because its dylib (ThinLTO bitcode objects)
+# and its .a (native -Oz objects) cannot come from the same compilation.
+
+# Serialize builds per out dir. Two concurrent builds in one dir would race —
+# staging/gn gen vs compile, and two ninjas corrupt .ninja_deps ("premature end of
+# file"), forcing a near-full rebuild. mkdir is atomic (portable lock); the trap
+# frees every acquired lock on exit or signal. (A SIGKILLed run may leave a stale
+# lock — the message says how to clear it.)
+LOCKS=""
+release_locks() { for l in $LOCKS; do rmdir "$l" 2>/dev/null; done; }
+trap release_locks EXIT INT TERM
+acquire_lock() {  # $1 = out dir (relative to $CHROMIUM)
+  local lock="$CHROMIUM/$1.build-lib.lock"
+  if ! mkdir "$lock" 2>/dev/null; then
+    echo "error: another build-lib.sh is already building $1." >&2
+    echo "  (lock: $lock — if no build is running, remove it: rmdir '$lock')" >&2
+    exit 1
+  fi
+  LOCKS="$LOCKS $lock"
+}
 
 # 1. Stage sources into the donor tree (same contract as build.sh) unless --no-stage.
 if [ "$STAGE" = 1 ]; then
@@ -173,30 +192,46 @@ if [ "$STAGE" = 1 ]; then
   done
 fi
 
-# 2. Provision the NON-component out dir (the one switch that makes a single file).
-if [ "$MODE" = debug ]; then IS_DEBUG=true; SYM=2; BSYM=1; else IS_DEBUG=false; SYM=1; BSYM=0; fi
+# Feature-flag GN values (shared by every pass).
 [ "$WEBGPU" = 1 ] && USE_DAWN=true || USE_DAWN=false
 [ "$VIDEO" = 1 ] && VID=true || VID=false        # video decoders (audio stays regardless)
 [ "$ML" = 1 ] && MLV=true || MLV=false           # WebNN TFLite/LiteRT/XNNPACK backend
 [ "$WASM" = 1 ] && WASMV=true || WASMV=false     # V8 WebAssembly engine
 [ "$AV1ENC" = 1 ] && AOMV=true || AOMV=false     # libaom AV1 encoder
 [ "$TRACING" = 1 ] && TRACEV=true || TRACEV=false # OPTIONAL_TRACE_EVENT macros
-# --size-optimized: the size-optimized ship config. Release only (ThinLTO is a slow full-rebuild link;
-# debug stays fast + keeps DCHECKs). The default build is a fast DEV release (-O2, no LTO, no
-# dedup, DCHECKs on) — this trades build time for a much smaller dylib.
-if [ "$SIZE" = 1 ] && [ "$MODE" != debug ]; then
-  SIZE_ARGS='optimize_for_size = true          # -Oz/-Os instead of -O2/-O3
+
+# write_args OUT THINLTO — emit args.gn for one pass.
+#   Profile args: debug = symbols+DCHECKs; dev release = -O2, DCHECKs ON, light symbols;
+#   ship = -Oz + DCHECKs compiled out + no unwind tables (+ ThinLTO for the dylib pass).
+write_args() {
+  local out="$1" thinlto="$2"
+  local is_debug sym bsym profile_args
+  if [ "$MODE" = debug ]; then
+    is_debug=true; sym=2; bsym=1
+    profile_args='# debug profile: assertions + full symbols (see is_debug/symbol_level)'
+  elif [ "$SHIP" = 1 ]; then
+    is_debug=false; sym=0; bsym=0   # stripped anyway; 0 also speeds the (LTO) link
+    profile_args='optimize_for_size = true          # -Oz/-Os instead of -O2/-O3
 dcheck_always_on = false          # compile out every DCHECK assertion + its message string
-use_thin_lto = true               # cross-module dead-code elimination + inlining + ICF
-thin_lto_enable_optimizations = true
 exclude_unwind_tables = true      # drop C++ unwind tables (no in-process crash backtraces)'
-  SYM=0; BSYM=0                    # stripped anyway; 0 also speeds the LTO build
-else
-  SIZE_ARGS='# size-opt off — pass --size-optimized (release) for the small ThinLTO ship build'
-fi
-mkdir -p "$CHROMIUM/$OUT"
-cat > "$CHROMIUM/$OUT/args.gn" <<EOF
-is_debug = $IS_DEBUG
+    if [ "$thinlto" = 1 ]; then
+      profile_args="$profile_args
+# ThinLTO for the DYLIB pass only: whole-program dead-code elimination + inlining +
+# ICF happen at OUR solink, so the shipped dylib is smallest. The STATIC pass omits
+# this on purpose — an archive never goes through our linker, so bitcode objects
+# would bloat it ~8x and force an LTO-capable linker (lld) on every consumer.
+use_thin_lto = true
+thin_lto_enable_optimizations = true"
+    fi
+  else
+    is_debug=false; sym=1; bsym=0
+    profile_args='# dev release: -O2, DCHECK assertions compiled IN (Chromium developer default) —
+# near-ship speed, but internal engine bugs abort with a message instead of
+# corrupting. Use --ship for the publishable artifacts.'
+  fi
+  mkdir -p "$CHROMIUM/$out"
+  cat > "$CHROMIUM/$out/args.gn" <<EOF
+is_debug = $is_debug
 is_component_build = false        # single-file: statically link the whole engine
 use_siso = false                  # siso binary is wrong-arch here; use ninja backend
 use_dawn = $USE_DAWN              # WebGPU/Dawn — off unless --webgpu (Dawn native ~97MB).
@@ -240,9 +275,9 @@ enable_libaom = $AOMV
 # instrumentation + its string literals; --tracing restores full trace coverage for
 # perf work. Trimming perfetto core further would need patches (Tier 2).
 optional_trace_events_enabled = $TRACEV
-$SIZE_ARGS
-symbol_level = $SYM
-blink_symbol_level = $BSYM
+$profile_args
+symbol_level = $sym
+blink_symbol_level = $bsym
 use_system_xcode = true
 clang_use_chrome_plugins = false
 use_clang_modules = false
@@ -252,32 +287,94 @@ angle_enable_metal = true          # ANGLE Metal (hardware GPU) backend — need
                                   # compiles .metal->.air). With only CommandLineTools this must
                                   # be false (SwiftShader software fallback). true = GPU WebGL.
 EOF
-echo "==> gn gen $OUT  (is_debug=$IS_DEBUG, is_component_build=false)"
-( cd "$CHROMIUM" && gn gen "$OUT" >/dev/null )
+}
 
-# 3. Build the monolith shared library. It compiles every archive that BOTH the
-#    .dylib and the merged .a need, so we always build it. First run compiles the
-#    whole engine in non-component mode — slow; re-runs are incremental.
-SHARED="$GN_PATH:miniblink2"
-if [ "$PRINT_ONLY" = 1 ]; then
-  echo "==> dry-run: ninja -n $SHARED"
-  ( cd "$CHROMIUM" && ninja -C "$OUT" -n "$SHARED" >/dev/null && echo "  graph OK" )
-  exit 0
-fi
-echo "==> $NINJA -C $OUT $SHARED   (first build is a full non-component compile — slow)"
-# v8_context_snapshot.arm64.bin is built HERE too (not taken from REF): V8 snapshots
-# are BUILD-FLAG-DEPENDENT — the serialized-data magic embeds V8's flag configuration,
-# so a snapshot from a wasm-on reference build makes a wasm-off engine SIGTRAP in the
-# deserializer inside mbInitialize (Check failed: magic_number_ == kMagicNumber).
-( cd "$CHROMIUM" && "$NINJA" -C "$OUT" "$SHARED" v8_context_snapshot.arm64.bin )
+# merge_static OUT — merge ALL the dylib's link inputs in $OUT into one complete
+# dist/libminiblink2.a. The exact set is the solink edge's \$in (.a/.o) PLUS its
+# separate `rlibs =` variable (Chromium links Rust via that, not \$in) PLUS the
+# force_loaded host archive. (The post-link .rsp is deleted by ninja, and GN's
+# static_library template won't forward complete_static_library, so we read the
+# edge directly.) The merge tool must run from $OUT — paths are relative to it.
+merge_static() {
+  local out="$1"
+  echo "==> merging link inputs -> libminiblink2.a"
+  local nj="$CHROMIUM/$out/obj/$GN_PATH/miniblink2.ninja"
+  local list; list="$(mktemp)"
+  # $in: everything after "solink", up to the first " |"
+  grep ": solink " "$nj" | head -1 | sed -E 's/^.*: solink //; s/ \|.*$//' \
+    | tr ' ' '\n' | grep -E "\.(a|o)$" > "$list"
+  # rlibs variable
+  sed -n '/: solink /,/^$/p' "$nj" | grep "^  rlibs =" | sed 's/^  rlibs = //' \
+    | tr ' ' '\n' | grep -E "\.rlib$" >> "$list"
+  # force_loaded host archive (in case it isn't already in $in)
+  echo "obj/$GN_PATH/libminiblink_host.a" >> "$list"
+  sort -u "$list" -o "$list"
+  echo "  merging $(wc -l < "$list") inputs (rlibs: $(grep -c '\.rlib$' "$list"))"
+  # Merge with llvm-ar via an MRI script: ADDLIB flattens each input archive's members,
+  # ADDMOD adds loose objects, into ONE uniform archive. (llvm-ar also handles bitcode
+  # members uniformly if a ThinLTO .a is ever wanted; Apple libtool would split
+  # bitcode/native into fat slices the linker can't use.) Fall back to libtool if
+  # llvm-ar is absent (a native .a links fine either way).
+  local llvm_ar="$CHROMIUM/third_party/llvm-build/Release+Asserts/bin/llvm-ar"
+  rm -f "$DIST/libminiblink2.a"
+  if [ -x "$llvm_ar" ]; then
+    local mri; mri="$(mktemp)"
+    { echo "create $DIST/libminiblink2.a"
+      while IFS= read -r m; do
+        case "$m" in *.a|*.rlib) echo "addlib $m" ;; *.o) echo "addmod $m" ;; esac
+      done < "$list"
+      echo "save"; echo "end"; } > "$mri"
+    ( cd "$CHROMIUM/$out" && "$llvm_ar" -M < "$mri" )
+    rm -f "$mri"
+  else
+    ( cd "$CHROMIUM/$out" && libtool -static -o "$DIST/libminiblink2.a" -filelist "$list" 2>/dev/null )
+  fi
+  rm -f "$list"
+  if [ "$SHIP" = 1 ]; then
+    # Ship archive: strip local symbols (the miniblink49 recipe — strip -x keeps every
+    # external symbol + anything referenced by a relocation, so the archive stays
+    # statically linkable). Native objects only; a bitcode .a can't be stripped.
+    echo "==> stripping local symbols from libminiblink2.a"
+    strip -x "$DIST/libminiblink2.a"
+  fi
+}
 
-# Flag-NEUTRAL runtime data (resource paks, ICU data) is copied from a reference build
-# (REF, default out/Release), NOT rebuilt: building those in a fresh non-component out
-# dir drags in a huge resource pipeline for no benefit. The V8 snapshots are NOT taken
-# from REF — see the flag-dependence note above; they come from $OUT below.
-REF="${REF:-$CHROMIUM/out/Release}"
+# build_pass OUT THINLTO WANT_DYLIB WANT_A WANT_SNAPSHOT — provision + build one out
+# dir and collect its artifacts into dist.
+build_pass() {
+  local out="$1" thinlto="$2" want_dylib="$3" want_a="$4" want_snapshot="$5"
+  acquire_lock "$out"
+  write_args "$out" "$thinlto"
+  echo "==> gn gen $out"
+  ( cd "$CHROMIUM" && gn gen "$out" >/dev/null )
+  if [ "$PRINT_ONLY" = 1 ]; then
+    echo "==> dry-run: ninja -n $SHARED  ($out)"
+    ( cd "$CHROMIUM" && ninja -C "$out" -n "$SHARED" >/dev/null && echo "  graph OK" )
+    return 0
+  fi
+  # The dylib target is built in EVERY pass — even a static-only pass needs its solink
+  # edge (the merge reads the actual link inputs from it). v8_context_snapshot.arm64.bin
+  # is built where dist data comes from (not taken from REF): V8 snapshots are
+  # BUILD-FLAG-DEPENDENT — the serialized-data magic embeds V8's flag configuration, so
+  # a snapshot from a differently-flagged build SIGTRAPs the engine at mbInitialize.
+  local targets=("$SHARED")
+  [ "$want_snapshot" = 1 ] && targets+=(v8_context_snapshot.arm64.bin)
+  echo "==> $NINJA -C $out ${targets[*]}   (first build of a profile is a full compile — slow)"
+  ( cd "$CHROMIUM" && "$NINJA" -C "$out" "${targets[@]}" )
 
-DIST="$HERE/dist/$MODE"
+  if [ "$want_dylib" = 1 ]; then
+    cp "$CHROMIUM/$out/libminiblink2.dylib" "$DIST/"
+    # Release/ship: strip local/debug symbols — keeps the exported mb* dynamic symbols
+    # (so consumers still link), drops the local-symbol table. Debug keeps them for
+    # readable backtraces (MB_STACK_DUMP).
+    if [ "$MODE" != debug ]; then
+      strip -x "$DIST/libminiblink2.dylib" && echo "  stripped dylib (local symbols removed)"
+    fi
+  fi
+  [ "$want_a" = 1 ] && merge_static "$out"
+  return 0
+}
+
 mkdir -p "$DIST/include/miniblink2"
 
 # Public API header — the SDK surface: the miniblink2 mb* C API, self-contained
@@ -286,70 +383,34 @@ mkdir -p "$DIST/include/miniblink2"
 cp "$HERE/src/miniblink2/miniblink2.h" "$DIST/include/miniblink2/miniblink2.h"
 rm -f "$DIST/include/miniblink2/wke.h" "$DIST/include/miniblink2/mb_capi.h"  # pre-rename leftovers
 
-# 4a. Shared deliverable: the self-contained dylib straight from the link.
-if [ "$FORM" != static ]; then
-  cp "$CHROMIUM/$OUT/libminiblink2.dylib" "$DIST/"
-  # Release: strip local/debug symbols — keeps the exported mb* dynamic symbols
-  # (so consumers still link), drops the ~120MB symbol table (~330MB -> ~210MB). Debug
-  # keeps them for readable backtraces (MB_STACK_DUMP).
-  if [ "$MODE" != debug ]; then
-    strip -x "$DIST/libminiblink2.dylib" && echo "  stripped dylib (local symbols removed)"
-  fi
+# 2+3. Run the profile's pass(es). DATA_OUT is where runtime data (V8 snapshots,
+# ANGLE dylibs) is collected from afterwards.
+if [ "$MODE" = debug ]; then
+  #                 out             thinlto dylib a  snapshot
+  build_pass        out/mono-debug  0       1     0  1
+  DATA_OUT=out/mono-debug
+elif [ "$SHIP" = 1 ]; then
+  build_pass        out/mono-release-dynamic 1     1 0 1
+  build_pass        out/mono-release-static  0     0 1 0
+  DATA_OUT=out/mono-release-dynamic
+else
+  build_pass        out/mono-release 0      1     1  1
+  DATA_OUT=out/mono-release
 fi
+[ "$PRINT_ONLY" = 1 ] && exit 0
 
-# 4b. Static deliverable: merge ALL the dylib's link inputs into one complete
-#     libminiblink2.a. The exact set is the solink edge's $in (.a/.o) PLUS its
-#     separate `rlibs =` variable (Chromium links Rust via that, not $in) PLUS the
-#     force_loaded host archive. (The post-link .rsp is deleted by ninja, and GN's
-#     static_library template won't forward complete_static_library, so we read the
-#     edge directly.) libtool must run from $OUT — the paths are relative to it.
-if [ "$FORM" != shared ]; then
-  echo "==> merging link inputs -> libminiblink2.a"
-  NJ="$CHROMIUM/$OUT/obj/$GN_PATH/miniblink2.ninja"
-  LIST="$(mktemp)"
-  # $in: everything after "solink", up to the first " |"
-  grep ": solink " "$NJ" | head -1 | sed -E 's/^.*: solink //; s/ \|.*$//' \
-    | tr ' ' '\n' | grep -E "\.(a|o)$" > "$LIST"
-  # rlibs variable
-  sed -n '/: solink /,/^$/p' "$NJ" | grep "^  rlibs =" | sed 's/^  rlibs = //' \
-    | tr ' ' '\n' | grep -E "\.rlib$" >> "$LIST"
-  # force_loaded host archive (in case it isn't already in $in)
-  echo "obj/$GN_PATH/libminiblink_host.a" >> "$LIST"
-  sort -u "$LIST" -o "$LIST"
-  echo "  merging $(wc -l < "$LIST") inputs (rlibs: $(grep -c '\.rlib$' "$LIST"))"
-  # Merge with llvm-ar via an MRI script: ADDLIB flattens each input archive's members,
-  # ADDMOD adds loose objects, into ONE uniform archive. Apple `libtool` can't do this for a
-  # --size-optimized build: its objects are ThinLTO BITCODE, and libtool emits a FAT archive
-  # splitting bitcode (cputype 0) from native (arm64) objects, so an arm64 link sees only the
-  # native slice and every mb* symbol comes up undefined. llvm-ar treats bitcode + native
-  # uniformly, so the .a is consumable (scripts/build-samples.sh --static). Fall back to
-  # libtool if llvm-ar is absent (a native, non-LTO .a links fine either way).
-  LLVM_AR="$CHROMIUM/third_party/llvm-build/Release+Asserts/bin/llvm-ar"
-  rm -f "$DIST/libminiblink2.a"
-  if [ -x "$LLVM_AR" ]; then
-    MRI="$(mktemp)"
-    { echo "create $DIST/libminiblink2.a"
-      while IFS= read -r m; do
-        case "$m" in *.a|*.rlib) echo "addlib $m" ;; *.o) echo "addmod $m" ;; esac
-      done < "$LIST"
-      echo "save"; echo "end"; } > "$MRI"
-    ( cd "$CHROMIUM/$OUT" && "$LLVM_AR" -M < "$MRI" )
-    rm -f "$MRI"
-  else
-    ( cd "$CHROMIUM/$OUT" && libtool -static -o "$DIST/libminiblink2.a" -filelist "$LIST" 2>/dev/null )
-  fi
-  rm -f "$LIST"
-fi
+# Flag-NEUTRAL runtime data (resource paks, ICU data) is copied from a reference build
+# (REF, default out/Release), NOT rebuilt: building those in a fresh non-component out
+# dir drags in a huge resource pipeline for no benefit. The V8 snapshots are NOT taken
+# from REF — see the flag-dependence note in build_pass; they come from $DATA_OUT.
+REF="${REF:-$CHROMIUM/out/Release}"
 
-# 4c. Runtime data. Flag-neutral files come from the reference build (see REF note
-# above); the V8 snapshots MUST come from this out dir — they are flag-dependent
-# (v8_enable_webassembly etc. change the snapshot magic; a REF snapshot traps a
-# differently-flagged engine at mbInitialize).
+# 4. Runtime data.
 for f in blink_resources.pak icudtl.dat media_controls_resources_100_percent.pak; do
   [ -f "$REF/$f" ] && cp "$REF/$f" "$DIST/"
 done
 for f in snapshot_blob.bin v8_context_snapshot.bin v8_context_snapshot.arm64.bin; do
-  [ -f "$CHROMIUM/$OUT/$f" ] && cp "$CHROMIUM/$OUT/$f" "$DIST/"
+  [ -f "$CHROMIUM/$DATA_OUT/$f" ] && cp "$CHROMIUM/$DATA_OUT/$f" "$DIST/"
 done
 # ICU locale trim (10.4MB -> ~6.3MB): drop per-locale collation/display-name bundles for
 # locales outside MB_ICU_KEEP (default root+en+zh). ICU falls back to root for a missing
@@ -364,7 +425,7 @@ fi
 # GL driver dylibs (ANGLE, + SwiftShader if --swiftshader) + the SwiftShader Vulkan ICD
 # manifest. The engine dlopen's the GL implementation from the executable's own directory at
 # runtime for WebGL / GPU-accelerated <canvas> — it is deliberately NOT statically linked
-# (Chromium's standard GL loading). Built by the monolith in $OUT; the dylibs are
+# (Chromium's standard GL loading). Built by the monolith in $DATA_OUT; the dylibs are
 # self-contained (reference each other via @rpath).
 GL_DYLIBS="libEGL.dylib libGLESv2.dylib"
 if [ "$SWIFTSHADER" = 1 ]; then
@@ -380,8 +441,8 @@ else
   rm -f "$DIST/libvk_swiftshader.dylib" "$DIST/vk_swiftshader_icd.json"  # drop stale copies
 fi
 for f in $GL_DYLIBS; do
-  [ -f "$CHROMIUM/$OUT/$f" ] || continue
-  cp "$CHROMIUM/$OUT/$f" "$DIST/"
+  [ -f "$CHROMIUM/$DATA_OUT/$f" ] || continue
+  cp "$CHROMIUM/$DATA_OUT/$f" "$DIST/"
   # Release: strip local symbols from the GL driver dylibs too (same rationale as
   # the engine dylib above) — libGLESv2 alone carries ~51k locals, 18.3MB -> 11.9MB.
   case "$f" in *.dylib)
@@ -389,7 +450,7 @@ for f in $GL_DYLIBS; do
   esac
 done
 # the engine loads "v8_context_snapshot.bin"; derive it from the arch-suffixed file
-# just copied from $OUT. Unconditional overwrite: dist may hold a STALE plain-named
+# just copied from $DATA_OUT. Unconditional overwrite: dist may hold a STALE plain-named
 # copy from an earlier differently-flagged build (V8 snapshots are flag-dependent).
 [ -f "$DIST/v8_context_snapshot.arm64.bin" ] \
   && cp "$DIST/v8_context_snapshot.arm64.bin" "$DIST/v8_context_snapshot.bin"

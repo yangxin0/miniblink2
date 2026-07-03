@@ -28,7 +28,7 @@ depot_tools as **siblings** of this repo, plus full Xcode (for the Metal shader 
 
 ```sh
 # 1. Build the self-contained SDK -> dist/release/
-scripts/build-lib.sh --both --release --size-optimized
+scripts/build-lib.sh --release --ship
 
 # 2. Build the sample browsers against it
 scripts/build-samples.sh --both
@@ -62,23 +62,31 @@ Deployment rules:
   they never appear in `otool -L` — but WebGL is unavailable without them. The
   SwiftShader pair is only needed if you run with `--use-angle=swiftshader`
   (headless CI / GPU-less VMs); desktop-only distributions can drop those ~20 MB.
-- The `--size-optimized` `.a` contains **ThinLTO bitcode**: link it with an LTO-capable
-  toolchain (`scripts/build-samples.sh` shows the exact invocation — Chromium's
-  `clang++` + `lld`).
+- The `.a` is **native machine code** (`--ship` deliberately skips ThinLTO for the
+  archive — bitcode would bloat it ~8x and force lld on consumers): it links with any
+  toolchain (`scripts/build-samples.sh` shows the framework list a consumer supplies).
 
 ### `scripts/build-lib.sh` — building the SDK
 
 ```sh
-scripts/build-lib.sh [--shared|--static|--both] [--release|--debug]
-                     [--size-optimized] [--webgpu] [--video] [--ml] [--wasm]
-                     [--av1-encode] [--tracing] [--swiftshader] [--icu-full]
+scripts/build-lib.sh [--release|--debug] [--ship]
+                     [--webgpu] [--video] [--ml] [--wasm] [--av1-encode]
+                     [--tracing] [--swiftshader] [--icu-full]
                      [--chromium DIR] [--depot DIR] [--no-stage] [--print-only]
 ```
 
-| Flag | Effect | Size impact (release dylib, stripped) |
+Profiles (each in its own out dir, so switching stays incremental):
+
+| Profile | Artifacts | Config |
 |---|---|---|
-| *(default dev build)* | fast `-O2`, DCHECKs on, no LTO | 183 MB |
-| `--size-optimized` | **ship build**: ThinLTO + `-Oz` + ICF + DCHECKs off | **88 MB** (`.a`: 1.9 GB ThinLTO bitcode) |
+| `--debug` | dylib 1.3 GB | no optimization, full symbols, DCHECKs — for lldb |
+| `--release` | dylib 183 MB + dev `.a` | `-O2`, **DCHECK assertions on** (Chromium's developer default: near-ship speed, internal bugs abort loudly) |
+| `--release --ship` | **dylib 88 MB + `.a` 757 MB** | the publishable SDK: `-Oz`, DCHECKs compiled out, stripped. The dylib uses **ThinLTO** (whole-program opt at our link); the `.a` is **native code** on purpose — an archive never passes through our linker, so bitcode would only bloat it (1.9 GB) and force lld on consumers |
+
+Feature flags (apply to any profile):
+
+| Flag | Effect | Size impact (ship dylib) |
+|---|---|---|
 | `--webgpu` | include WebGPU (Dawn); off = Dawn completely absent from the binary | +~9 MB |
 | `--video` | include `<video>` decode (H.264/ffmpeg-video). Off = **audio still plays** (miniblink49 parity) | +~8 MB |
 | `--wasm` | include WebAssembly (V8 wasm engine). Off = `window.WebAssembly` absent (miniblink49 parity) | +~4.5 MB |
@@ -90,7 +98,9 @@ scripts/build-lib.sh [--shared|--static|--both] [--release|--debug]
 
 Feature flags are include-only and **default off** — the default SDK is the trimmed,
 miniblink49-like profile (audio on; video/webgpu/ml/wasm off). For comparison: miniblink49
-ships 78 MB *unstripped* (~53 MB stripped); this is the full 2026 engine at ~1.7× its size.
+ships a 53 MB stripped dylib / 134 MB `.a`; this is the full 2026 engine at ~1.7× / ~5.6×
+those sizes (the archive ratio is worse because an archive can't be dead-stripped — it
+must carry every object a consumer might pull).
 Per-component size attribution for further pruning: `nm -n <out>/libminiblink2.dylib |
 scripts/sizemap.py` (see `BACKLOG.md` §E for the measured, deliberately-not-cut leftovers).
 
@@ -105,7 +115,7 @@ scripts/build-samples.sh [--dyn|--static|--both] [--release|--debug]
 
 - `minibrowser_dyn` — a Cocoa mini-browser (toolbar + address bar) linking the `.dylib`.
   The app itself is **89 KB**.
-- `minibrowser_static` — the same browser statically linked: a **110 MB single binary**
+- `minibrowser_static` — the same browser statically linked: a **102 MB single binary**
   with zero engine dylib dependencies.
 
 ### `scripts/package.sh` — zip the SDK for distribution

@@ -23,11 +23,10 @@
 #   - ad-hoc re-sign of every modified Mach-O (install_name_tool invalidates the
 #     arm64 code signature; an unsigned/invalid dylib is killed at load on macOS)
 #
-# The dylib in dist/ is already stripped by build-lib.sh. The .a is stripped here
-# (strip -x, locals only — the miniblink49 recipe) when it contains NATIVE
-# objects; a --size-optimized .a is ThinLTO BITCODE in a cputype(0) fat slice,
-# which strip can't process and plain `clang++ + ld64` can't link — the README
-# gets the lld instructions and the caveat instead.
+# The dylib and (--ship) .a in dist/ are already stripped by build-lib.sh; the
+# .a is strip -x'd here too when it contains native objects (harmless if already
+# stripped). A LEGACY ThinLTO bitcode .a (pre---ship builds) can't be stripped or
+# linked by plain clang+ld64 — the generated README gets lld instructions then.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -124,8 +123,8 @@ if [ "$WANT_STATIC" = true ]; then
   echo "==> [$MODE] staging libminiblink2.a ($(du -h "$DIST/libminiblink2.a" | cut -f1))"
   cp "$DIST/libminiblink2.a" "$STAGE/lib/"
   if lipo -info "$STAGE/lib/libminiblink2.a" 2>/dev/null | grep -q "cputype (0)"; then
-    # ThinLTO bitcode archive (--size-optimized build): not strippable, and only
-    # linkable with an LTO-capable toolchain — documented in the README below.
+    # Legacy ThinLTO bitcode archive: not strippable, and only linkable with an
+    # LTO-capable toolchain — documented in the README below.
     STATIC_IS_BITCODE=true
     echo "    ThinLTO bitcode archive — skipping strip (locals go away at the consumer's LTO link)"
   else
@@ -168,9 +167,9 @@ fi
 if [ "$WANT_STATIC" = true ]; then
   LIB_LINES+="- \`lib/libminiblink2.a\` — the complete engine merged into one archive."$'\n'
   if [ "$STATIC_IS_BITCODE" = true ]; then
-    USE_LINES+="Link statically (this archive is ThinLTO BITCODE from a --size-optimized
-build — it needs an LTO-capable linker, i.e. a recent clang++ with lld;
-plain Xcode clang+ld64 will report every symbol undefined):
+    USE_LINES+="Link statically (this archive is ThinLTO BITCODE — it needs an
+LTO-capable linker, i.e. a recent clang++ with lld; plain Xcode
+clang+ld64 will report every symbol undefined):
 
     clang++ app.mm -Iinclude lib/libminiblink2.a \\
       -fuse-ld=lld -Wl,-ObjC -Wl,-dead_strip \\
