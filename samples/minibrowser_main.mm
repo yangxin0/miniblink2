@@ -1,32 +1,19 @@
-// miniblink mini-browser for macOS — a minimal host that drives the wke C API.
+// miniblink2 mini-browser for macOS — a minimal host that drives the mb C API.
 //
-// wke renders the page off-screen into a memory bitmap (the in-tree skia memory
-// canvas, RGBA N32). This host:
-//   1. wkeInitialize() + creates an off-screen wkeWebView,
+// The engine renders the page off-screen into a memory bitmap (BGRA8888). This host:
+//   1. mbInitialize() + creates an off-screen mbView,
 //   2. hosts it in an NSWindow/NSView,
-//   3. on wkeOnPaintUpdated marks the view dirty; drawRect: pulls the webview's
-//      pixels via wkePaint() and blits them with CoreGraphics,
-//   4. forwards mouse/resize, and runs the Cocoa run loop — blink's scheduler is
-//      pumped by the GCD-backed SharedTimerMac, so timers/loading advance.
+//   3. a 60fps timer marks the view dirty; drawRect: pulls the view's pixels via
+//      mbRepaintToBitmap() (the fast interactive repaint) and blits with CoreGraphics,
+//   4. forwards mouse/keyboard/resize, and runs the Cocoa run loop — blink's
+//      scheduler is pumped by the GCD-backed SharedTimerMac, so timers/loading advance.
 //
-// Build: the `minibrowser` CMake target links the full engine archive set.
+// Build: scripts/build-samples.sh (links libminiblink2.dylib or the merged .a).
 #import <Cocoa/Cocoa.h>
 #include <vector>
-#include "wke/wke.h"
+#include "miniblink2/miniblink2.h"
 
-// Win32 message + mouse-key-flag codes the wke input API expects (kept local so
-// this Cocoa TU doesn't pull win_compat/windows.h).
-enum {
-    kWM_MOUSEMOVE = 0x0200, kWM_LBUTTONDOWN = 0x0201, kWM_LBUTTONUP = 0x0202,
-    kWM_LBUTTONDBLCLK = 0x0203, kWM_RBUTTONDOWN = 0x0204, kWM_RBUTTONUP = 0x0205,
-    kWM_MBUTTONDOWN = 0x0207, kWM_MBUTTONUP = 0x0208,
-    kMK_LBUTTON = 0x0001, kMK_RBUTTON = 0x0002, kMK_SHIFT = 0x0004,
-    kMK_CONTROL = 0x0008, kMK_MBUTTON = 0x0010,
-    kVK_BACK = 0x08, kVK_TAB = 0x09, kVK_RETURN = 0x0D, kVK_ESCAPE = 0x1B,
-    kVK_LEFT = 0x25, kVK_UP = 0x26, kVK_RIGHT = 0x27, kVK_DOWN = 0x28, kVK_DELETE = 0x2E,
-};
-
-static wkeWebView g_webView = nullptr;
+static mbView* g_view = nullptr;
 static NSView* g_contentView = nil;
 static CGFloat g_scale = 1.0;             // Retina backing scale: render at this factor for crisp output
 static NSTextField* g_addressBar = nil;   // URL entry
@@ -34,54 +21,66 @@ static NSButton* g_backButton = nil;      // ◀
 static NSButton* g_forwardButton = nil;   // ▶
 static const CGFloat kToolbarHeight = 40.0;
 
+// mb modifier bitmask: 1=ctrl 2=shift 4=alt 8=meta.
+static int mbModifiers(NSEvent* e) {
+    NSUInteger m = [e modifierFlags];
+    int mods = 0;
+    if (m & NSEventModifierFlagControl) mods |= 1;
+    if (m & NSEventModifierFlagShift)   mods |= 2;
+    if (m & NSEventModifierFlagOption)  mods |= 4;
+    if (m & NSEventModifierFlagCommand) mods |= 8;
+    return mods;
+}
+
 // Reflect the engine's current URL + history availability into the chrome.
 static void mbUpdateChrome() {
-    if (!g_webView) return;
-    const utf8* u = wkeGetURL(g_webView);
-    if (u && g_addressBar) {
+    if (!g_view) return;
+    char url[4096];
+    if (mbGetURL(g_view, url, sizeof url) > 0 && g_addressBar) {
         // Don't stomp the field while the user is editing it (an active NSTextField
         // edit makes the window's firstResponder the shared field editor, an NSTextView).
         id fr = [g_addressBar.window firstResponder];
         if (![fr isKindOfClass:[NSTextView class]])
-            [g_addressBar setStringValue:[NSString stringWithUTF8String:u]];
+            [g_addressBar setStringValue:[NSString stringWithUTF8String:url]];
     }
-    [g_backButton setEnabled:wkeCanGoBack(g_webView)];
-    [g_forwardButton setEnabled:wkeCanGoForward(g_webView)];
+    [g_backButton setEnabled:mbCanGoBack(g_view) != 0];
+    [g_forwardButton setEnabled:mbCanGoForward(g_view) != 0];
 }
 
-// ---- The content view: blits the wke webview's RGBA buffer ------------------
+// ---- The content view: blits the engine's BGRA buffer -----------------------
 @interface MbBrowserView : NSView
 @end
 
 @implementation MbBrowserView
-- (BOOL)isFlipped { return YES; }  // top-left origin, matching wke/blink
+- (BOOL)isFlipped { return YES; }  // top-left origin, matching blink
 
 - (void)drawRect:(NSRect)dirtyRect {
-    if (!g_webView)
+    if (!g_view)
         return;
     CGFloat sc = g_scale > 0 ? g_scale : 1.0;
     int lw = (int)self.bounds.size.width;        // logical points
     int lh = (int)self.bounds.size.height;
-    int w = (int)(lw * sc);                       // physical pixels (matches the webview)
+    int w = (int)(lw * sc);                       // physical pixels (matches the view)
     int h = (int)(lh * sc);
     if (w <= 0 || h <= 0)
         return;
 
-    // Pull the rendered page pixels (RGBA, w*4 pitch) from wke, at physical resolution.
+    // Pull the rendered page pixels (BGRA, w*4 pitch) at physical resolution.
+    // mbRepaintToBitmap is the interactive variant: no per-call lifecycle settle,
+    // so a 60fps blit loop stays fast on live pages (vs. one-shot mbPaintToBitmap).
     int pitch = w * 4;
     static std::vector<unsigned char> buf;
     buf.assign((size_t)pitch * h, 0);
-    wkePaint(g_webView, buf.data(), pitch);
+    mbRepaintToBitmap(g_view, buf.data(), w, h, pitch);
 
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGContextRef ctx = (CGContextRef)[[NSGraphicsContext currentContext] CGContext];
     // The engine renders BGRA8888 (byte 0 = B). Read it as such: AlphaFirst + 32-little
-    // makes the word ARGB, whose little-endian bytes are B,G,R,A = BGRA. (The previous
-    // AlphaLast|32Big read it as RGBA, swapping R<->B — red logos showed up blue/purple.)
+    // makes the word ARGB, whose little-endian bytes are B,G,R,A = BGRA.
     CGContextRef bmp = CGBitmapContextCreate(buf.data(), w, h, 8, pitch, cs,
         kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
     CGImageRef img = CGBitmapContextCreateImage(bmp);
-    // wke's buffer is top-down (row 0 = top). In this flipped NSView, draw the
+    // The buffer is top-down (row 0 = top). In this flipped NSView, draw the
     // image with a vertical flip so it appears upright. The physical-resolution
     // image is blitted into the logical bounds; on a Retina context that maps 1:1
     // to device pixels -> crisp (no upscaling blur).
@@ -95,7 +94,7 @@ static void mbUpdateChrome() {
     CGColorSpaceRelease(cs);
 }
 
-// ---- Input: forward Cocoa events to wke -------------------------------------
+// ---- Input: forward Cocoa events to the engine ------------------------------
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)becomeFirstResponder { return YES; }
 - (BOOL)acceptsFirstMouse:(NSEvent*)e { return YES; }
@@ -110,112 +109,118 @@ static void mbUpdateChrome() {
     [super updateTrackingAreas];
 }
 
-// Compute wke (x, y, flags) from an NSEvent. The view is flipped, so the
-// converted point is already top-left origin (matching wke/blink).
-- (void)wkePoint:(NSEvent*)e x:(int*)x y:(int*)y flags:(unsigned int*)flags {
+// Engine (x, y) from an NSEvent. The view is flipped, so the converted point is
+// already top-left origin (matching blink). The viewport is LOGICAL (CSS px)
+// with a device scale factor for HiDPI raster, so input is in logical points.
+- (void)mbPoint:(NSEvent*)e x:(int*)x y:(int*)y {
     NSPoint p = [self convertPoint:[e locationInWindow] fromView:nil];
-    // The viewport is LOGICAL (CSS px) with a device scale factor for HiDPI raster,
-    // so input is in logical points (no *g_scale) — matches the layout coordinate space.
     *x = (int)p.x; *y = (int)p.y;
-    unsigned int f = 0;
-    NSUInteger m = [e modifierFlags];
-    if (m & NSEventModifierFlagShift)   f |= kMK_SHIFT;
-    if (m & NSEventModifierFlagControl) f |= kMK_CONTROL;
-    NSUInteger b = [NSEvent pressedMouseButtons];
-    if (b & 1) f |= kMK_LBUTTON;
-    if (b & 2) f |= kMK_RBUTTON;
-    if (b & 4) f |= kMK_MBUTTON;
-    *flags = f;
 }
-- (void)fireMouse:(unsigned int)msg event:(NSEvent*)e {
-    if (!g_webView) return;
-    int x, y; unsigned int flags; [self wkePoint:e x:&x y:&y flags:&flags];
-    wkeFireMouseEvent(g_webView, msg, x, y, flags);
+- (void)mouseDown:(NSEvent*)e {
+    if (!g_view) return;
+    mbSetFocus(g_view, 1);
+    int x, y; [self mbPoint:e x:&x y:&y];
+    mbSendMouseDown(g_view, x, y);
     [self setNeedsDisplay:YES];
 }
-- (void)mouseDown:(NSEvent*)e        { wkeSetFocus(g_webView); [self fireMouse:kWM_LBUTTONDOWN event:e]; }
-- (void)mouseUp:(NSEvent*)e          { [self fireMouse:kWM_LBUTTONUP event:e]; }
-- (void)mouseDragged:(NSEvent*)e     { [self fireMouse:kWM_MOUSEMOVE event:e]; }
-- (void)mouseMoved:(NSEvent*)e       { [self fireMouse:kWM_MOUSEMOVE event:e]; }
-- (void)rightMouseDown:(NSEvent*)e   {
-    if (!g_webView) return;
-    int x, y; unsigned int flags; [self wkePoint:e x:&x y:&y flags:&flags];
-    wkeFireMouseEvent(g_webView, kWM_RBUTTONDOWN, x, y, flags);
-    [self setNeedsDisplay:YES];  // (modern wke has no wkeFireContextMenuEvent)
+- (void)mouseUp:(NSEvent*)e {
+    if (!g_view) return;
+    int x, y; [self mbPoint:e x:&x y:&y];
+    mbSendMouseUp(g_view, x, y);
+    [self setNeedsDisplay:YES];
 }
-- (void)rightMouseUp:(NSEvent*)e     { [self fireMouse:kWM_RBUTTONUP event:e]; }
-- (void)otherMouseDown:(NSEvent*)e   { [self fireMouse:kWM_MBUTTONDOWN event:e]; }
-- (void)otherMouseUp:(NSEvent*)e     { [self fireMouse:kWM_MBUTTONUP event:e]; }
-- (void)otherMouseDragged:(NSEvent*)e{ [self fireMouse:kWM_MOUSEMOVE event:e]; }
+- (void)mouseDragged:(NSEvent*)e     { [self forwardMove:e]; }
+- (void)mouseMoved:(NSEvent*)e       { [self forwardMove:e]; }
+- (void)otherMouseDragged:(NSEvent*)e{ [self forwardMove:e]; }
+- (void)forwardMove:(NSEvent*)e {
+    if (!g_view) return;
+    int x, y; [self mbPoint:e x:&x y:&y];
+    // mbSendMouseDown/Up track the held button, so moves in between are a drag.
+    mbSendMouseMove(g_view, x, y);
+    [self setNeedsDisplay:YES];
+}
+// Right/middle: the mb API models these as complete clicks (down+up), which also
+// fire contextmenu/auxclick like a real browser.
+- (void)rightMouseDown:(NSEvent*)e {
+    if (!g_view) return;
+    int x, y; [self mbPoint:e x:&x y:&y];
+    mbSendMouseClickEx(g_view, x, y, /*button=right*/2, mbModifiers(e));
+    [self setNeedsDisplay:YES];
+}
+- (void)otherMouseDown:(NSEvent*)e {
+    if (!g_view) return;
+    int x, y; [self mbPoint:e x:&x y:&y];
+    mbSendMouseClickEx(g_view, x, y, /*button=middle*/1, mbModifiers(e));
+    [self setNeedsDisplay:YES];
+}
 
 - (void)scrollWheel:(NSEvent*)e {
-    if (!g_webView) return;
-    int x, y; unsigned int flags; [self wkePoint:e x:&x y:&y flags:&flags];
-    // Cocoa scroll deltas are small; scale toward a Win32 WHEEL_DELTA (120) step.
-    double dy = [e hasPreciseScrollingDeltas] ? [e scrollingDeltaY] : [e scrollingDeltaY] * 10.0;
-    int delta = (int)(dy * 3.0);
-    if (delta) wkeFireMouseWheelEvent(g_webView, x, y, delta, flags);
+    if (!g_view) return;
+    int x, y; [self mbPoint:e x:&x y:&y];
+    // mbSendWheel takes DOM-convention pixel deltas (deltaY>0 = scroll down),
+    // the opposite sign of Cocoa's scrolling deltas. Line-based wheels scale
+    // toward a typical line height.
+    double dy = [e hasPreciseScrollingDeltas] ? [e scrollingDeltaY] : [e scrollingDeltaY] * 40.0;
+    double dx = [e hasPreciseScrollingDeltas] ? [e scrollingDeltaX] : [e scrollingDeltaX] * 40.0;
+    if ((int)dy || (int)dx)
+        mbSendWheel(g_view, x, y, (int)-dx, (int)-dy, mbModifiers(e));
     [self setNeedsDisplay:YES];
 }
 
-static unsigned int vkFromKeyCode(unsigned short kc) {
+// Named non-text keys -> mb key names (mbSendKey triggers the browser default
+// action and includes the release, so there is no separate keyUp forwarding).
+static const char* mbKeyName(unsigned short kc) {
     switch (kc) {
-        case 51: return kVK_BACK;   case 48: return kVK_TAB;    case 36: return kVK_RETURN;
-        case 76: return kVK_RETURN; case 53: return kVK_ESCAPE; case 117: return kVK_DELETE;
-        case 123: return kVK_LEFT;  case 124: return kVK_RIGHT; case 126: return kVK_UP; case 125: return kVK_DOWN;
-        default: return 0;
+        case 51: return "Backspace"; case 48: return "Tab";
+        case 36: case 76: return "Enter";
+        case 53: return "Escape";    case 117: return "Delete";
+        case 123: return "ArrowLeft"; case 124: return "ArrowRight";
+        case 126: return "ArrowUp";   case 125: return "ArrowDown";
+        case 115: return "Home";      case 119: return "End";
+        case 116: return "PageUp";    case 121: return "PageDown";
+        default: return nullptr;
     }
 }
 - (void)keyDown:(NSEvent*)e {
-    if (!g_webView) return;
-    unsigned int vk = vkFromKeyCode([e keyCode]);
-    if (vk) wkeFireKeyDownEvent(g_webView, vk, 0, false);
-    NSString* chars = [e characters];
-    for (NSUInteger i = 0; i < [chars length]; ++i) {
-        unichar c = [chars characterAtIndex:i];
-        if (c >= 0x20 || c == '\r' || c == '\t')  // printable + enter/tab
-            wkeFireKeyPressEvent(g_webView, c, 0, false);
+    if (!g_view) return;
+    int mods = mbModifiers(e);
+    const char* name = mbKeyName([e keyCode]);
+    if (name) {
+        mbSendKeyEx(g_view, name, mods);
+    } else if (mods & (1 | 8)) {
+        // ctrl/cmd shortcuts (select-all, etc.): per-character trusted key events.
+        NSString* chars = [[e charactersIgnoringModifiers] lowercaseString];
+        for (NSUInteger i = 0; i < [chars length]; ++i) {
+            char key[2] = { (char)[chars characterAtIndex:i], 0 };
+            if (key[0] >= 0x20 && key[0] < 0x7f) mbSendKeyEx(g_view, key, mods);
+        }
+    } else {
+        // Plain text input (full Unicode) into the focused editable.
+        NSString* chars = [e characters];
+        if ([chars length]) mbSendText(g_view, [chars UTF8String]);
     }
     [self setNeedsDisplay:YES];
 }
-- (void)keyUp:(NSEvent*)e {
-    if (!g_webView) return;
-    unsigned int vk = vkFromKeyCode([e keyCode]);
-    if (vk) wkeFireKeyUpEvent(g_webView, vk, 0, false);
-}
 @end
 
-// NOTE (modern port): miniblink49 needed an async wkeOnPaintUpdated (HDC) callback
-// plus a block of JS polyfills (IntersectionObserver, ResizeObserver, customElements,
-// requestIdleCallback, queueMicrotask, navigator.permissions, …) injected via
-// wkeOnDidCreateScriptContext to bridge its old blink-53 platform. The modern engine
-// is M150 — it ships ALL of those natively and renders SYNCHRONOUSLY — so both are
-// removed: a 60fps timer drives redraw and there are no polyfills. The native UA is
-// already Chrome 150, so no UA spoof is needed either.
-
 // Route page console.log / warnings / errors to stdout (useful for debugging).
-static void onConsole(wkeWebView, void*, wkeConsoleLevel level, const wkeString message,
-    const wkeString sourceName, unsigned sourceLine, const wkeString /*stackTrace*/) {
-    const utf8* msg = message ? wkeGetString(message) : "";
-    const utf8* src = sourceName ? wkeGetString(sourceName) : "";
-    NSLog(@"[console:%d] %s  (%s:%u)", (int)level, msg ? msg : "", src ? src : "", sourceLine);
+static void onConsole(mbView*, void*, const char* level, const char* message) {
+    NSLog(@"[console:%s] %s", level ? level : "", message ? message : "");
 }
 
-// URL changed in the engine -> refresh address bar + back/forward state.
-static void onURLChanged(wkeWebView, void*, const wkeString url) {
+// URL committed in the engine -> refresh address bar + back/forward state.
+static void onUrlChanged(mbView*, void*, const char* /*url*/) {
     dispatch_async(dispatch_get_main_queue(), ^{ mbUpdateChrome(); });
 }
 // Page finished loading -> refresh chrome (final URL after redirects, history).
-static void onLoadingFinish(wkeWebView, void*, const wkeString, wkeLoadingResult, const wkeString) {
+static void onLoadFinish(mbView*, void*) {
     dispatch_async(dispatch_get_main_queue(), ^{ mbUpdateChrome(); });
 }
 // Title changed -> window title.
-static void onTitleChanged(wkeWebView, void*, const wkeString title) {
-    const utf8* t = title ? wkeGetString(title) : "";
-    if (!t) return;
-    NSString* s = [NSString stringWithUTF8String:t];
+static void onTitleChanged(mbView*, void*, const char* title) {
+    NSString* s = title ? [NSString stringWithUTF8String:title] : @"";
     dispatch_async(dispatch_get_main_queue(), ^{
-        [[g_contentView window] setTitle:s.length ? s : @"miniblink (macOS)"];
+        [[g_contentView window] setTitle:s.length ? s : @"miniblink2 (macOS)"];
     });
 }
 
@@ -223,13 +228,13 @@ static void onTitleChanged(wkeWebView, void*, const wkeString title) {
 @interface MbChrome : NSObject <NSWindowDelegate>
 @end
 @implementation MbChrome
-- (void)goBack:(id)sender    { if (g_webView && wkeCanGoBack(g_webView))    wkeGoBack(g_webView); }
-- (void)goForward:(id)sender { if (g_webView && wkeCanGoForward(g_webView)) wkeGoForward(g_webView); }
-- (void)reload:(id)sender    { if (g_webView) wkeReload(g_webView); }
+- (void)goBack:(id)sender    { if (g_view && mbCanGoBack(g_view))    mbGoBack(g_view); }
+- (void)goForward:(id)sender { if (g_view && mbCanGoForward(g_view)) mbGoForward(g_view); }
+- (void)reload:(id)sender    { if (g_view) mbReload(g_view); }
 
 // Enter in the address bar -> normalize + load.
 - (void)navigate:(id)sender {
-    if (!g_webView) return;
+    if (!g_view) return;
     NSString* text = [[g_addressBar stringValue]
         stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (text.length == 0) return;
@@ -248,7 +253,7 @@ static void onTitleChanged(wkeWebView, void*, const wkeString title) {
     } else {
         urlStr = [@"https://" stringByAppendingString:text];
     }
-    wkeLoadURL(g_webView, [urlStr UTF8String]);
+    mbLoadURL(g_view, [urlStr UTF8String]);
     // hand keyboard focus back to the page
     [[g_addressBar window] makeFirstResponder:g_contentView];
 }
@@ -259,8 +264,8 @@ static void onTitleChanged(wkeWebView, void*, const wkeString title) {
     NSRect cr = [[win contentView] bounds];
     int w = (int)cr.size.width;                       // LOGICAL viewport (CSS px);
     int h = (int)(cr.size.height - kToolbarHeight);   // the device scale handles HiDPI
-    if (w <= 0 || h <= 0 || !g_webView) return;
-    wkeResize(g_webView, w, h);
+    if (w <= 0 || h <= 0 || !g_view) return;
+    mbResize(g_view, w, h);
     [g_contentView setNeedsDisplay:YES];
 }
 @end
@@ -288,7 +293,7 @@ int main(int argc, const char** argv) {
             styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                        NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable)
             backing:NSBackingStoreBuffered defer:NO];
-        [win setTitle:@"miniblink (macOS)"];
+        [win setTitle:@"miniblink2 (macOS)"];
 
         NSView* root = [[NSView alloc] initWithFrame:winFrame];
         [win setContentView:root];
@@ -334,38 +339,33 @@ int main(int argc, const char** argv) {
         [win makeFirstResponder:g_contentView]; // keyboard goes to the page
         [NSApp activateIgnoringOtherApps:YES];
 
-        // Bring up the engine and load the page. Render at the display's backing
-        // scale (Retina) so the page isn't upscaled/blurry: size the viewport in
-        // HiDPI: lay out at the LOGICAL window size (CSS px) and set the DEVICE SCALE
-        // FACTOR so the page renders retina-crisp (devicePixelRatio == backing scale).
-        // (Earlier this wrongly used wkeSetZoomFactor — PAGE ZOOM — which scales content
-        // instead of raster resolution; the result was a blurry/zoomed HiDPI display.)
+        // Bring up the engine and load the page. Lay out at the LOGICAL window
+        // size (CSS px) and set the DEVICE SCALE FACTOR so the page renders
+        // retina-crisp (devicePixelRatio == backing scale) — page zoom would
+        // scale content instead of raster resolution.
         g_scale = [win backingScaleFactor];
         if (g_scale <= 0) g_scale = 1.0;
-        wkeInitialize();
-        g_webView = wkeCreateWebView();
-        wkeResize(g_webView, W, H);                      // LOGICAL viewport
-        wkeSetDeviceScaleFactor(g_webView, g_scale);     // HiDPI raster (not page zoom)
-        wkeOnConsole(g_webView, onConsole, nullptr);
+        mbInitialize();
+        g_view = mbCreateView(W, H);                    // LOGICAL viewport
+        mbSetDeviceScaleFactor(g_view, (float)g_scale); // HiDPI raster (not page zoom)
+        mbOnConsoleMessage(g_view, onConsole, nullptr);
         // Chrome wiring: keep the address bar + back/forward state in sync.
-        wkeOnURLChanged(g_webView, onURLChanged, nullptr);
-        wkeOnLoadingFinish(g_webView, onLoadingFinish, nullptr);
-        wkeOnTitleChanged(g_webView, onTitleChanged, nullptr);
-        wkeLoadURL(g_webView, url);
+        mbOnUrlChanged(g_view, onUrlChanged, nullptr);
+        mbOnLoadFinish(g_view, onLoadFinish, nullptr);
+        mbOnTitleChanged(g_view, onTitleChanged, nullptr);
+        mbLoadURL(g_view, url);
 
         NSLog(@"[minibrowser] loading %s", url);
 
-        // Drive the render: each frame, let wke run its pending paint (which fires
-        // onPaintUpdated when the page changes) and mark the view dirty. Without an
-        // active pump the offscreen page never composites and the window stays blank.
+        // Drive the render: each frame, repaint + blit. Without an active pump the
+        // offscreen page never composites and the window stays blank.
         __block int ticks = 0;
         [NSTimer scheduledTimerWithTimeInterval:1.0/60.0 repeats:YES block:^(NSTimer*) {
             ++ticks;
-            [g_contentView setNeedsDisplay:YES];  // drawRect -> wkePaint drives+blits
+            [g_contentView setNeedsDisplay:YES];  // drawRect -> mbRepaintToBitmap drives+blits
             if (ticks % 15 == 0) mbUpdateChrome();   // keep nav buttons/URL fresh
             if (ticks % 60 == 0)
-                NSLog(@"[minibrowser] tick=%d loading=%d complete=%d", ticks,
-                      wkeIsLoading(g_webView), wkeIsLoadingCompleted(g_webView));
+                NSLog(@"[minibrowser] tick=%d loadFinished=%d", ticks, mbIsLoadFinished(g_view));
         }];
         NSLog(@"[minibrowser] timer scheduled, entering run loop");
 

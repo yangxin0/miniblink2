@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-samples.sh — build the wke sample app (minibrowser) against a dist/ SDK.
+# build-samples.sh — build the mb-API sample app (minibrowser) against a dist/ SDK.
 #
 #   scripts/build-samples.sh [--release|--debug] [--dyn|--static|--both] [--chromium DIR]
 #
@@ -41,7 +41,8 @@ DIST="$HERE/dist/$MODE"
 SRC="$HERE/samples/minibrowser_main.mm"
 [ -f "$SRC" ] || { echo "error: missing $SRC" >&2; exit 1; }
 
-# samples #include "wke/wke.h"; -I src resolves it (same header staged into dist/include).
+# samples #include "miniblink2/miniblink2.h"; -I src resolves it (the same header the
+# SDK ships as dist/include/miniblink2/miniblink2.h).
 # -isysroot is explicit: the Chromium clang++ (used for the static/LTO link) has no default
 # macOS SDK, unlike the system clang++.
 SDKROOT="$(xcrun --show-sdk-path 2>/dev/null || echo /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk)"
@@ -77,7 +78,7 @@ if [ "$FORM" = static ] || [ "$FORM" = both ]; then
   # A --size-optimized .a is ThinLTO BITCODE. build-lib.sh merges it with Apple `libtool`,
   # which can't put bitcode + native objects in one uniform archive: it emits a FAT archive
   # with the bitcode in a cputype(0) slice and the native objects in an arm64 slice. Linking
-  # for arm64 then reads ONLY the arm64 slice and reports every wke*/mb* symbol undefined.
+  # for arm64 then reads ONLY the arm64 slice and reports every mb* symbol undefined.
   # Detect that and stop with guidance rather than a wall of "undefined symbol" errors.
   if lipo -info "$DIST/libminiblink2.a" 2>/dev/null | grep -q "cputype (0)"; then
     echo "error: $DIST/libminiblink2.a is a ThinLTO (--size-optimized) bitcode archive; it" >&2
