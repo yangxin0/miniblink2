@@ -21,10 +21,9 @@ component("miniblink_host") {
   # Vendored WebSocket-enabled libcurl (third_party/curl) FIRST, so <curl/curl.h>
   # and <curl/websockets.h> resolve to it rather than the SDK's WS-less system curl.
   include_dirs = [
-    # NOTE: absolute path = the repo's on-disk directory name (still miniblink-modern);
-    # update BOTH curl paths in this file if the folder is ever renamed to match the
-    # miniblink2 brand.
-    "/Users/yangxin/dennis/chrome/miniblink-modern/third_party/curl/include",
+    # NOTE: absolute path = the repo's on-disk directory; update BOTH curl paths
+    # in this file (and the vendored libcurl.4.dylib install id) on a folder rename.
+    "/Users/yangxin/dennis/chrome/miniblink2/third_party/curl/include",
     "//third_party/blink/renderer",
   ]
 
@@ -172,7 +171,7 @@ component("miniblink_host") {
   # Vendored WebSocket-enabled libcurl (scripts/build-curl-macos.sh): a dylib so its
   # OpenSSL TLS stays isolated from BoringSSL (two-level namespace). Its absolute
   # install_name lets the linked binaries find it at runtime without an rpath.
-  lib_dirs = [ "/Users/yangxin/dennis/chrome/miniblink-modern/third_party/curl/lib" ]  # see rename NOTE above
+  lib_dirs = [ "/Users/yangxin/dennis/chrome/miniblink2/third_party/curl/lib" ]  # see rename NOTE above
   libs = [ "curl" ]  # -> third_party/curl/lib/libcurl.dylib (HTTP(S) + ws/wss)
   # Real audio output (media/mb_media_player.cc MbCoreAudioSink): a DefaultOutput
   # AudioUnit pulls decoded samples to the system audio device.
