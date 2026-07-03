@@ -1,7 +1,7 @@
-// mb_capi.cc — extern "C" ABI implementation. Pure forwarding to the C++ host;
+// miniblink2.cc — extern "C" implementation of the miniblink2 public API (mb* ABI). Pure forwarding to the C++ host;
 // no Blink types cross this boundary.
 
-#include "miniblink_host/capi/mb_capi.h"
+#include "miniblink2/miniblink2.h"
 
 #include <algorithm>
 #include <cctype>
@@ -26,7 +26,7 @@
 // Rust allocator rlib. In a --size-optimized (ThinLTO) build LTO sees no *bitcode* user and
 // internalizes/drops them, so a static libminiblink2.a link leaves the native rlib's references
 // undefined (the dylib is unaffected — it never force-pulls that rlib). This mb_capi object is
-// ALWAYS pulled into any consumer link (every wke*/mb* entry point lives here), so referencing
+// ALWAYS pulled into any consumer link (every mb* entry point lives here), so referencing
 // the allocator from it forces LTO to keep the real definitions live — the static .a is then
 // self-sufficient with NO consumer -Wl,-u. This is NOT a trap stub (cf. mb_dawn_stubs.cc): these
 // run on every Rust allocation and must resolve to the real PartitionAlloc-backed functions.

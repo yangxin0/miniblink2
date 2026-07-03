@@ -1,5 +1,5 @@
 // mb_demo — a runnable, end-to-end example of the pure-C `mb_capi` ABI (the
-// project's primary embedding seam; the wke layer is built on top of this).
+// project's primary embedding seam).
 //
 // It drives a small offline page the way a C/C++ embedder would: fill a field,
 // read its live value, dispatch a custom DOM event that asynchronously appends a
@@ -8,7 +8,7 @@
 // just that element to a PNG. Each step asserts, so running it doubles as an
 // integration check. Returns 0 on success, 1 on any failed step.
 
-#include "miniblink_host/capi/mb_capi.h"
+#include "miniblink2/miniblink2.h"
 
 #include <cstdio>
 #include <cstring>

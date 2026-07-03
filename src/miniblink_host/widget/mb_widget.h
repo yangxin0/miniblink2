@@ -75,7 +75,7 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   void SendKeyEx(const char* key, int modifiers);
   // Dispatch a standalone key RELEASE (kKeyUp) for a Win32 VK code, so page `keyup`
   // handlers fire on release. Pairs with SendKey for callers that drive down/up
-  // separately (e.g. wke's wkeFireKeyUpEvent).
+  // separately (a standalone keyup dispatch).
   void SendKeyUp(int windows_key_code);
   // Drive the focused editable through an IME sequence: `composing` shows the in-progress
   // reading (compositionstart/update), `committed` inserts the final text + fires

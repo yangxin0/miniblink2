@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # mb_shot_smoke.sh — CLI regression test for the mb_shot binary.
 #
-# The C++ smoke suites (mb_smoke / wke_smoke) cover the library/ABI, but the
+# The C++ smoke suites (mb_smoke) cover the library/ABI, but the
 # mb_shot command-line tool — its argument parsing and stdout extraction format
 # — had no automated coverage; the extraction flags were only verified by hand.
 # This script exercises them end-to-end against a local fixture (offline, no

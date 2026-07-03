@@ -12,18 +12,18 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 TREE="${1:?usage: build.sh /path/to/chromium-150.x.y.z}"
 OUT="${OUT:-out/Release}"
 DEST="$TREE/third_party/blink/renderer/miniblink_host"
-WKE_DEST="$TREE/third_party/blink/renderer/wke"
+MB2_DEST="$TREE/third_party/blink/renderer/miniblink2"
 
 [ -d "$TREE/third_party/blink/renderer" ] || { echo "not a chromium tree: $TREE" >&2; exit 1; }
 
 echo "==> staging host sources -> $DEST"
 rm -rf "$DEST"
 cp -R "$HERE/src/miniblink_host" "$DEST"
-# wke compatibility layer (built into the host lib + a wke_smoke target; its
-# BUILD.gn references live in miniblink_host/BUILD.gn via ../wke/).
-echo "==> staging wke sources -> $WKE_DEST"
-rm -rf "$WKE_DEST"
-cp -R "$HERE/src/wke" "$WKE_DEST"
+# miniblink2 public API (built into the host lib; its BUILD.gn references live
+# in miniblink_host/BUILD.gn via ../miniblink2/).
+echo "==> staging miniblink2 API sources -> $MB2_DEST"
+rm -rf "$MB2_DEST"
+cp -R "$HERE/src/miniblink2" "$MB2_DEST"
 
 echo "==> applying blink compatibility patches"
 for p in "$HERE"/patches/*.patch; do
@@ -55,8 +55,8 @@ export PATH="$TREE/buildtools/mac:$PATH"
 echo "==> gn gen"
 ( cd "$TREE" && gn gen "$OUT" >/dev/null )
 
-echo "==> ninja miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo wke_smoke wke_demo mb_gl_probe mb_gpu_probe mb_dawn_probe mb_webgpu_probe mb_webgpu2_probe mb_compositor_probe mb_compositor2_probe mb_compositor3_probe mb_compositor4_probe mb_compositor5_probe mb_compositor_widget_smoke"
-( cd "$TREE" && ninja -C "$OUT" miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo wke_smoke wke_demo mb_gl_probe mb_gpu_probe mb_dawn_probe mb_webgpu_probe mb_webgpu2_probe mb_compositor_probe mb_compositor2_probe mb_compositor3_probe mb_compositor4_probe mb_compositor5_probe mb_compositor_widget_smoke )
+echo "==> ninja miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo mb_gl_probe mb_gpu_probe mb_dawn_probe mb_webgpu_probe mb_webgpu2_probe mb_compositor_probe mb_compositor2_probe mb_compositor3_probe mb_compositor4_probe mb_compositor5_probe mb_compositor_widget_smoke"
+( cd "$TREE" && ninja -C "$OUT" miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo mb_gl_probe mb_gpu_probe mb_dawn_probe mb_webgpu_probe mb_webgpu2_probe mb_compositor_probe mb_compositor2_probe mb_compositor3_probe mb_compositor4_probe mb_compositor5_probe mb_compositor_widget_smoke )
 
 echo "==> vendor resource paks next to the binary"
 cp "$TREE/$OUT/gen/third_party/blink/public/resources/blink_resources.pak" \

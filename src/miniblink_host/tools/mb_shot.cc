@@ -39,7 +39,7 @@
 #include <utility>
 #include <vector>
 
-#include "miniblink_host/capi/mb_capi.h"
+#include "miniblink2/miniblink2.h"
 
 namespace {
 // Cap full-page height so a runaway/infinite-scroll page can't request a

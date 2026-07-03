@@ -1,16 +1,15 @@
 # Exported-symbol list for libminiblink2.dylib (ld64 -exported_symbols_list;
 # glob patterns, one per line, '#' comments).
 #
-# The SDK surface is exactly the wke* + mb* C API (wke.h / mb_capi.h). Everything
+# The SDK surface is exactly the miniblink2 mb* C API (miniblink2.h). Everything
 # else — v8 debugger-print helpers (_v8_internal_Print_*, _As_*), Rust cxxbridge
 # shims, cppgc internals — is hidden. Beyond hygiene this feeds -Wl,-dead_strip
 # (already on for Apple optimized links): every default-visibility export is a
-# live root, so hiding ~1500 non-API symbols lets the linker strip what only they
+# live root, so hiding the non-API symbols lets the linker strip what only they
 # kept alive, and shrinks the export trie dyld parses at load.
-# The API is strictly CamelCase (wkeInitialize, mbCreateWebView, ...); the
-# [A-Z] class keeps internal C helpers like mb_rust_alloc_keep (hidden
-# keep-alive array in mb_capi.cc) out of the list — lld's strict ld64 port
-# errors on "cannot export hidden symbol" where classic ld64 only warned,
-# which broke the ThinLTO (--size-optimized) link with a bare _mb* glob.
-_wke[A-Z]*
+# The API is strictly CamelCase (mbInitialize, mbCreateView, ...); the [A-Z]
+# class keeps internal C helpers like mb_rust_alloc_keep (hidden keep-alive
+# array in miniblink2.cc) out of the list — lld's strict ld64 port errors on
+# "cannot export hidden symbol" where classic ld64 only warned, which broke
+# the ThinLTO (--size-optimized) link with a bare _mb* glob.
 _mb[A-Z]*

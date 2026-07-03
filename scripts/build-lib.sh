@@ -35,8 +35,8 @@
 # non-component mode (slow; shares nothing with out/Release). Re-runs are incremental.
 #
 # Each dist/<mode>/ is a self-contained SDK:
-#   libminiblink2.{dylib,a}            the library (exposes mb_capi + the wke API)
-#   include/miniblink2/{wke.h,mb_capi.h}  public headers
+#   libminiblink2.{dylib,a}            the library (exposes the miniblink2 mb* C API)
+#   include/miniblink2/miniblink2.h    the public header
 #   blink_resources.pak, icudtl.dat, snapshot_blob.bin, v8_context_snapshot.bin
 #                               runtime data the engine loads at startup
 set -euo pipefail
@@ -118,7 +118,7 @@ NINJA="ninja"
 OUT="out/mono-$MODE"
 if [ "$SIZE" = 1 ] && [ "$MODE" != debug ]; then OUT="out/mono-$MODE-ship"; fi
 DEST="$CHROMIUM/third_party/blink/renderer/miniblink_host"
-WKE_DEST="$CHROMIUM/third_party/blink/renderer/wke"
+MB2_DEST="$CHROMIUM/third_party/blink/renderer/miniblink2"
 GN_PATH="third_party/blink/renderer/miniblink_host"
 
 # Serialize builds that share this out dir. Two concurrent build-lib.sh runs would race —
@@ -136,14 +136,14 @@ trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
 
 # 1. Stage sources into the donor tree (same contract as build.sh) unless --no-stage.
 if [ "$STAGE" = 1 ]; then
-  echo "==> staging host + wke sources -> $DEST"
+  echo "==> staging host + miniblink2 API sources -> $DEST"
   # rsync, NOT rm -rf + cp -R: rsync preserves mtimes and copies ONLY changed files, so
   # ninja's incremental build reuses every unchanged .o. (cp -R stamps every file with a
   # fresh mtime, forcing ninja to recompile all ~60 host objects on every run.) Trailing
   # slashes sync directory CONTENTS; --delete prunes files removed from src.
-  mkdir -p "$DEST" "$WKE_DEST"
+  mkdir -p "$DEST" "$MB2_DEST"
   rsync -a --delete "$HERE/src/miniblink_host/" "$DEST/"
-  rsync -a --delete "$HERE/src/wke/" "$WKE_DEST/"
+  rsync -a --delete "$HERE/src/miniblink2/" "$MB2_DEST/"
   echo "==> applying blink compatibility patches"
   for p in "$HERE"/patches/*.patch; do
     [ -f "$p" ] || continue
@@ -265,17 +265,16 @@ REF="${REF:-$CHROMIUM/out/Release}"
 DIST="$HERE/dist/$MODE"
 mkdir -p "$DIST/include/miniblink2"
 
-# Public API headers — the SDK surface, grouped under one miniblink2/ namespace. The
-# library exposes BOTH the mb_capi C API and the wke compatibility API; both headers
-# are self-contained (standard-library includes only). Consumer:
-#   -Idist/<mode>/include   +   #include "miniblink2/wke.h" / "miniblink2/mb_capi.h"
-cp "$HERE/src/wke/wke.h"                     "$DIST/include/miniblink2/wke.h"
-cp "$HERE/src/miniblink_host/capi/mb_capi.h" "$DIST/include/miniblink2/mb_capi.h"
+# Public API header — the SDK surface: the miniblink2 mb* C API, self-contained
+# (standard-library includes only). Consumer:
+#   -Idist/<mode>/include   +   #include "miniblink2/miniblink2.h"
+cp "$HERE/src/miniblink2/miniblink2.h" "$DIST/include/miniblink2/miniblink2.h"
+rm -f "$DIST/include/miniblink2/wke.h" "$DIST/include/miniblink2/mb_capi.h"  # pre-rename leftovers
 
 # 4a. Shared deliverable: the self-contained dylib straight from the link.
 if [ "$FORM" != static ]; then
   cp "$CHROMIUM/$OUT/libminiblink2.dylib" "$DIST/"
-  # Release: strip local/debug symbols — keeps the exported mb*/wke* dynamic symbols
+  # Release: strip local/debug symbols — keeps the exported mb* dynamic symbols
   # (so consumers still link), drops the ~120MB symbol table (~330MB -> ~210MB). Debug
   # keeps them for readable backtraces (MB_STACK_DUMP).
   if [ "$MODE" != debug ]; then
@@ -307,7 +306,7 @@ if [ "$FORM" != shared ]; then
   # ADDMOD adds loose objects, into ONE uniform archive. Apple `libtool` can't do this for a
   # --size-optimized build: its objects are ThinLTO BITCODE, and libtool emits a FAT archive
   # splitting bitcode (cputype 0) from native (arm64) objects, so an arm64 link sees only the
-  # native slice and every wke*/mb* symbol comes up undefined. llvm-ar treats bitcode + native
+  # native slice and every mb* symbol comes up undefined. llvm-ar treats bitcode + native
   # uniformly, so the .a is consumable (scripts/build-samples.sh --static). Fall back to
   # libtool if llvm-ar is absent (a native, non-LTO .a links fine either way).
   LLVM_AR="$CHROMIUM/third_party/llvm-build/Release+Asserts/bin/llvm-ar"

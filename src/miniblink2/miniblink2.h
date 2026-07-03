@@ -1,13 +1,13 @@
-// miniblink2 public C ABI — the GN<->CMake seam.
+// miniblink2.h — the miniblink2 public C API (mb* ABI).
 //
-// This is the ONLY surface the CMake-built outer shell (wke/mb, port/) links
+// This is the ONLY surface an embedding application links
 // against. Everything below it is GN-built C++ that touches Blink/base/mojo.
 // Pure C, no Blink types leak across this boundary.
 //
 // Status: Phase 1 v0 (render-to-bitmap, no input/JS-interaction yet).
 
-#ifndef MINIBLINK_HOST_CAPI_MB_CAPI_H_
-#define MINIBLINK_HOST_CAPI_MB_CAPI_H_
+#ifndef MINIBLINK2_MINIBLINK2_H_
+#define MINIBLINK2_MINIBLINK2_H_
 
 #include <stddef.h>
 #include <stdint.h>
@@ -981,7 +981,7 @@ MB_EXPORT int mbGetTextForSelectorInFrame(mbView*, int frame_index,
 // Like mbEvalJS, but ALSO reports the JS typeof the result via `out_type` (one of
 // "number"/"string"/"boolean"/"object"/"function"/"undefined"/"array"/"null"),
 // captured from the SAME single evaluation (no re-run, so side effects fire once).
-// Returns the value length in bytes. Used to back wke's jsTypeOf.
+// Returns the value length in bytes (JS typeof-style type probing).
 MB_EXPORT int mbEvalJSEx(mbView*, const char* utf8_script, char* out_value,
                          int value_cap, char* out_type, int type_cap);
 
@@ -1062,4 +1062,4 @@ MB_EXPORT int mbPaintRectToBitmap(mbView*, void* out_bgra, int x, int y, int w,
 }  // extern "C"
 #endif
 
-#endif  // MINIBLINK_HOST_CAPI_MB_CAPI_H_
+#endif  // MINIBLINK2_MINIBLINK2_H_

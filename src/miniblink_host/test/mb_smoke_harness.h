@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-#include "miniblink_host/capi/mb_capi.h"
+#include "miniblink2/miniblink2.h"
 
 namespace mbsmoke {
 

@@ -5,7 +5,7 @@
 # then `gn gen out/Release && ninja -C out/Release miniblink_host`.
 #
 # Produces a shared library exposing the extern "C" mb_capi.h ABI. The CMake
-# outer shell (wke/mb, port/) links ONLY that.
+# outer shell links ONLY that.
 #
 # NOTE: this reaches into renderer-internal blink targets (web_frame_widget_impl,
 # url_loader), not just //third_party/blink/public — like blink's own test support.
@@ -29,10 +29,11 @@ component("miniblink_host") {
   ]
 
   sources = [
+    # The public C API (staged alongside at ../miniblink2; the mb* ABI).
+    "../miniblink2/miniblink2.cc",
+    "../miniblink2/miniblink2.h",
     "blob/mb_blob_registry.cc",
     "blob/mb_blob_registry.h",
-    "capi/mb_capi.cc",
-    "capi/mb_capi.h",
     "frame/mb_broadcast_channel.cc",
     "frame/mb_broadcast_channel.h",
     "frame/mb_cache_storage.cc",
@@ -93,9 +94,6 @@ component("miniblink_host") {
     "worker/mb_worker_fetch_context.h",
     "worker/mb_worker_script.cc",
     "worker/mb_worker_script.h",
-    # wke compatibility layer (staged alongside at ../wke; wraps the mb_capi ABI).
-    "../wke/wke.cc",
-    "../wke/wke.h",
   ]
 
   deps = [
@@ -230,7 +228,7 @@ component("miniblink_host") {
 shared_library("miniblink2") {
   output_name = "miniblink2"
   deps = [ ":miniblink_host" ]
-  # exported_symbols_list pins the export surface to the wke*/mb* SDK API (see
+  # exported_symbols_list pins the export surface to the mb* SDK API (see
   # miniblink2.exports) — everything else becomes local, which both trims the
   # export trie and gives -Wl,-dead_strip more to strip.
   inputs = [ "miniblink2.exports" ]
@@ -290,21 +288,6 @@ executable("mb_shot") {
 # wait-idle/scrape/request-log/element-screenshot) that doubles as documentation.
 executable("mb_demo") {
   sources = [ "tools/mb_demo.cc" ]
-  include_dirs = [ "//third_party/blink/renderer" ]
-  deps = [ ":miniblink_host" ]
-}
-
-# wke_smoke: exercises the wke compatibility slice end to end (its own process).
-executable("wke_smoke") {
-  sources = [ "../wke/wke_smoke.cc" ]
-  include_dirs = [ "//third_party/blink/renderer" ]
-  deps = [ ":miniblink_host" ]
-}
-
-# wke_demo: a runnable example of the automation API (fill/select/click/wait/
-# scrape/screenshot) that doubles as documentation.
-executable("wke_demo") {
-  sources = [ "../wke/wke_demo.cc" ]
   include_dirs = [ "//third_party/blink/renderer" ]
   deps = [ ":miniblink_host" ]
 }
