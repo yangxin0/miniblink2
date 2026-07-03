@@ -110,7 +110,13 @@ command -v gn >/dev/null 2>&1 || {
 }
 NINJA="ninja"
 
+# One out dir PER PROFILE: --size-optimized changes every compile command
+# (-Oz/ThinLTO/no-DCHECK vs -O2/DCHECK), and ninja keys rebuilds on the command
+# hash — sharing one dir made every dev<->ship switch a full ~28k-object
+# recompile even though all the .o files were present. A dedicated dir keeps
+# each profile incremental; the cost is a second ~60GB build tree on disk.
 OUT="out/mono-$MODE"
+if [ "$SIZE" = 1 ] && [ "$MODE" != debug ]; then OUT="out/mono-$MODE-ship"; fi
 DEST="$CHROMIUM/third_party/blink/renderer/miniblink_host"
 WKE_DEST="$CHROMIUM/third_party/blink/renderer/wke"
 GN_PATH="third_party/blink/renderer/miniblink_host"
