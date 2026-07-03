@@ -16,9 +16,8 @@ that satisfies modern Blink so it runs without the full browser.
 gets the whole modern web platform — GPU-accelerated WebGL on Metal included
 (`map.baidu.com` and MapLibre GL render their full vector maps).
 
-> New here? `include/miniblink2/wke.h` (classic miniblink API) and
-> `include/miniblink2/mb_capi.h` (the native ABI) are the two public headers.
-> Quick start below; `PROGRESS.md` has the development journal.
+> New here? `include/miniblink2/miniblink2.h` (the `mb*` C API) is the single
+> public header. Quick start below; `PROGRESS.md` has the development journal.
 
 ---
 
@@ -46,9 +45,9 @@ A Cocoa window opens and renders the page — WebGL vector maps run on the **Met
 
 | File | What it is |
 |---|---|
-| `libminiblink2.dylib` | the whole engine as ONE shared library (exports `wke*` + `mb*`) |
+| `libminiblink2.dylib` | the whole engine as ONE shared library (exports the `mb*` C API) |
 | `libminiblink2.a` | the same engine as ONE complete static archive |
-| `include/miniblink2/{wke.h, mb_capi.h}` | the two public C headers |
+| `include/miniblink2/miniblink2.h` | the public C header |
 | `blink_resources.pak`, `media_controls_…pak` | Blink resources (UA stylesheet, …) |
 | `icudtl.dat`, `v8_context_snapshot.bin` | ICU data + the V8 context snapshot |
 | `libEGL.dylib`, `libGLESv2.dylib` | **ANGLE** — the GL/WebGL driver (→ Metal) |
@@ -120,9 +119,8 @@ The miniblink49 `tools/package-macos.sh` equivalent: stages `dist/<mode>/` into
 `lib/` + `include/` + `resources/` + a generated README containing the exact
 link lines. The staged dylibs are made **portable**: the vendored-curl reference
 is rewritten from the build machine's absolute path to `@loader_path`, install
-ids become `@rpath`, and everything is ad-hoc re-signed. `include/wke/wke.h`
-ships as a miniblink49-compatible alias. Verified by compiling and booting the
-sample browser from an unpacked zip in a clean directory.
+ids become `@rpath`, and everything is ad-hoc re-signed. Verified by compiling
+and booting the sample browser from an unpacked zip in a clean directory.
 
 ## GPU architecture (macOS)
 
@@ -141,7 +139,7 @@ WebGPU (--webgpu)  ────► Dawn ──► Metal
   runtime probing (`patches/0017`); `navigator.gpu.requestAdapter()` resolves null.
 - Canvases paint **inline** (no display compositor): the drawing buffer is snapshotted
   into the software page paint (`patches/0008` + `0018`), which is what makes WebGL
-  content appear in `wkePaint`/`mbPaintToBitmap`/`mb_shot` screenshots.
+  content appear in `mbPaintToBitmap`/`mb_shot` screenshots.
 
 ## What works (verified by a 400+ case automated battery)
 
@@ -242,11 +240,10 @@ More demos — modern CSS, JS mutating the DOM, `file://` + SVG, `<canvas>` 2D:
 ## Architecture
 
 ```
-┌─ wke compatibility layer (src/wke) ─────────────────────┐
-│  the classic miniblink `wke` C API on modern Blink      │
-└──────────── wraps the mb_capi ABI ▼ ────────────────────┘
+┌─ miniblink2 public API (src/miniblink2) ────────────────┐
+│  miniblink2.h — the extern "C" mb* API (the seam)       │
+└────────────── pure C, no Blink types ▼ ─────────────────┘
 ┌─ miniblink_host (GN target, src/miniblink_host) ────────┐
-│  capi/      extern "C" ABI (the seam)                   │
 │  runtime/   engine bring-up (V8 snapshot, ThreadPool,   │
 │             ResourceBundle, scheduler, blink::Initialize)│
 │  platform/  blink::Platform, in-process GPU thread,     │
@@ -321,60 +318,34 @@ Grouped overview (see the header for exact signatures):
 - **Page config:** `mbSetDeviceScaleFactor` `mbSetTransparentBackground`
   `mbSetDarkMode` `mbSetLocale` `mbSetTimezone` `mbSetFocus`
 
-## wke compatibility layer (`include/miniblink2/wke.h`)
+## Quick start (`include/miniblink2/miniblink2.h`)
 
-A drop-in subset of classic miniblink's `wke` C API implemented on top of `mb_capi`,
-so an existing `wke` app runs on modern Blink with the original signatures (`utf8`,
-`wkeWebView`, `jsValue`, …). Verified by `wke_smoke` (96 default cases). Functions
-marked *(ext)* are port extensions beyond the classic surface.
-
-- **Lifecycle / load:** `wkeInitialize`/`wkeFinalize`, `wkeCreateWebView`/
-  `wkeDestroyWebView`, `wkeLoadURL`/`wkeLoadHTML`/`wkeLoadHtmlWithBaseUrl`,
-  `wkePostURL`, `wkeReload`, the loading-state pollers.
-- **Geometry / rendering:** `wkeResize`, width/height/content-size getters,
-  `wkeSetTransparent`, `wkeSetZoomFactor`, `wkeSetEditable`, `wkeSetDarkMode` *(ext)*,
-  `wkeSetDeviceScaleFactor` *(ext)*, `wkeScrollTo`/`wkeScrollToBottom` *(ext)*,
-  `wkeSetFocus`/`wkeKillFocus`.
-- **Capture:** `wkePaint` (caller BGRA buffer) + *(ext)* `wkePaintRect`,
-  `wkeSavePng`/`wkeSavePngRect`/`wkeSaveElementPng`, `wkeSavePdf`, `wkeEncodePng`.
-- **Input:** `wkeFireMouseEvent`, `wkeFireMouseWheelEvent`,
-  `wkeFireKeyDown/Up/PressEvent`.
-- **Scripting (full string-backed `jsValue` model):** `wkeRunJS` + `wkeGlobalExec`;
-  the `jsTypeOf`/`jsIs*`/`jsTo*`/`js*` constructor-accessor set; `jsGet`/`jsSet`/
-  `jsCall`/`jsCallGlobal`; `wkeSetInitScript`, `wkeInsertCSS` *(ext)*,
-  `wkeRunJsInIsolatedWorld` *(ext)*, `wkeOnJsBridge` *(ext)*,
-  `wkeJsBindFunction` (native C functions callable from JS, typed args + return).
-- **DOM automation** *(ext, Puppeteer-style)*: the full query/act/wait selector set
-  (`wkeCountSelector`, `wkeGetTextForSelector`, `wkeClickSelector`, `wkeFillSelector`,
-  `wkeWaitForSelector`, `wkeWaitForNetworkIdle`, …).
-- **Networking:** cookies + jar persistence, `wkeSetProxy`, and *(ext)*
-  `wkeSetExtraHeaders`, locale/timezone, redirect/cert toggles, HTTP status +
-  response headers, request log, URL blocking.
-- **Callbacks:** `wkeOnLoadingFinish`, `wkeOnTitleChanged`, `wkeOnConsole`,
-  `wkeOnDocumentReady` (+ `wkeString` helpers).
+The single public header is the `mb*` C API — pure C, no Blink types:
 
 ```c
-#include "wke.h"
+#include "miniblink2/miniblink2.h"
 
-wkeInitialize();
-wkeWebView wv = wkeCreateWebView();
-wkeResize(wv, 1200, 800);
-wkeLoadURL(wv, "https://example.com");        // synchronous in this build
-if (wkeIsLoadingSucceeded(wv)) {
-    printf("title: %s\n", wkeGetTitle(wv));
-    jsValue n = wkeRunJS(wv, "document.querySelectorAll('a').length");
-    printf("links: %d\n", jsToInt(wkeGlobalExec(wv), n));
-    int w = wkeGetWidth(wv), h = wkeGetHeight(wv);
-    void* bits = malloc((size_t)w * h * 4);   // BGRA
-    wkePaint(wv, bits, w * 4);
+mbInitialize();
+mbView* v = mbCreateView(1200, 800);
+mbLoadURL(v, "https://example.com");          // synchronous in this build
+if (mbIsLoadFinished(v)) {
+    char title[512], links[64];
+    mbGetTitle(v, title, sizeof title);
+    printf("title: %s\n", title);
+    mbEvalJS(v, "document.querySelectorAll('a').length", links, sizeof links);
+    printf("links: %s\n", links);
+    void* bits = malloc((size_t)1200 * 800 * 4);   // BGRA
+    mbPaintToBitmap(v, bits, 1200, 800, 1200 * 4);
     free(bits);
 }
-wkeDestroyWebView(wv);
-wkeFinalize();
+mbDestroyView(v);
 ```
 
-Loading is synchronous here, so a `wke` app can poll `wkeIsLoadingCompleted` instead of
-waiting on a message loop. A complete automation example is `src/wke/wke_demo.cc`.
+Loading is synchronous, so an app can call straight through instead of waiting on a
+message loop; push-model callbacks (`mbOnLoadFinish`, `mbOnUrlChanged`,
+`mbOnTitleChanged`, `mbOnConsoleMessage`, …) serve hosts that pump one (see
+`samples/minibrowser_main.mm`). A complete automation example is
+`src/miniblink_host/tools/mb_demo.cc`.
 
 ## Requirements
 
@@ -407,7 +378,6 @@ tree, applies `patches/`, runs GN + ninja against the **component** `out/Release
 executes the full test battery:
 
 - `mb_smoke` — 179-check capability + regression suite over the C ABI.
-- `wke_smoke` — 96 checks over the wke layer.
 - `mb_shot_smoke.sh` — 62 offline CLI cases asserting `mb_shot`'s exact stdout,
   capture geometry, and an end-to-end fill→click→wait→eval scrape.
 - `MB_NET_TESTS=1` adds the live-network cases (POST/cookies/proxy/redirects/certs).
@@ -417,6 +387,6 @@ executes the full test battery:
 
 ## Credits
 
-Classic engine, the `wke`/`mb` API design, and years of groundwork by **weolar** —
+Classic engine, the original `wke` API design (which shaped the `mb` API), and years of groundwork by **weolar** —
 <https://github.com/weolar/miniblink49> · <http://miniblink.net>. This project is an
 independent re-implementation of that embedding model on modern Blink.

@@ -7,6 +7,14 @@ Release notes for miniblink2. Each release is an annotated git tag
 
 ## v0.2 — 2026-07-02 (unreleased)
 
+**API consolidation.** The public surface is now exactly one header —
+`include/miniblink2/miniblink2.h`, the `mb*` C API (formerly `mb_capi.h`,
+now living at `src/miniblink2/`). The legacy `wke` compatibility layer
+(miniblink49 signatures) is removed: its wrapper, smoke suite, demo, the
+`wkexe` sample and the `_wke*` exports are gone, and the `minibrowser`
+sample is ported to the mb API (`mbRepaintToBitmap` blit loop, trusted
+`mbSend*` input, `mbOn*` callbacks).
+
 **Binary-size pruning.** The ship dylib drops **97 → 88 MB** and the shipped
 SDK footprint **~153 → ~105 MB** (incl. stripping ANGLE's libGLESv2 18.3 →
 11.9 MB), with every cut an include-only toggle in
@@ -28,7 +36,7 @@ SDK footprint **~153 → ~105 MB** (incl. stripping ANGLE's libGLESv2 18.3 →
 - **`--icu-full`** (default off): `icudtl.dat` trimmed 10.4 → 6.3 MB by
   `scripts/trim_icu.py` (keeps root+en+zh, all CJK break/segmentation data,
   converters; other locales fall back to root).
-- Exports pinned to the CamelCase `wke*`/`mb*` API (353 symbols, was 1,828),
+- Exports pinned to the CamelCase `mb*` API (was 1,828 symbols),
   feeding `-dead_strip`; V8 snapshots now come from the same-flags build
   (flag-mismatched snapshots SIGTRAP at `mbInitialize`).
 - New: `scripts/sizemap.py` per-component size attribution; `BACKLOG.md` §E

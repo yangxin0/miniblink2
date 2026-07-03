@@ -7,7 +7,7 @@
 # Packages what scripts/build-lib.sh already put in dist/<mode>/ (build first!):
 #   <name>/lib/        libminiblink2.dylib + ANGLE GL dylibs + the vendored libcurl
 #                      chain [dynamic/both]; libminiblink2.a [static/both]
-#   <name>/include/miniblink2/{wke.h,mb_capi.h}
+#   <name>/include/miniblink2/miniblink2.h
 #   <name>/resources/  blink_resources.pak, icudtl.dat, V8 snapshots, media pak —
 #                      the engine loads these from the EXECUTABLE's directory
 #   <name>/README.md   generated link + runtime instructions
@@ -58,7 +58,7 @@ esac
 
 DIST="$HERE/dist/$MODE"
 CURL_LIB="$HERE/third_party/curl/lib"
-[ -f "$DIST/include/miniblink2/wke.h" ] || {
+[ -f "$DIST/include/miniblink2/miniblink2.h" ] || {
   echo "error: no SDK in $DIST — build it first: scripts/build-lib.sh --$MODE" >&2; exit 1; }
 if [ "$WANT_DYNAMIC" = true ] && [ ! -f "$DIST/libminiblink2.dylib" ]; then
   echo "error: no $DIST/libminiblink2.dylib — build it: scripts/build-lib.sh --shared --$MODE" >&2; exit 1
@@ -137,12 +137,6 @@ fi
 # --- include/ + resources/ ---------------------------------------------------
 echo "==> [$MODE] staging headers + runtime data"
 cp "$DIST"/include/miniblink2/*.h "$STAGE/include/miniblink2/"
-# miniblink49 compatibility: its SDK shipped include/wke/wke.h, and code ported
-# from it (this repo's samples included) writes `#include "wke/wke.h"`. Ship a
-# wrapper so both spellings work against -Iinclude.
-mkdir -p "$STAGE/include/wke"
-printf '// miniblink49-compatible include path; the real header lives in miniblink2/.\n#include "../miniblink2/wke.h"\n' \
-  > "$STAGE/include/wke/wke.h"
 for f in blink_resources.pak icudtl.dat media_controls_resources_100_percent.pak \
          snapshot_blob.bin v8_context_snapshot.bin v8_context_snapshot.arm64.bin; do
   [ -f "$DIST/$f" ] && cp "$DIST/$f" "$STAGE/resources/"
@@ -159,7 +153,7 @@ fi
 
 LIB_LINES=""; USE_LINES=""
 if [ "$WANT_DYNAMIC" = true ]; then
-  LIB_LINES+="- \`lib/libminiblink2.dylib\` — the whole engine as one shared library (wke + mb C APIs); loads the \`lib/libcurl*\` chain via \`@loader_path\`."$'\n'
+  LIB_LINES+="- \`lib/libminiblink2.dylib\` — the whole engine as one shared library (the miniblink2 mb* C API); loads the \`lib/libcurl*\` chain via \`@loader_path\`."$'\n'
   LIB_LINES+="- \`lib/libEGL.dylib\`, \`lib/libGLESv2.dylib\` — ANGLE (Metal); dlopen'd from the executable's directory for WebGL."$'\n'
   USE_LINES+="Link dynamically:
 
@@ -202,11 +196,10 @@ cat > "$STAGE/README.md" <<EOF
 # miniblink2 macOS SDK (arm64, $MODE, $KIND)
 
 Standalone single-process Blink (Chromium M150 / V8 15) behind the classic
-miniblink \`wke\` C API plus the native \`mb\` ABI — the spiritual successor to
+miniblink2 \`mb\` C API — the spiritual successor to
 miniblink49, rebuilt on the modern engine. https://github.com/yangxin0/miniblink2
 
-$LIB_LINES- \`include/miniblink2/\` — public headers (\`wke.h\`, \`mb_capi.h\`);
-  \`include/wke/wke.h\` is a miniblink49-compatible alias of the same header.
+$LIB_LINES- \`include/miniblink2/miniblink2.h\` — the public header (the mb* C API).
 - \`resources/\` — engine runtime data (resource paks, ICU data, V8 snapshots).
   **Required**: copy these next to your executable.
 
