@@ -1,0 +1,74 @@
+WebFrameWidgetImpl::InjectScrollbarGestureScroll: survive (and still scroll with) a null
+widget_input_handler_manager().
+
+Under scroll unification every scrollbar interaction (arrow/track press, autoscroll,
+thumb drag) is turned into a synthetic GestureScroll and posted toward the compositor
+input pipeline. In a single-process embedder with no browser-side input-handler host,
+widget_input_handler_manager() is null — the SetMouseCapture guard (0011) fixed the same
+null for mouse capture — so a mousedown on any native scrollbar SIGSEGV d in
+DispatchScrollGestureToCompositor (read at null+0xa0, hit in Glyph clicking the
+dictionary popup scrollbar).
+
+Guarding alone would leave scrollbars inert, so this is a fallback, not a skip: apply the
+GSU delta directly to the target ScrollableArea via UserScroll — the operation the
+compositor round-trip performs. GSB/GSE only bracket the injected stream and are dropped.
+Pixel deltas arrive pre-scaled by InputEventsScaleFactor (for the pipeline to divide back
+out), so the fallback unscales them. The browser-backed path is unchanged.
+
+--- a/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
++++ b/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
+@@ -136,6 +136,7 @@
+ #include "third_party/blink/renderer/core/page/page_animator.h"
+ #include "third_party/blink/renderer/core/page/pointer_lock_controller.h"
+ #include "third_party/blink/renderer/core/page/scrolling/fragment_anchor.h"
++#include "third_party/blink/renderer/core/scroll/scrollable_area.h"
+ #include "third_party/blink/renderer/core/page/validation_message_client.h"
+ #include "third_party/blink/renderer/core/page/viewport_description.h"
+ #include "third_party/blink/renderer/core/paint/timing/first_meaningful_paint_detector.h"
+@@ -3975,6 +3976,46 @@
+     ui::ScrollGranularity granularity,
+     cc::ElementId scrollable_area_element_id,
+     blink::WebInputEvent::Type injected_type) {
++  // A single-process embedder with no browser-side input-handler host has a
++  // null widget_input_handler_manager() (see the SetMouseCapture guard below);
++  // dispatching the synthetic gesture toward the (absent) compositor input
++  // pipeline would dereference it. Scrollbar arrows/track/thumb still have to
++  // scroll, so apply the delta straight to the target ScrollableArea instead,
++  // on the main thread — the same UserScroll the compositor path drives.
++  if (!widget_base_->widget_input_handler_manager()) {
++    if (injected_type != WebInputEvent::Type::kGestureScrollUpdate)
++      return;  // Begin/End only bracket the injected stream.
++    gfx::Vector2dF resolved_delta = delta;
++    if (granularity == ui::ScrollGranularity::kScrollByPrecisePixel ||
++        granularity == ui::ScrollGranularity::kScrollByPixel) {
++      // ScrollableArea::InjectScrollbarGestureScroll pre-scaled pixel deltas
++      // by InputEventsScaleFactor for the input pipeline to scale back down;
++      // this path bypasses that pipeline, so undo the scale.
++      if (LocalFrameView* root_view = LocalRootImpl()->GetFrame()->View()) {
++        float scale = root_view->InputEventsScaleFactor();
++        if (scale > 0)
++          resolved_delta.Scale(1.f / scale);
++      }
++    }
++    bool applied = false;
++    ForEachLocalFrameControlledByWidget(
++        LocalRootImpl()->GetFrame(), [&](WebLocalFrameImpl* local_frame) {
++          if (applied || !local_frame)
++            return;
++          LocalFrameView* view = local_frame->GetFrame()->View();
++          ScrollableArea* area =
++              view ? view->ScrollableAreaWithElementId(
++                         scrollable_area_element_id)
++                   : nullptr;
++          if (!area)
++            return;
++          area->UserScroll(granularity, ScrollOffset(resolved_delta),
++                           cc::ScrollSourceType::kRelativeScroll,
++                           ScrollableArea::ScrollCallback());
++          applied = true;
++        });
++    return;
++  }
+   // create a GestureScroll Event and post it to the compositor thread
+   // TODO(crbug.com/1126098) use original input event's timestamp.
+   // TODO(crbug.com/1082590) ensure continuity in scroll metrics collection
