@@ -2907,8 +2907,15 @@ bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y,
     widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
     base::RunLoop().RunUntilIdle();
   }
-  if (settle)  // final paint-clean pass; the interactive tick's lifecycle above is enough
-    widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
+  // The lifecycle update must be the LAST thing before the paint replay — for
+  // BOTH paths. The drive tick ends with RunUntilIdle, and any task it drains
+  // (queued input, timers, decode/network completions) can re-dirty style or
+  // layout; PaintOutsideOfLifecycle on a dirty document plays back an empty or
+  // partial record over the white-cleared canvas. Interactively that is one
+  // all-background frame — the page visibly flickers while the pointer moves,
+  // because every queued mouse-move dirties hover styles right after the
+  // in-loop lifecycle pass.
+  widget_->widget()->UpdateAllLifecyclePhases(blink::DocumentUpdateReason::kTest);
 
   auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
   blink::LocalFrame* frame = impl->GetFrame();
