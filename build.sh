@@ -31,6 +31,11 @@ echo "==> staging vendored curl -> $CURL_DEST"
 rm -rf "$CURL_DEST"
 mkdir -p "$CURL_DEST"
 cp -R "$HERE/third_party/curl/include" "$HERE/third_party/curl/lib" "$CURL_DEST/"
+# Retarget the STAGED libcurl's install id to THIS repo's copy (the tracked
+# binary is never modified — no binary churn in git); re-sign for arm64.
+install_name_tool -id "$HERE/third_party/curl/lib/libcurl.4.dylib" \
+    "$CURL_DEST/lib/libcurl.4.dylib" 2>/dev/null
+codesign --force --sign - "$CURL_DEST/lib/libcurl.4.dylib" 2>/dev/null
 
 echo "==> applying blink compatibility patches"
 for p in "$HERE"/patches/*.patch; do

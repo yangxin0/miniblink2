@@ -147,9 +147,18 @@ if [ "$STAGE" = 1 ]; then
   rsync -a --delete "$HERE/src/miniblink2/" "$MB2_DEST/"
   # Vendored curl SDK (headers + dylib chain) staged like the sources, so
   # BUILD.gn references it RELATIVELY — no absolute repo path in build files.
-  # -a keeps the libcurl.dylib symlink; the dylibs' install names (set by
-  # build-curl-macos.sh) still point at the repo copy for runtime loading.
+  # -a keeps the libcurl.dylib symlink.
   rsync -a --delete "$HERE/third_party/curl/include" "$HERE/third_party/curl/lib" "$CURL_DEST/"
+  # Retarget the STAGED libcurl's install id to THIS repo's copy. The id baked
+  # into the tracked binary may be stale (folder renames), and the tracked file
+  # must never be modified (no binary churn in git). The linker records this id
+  # as the runtime load path of every binary it links, so dev builds always
+  # point at wherever the repo currently lives; package.sh rewrites it to
+  # @loader_path for distribution. Re-sign: install_name_tool invalidates the
+  # ad-hoc signature and dyld kills invalidly-signed arm64 images at load.
+  install_name_tool -id "$HERE/third_party/curl/lib/libcurl.4.dylib" \
+      "$CURL_DEST/lib/libcurl.4.dylib" 2>/dev/null
+  codesign --force --sign - "$CURL_DEST/lib/libcurl.4.dylib" 2>/dev/null
   echo "==> applying blink compatibility patches"
   for p in "$HERE"/patches/*.patch; do
     [ -f "$p" ] || continue
