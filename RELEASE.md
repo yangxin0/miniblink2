@@ -5,7 +5,7 @@ Release notes for miniblink2. Each release is an annotated git tag
 
 ---
 
-## v0.2 — 2026-07-02 (unreleased)
+## v0.2 — 2026-07-03 (`v0.2`)
 
 **API consolidation.** The public surface is now exactly one header —
 `include/miniblink2/miniblink2.h`, the `mb*` C API (formerly `mb_capi.h`,
@@ -42,9 +42,24 @@ SDK footprint **~153 → ~105 MB** (incl. stripping ANGLE's libGLESv2 18.3 →
 - New: `scripts/sizemap.py` per-component size attribution; `BACKLOG.md` §E
   documents the measured leftovers deliberately not cut (WebRTC is a feature).
 
+**Distribution & build workflow.**
+
+- New `scripts/package.sh` (the miniblink49 `package-macos.sh` equivalent):
+  zips the SDK as `miniblink2-macos-arm64-<mode>[-kind].zip` (47 MB release
+  dynamic) with `lib/` + `include/` + `resources/` + a generated README. The
+  staged dylibs are made portable (vendored-curl reference rewritten to
+  `@loader_path`, `@rpath` install ids, ad-hoc re-signing) and the whole
+  curl chain + ANGLE + runtime data ship inside.
+- Per-profile out dirs (`out/mono-release` dev vs `out/mono-release-ship`):
+  dev↔ship switches no longer force a full ~28k-object recompile — a no-change
+  ship rebuild is ~3 minutes, the post-refactor rebuild here was 5 ninja edges.
+- The rebrand from miniblink-modern to **miniblink2** lands throughout
+  (docs, sources, patches; remote: github.com/yangxin0/miniblink2).
+
 Verified: samples boot and render against the pruned ship build; Intl
 (zh/en), CJK segmentation, collation, canvas, and root-fallback for trimmed
-locales all pass; `RTCPeerConnection` signaling intact.
+locales all pass; `RTCPeerConnection` signaling intact; the packaged zip
+compiles and boots the mb-API sample from a clean directory.
 
 ---
 
