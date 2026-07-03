@@ -1,0 +1,72 @@
+diff --git a/base/message_loop/message_pump_apple.h b/base/message_loop/message_pump_apple.h
+index 148b5a1..d318619 100644
+--- a/base/message_loop/message_pump_apple.h
++++ b/base/message_loop/message_pump_apple.h
+@@ -249,6 +249,16 @@ class BASE_EXPORT MessagePumpCFRunLoopBase : public MessagePump {
+   // the object was created in.
+   int nesting_level_ = 0;
+ 
++  // The virtual nesting floor. 0 when the pump was created before its run
++  // loop first ran (the browser case: every entry is observed). 1 when it
++  // was created from a callout of an ALREADY-RUNNING loop -- an embedder
++  // initializing the engine mid-loop -- whose entry predates the observers:
++  // that loop is modeled as one persistent outer level, the macOS analogue
++  // of the iOS OnAttach() flow. kCFRunLoopExit clamps at the floor, because
++  // below it there is always another unobserved pre-creation frame (see the
++  // balanced-loops contract on the destructor).
++  int initial_nesting_level_ = 0;
++
+   // The recursion depth (calculated in the same way as |nesting_level_|) of the
+   // innermost executing CFRunLoopRun loop started by a call to Run.
+   int run_nesting_level_ = 0;
+diff --git a/base/message_loop/message_pump_apple.mm b/base/message_loop/message_pump_apple.mm
+index c2b4b9b..3113e86 100644
+--- a/base/message_loop/message_pump_apple.mm
++++ b/base/message_loop/message_pump_apple.mm
+@@ -313,6 +313,26 @@ explicit OptionalAutoreleasePool(MessagePumpCFRunLoopBase* pump) {
+                               /*callout=*/EnterExitObserver,
+                               /*context=*/&observer_context));
+   SetModeMask(initial_mode_mask);
++
++  // Created from inside a callout of this (already-running) run loop? Then
++  // the loop entry predates the observers installed above, and the pump
++  // would meet its first pre-wait at nesting level 0 with no work-item scope
++  // to pop. Model the running loop as one persistent outer nesting level --
++  // exactly the iOS OnAttach() mid-loop attach flow -- so the scope/nesting
++  // invariants (no scope ops at level 0, stack size bounded by the level)
++  // hold. Created before the loop runs (the browser, CLI hosts), the current
++  // mode is null and nothing changes.
++  base::apple::ScopedCFTypeRef<CFStringRef> running_mode(
++      CFRunLoopCopyCurrentMode(run_loop_.get()));
++  if (running_mode) {
++    initial_nesting_level_ = 1;
++    nesting_level_ = 1;
++    deepest_nesting_level_ = 1;
++    // Covers native work between now and the loop next going to sleep; the
++    // delegate is not attached yet, so this is the documented nullopt
++    // placeholder scope.
++    PushWorkItemScope();
++  }
+ }
+ 
+ // Ideally called on the run loop thread.  If other run loops were running
+@@ -680,6 +700,19 @@ explicit OptionalAutoreleasePool(MessagePumpCFRunLoopBase* pump) {
+         self->MaybeScheduleNestingDeferredWork();
+       });
+ 
++      // At the virtual floor (a pump created mid-loop), the exiting loop is
++      // one whose entry predates this pump; control returns to another
++      // pre-creation frame, so the floor level and its work-item scope stay
++      // in place for that frame. Only the sleep marker is cleared.
++      if (self->initial_nesting_level_ > 0 &&
++          self->nesting_level_ == self->initial_nesting_level_) {
++        if (!self->sleeping_nesting_levels_.empty() &&
++            self->sleeping_nesting_levels_.top() == self->nesting_level_) {
++          self->sleeping_nesting_levels_.pop();
++        }
++        break;
++      }
++
+       // Current work item tracking needs to go away since execution will stop.
+       self->PopWorkItemScope();
+ 
