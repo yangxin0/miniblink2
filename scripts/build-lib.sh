@@ -119,6 +119,7 @@ OUT="out/mono-$MODE"
 if [ "$SIZE" = 1 ] && [ "$MODE" != debug ]; then OUT="out/mono-$MODE-ship"; fi
 DEST="$CHROMIUM/third_party/blink/renderer/miniblink_host"
 MB2_DEST="$CHROMIUM/third_party/blink/renderer/miniblink2"
+CURL_DEST="$CHROMIUM/third_party/blink/renderer/miniblink2_curl"
 GN_PATH="third_party/blink/renderer/miniblink_host"
 
 # Serialize builds that share this out dir. Two concurrent build-lib.sh runs would race —
@@ -141,9 +142,14 @@ if [ "$STAGE" = 1 ]; then
   # ninja's incremental build reuses every unchanged .o. (cp -R stamps every file with a
   # fresh mtime, forcing ninja to recompile all ~60 host objects on every run.) Trailing
   # slashes sync directory CONTENTS; --delete prunes files removed from src.
-  mkdir -p "$DEST" "$MB2_DEST"
+  mkdir -p "$DEST" "$MB2_DEST" "$CURL_DEST"
   rsync -a --delete "$HERE/src/miniblink_host/" "$DEST/"
   rsync -a --delete "$HERE/src/miniblink2/" "$MB2_DEST/"
+  # Vendored curl SDK (headers + dylib chain) staged like the sources, so
+  # BUILD.gn references it RELATIVELY — no absolute repo path in build files.
+  # -a keeps the libcurl.dylib symlink; the dylibs' install names (set by
+  # build-curl-macos.sh) still point at the repo copy for runtime loading.
+  rsync -a --delete "$HERE/third_party/curl/include" "$HERE/third_party/curl/lib" "$CURL_DEST/"
   echo "==> applying blink compatibility patches"
   for p in "$HERE"/patches/*.patch; do
     [ -f "$p" ] || continue

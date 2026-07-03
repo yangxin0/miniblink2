@@ -18,12 +18,12 @@ component("miniblink_host") {
 
   # Donor-tree sandbox lives at //third_party/blink/renderer/miniblink_host; this
   # makes `#include "miniblink_host/..."` resolve from there.
-  # Vendored WebSocket-enabled libcurl (third_party/curl) FIRST, so <curl/curl.h>
-  # and <curl/websockets.h> resolve to it rather than the SDK's WS-less system curl.
+  # Vendored WebSocket-enabled libcurl, staged from <repo>/third_party/curl into
+  # ../miniblink2_curl by build.sh / scripts/build-lib.sh — so this file needs no
+  # absolute repo path. FIRST, so <curl/curl.h> and <curl/websockets.h> resolve
+  # to it rather than the SDK's WS-less system curl.
   include_dirs = [
-    # NOTE: absolute path = the repo's on-disk directory; update BOTH curl paths
-    # in this file (and the vendored libcurl.4.dylib install id) on a folder rename.
-    "/Users/yangxin/dennis/chrome/miniblink2/third_party/curl/include",
+    "../miniblink2_curl/include",
     "//third_party/blink/renderer",
   ]
 
@@ -169,9 +169,12 @@ component("miniblink_host") {
   ]
 
   # Vendored WebSocket-enabled libcurl (scripts/build-curl-macos.sh): a dylib so its
-  # OpenSSL TLS stays isolated from BoringSSL (two-level namespace). Its absolute
-  # install_name lets the linked binaries find it at runtime without an rpath.
-  lib_dirs = [ "/Users/yangxin/dennis/chrome/miniblink2/third_party/curl/lib" ]  # see rename NOTE above
+  # OpenSSL TLS stays isolated from BoringSSL (two-level namespace). The lib dir is
+  # the STAGED copy (relative path, see the include_dirs note); the dylib's install
+  # name — baked in by build-curl-macos.sh — still points at the REPO copy, which is
+  # how linked binaries find it at runtime without an rpath. package.sh rewrites
+  # that to @loader_path for distribution.
+  lib_dirs = [ "../miniblink2_curl/lib" ]
   libs = [ "curl" ]  # -> third_party/curl/lib/libcurl.dylib (HTTP(S) + ws/wss)
   # Real audio output (media/mb_media_player.cc MbCoreAudioSink): a DefaultOutput
   # AudioUnit pulls decoded samples to the system audio device.

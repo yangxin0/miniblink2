@@ -24,6 +24,13 @@ cp -R "$HERE/src/miniblink_host" "$DEST"
 echo "==> staging miniblink2 API sources -> $MB2_DEST"
 rm -rf "$MB2_DEST"
 cp -R "$HERE/src/miniblink2" "$MB2_DEST"
+# Vendored curl SDK staged alongside so BUILD.gn references it relatively
+# (no absolute repo paths in build files). cp -R preserves the dylib symlink.
+CURL_DEST="$TREE/third_party/blink/renderer/miniblink2_curl"
+echo "==> staging vendored curl -> $CURL_DEST"
+rm -rf "$CURL_DEST"
+mkdir -p "$CURL_DEST"
+cp -R "$HERE/third_party/curl/include" "$HERE/third_party/curl/lib" "$CURL_DEST/"
 
 echo "==> applying blink compatibility patches"
 for p in "$HERE"/patches/*.patch; do

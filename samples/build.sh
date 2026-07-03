@@ -10,7 +10,8 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PROJ="$(cd "$HERE/.." && pwd)"
-DONOR="${1:-/Users/yangxin/dennis/chrome/chromium-150.0.7871.24}"
+# Donor tree defaults to the sibling checkout (same convention as build-lib.sh).
+DONOR="${1:-$(dirname "$PROJ")/chromium-150.0.7871.24}"
 OUT="$DONOR/out/Release"
 DYLIB="$OUT/libminiblink_host.dylib"
 
