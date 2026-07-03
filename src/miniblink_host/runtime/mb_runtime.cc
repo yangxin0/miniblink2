@@ -130,6 +130,19 @@ MbRuntime::MbRuntime() {
     base::debug::EnableInProcessStackDumping();
   MB_STEP("2 CommandLine::Init");
   base::CommandLine::Init(0, nullptr);
+  // Pin base::DIR_ASSETS to this module's own directory before anything reads
+  // it (ICU data, the resource paks, and the V8 snapshots all resolve through
+  // it). Unbundled this matches the existing DIR_MODULE fallback; but inside a
+  // macOS .app bundle DIR_ASSETS resolves to FrameworkBundlePath()/Resources —
+  // for an embedder with no framework bundle that is "<App>.app/Resources",
+  // which a sealed bundle cannot even contain. The module directory IS the
+  // vendoring contract (the runtime files ship next to the library).
+  MB_STEP("2a PathService::Override(DIR_ASSETS)");
+  {
+    base::FilePath module_path;
+    if (base::PathService::Get(base::FILE_MODULE, &module_path))
+      base::PathService::Override(base::DIR_ASSETS, module_path.DirName());
+  }
   MB_STEP("3 InitializeICU");
   base::i18n::InitializeICU();  // needs icudtl.dat next to the module (vendor it)
   MB_STEP("4 FeatureList");
