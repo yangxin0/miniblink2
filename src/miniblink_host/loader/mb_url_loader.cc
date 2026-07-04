@@ -8,6 +8,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -1035,8 +1036,27 @@ void MbSetRequestMockHook(MbRequestMockHook hook) {
   RequestMockHook() = std::move(hook);
 }
 
+namespace {
+// Per-context hooks, keyed by the opaque owner pointer. Leaked (no exit-time
+// destructor); entries are erased when their view unregisters.
+std::map<const void*, MbRequestMockHook>& ContextMockHooks() {
+  static auto* m = new std::map<const void*, MbRequestMockHook>();
+  return *m;
+}
+}  // namespace
+
+void MbSetRequestMockHookForContext(const void* ctx, MbRequestMockHook hook) {
+  if (!ctx)
+    return;
+  if (hook)
+    ContextMockHooks()[ctx] = std::move(hook);
+  else
+    ContextMockHooks().erase(ctx);
+}
+
 bool MbFindMock(const std::string& url, std::string* body,
-                std::string* content_type, int* status) {
+                std::string* content_type, int* status,
+                const void* host_ctx) {
   // Static mocks first. Last matching entry wins, so a later mbMockResponse overrides an
   // earlier overlapping one (intuitive "re-mock to replace").
   const MockEntry* hit = nullptr;
@@ -1051,6 +1071,23 @@ bool MbFindMock(const std::string& url, std::string* body,
     if (status)
       *status = hit->status;
     return true;
+  }
+  // Per-context hook next: the requesting view's own mock, if registered.
+  if (host_ctx) {
+    auto it = ContextMockHooks().find(host_ctx);
+    if (it != ContextMockHooks().end() && it->second) {
+      std::string b, ct;
+      int st = 0;
+      if (it->second(url, &b, &ct, &st)) {
+        if (body)
+          *body = std::move(b);
+        if (content_type)
+          *content_type = std::move(ct);
+        if (status)
+          *status = st > 0 ? st : 200;
+        return true;
+      }
+    }
   }
   // Then the dynamic hook (computed per URL). It runs for every otherwise-unmocked load.
   if (RequestMockHook()) {
@@ -1156,7 +1193,7 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 const std::string& post_content_type,
                 const std::string& http_method, std::string* out_final_url,
                 int* out_status, std::string* out_headers,
-                std::string* out_error) {
+                std::string* out_error, const void* host_ctx) {
   if (out_error)
     out_error->clear();
   GURL url(url_spec);
@@ -1166,7 +1203,7 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
   {
     std::string mock_body, mock_ct;
     int mock_status = 0;
-    if (MbFindMock(url.spec(), &mock_body, &mock_ct, &mock_status)) {
+    if (MbFindMock(url.spec(), &mock_body, &mock_ct, &mock_status, host_ctx)) {
       *body = std::move(mock_body);
       if (content_type)
         *content_type = mock_ct;
@@ -1304,9 +1341,11 @@ class MbSseStream : public std::enable_shared_from_this<MbSseStream> {
   std::atomic<bool> stop_{false};
 };
 
-MbURLLoader::MbURLLoader(std::string user_agent, std::string extra_headers)
+MbURLLoader::MbURLLoader(std::string user_agent, std::string extra_headers,
+                         const void* host_ctx)
     : user_agent_(std::move(user_agent)),
-      extra_headers_(std::move(extra_headers)) {}
+      extra_headers_(std::move(extra_headers)),
+      host_ctx_(host_ctx) {}
 MbURLLoader::~MbURLLoader() {
   if (sse_stream_)
     sse_stream_->Stop();  // detached worker observes stop_ and exits
@@ -1415,7 +1454,7 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
     std::string mock_b, mock_c;
     int mock_s = 0;
     if (accept.find("text/event-stream") != std::string::npos &&
-        !MbFindMock(fetch_url.spec(), &mock_b, &mock_c, &mock_s)) {
+        !MbFindMock(fetch_url.spec(), &mock_b, &mock_c, &mock_s, host_ctx_)) {
       std::string req_headers = extra_headers_;
       for (const auto& kv : request->headers.GetHeaderVector()) {
         if (ToLower(kv.key) == "content-type")
@@ -1441,7 +1480,8 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   // real fetch (offline tests, API substitution). Checked before any scheme fetch.
   std::string mock_body, mock_ct;
   int mock_status = 0;
-  if (MbFindMock(fetch_url.spec(), &mock_body, &mock_ct, &mock_status)) {
+  if (MbFindMock(fetch_url.spec(), &mock_body, &mock_ct, &mock_status,
+                 host_ctx_)) {
     contents = std::move(mock_body);
     http_content_type = mock_ct.empty() ? std::string("text/html") : mock_ct;
     http_status = mock_status > 0 ? mock_status : 200;

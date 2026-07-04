@@ -453,6 +453,11 @@ class MbWebView {
   void SetBeginLoadingCallback(std::function<void(const std::string&)> cb);
   void SetFailLoadingCallback(
       std::function<void(const std::string&, const std::string&)> cb);
+  // Per-view dynamic request mock (see MbSetRequestMockHookForContext); this
+  // view is the context. Pass {} to remove. Cleared automatically on destroy.
+  void SetRequestMockCallback(
+      std::function<bool(const std::string&, std::string*, std::string*, int*)>
+          cb);
   // Called by MbFrameClient when the main frame fires DOMContentLoaded (DOM parsed +
   // deferred scripts run, BEFORE subresources/images — the "page interactive" signal,
   // earlier than load-finish/onload). Fires the registered callback.

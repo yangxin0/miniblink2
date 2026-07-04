@@ -307,6 +307,9 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
 MbWebView::MbWebView() = default;
 
 MbWebView::~MbWebView() {
+  // Erase this view's per-context mock hook before anything else — a fetch
+  // fired during teardown must not consult a hook whose captures are dying.
+  MbSetRequestMockHookForContext(this, {});
   // Tear down the blink object graph (WebViewImpl -> Page -> main LocalFrame ->
   // WebFrameWidget) HERE, in the destructor body, while frame_client_/view_client_/
   // agent_group_scheduler_ are still alive — those blink objects hold references to
@@ -1894,6 +1897,12 @@ void MbWebView::SetBeginLoadingCallback(
 void MbWebView::SetFailLoadingCallback(
     std::function<void(const std::string&, const std::string&)> cb) {
   on_fail_loading_ = std::move(cb);
+}
+
+void MbWebView::SetRequestMockCallback(
+    std::function<bool(const std::string&, std::string*, std::string*, int*)>
+        cb) {
+  MbSetRequestMockHookForContext(this, std::move(cb));
 }
 
 void MbWebView::OnDOMContentLoaded() {

@@ -139,7 +139,8 @@ void MbAddMock(const std::string& substring, const std::string& body,
                const std::string& content_type, int status);
 void MbClearMocks();
 bool MbFindMock(const std::string& url, std::string* body,
-                std::string* content_type, int* status);
+                std::string* content_type, int* status,
+                const void* host_ctx = nullptr);
 
 // Dynamic request mock: consulted by MbFindMock when no static mock matches. The hook may
 // COMPUTE a response for any URL (one the caller can't pre-register) and fill body/
@@ -148,6 +149,15 @@ bool MbFindMock(const std::string& url, std::string* body,
 using MbRequestMockHook = std::function<bool(const std::string& url, std::string* body,
                                              std::string* content_type, int* status)>;
 void MbSetRequestMockHook(MbRequestMockHook hook);
+
+// Per-CONTEXT dynamic request mock: same shape as the process-wide hook but
+// keyed by an opaque host context (the owning MbWebView), so two views can
+// serve the same URL differently. Consulted by MbFindMock after the static
+// table and BEFORE the process-wide hook, only for fetches that carry the
+// context (a view's document, subresources, and view-level fetch helpers;
+// workers and other viewless fetches fall through to the process-wide hook).
+// Pass {} to erase. The registrant must erase before the context dies.
+void MbSetRequestMockHookForContext(const void* ctx, MbRequestMockHook hook);
 
 // Request URL rewriting: before any fetch, replace the first occurrence of `from`
 // with `to` in the request URL (host swap, scheme upgrade, CDN -> local mock). The
@@ -217,13 +227,17 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* out_final_url = nullptr,
                 int* out_status = nullptr,
                 std::string* out_headers = nullptr,
-                std::string* out_error = nullptr);
+                std::string* out_error = nullptr,
+                const void* host_ctx = nullptr);
 
 class MbURLLoader : public blink::URLLoader {
  public:
   // `user_agent` is sent on every subresource request (empty -> default);
   // `extra_headers` are newline-separated "Name: Value" lines added to each.
-  explicit MbURLLoader(std::string user_agent = "", std::string extra_headers = "");
+  // `host_ctx` identifies the owning view for per-context request mocks
+  // (see MbSetRequestMockHookForContext); null means process-wide only.
+  explicit MbURLLoader(std::string user_agent = "", std::string extra_headers = "",
+                       const void* host_ctx = nullptr);
   ~MbURLLoader() override;
 
   // blink::URLLoader:
@@ -292,6 +306,7 @@ class MbURLLoader : public blink::URLLoader {
   blink::URLLoaderClient* client_ = nullptr;  // not owned; valid until done/cancel
   std::string user_agent_;  // sent on each request (empty -> default)
   std::string extra_headers_;  // newline-separated "Name: Value" added per request
+  const void* host_ctx_ = nullptr;  // owning view for per-context mocks (may be null)
   std::string body_;  // owns the bytes while the data pipe drains them
   std::unique_ptr<mojo::DataPipeProducer> data_pipe_producer_;
   // SSE streaming state (main thread): the producer + a watcher draining chunks.
