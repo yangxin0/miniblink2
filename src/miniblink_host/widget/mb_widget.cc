@@ -397,6 +397,97 @@ void MbWidget::SendMouseMove(int x, int y) {
   impl->HandleInputEvent(blink::WebCoalescedInputEvent(e, ui::LatencyInfo()));
 }
 
+void MbWidget::SendMouseEvent(int type, int x, int y, int button,
+                              int click_count, int modifiers) {
+  if (!widget_)
+    return;
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  blink::WebMouseEvent::Button btn = blink::WebMouseEvent::Button::kLeft;
+  if (button == 1)
+    btn = blink::WebMouseEvent::Button::kMiddle;
+  else if (button == 2)
+    btn = blink::WebMouseEvent::Button::kRight;
+  int mods = 0;
+  if (modifiers & 1)
+    mods |= blink::WebInputEvent::kControlKey;
+  if (modifiers & 2)
+    mods |= blink::WebInputEvent::kShiftKey;
+  if (modifiers & 4)
+    mods |= blink::WebInputEvent::kAltKey;
+  if (modifiers & 8)
+    mods |= blink::WebInputEvent::kMetaKey;
+
+  blink::WebInputEvent::Type ev_type;
+  switch (type) {
+    case 1:
+      ev_type = blink::WebInputEvent::Type::kMouseDown;
+      mods |= ButtonDownModifier(btn);
+      if (btn == blink::WebMouseEvent::Button::kLeft)
+        mouse_pressed_ = true;
+      break;
+    case 2:
+      ev_type = blink::WebInputEvent::Type::kMouseUp;
+      if (btn == blink::WebMouseEvent::Button::kLeft)
+        mouse_pressed_ = false;
+      break;
+    default:
+      ev_type = blink::WebInputEvent::Type::kMouseMove;
+      // While a button is held, moves carry the held-button mask (drags).
+      if (mouse_pressed_)
+        mods |= blink::WebInputEvent::kLeftButtonDown;
+      break;
+  }
+
+  blink::WebMouseEvent e(ev_type, mods, base::TimeTicks::Now());
+  e.pointer_type = blink::WebPointerProperties::PointerType::kMouse;
+  e.SetPositionInWidget(x, y);
+  e.SetPositionInScreen(x, y);
+  e.button = (ev_type == blink::WebInputEvent::Type::kMouseMove)
+                 ? blink::WebMouseEvent::Button::kNoButton
+                 : btn;
+  e.click_count = (ev_type == blink::WebInputEvent::Type::kMouseMove)
+                      ? 0
+                      : (click_count > 0 ? click_count : 1);
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(e, ui::LatencyInfo()));
+}
+
+bool MbWidget::SendWheelEx(int x, int y, float delta_x, float delta_y,
+                           bool precise, int modifiers) {
+  if (!widget_)
+    return false;
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  int mods = 0;
+  if (modifiers & 1)
+    mods |= blink::WebInputEvent::kControlKey;
+  if (modifiers & 2)
+    mods |= blink::WebInputEvent::kShiftKey;
+  if (modifiers & 4)
+    mods |= blink::WebInputEvent::kAltKey;
+  if (modifiers & 8)
+    mods |= blink::WebInputEvent::kMetaKey;
+  // Same DOM-sign convention as SendWheel: positive deltaY scrolls content
+  // DOWN; blink's field is the negative of that. Deltas stay float — no
+  // 120-tick quantization, so slow trackpad drags aren't lost.
+  blink::WebMouseWheelEvent e(blink::WebInputEvent::Type::kMouseWheel, mods,
+                              base::TimeTicks::Now());
+  e.SetPositionInWidget(x, y);
+  e.SetPositionInScreen(x, y);
+  e.delta_x = -delta_x;
+  e.delta_y = -delta_y;
+  e.wheel_ticks_x = -delta_x / 120.0f;
+  e.wheel_ticks_y = -delta_y / 120.0f;
+  e.delta_units = precise ? ui::ScrollGranularity::kScrollByPrecisePixel
+                          : ui::ScrollGranularity::kScrollByPixel;
+  // Non-phased (see SendWheel): a phased wheel would route to the compositor's
+  // gesture-scroll generator, absent in this non-compositing widget.
+  e.phase = blink::WebMouseWheelEvent::kPhaseNone;
+  e.dispatch_type = blink::WebInputEvent::DispatchType::kBlocking;
+  blink::WebInputEventResult r = impl->HandleInputEvent(
+      blink::WebCoalescedInputEvent(e, ui::LatencyInfo()));
+  return r == blink::WebInputEventResult::kHandledApplication ||
+         r == blink::WebInputEventResult::kHandledSystem;
+}
+
 bool MbWidget::SendWheel(int x, int y, int delta_x, int delta_y, int modifiers) {
   if (!widget_)
     return false;

@@ -39,6 +39,30 @@ MB_EXPORT void mbShutdown(void);
 // load and paint, and in the host's event loop.
 MB_EXPORT void mbPumpMessages(void);
 
+// INTERACTIVE hosts: the re-entrancy-safe update slice. Several mb* calls drive
+// a nested run loop (loads, waits, paints, pumps), and on shared-main-thread
+// platforms host callbacks (timers, display links) can fire INSIDE them and
+// call back into the engine. mbUpdate is the safe tick for that world:
+//  - engine off the stack: runs pending engine work (one mbPumpMessages slice),
+//    then drains callbacks queued by mbDefer;
+//  - engine ON the stack (this tick fired mid-engine-call): returns immediately
+//    instead of nesting — the outermost call's next mbUpdate does the work.
+// Call it from the host's frame tick instead of mbPumpMessages.
+MB_EXPORT void mbUpdate(void);
+
+// 1 while any engine-entering mb* call is on the current stack. Hosts that must
+// gate their own work (e.g. skip a blit when a pump tick landed inside a load)
+// can poll this instead of tracking call depth themselves.
+MB_EXPORT int mbInEngineCall(void);
+
+// Run  when the engine is next OFF the stack: immediately if it
+// already is, otherwise from the tail of the next mbUpdate. Use for work that
+// must ENTER the engine (create a view, start a load) but was scheduled from a
+// callback firing inside an engine call — calling in directly from there would
+// re-enter blink. Engine-side replacement for host-rolled deferral queues.
+typedef void (*mbDeferredCallback)(void* userdata);
+MB_EXPORT void mbDefer(mbDeferredCallback cb, void* userdata);
+
 // Drive the engine for ~ms of real time so setTimeout / async work runs.
 MB_EXPORT void mbWait(mbView*, int ms);
 
@@ -207,6 +231,38 @@ MB_EXPORT void mbSetInitScript(mbView*, const char* utf8_script);
 MB_EXPORT int mbInsertCSS(mbView*, const char* css);
 
 // Synthesize a left mouse click (down+up) at (x,y) in the view.
+// ---- Typed input events -----------------------------------------------------
+// Structured alternatives to the positional mbSend* shorthands: explicit
+// fields, precise units, room to grow without another trailing parameter.
+// Set struct_size = sizeof(the struct); it versions the ABI (a newer engine
+// can tell how much of the struct the caller filled).
+
+#define MB_MOUSE_MOVE 0
+#define MB_MOUSE_DOWN 1
+#define MB_MOUSE_UP   2
+
+typedef struct mbMouseEvent {
+  int struct_size;  // = sizeof(mbMouseEvent)
+  int type;         // MB_MOUSE_MOVE / MB_MOUSE_DOWN / MB_MOUSE_UP
+  int x, y;         // logical (CSS) px in the view
+  int button;       // 0 left, 1 middle, 2 right (ignored for MOVE)
+  int click_count;  // DOWN/UP: 1 = single, 2 = double-click
+  int modifiers;    // bitmask: 1 ctrl, 2 shift, 4 alt, 8 meta
+} mbMouseEvent;
+MB_EXPORT void mbSendMouseEvent(mbView*, const mbMouseEvent*);
+
+typedef struct mbWheelEvent {
+  int struct_size;         // = sizeof(mbWheelEvent)
+  int x, y;                // logical px
+  float delta_x, delta_y;  // precise pixel deltas, DOM sign (deltaY>0 = content down)
+  int precise;             // 1 = trackpad-style precise deltas
+  int phase;               // RESERVED, must be 0 (no compositor gesture generator)
+  int modifiers;           // bitmask as above
+} mbWheelEvent;
+// Returns 1 if a blocking listener consumed the wheel (called preventDefault) -
+// the host then suppresses its default scroll.
+MB_EXPORT int mbSendWheelEvent(mbView*, const mbWheelEvent*);
+
 MB_EXPORT void mbSendMouseClick(mbView*, int x, int y);
 // General click at (x,y): `button` 0=left/1=middle/2=right; `modifiers` is a bitmask
 // 1=ctrl 2=shift 4=alt 8=meta — so the page sees e.button + e.ctrlKey/shiftKey/altKey/
@@ -1008,6 +1064,14 @@ MB_EXPORT int mbRepaintToBitmap(mbView*,
                                 int width,
                                 int height,
                                 int stride);
+
+// 1 when blink has requested a new frame since the last successful paint
+// (style/layout invalidation, animations, rAF) — 0 means the last painted frame
+// is still current and a polling host can SKIP its mbRepaintToBitmap/blit for
+// this tick. Snapshot semantics: painting clears the flag up front, so a
+// request landing mid-paint marks the NEXT frame. Composited views (see
+// mbSetCompositingEnabled) always report 1. New views start dirty.
+MB_EXPORT int mbViewIsDirty(mbView*);
 
 // Render the current frame and encode it to `path`. The image format follows the
 // extension: .jpg/.jpeg -> JPEG (quality 90), anything else -> PNG. Returns 1 on success.

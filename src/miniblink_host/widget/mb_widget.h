@@ -53,6 +53,17 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   // `wheel` handlers (isTrusted=true). Returns true if a blocking listener consumed
   // it (called preventDefault) — the caller then suppresses the default scroll.
   bool SendWheel(int x, int y, int delta_x, int delta_y, int modifiers);
+  // Typed-event entries (the mbMouseEvent/mbWheelEvent C structs route here).
+  // General mouse event: type 0=move 1=down 2=up; button 0=left 1=middle
+  // 2=right; click_count for down/up (2 = double-click); modifiers bitmask
+  // 1=ctrl 2=shift 4=alt 8=meta.
+  void SendMouseEvent(int type, int x, int y, int button, int click_count,
+                      int modifiers);
+  // Precise wheel: float pixel deltas with DOM sign; `precise` marks
+  // trackpad-style deltas (kScrollByPrecisePixel). Returns true if a blocking
+  // listener consumed it (preventDefault).
+  bool SendWheelEx(int x, int y, float delta_x, float delta_y, bool precise,
+                   int modifiers);
   // Trusted single-finger touch tap at (x,y): a real WebPointerEvent(kTouch) down+up,
   // so blink fires pointerdown/up + touchstart/end with isTrusted=true. Returns false if
   // no widget. (Dispatch may be async — the element's handlers run on the next pump.)
@@ -82,6 +93,15 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   // compositionend + input. Either may be empty/null.
   void SendIme(const char* composing, const char* committed);
 
+  // Frame-request flag for hosts that poll (mbViewIsDirty): blink calls
+  // ScheduleNonCompositedAnimation() whenever the non-composited widget wants a
+  // new frame (style/layout invalidation, animations, rAF). Painting SNAPSHOTS
+  // and clears it up front, so a request that lands mid-paint counts toward the
+  // NEXT frame instead of being lost.
+  void ScheduleNonCompositedAnimation() override { needs_frame_ = true; }
+  bool needs_frame() const { return needs_frame_; }
+  void set_needs_frame(bool on) { needs_frame_ = on; }
+
   blink::WebFrameWidget* widget() { return widget_; }
   // The software compositor backing this widget when attached compositing, else null.
   SoftwareCompositor* compositor() { return compositor_.get(); }
@@ -100,6 +120,7 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   void SetRealisticScreen(int view_w, int view_h);
 
   blink::WebFrameWidget* widget_ = nullptr;  // owned by Blink (the frame)
+  bool needs_frame_ = true;  // start dirty: the first paint is always wanted
   bool mouse_pressed_ = false;  // left button held (drag): moves carry the mask
   bool composited_ = false;
   std::unique_ptr<SoftwareCompositor> compositor_;  // non-null iff composited_

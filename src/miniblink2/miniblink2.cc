@@ -72,6 +72,37 @@ void CopyToBuffer(const std::string& result, char* out, int out_cap) {
 }
 }  // namespace
 
+namespace {
+
+// Engine-call depth for the C ABI: >0 while any engine-entering export is on
+// the stack. Single-threaded by contract (the engine lives on the caller's
+// main thread), so a plain int suffices.
+int g_engine_depth = 0;
+struct EngineScope {
+  EngineScope() { ++g_engine_depth; }
+  ~EngineScope() { --g_engine_depth; }
+  EngineScope(const EngineScope&) = delete;
+  EngineScope& operator=(const EngineScope&) = delete;
+};
+
+// Callbacks parked by mbDefer until the engine is off the stack.
+std::vector<std::pair<mbDeferredCallback, void*>>& DeferredQueue() {
+  // Intentionally leaked: no exit-time destructor (the process outlives it).
+  static auto* q = new std::vector<std::pair<mbDeferredCallback, void*>>();
+  return *q;
+}
+
+void DrainDeferred() {
+  // Swap out first: a drained callback may mbDefer again (repark for the next
+  // update) or start a load that pumps - the queue must not be iterated live.
+  std::vector<std::pair<mbDeferredCallback, void*>> ready;
+  ready.swap(DeferredQueue());
+  for (auto& [cb, userdata] : ready)
+    cb(userdata);
+}
+
+}  // namespace
+
 extern "C" {
 
 int mbInitialize(void) {
@@ -83,46 +114,79 @@ void mbShutdown(void) {
 }
 
 void mbPumpMessages(void) {
+  EngineScope engine_scope;
   if (auto* rt = mb::MbRuntime::Get())
     rt->PumpOnce();
 }
 
+void mbUpdate(void) {
+  if (g_engine_depth > 0)
+    return;  // fired inside an engine call; the outermost caller updates next
+  {
+    EngineScope engine_scope;
+    if (auto* rt = mb::MbRuntime::Get())
+      rt->PumpOnce();
+  }
+  DrainDeferred();
+}
+
+int mbInEngineCall(void) {
+  return g_engine_depth > 0 ? 1 : 0;
+}
+
+void mbDefer(mbDeferredCallback cb, void* userdata) {
+  if (!cb)
+    return;
+  if (g_engine_depth == 0) {
+    cb(userdata);
+    return;
+  }
+  DeferredQueue().emplace_back(cb, userdata);
+}
+
 void mbWait(mbView* v, int ms) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->WaitMs(ms);
 }
 
 int mbWaitForSelector(mbView* v, const char* css_selector, int timeout_ms) {
+  EngineScope engine_scope;
   if (!v || !v->impl || !css_selector)
     return 0;
   return v->impl->WaitForSelector(css_selector, timeout_ms) ? 1 : 0;
 }
 
 int mbWaitForVisibleSelector(mbView* v, const char* css_selector, int timeout_ms) {
+  EngineScope engine_scope;
   if (!v || !v->impl || !css_selector)
     return 0;
   return v->impl->WaitForVisibleSelector(css_selector, timeout_ms) ? 1 : 0;
 }
 
 int mbWaitForSelectorHidden(mbView* v, const char* css_selector, int timeout_ms) {
+  EngineScope engine_scope;
   if (!v || !v->impl || !css_selector)
     return 0;
   return v->impl->WaitForSelectorHidden(css_selector, timeout_ms) ? 1 : 0;
 }
 
 int mbWaitForNetworkIdle(mbView* v, int idle_ms, int timeout_ms) {
+  EngineScope engine_scope;
   if (!v || !v->impl)
     return 0;
   return v->impl->WaitForNetworkIdle(idle_ms, timeout_ms) ? 1 : 0;
 }
 
 int mbWaitForFunction(mbView* v, const char* js_expr, int timeout_ms) {
+  EngineScope engine_scope;
   if (!v || !v->impl || !js_expr)
     return 0;
   return v->impl->WaitForFunction(js_expr, timeout_ms) ? 1 : 0;
 }
 
 mbView* mbCreateView(int width, int height) {
+  EngineScope engine_scope;
   if (!mb::MbRuntime::Get())
     return nullptr;  // must mbInitialize() first
   auto view = std::make_unique<mbView>();
@@ -133,6 +197,7 @@ mbView* mbCreateView(int width, int height) {
 }
 
 void mbDestroyView(mbView* v) {
+  EngineScope engine_scope;
   delete v;  // unique_ptr<MbWebView> dtor closes the WebView
 }
 
@@ -152,6 +217,7 @@ int mbViewFrameSinkRequested(mbView* v) {
 }
 
 void mbViewComposite(mbView* v) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->Composite();
 }
@@ -163,21 +229,25 @@ unsigned int mbViewCompositorPixel(mbView* v, int x, int y) {
 }
 
 void mbResize(mbView* v, int width, int height) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->Resize(width, height);
 }
 
 void mbLoadHTML(mbView* v, const char* utf8_html, const char* base_url) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->LoadHTML(utf8_html, base_url);
 }
 
 void mbLoadURL(mbView* v, const char* utf8_url) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->LoadURL(utf8_url);
 }
 
 int mbDownloadURL(mbView* v, const char* url, const char* dest_path) {
+  EngineScope engine_scope;
   if (!v || !v->impl || !url || !dest_path)
     return 0;
   return v->impl->DownloadURL(url, dest_path) ? 1 : 0;
@@ -276,6 +346,7 @@ void mbOnNewWindow(mbView* v, mbNewWindowCallback cb, void* userdata) {
 
 void mbPostURL(mbView* v, const char* utf8_url, const char* utf8_body,
                const char* content_type) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->PostURL(utf8_url, utf8_body,
                      utf8_body ? std::strlen(utf8_body) : 0, content_type);
@@ -283,12 +354,14 @@ void mbPostURL(mbView* v, const char* utf8_url, const char* utf8_body,
 
 void mbPostURLData(mbView* v, const char* utf8_url, const char* body, int body_len,
                    const char* content_type) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->PostURL(utf8_url, body,
                      body_len > 0 ? static_cast<size_t>(body_len) : 0, content_type);
 }
 
 void mbRunJS(mbView* v, const char* utf8_script) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->RunJS(utf8_script);
 }
@@ -299,37 +372,44 @@ void mbSetInitScript(mbView* v, const char* utf8_script) {
 }
 
 int mbInsertCSS(mbView* v, const char* css) {
+  EngineScope engine_scope;
   if (!v || !v->impl || !css)
     return 0;
   return v->impl->InsertCSS(css) ? 1 : 0;
 }
 
 void mbSendMouseClick(mbView* v, int x, int y) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->SendMouseClick(x, y);
 }
 
 void mbSendMouseClickEx(mbView* v, int x, int y, int button, int modifiers) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->SendMouseClickEx(x, y, button, modifiers);
 }
 
 void mbSendMouseDown(mbView* v, int x, int y) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->SendMouseDown(x, y);
 }
 
 void mbSendMouseUp(mbView* v, int x, int y) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->SendMouseUp(x, y);
 }
 
 void mbSendTouchTap(mbView* v, int x, int y) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->SendTouchTap(x, y);
 }
 
 void mbSendTouchSwipe(mbView* v, int x1, int y1, int x2, int y2) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->SendTouchSwipe(x1, y1, x2, y2);
 }
@@ -444,12 +524,34 @@ int mbSelectOption(mbView* v, const char* css_selector, const char* value) {
   return v->impl->SelectOption(css_selector, value) ? 1 : 0;
 }
 
+void mbSendMouseEvent(mbView* v, const mbMouseEvent* e) {
+  EngineScope engine_scope;
+  if (!v || !v->impl || !e ||
+      e->struct_size < static_cast<int>(sizeof(mbMouseEvent)))
+    return;
+  v->impl->SendMouseEvent(e->type, e->x, e->y, e->button, e->click_count,
+                          e->modifiers);
+}
+
+int mbSendWheelEvent(mbView* v, const mbWheelEvent* e) {
+  EngineScope engine_scope;
+  if (!v || !v->impl || !e ||
+      e->struct_size < static_cast<int>(sizeof(mbWheelEvent)) || e->phase != 0)
+    return 0;
+  return v->impl->SendWheelEx(e->x, e->y, e->delta_x, e->delta_y,
+                              e->precise != 0, e->modifiers)
+             ? 1
+             : 0;
+}
+
 void mbSendMouseMove(mbView* v, int x, int y) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->SendMouseMove(x, y);
 }
 
 void mbSendWheel(mbView* v, int x, int y, int deltaX, int deltaY, int modifiers) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->SendWheel(x, y, deltaX, deltaY, modifiers);
 }
@@ -579,26 +681,31 @@ void mbSetExtraHeaders(mbView* v, const char* utf8_headers) {
 }
 
 void mbSendText(mbView* v, const char* utf8_text) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->SendText(utf8_text);
 }
 
 void mbSendKey(mbView* v, const char* key_name) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->SendKey(key_name);
 }
 
 void mbSendKeyEx(mbView* v, const char* key, int modifiers) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->SendKeyEx(key, modifiers);
 }
 
 void mbSendKeyUp(mbView* v, int windows_key_code) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->SendKeyUp(windows_key_code);
 }
 
 void mbSendIme(mbView* v, const char* composing, const char* committed) {
+  EngineScope engine_scope;
   if (v && v->impl)
     v->impl->SendIme(composing, committed);
 }
@@ -1263,6 +1370,7 @@ int mbGoForward(mbView* v) {
 }
 
 int mbEvalJSIsolated(mbView* v, const char* utf8_script, char* out, int out_cap) {
+  EngineScope engine_scope;
   if (!v || !v->impl)
     return 0;
   std::string result = v->impl->EvalIsolated(utf8_script);
@@ -1271,6 +1379,7 @@ int mbEvalJSIsolated(mbView* v, const char* utf8_script, char* out, int out_cap)
 }
 
 int mbEvalJS(mbView* v, const char* utf8_script, char* out, int out_cap) {
+  EngineScope engine_scope;
   if (!v || !v->impl)
     return 0;
   std::string result = v->impl->EvalToString(utf8_script);
@@ -1313,6 +1422,7 @@ int mbGetTextForSelectorInFrame(mbView* v, int frame_index,
 
 int mbEvalJSEx(mbView* v, const char* utf8_script, char* out_value,
                int value_cap, char* out_type, int type_cap) {
+  EngineScope engine_scope;
   if (!v || !v->impl)
     return 0;
   std::string type;
@@ -1323,12 +1433,20 @@ int mbEvalJSEx(mbView* v, const char* utf8_script, char* out_value,
 }
 
 int mbPaintToBitmap(mbView* v, void* out_bgra, int width, int height, int stride) {
+  EngineScope engine_scope;
   if (!v || !v->impl || !out_bgra)
     return 0;
   return v->impl->PaintToBitmap(out_bgra, width, height, stride) ? 1 : 0;
 }
 
+int mbViewIsDirty(mbView* v) {
+  if (!v || !v->impl)
+    return 0;
+  return v->impl->IsDirty() ? 1 : 0;
+}
+
 int mbRepaintToBitmap(mbView* v, void* out_bgra, int width, int height, int stride) {
+  EngineScope engine_scope;
   if (!v || !v->impl || !out_bgra)
     return 0;
   // Fast INTERACTIVE paint (no one-shot lifecycle settle / task-queue drain) — for a
@@ -1339,12 +1457,14 @@ int mbRepaintToBitmap(mbView* v, void* out_bgra, int width, int height, int stri
 }
 
 int mbSavePng(mbView* v, const char* path, int width, int height) {
+  EngineScope engine_scope;
   if (!v || !v->impl || !path)
     return 0;
   return v->impl->SavePng(path, width, height) ? 1 : 0;
 }
 
 int mbEncodePng(mbView* v, int width, int height, const unsigned char** out_data) {
+  EngineScope engine_scope;
   if (!v || !v->impl || width <= 0 || height <= 0)
     return 0;
   if (!v->impl->EncodePng(width, height))
@@ -1356,6 +1476,7 @@ int mbEncodePng(mbView* v, int width, int height, const unsigned char** out_data
 }
 
 int mbSavePdf(mbView* v, const char* path) {
+  EngineScope engine_scope;
   if (!v || !v->impl || !path)
     return 0;
   return v->impl->SavePdf(path) ? 1 : 0;
@@ -1368,6 +1489,7 @@ void mbSetPrintBackground(mbView* v, int enabled) {
 
 int mbSavePdfEx(mbView* v, const char* path, double width_pt, double height_pt,
                 int landscape, double scale, double margin_pt) {
+  EngineScope engine_scope;
   if (!v || !v->impl || !path)
     return 0;
   return v->impl->SavePdfEx(path, width_pt, height_pt, landscape != 0, scale,
@@ -1377,12 +1499,14 @@ int mbSavePdfEx(mbView* v, const char* path, double width_pt, double height_pt,
 }
 
 int mbSavePngRect(mbView* v, const char* path, int x, int y, int w, int h) {
+  EngineScope engine_scope;
   if (!v || !v->impl || !path)
     return 0;
   return v->impl->SavePngRect(path, x, y, w, h) ? 1 : 0;
 }
 
 int mbSaveElementPng(mbView* v, const char* css_selector, const char* path) {
+  EngineScope engine_scope;
   if (!v || !v->impl || !css_selector || !path)
     return 0;
   return v->impl->SaveElementPng(css_selector, path) ? 1 : 0;
@@ -1397,6 +1521,7 @@ int mbGetElementRect(mbView* v, const char* css_selector, int* x, int* y, int* w
 
 int mbPaintRectToBitmap(mbView* v, void* out_bgra, int x, int y, int w, int h,
                         int stride) {
+  EngineScope engine_scope;
   if (!v || !v->impl || !out_bgra)
     return 0;
   return v->impl->PaintRectToBitmap(out_bgra, x, y, w, h, stride) ? 1 : 0;
