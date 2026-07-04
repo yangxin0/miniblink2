@@ -1,7 +1,8 @@
 // miniblink2.cc — extern "C" implementation of the miniblink2 public API (mb* ABI). Pure forwarding to the C++ host;
 // no Blink types cross this boundary.
 
-#include "miniblink2/miniblink2.h"
+#include "miniblink2/automation.h"
+#include "miniblink2/view.h"
 
 #include <algorithm>
 #include <cctype>

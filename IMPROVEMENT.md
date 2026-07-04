@@ -146,7 +146,7 @@ comment. One header per concern also keeps the ABI reviewable per release.
 | 3 | Load lifecycle callbacks | **Shipped** (e047aff): mbOnBeginLoading (main-frame commit) + mbOnFailLoading (top-level failure funnel, with last_error_). mbLoadHTML/mbLoadURL already return before the load event, so no separate Async variants were needed. |
 | 4 | Per-view request hooks | **Shipped, loader path** (c395cc8): mbOnRequestMock(view, cb, userdata) - MbFindMock takes an opaque host context, subresource loaders inherit the view from their frame client, hook self-erases on view destroy. Worker scripts and view-level MbFetchUrl helpers still fall back to the process-wide hook. |
 | 5 | Typed input events | **Shipped** (01805da): mbMouseEvent / mbWheelEvent with struct_size versioning, float deltas, reserved phase. |
-| 6 | view/auto header split | **Shipped**: include/miniblink2/{view.h,auto.h} split by audience (117 view / 79 auto exports, conservation-checked); miniblink2.h stays as a zero-diff compatibility umbrella. Pumping calls are flagged in auto.h. |
+| 6 | header split by audience | **Shipped**: include/miniblink2/{view.h,automation.h} (117 embedder / 79 automation exports, conservation-checked). No umbrella - every consumer names its audience; all in-repo consumers repointed. Pumping calls are flagged in automation.h. |
 
 Verified in the Glyph host: engine smoke test + a 720-sample pointer-sweep
 harness with a damage-gated blit path and a liveness beacon (0 flicker,

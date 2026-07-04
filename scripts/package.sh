@@ -7,7 +7,7 @@
 # Packages what scripts/build-lib.sh already put in dist/<mode>/ (build first!):
 #   <name>/lib/        libminiblink2.dylib + ANGLE GL dylibs + the vendored libcurl
 #                      chain [dynamic/both]; libminiblink2.a [static/both]
-#   <name>/include/miniblink2/miniblink2.h
+#   <name>/include/miniblink2/{view.h,automation.h}
 #   <name>/resources/  blink_resources.pak, icudtl.dat, V8 snapshots, media pak —
 #                      the engine loads these from the EXECUTABLE's directory
 #   <name>/README.md   generated link + runtime instructions
@@ -57,7 +57,7 @@ esac
 
 DIST="$HERE/dist/$MODE"
 CURL_LIB="$HERE/third_party/curl/lib"
-[ -f "$DIST/include/miniblink2/miniblink2.h" ] || {
+[ -f "$DIST/include/miniblink2/view.h" ] || {
   echo "error: no SDK in $DIST — build it first: scripts/build-lib.sh --$MODE" >&2; exit 1; }
 if [ "$WANT_DYNAMIC" = true ] && [ ! -f "$DIST/libminiblink2.dylib" ]; then
   echo "error: no $DIST/libminiblink2.dylib — build it: scripts/build-lib.sh --shared --$MODE" >&2; exit 1
@@ -198,7 +198,7 @@ Standalone single-process Blink (Chromium M150 / V8 15) behind the classic
 miniblink2 \`mb\` C API — the spiritual successor to
 miniblink49, rebuilt on the modern engine. https://github.com/yangxin0/miniblink2
 
-$LIB_LINES- \`include/miniblink2/miniblink2.h\` — the public header (the mb* C API).
+$LIB_LINES- \`include/miniblink2/view.h\` — the embedder core (mb* C API); \`automation.h\` — the automation kit (waits/shots/scraping; pumps).
 - \`resources/\` — engine runtime data (resource paks, ICU data, V8 snapshots).
   **Required**: copy these next to your executable.
 

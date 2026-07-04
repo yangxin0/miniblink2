@@ -1,7 +1,7 @@
 // view.h — the INTERACTIVE-EMBEDDER core of the miniblink2 C API (mb* ABI):
 // engine/view lifecycle, loads + lifecycle callbacks, interactive paint,
 // input, resource interception, JS bridge, cookies, navigation. The
-// automation/testing surface lives in auto.h; include miniblink2.h for both.
+// automation/testing surface lives in automation.h (which includes this).
 //
 // This is the ONLY surface an embedding application links
 // against. Everything below it is GN-built C++ that touches Blink/base/mojo.

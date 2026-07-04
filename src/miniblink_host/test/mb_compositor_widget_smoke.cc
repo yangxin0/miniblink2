@@ -18,7 +18,7 @@
 #include <cstring>
 #include <vector>
 
-#include "miniblink2/miniblink2.h"
+#include "miniblink2/automation.h"
 
 int main() {
   if (!mbInitialize()) {

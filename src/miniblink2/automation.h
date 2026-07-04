@@ -1,12 +1,13 @@
-// auto.h — the AUTOMATION/TESTING surface of the miniblink2 C API (mb* ABI):
-// pump-driving waits, selector driving and scraping, screenshots/PDF, device
-// emulation, storage snapshots, the request log. Several calls here PUMP the
-// engine (mbWait, mbWaitFor*) — do not call them from an interactive host's
-// frame tick; they are meant for headless drivers. The embedder core is
-// view.h (included below); include miniblink2.h for both.
+// automation.h — the AUTOMATION/TESTING surface of the miniblink2 C API
+// (mb* ABI): pump-driving waits, selector driving and scraping, screenshots/
+// PDF, device emulation, storage snapshots, the request log. Several calls
+// here PUMP the engine (mbWait, mbWaitFor*) — do not call them from an
+// interactive host's frame tick; they are meant for headless drivers.
+// Includes the embedder core (view.h); there is no umbrella header —
+// embedders include view.h, drivers include automation.h.
 
-#ifndef MINIBLINK2_AUTO_H_
-#define MINIBLINK2_AUTO_H_
+#ifndef MINIBLINK2_AUTOMATION_H_
+#define MINIBLINK2_AUTOMATION_H_
 
 #include "view.h"
 
@@ -479,4 +480,4 @@ MB_EXPORT int mbPaintRectToBitmap(mbView*, void* out_bgra, int x, int y, int w,
 }  // extern "C"
 #endif
 
-#endif  // MINIBLINK2_AUTO_H_
+#endif  // MINIBLINK2_AUTOMATION_H_

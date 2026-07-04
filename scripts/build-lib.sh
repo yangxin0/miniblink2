@@ -41,7 +41,7 @@
 #
 # Each dist/<mode>/ is a self-contained SDK:
 #   libminiblink2.{dylib,a}            the library (exposes the miniblink2 mb* C API)
-#   include/miniblink2/miniblink2.h    the public header
+#   include/miniblink2/{view,automation}.h    the public headers
 #   blink_resources.pak, icudtl.dat, snapshot_blob.bin, v8_context_snapshot.bin
 #                               runtime data the engine loads at startup
 set -euo pipefail
