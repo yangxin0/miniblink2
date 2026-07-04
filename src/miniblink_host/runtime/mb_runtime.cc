@@ -20,6 +20,12 @@
 #include "base/feature_list.h"
 #include "base/i18n/icu_util.h"
 #include "base/run_loop.h"
+#include <malloc/malloc.h>
+
+#include "base/memory/memory_pressure_listener.h"
+#include "base/task/single_thread_task_runner.h"
+#include "v8/include/v8-isolate.h"
+
 #include "base/base_paths.h"
 #include "base/files/file_path.h"
 #include "base/memory/discardable_memory_allocator.h"
@@ -259,8 +265,45 @@ MbRuntime::~MbRuntime() {
   // TODO(mb): fuller teardown (isolate dispose, blink shutdown) when it matters.
 }
 
-void MbRuntime::PumpOnce() {
-  base::RunLoop().RunUntilIdle();
+void MbRuntime::PumpOnce(double budget_seconds) {
+  if (budget_seconds <= 0) {
+    base::RunLoop().RunUntilIdle();
+    return;
+  }
+  // Bounded slice: quit at idle (fast path) OR at the deadline, whichever
+  // comes first. The delayed quit is a plain task; delayed-task due times are
+  // checked between immediate tasks, so a busy queue still honors it. A quit
+  // on an already-finished RunLoop is a no-op (weak-bound), so the leftover
+  // delayed task from the idle path is harmless.
+  base::RunLoop loop;
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+      FROM_HERE, loop.QuitClosure(), base::Seconds(budget_seconds));
+  loop.RunUntilIdle();
+}
+
+void MbRuntime::PurgeMemory() {
+  base::MemoryPressureListener::NotifyMemoryPressure(
+      base::MEMORY_PRESSURE_LEVEL_CRITICAL);
+  if (isolate_) {
+    isolate_->MemoryPressureNotification(v8::MemoryPressureLevel::kCritical);
+    isolate_->LowMemoryNotification();
+  }
+  base::RunLoop().RunUntilIdle();  // run the pressure listeners now
+}
+
+void MbRuntime::LogMemoryUsage() {
+  if (isolate_) {
+    v8::HeapStatistics hs;
+    isolate_->GetHeapStatistics(&hs);
+    std::fprintf(stderr,
+                 "[mb] v8 heap: used %zu KB / total %zu KB, external %zu KB\n",
+                 hs.used_heap_size() / 1024, hs.total_heap_size() / 1024,
+                 hs.external_memory() / 1024);
+  }
+  malloc_statistics_t st{};
+  malloc_zone_statistics(nullptr, &st);
+  std::fprintf(stderr, "[mb] malloc: in use %zu KB, allocated %zu KB\n",
+               st.size_in_use / 1024, st.size_allocated / 1024);
 }
 
 void MbRuntime::SetScriptTimeoutMs(int ms) {

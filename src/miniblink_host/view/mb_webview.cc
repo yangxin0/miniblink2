@@ -6,6 +6,13 @@
 
 #include "miniblink_host/view/mb_webview.h"
 
+#include "third_party/blink/public/web/web_css_origin.h"
+#include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
+#include "third_party/blink/renderer/core/css/style_engine.h"
+#include "third_party/blink/renderer/core/css/style_sheet_contents.h"
+#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h" 
+
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -1587,6 +1594,29 @@ bool MbWebView::GetAttribute(const char* css_selector, const char* attr,
   return true;
 }
 
+namespace {
+// Parse + inject `css` into `doc` as a USER-origin sheet under a fixed key
+// (re-injecting under the same key replaces, so re-commits don't stack).
+void InjectUserSheet(blink::Document& doc, const std::string& css) {
+  auto* context = blink::MakeGarbageCollected<blink::CSSParserContext>(doc);
+  auto* contents = blink::MakeGarbageCollected<blink::StyleSheetContents>(context);
+  contents->ParseString(blink::WebString::FromUtf8(css));
+  doc.GetStyleEngine().InjectSheet(blink::StyleSheetKey("mb-user-stylesheet"),
+                                   contents, blink::WebCssOrigin::kUser);
+}
+}  // namespace
+
+void MbWebView::SetUserStylesheet(const char* css) {
+  user_stylesheet_ = css ? css : "";
+  if (user_stylesheet_.empty() || !main_frame_)
+    return;
+  // Apply to the CURRENT document too; future documents get it on commit.
+  auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
+  blink::LocalFrame* frame = impl->GetFrame();
+  if (frame && frame->GetDocument())
+    InjectUserSheet(*frame->GetDocument(), user_stylesheet_);
+}
+
 bool MbWebView::InsertCSS(const char* css) {
   if (!css)
     return false;
@@ -1811,6 +1841,13 @@ void MbWebView::StopLoading() {
 void MbWebView::OnDidCommitMainFrame(const std::string& url, bool standard) {
   if (on_begin_loading_)
     on_begin_loading_(url);
+  if (!user_stylesheet_.empty() && main_frame_) {
+    auto* impl_frame = blink::To<blink::WebLocalFrameImpl>(main_frame_);
+    if (blink::LocalFrame* lf = impl_frame->GetFrame()) {
+      if (lf->GetDocument())
+        InjectUserSheet(*lf->GetDocument(), user_stylesheet_);
+    }
+  }
   // Notify on every main-frame commit (host load, page navigation, redirect, reload) —
   // the "URL changed" signal, before the history bookkeeping below.
   if (on_url_changed_ && !url.empty())
@@ -2655,6 +2692,58 @@ std::string MbWebView::EvalInFrame(int frame_index, const char* utf8_script) {
               out->assign(*utf8, utf8.length());
           },
           frame, std::string(utf8_script), &result),
+      /*settle=*/false);
+  return result;
+}
+
+std::string MbWebView::EvalCatch(const char* utf8_script,
+                                 std::string* out_exception) {
+  if (out_exception)
+    out_exception->clear();
+  if (!main_frame_ || !utf8_script)
+    return {};
+  std::string result;
+  blink::WebLocalFrame* frame = main_frame_;
+  RunInFrameTask(
+      base::BindOnce(
+          [](blink::WebLocalFrame* f, std::string s, std::string* out,
+             std::string* out_exc) {
+            v8::Isolate* isolate = v8::Isolate::GetCurrent();
+            if (!isolate)
+              return;
+            v8::HandleScope handle_scope(isolate);
+            v8::Local<v8::Context> context = f->MainWorldScriptContext();
+            if (context.IsEmpty())
+              return;
+            v8::Context::Scope context_scope(context);
+            v8::TryCatch try_catch(isolate);
+            v8::Local<v8::Value> value = f->ExecuteScriptAndReturnValue(
+                blink::WebScriptSource(blink::WebString::FromUtf8(s)));
+            if (try_catch.HasCaught()) {
+              if (out_exc) {
+                v8::Local<v8::Message> msg = try_catch.Message();
+                if (!msg.IsEmpty()) {
+                  v8::String::Utf8Value text(isolate, msg->Get());
+                  *out_exc = *text ? *text : "unknown exception";
+                  int line = msg->GetLineNumber(context).FromMaybe(0);
+                  if (line > 0)
+                    *out_exc += " (line " + std::to_string(line) + ")";
+                } else {
+                  *out_exc = "unknown exception";
+                }
+              }
+              return;
+            }
+            if (value.IsEmpty())
+              return;
+            v8::Local<v8::String> str;
+            if (value->ToString(context).ToLocal(&str)) {
+              v8::String::Utf8Value utf8(isolate, str);
+              if (*utf8)
+                out->assign(*utf8, utf8.length());
+            }
+          },
+          frame, std::string(utf8_script), &result, out_exception),
       /*settle=*/false);
   return result;
 }

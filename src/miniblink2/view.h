@@ -53,6 +53,23 @@ MB_EXPORT void mbPumpMessages(void);
 // Call it from the host's frame tick instead of mbPumpMessages.
 MB_EXPORT void mbUpdate(void);
 
+// Bound each mbUpdate slice to at most `seconds` of dispatch (e.g. 0.005 for
+// a 5 ms budget at 60fps): when the budget is spent the slice returns and the
+// remaining work runs on the NEXT update, so one busy page cannot hold the
+// host's frame tick. 0 (the default) drains to idle. Applies to mbUpdate
+// only — mbPumpMessages and the automation waits intentionally run to idle.
+MB_EXPORT void mbSetMaxUpdateTime(double seconds);
+
+// Release as much memory as possible: broadcasts critical memory pressure
+// (blink's caches, decoded images and fonts listen) and triggers a full V8
+// GC. Call when the host UI goes hidden/idle; content re-decodes lazily on
+// the next paint.
+MB_EXPORT void mbPurgeMemory(void);
+
+// Log a coarse memory summary (V8 heap, malloc footprint) to stderr —
+// before/after bookends for mbPurgeMemory.
+MB_EXPORT void mbLogMemoryUsage(void);
+
 // 1 while any engine-entering mb* call is on the current stack. Hosts that must
 // gate their own work (e.g. skip a blit when a pump tick landed inside a load)
 // can poll this instead of tracking call depth themselves.
@@ -196,6 +213,14 @@ MB_EXPORT void mbSetInitScript(mbView*, const char* utf8_script);
 // before a screenshot. Returns 1 on success, 0 on failure. Applies to the
 // current document; re-apply after a navigation.
 MB_EXPORT int mbInsertCSS(mbView*, const char* css);
+
+// Persistent per-view USER-origin stylesheet: injected engine-side into every
+// document this view commits — survives navigations, participates in the
+// cascade at user-agent level, and never appears in the page's DOM (page JS
+// cannot see or remove it). Use for host presentation (scrollbars, background,
+// theming) instead of splicing <style> into the HTML. NULL or "" clears it.
+// Contrast mbInsertCSS: a one-shot DOM <style> append to the CURRENT document.
+MB_EXPORT void mbSetUserStylesheet(mbView*, const char* css);
 
 // Synthesize a left mouse click (down+up) at (x,y) in the view.
 // ---- Typed input events -----------------------------------------------------
@@ -661,6 +686,17 @@ MB_EXPORT int mbEvalJSInFrame(mbView*, int frame_index, const char* utf8_script,
 // Returns the value length in bytes (JS typeof-style type probing).
 MB_EXPORT int mbEvalJSEx(mbView*, const char* utf8_script, char* out_value,
                          int value_cap, char* out_type, int type_cap);
+
+// Like mbEvalJS, but a THROWN exception is reported in out_exception (message
+// plus source line) instead of being swallowed — an empty exception string
+// means the script completed. Returns the result length (see mbEvalJS).
+// Documented lifecycle: the JS world (and everything registered with
+// mbJsBindFunction) resets on every navigation; re-establish bindings from
+// mbOnBeginLoading / mbOnDOMContentLoaded. mbSetInitScript survives
+// navigations — the engine re-injects it into each new document.
+MB_EXPORT int mbEvalJSCatch(mbView*, const char* utf8_script,
+                            char* out_value, int value_cap,
+                            char* out_exception, int exc_cap);
 
 // Like mbEvalJS, but runs in a dedicated ISOLATED world: the script has its own
 // JS globals (separate from the page and from mbRunJS/mbEvalJS's main world) yet
