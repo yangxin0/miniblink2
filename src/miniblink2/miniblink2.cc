@@ -151,6 +151,18 @@ void mbLogMemoryUsage(void) {
     rt->LogMemoryUsage();
 }
 
+void mbUpdateAt(double frame_time_seconds) {
+  mb::MbSetHostFrameTime(frame_time_seconds);
+  mbUpdate();
+}
+
+void mbSetFontFamilies(mbView* v, const char* standard, const char* fixed,
+                       const char* serif, const char* sans_serif) {
+  EngineScope engine_scope;
+  if (v && v->impl)
+    v->impl->SetFontFamilies(standard, fixed, serif, sans_serif);
+}
+
 int mbInEngineCall(void) {
   return g_engine_depth > 0 ? 1 : 0;
 }

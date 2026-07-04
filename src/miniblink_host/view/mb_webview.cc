@@ -1605,24 +1605,42 @@ bool MbWebView::GetAttribute(const char* css_selector, const char* attr,
 namespace {
 // Parse + inject `css` into `doc` as a USER-origin sheet under a fixed key
 // (re-injecting under the same key replaces, so re-commits don't stack).
-void InjectUserSheet(blink::Document& doc, const std::string& css) {
-  auto* context = blink::MakeGarbageCollected<blink::CSSParserContext>(doc);
-  auto* contents = blink::MakeGarbageCollected<blink::StyleSheetContents>(context);
-  contents->ParseString(blink::WebString::FromUtf8(css));
-  doc.GetStyleEngine().InjectSheet(blink::StyleSheetKey("mb-user-stylesheet"),
-                                   contents, blink::WebCssOrigin::kUser);
+// Through the public WebDocument seam (the extension-CSS path): it handles
+// parse, registration AND style invalidation - a direct
+// StyleEngine::InjectSheet skipped the invalidation and never applied.
+void InjectUserSheet(blink::WebLocalFrame* frame, const std::string& css) {
+  const blink::WebStyleSheetKey key =
+      blink::WebString::FromUtf8("mb-user-stylesheet");
+  frame->GetDocument().InsertStyleSheet(blink::WebString::FromUtf8(css), &key,
+                                        blink::WebCssOrigin::kUser);
 }
 }  // namespace
+
+void MbWebView::SetFontFamilies(const char* standard, const char* fixed,
+                                const char* serif, const char* sans_serif) {
+  if (!web_view_ || !web_view_->GetSettings())
+    return;
+  blink::WebSettings* settings = web_view_->GetSettings();
+  if (standard && *standard)
+    settings->SetStandardFontFamily(blink::WebString::FromUtf8(standard),
+                                    USCRIPT_COMMON);
+  if (fixed && *fixed)
+    settings->SetFixedFontFamily(blink::WebString::FromUtf8(fixed),
+                                 USCRIPT_COMMON);
+  if (serif && *serif)
+    settings->SetSerifFontFamily(blink::WebString::FromUtf8(serif),
+                                 USCRIPT_COMMON);
+  if (sans_serif && *sans_serif)
+    settings->SetSansSerifFontFamily(blink::WebString::FromUtf8(sans_serif),
+                                     USCRIPT_COMMON);
+}
 
 void MbWebView::SetUserStylesheet(const char* css) {
   user_stylesheet_ = css ? css : "";
   if (user_stylesheet_.empty() || !main_frame_)
     return;
   // Apply to the CURRENT document too; future documents get it on commit.
-  auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
-  blink::LocalFrame* frame = impl->GetFrame();
-  if (frame && frame->GetDocument())
-    InjectUserSheet(*frame->GetDocument(), user_stylesheet_);
+  InjectUserSheet(main_frame_, user_stylesheet_);
 }
 
 bool MbWebView::InsertCSS(const char* css) {
@@ -1849,13 +1867,8 @@ void MbWebView::StopLoading() {
 void MbWebView::OnDidCommitMainFrame(const std::string& url, bool standard) {
   if (on_begin_loading_)
     on_begin_loading_(url);
-  if (!user_stylesheet_.empty() && main_frame_) {
-    auto* impl_frame = blink::To<blink::WebLocalFrameImpl>(main_frame_);
-    if (blink::LocalFrame* lf = impl_frame->GetFrame()) {
-      if (lf->GetDocument())
-        InjectUserSheet(*lf->GetDocument(), user_stylesheet_);
-    }
-  }
+  if (!user_stylesheet_.empty() && main_frame_)
+    InjectUserSheet(main_frame_, user_stylesheet_);
   // Notify on every main-frame commit (host load, page navigation, redirect, reload) —
   // the "URL changed" signal, before the history bookkeeping below.
   if (on_url_changed_ && !url.empty())
@@ -3003,6 +3016,17 @@ bool MbWebView::WaitForNetworkIdle(int idle_ms, int timeout_ms) {
   }
 }
 
+namespace {
+// The host's display-refresh timestamp (CACurrentMediaTime domain, seconds) —
+// set per tick by mbUpdateAt so rAF gets frame-aligned times instead of
+// whenever the pump happened to run. 0 = unset (fall back to Now()).
+double g_host_frame_time = 0;
+}  // namespace
+
+void MbSetHostFrameTime(double seconds) {
+  g_host_frame_time = seconds > 0 ? seconds : 0;
+}
+
 void MbWebView::ServiceAnimations() {
   // Run rAF + IntersectionObserver INSIDE a scheduler task. rAF callbacks routinely draw
   // to a <canvas> (CanvasRenderingContext::DidDraw); if that draw happens outside any
@@ -3020,7 +3044,9 @@ void MbWebView::ServiceAnimations() {
             // renderers all depend on it).
             if (self->web_view_ && self->web_view_->GetPage()) {
               self->web_view_->GetPage()->Animator().ServiceScriptedAnimations(
-                  base::TimeTicks::Now());
+                  g_host_frame_time > 0
+                      ? base::TimeTicks() + base::Seconds(g_host_frame_time)
+                      : base::TimeTicks::Now());
             }
             // Force IntersectionObserver computation. The normal lifecycle step skips it
             // for a throttled frame, and our offscreen widget reads as throttled — so

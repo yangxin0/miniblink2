@@ -35,6 +35,9 @@ class WebAgentGroupScheduler;
 
 namespace mb {
 
+// Item 7b: host display-refresh timestamp for rAF (see mbUpdateAt).
+void MbSetHostFrameTime(double seconds);
+
 class MbSession;
 
 class MbViewClient;     // blink::WebViewClient (minimal)
@@ -359,6 +362,12 @@ class MbWebView {
   // InsertCSS, which appends a one-shot <style> the page can see. Empty/null
   // clears it (takes effect on the next commit).
   void SetUserStylesheet(const char* css);
+  // Per-view generic font-family defaults (item 7a): what CSS "serif",
+  // "sans-serif", "monospace" and unstyled text resolve to. NULL/"" leaves a
+  // family unchanged. Applies to USCRIPT_COMMON (all scripts without a more
+  // specific per-script mapping) - the CJK-fallback knob dictionary hosts need.
+  void SetFontFamilies(const char* standard, const char* fixed,
+                       const char* serif, const char* sans_serif);
   // localStorage access for the document's origin (inject an auth token, read
   // SPA state). Get returns false if the key is absent or storage is unavailable
   // (opaque origin); Set returns false on a SecurityError/quota failure. Needs a

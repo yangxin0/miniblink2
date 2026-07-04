@@ -60,6 +60,14 @@ MB_EXPORT void mbUpdate(void);
 // only — mbPumpMessages and the automation waits intentionally run to idle.
 MB_EXPORT void mbSetMaxUpdateTime(double seconds);
 
+// mbUpdate with the host's display-refresh timestamp (seconds, in the
+// CACurrentMediaTime / mach monotonic domain - a CADisplayLink or
+// CVDisplayLink timestamp passes straight through). requestAnimationFrame
+// callbacks are stamped with THIS time instead of whenever the pump ran, so
+// animation-driven content advances frame-aligned. Behaves exactly like
+// mbUpdate otherwise (re-entrancy-safe, budget-bounded).
+MB_EXPORT void mbUpdateAt(double frame_time_seconds);
+
 // Release as much memory as possible: broadcasts critical memory pressure
 // (blink's caches, decoded images and fonts listen) and triggers a full V8
 // GC. Call when the host UI goes hidden/idle; content re-decodes lazily on
@@ -249,6 +257,15 @@ MB_EXPORT int mbInsertCSS(mbView*, const char* css);
 // theming) instead of splicing <style> into the HTML. NULL or "" clears it.
 // Contrast mbInsertCSS: a one-shot DOM <style> append to the CURRENT document.
 MB_EXPORT void mbSetUserStylesheet(mbView*, const char* css);
+
+// Per-view generic font-family defaults (what CSS "serif"/"sans-serif"/
+// "monospace" and unstyled text resolve to), for all scripts without a more
+// specific mapping. NULL/"" leaves that family unchanged. Set before (or
+// after - applies on next style recalc) loading; the engine defaults are
+// Times/Courier/Helvetica, a poor fit for CJK-heavy content.
+MB_EXPORT void mbSetFontFamilies(mbView*, const char* standard,
+                                 const char* fixed, const char* serif,
+                                 const char* sans_serif);
 
 // Synthesize a left mouse click (down+up) at (x,y) in the view.
 // ---- Typed input events -----------------------------------------------------
