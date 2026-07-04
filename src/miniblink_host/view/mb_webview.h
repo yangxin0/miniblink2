@@ -449,6 +449,10 @@ class MbWebView {
   void NotifyLoadFailed();
   // Register a callback fired on each main-frame load finish. Pass {} to clear.
   void SetLoadFinishCallback(std::function<void()> cb);
+  // Embedder lifecycle callbacks (see mbOnBeginLoading / mbOnFailLoading).
+  void SetBeginLoadingCallback(std::function<void(const std::string&)> cb);
+  void SetFailLoadingCallback(
+      std::function<void(const std::string&, const std::string&)> cb);
   // Called by MbFrameClient when the main frame fires DOMContentLoaded (DOM parsed +
   // deferred scripts run, BEFORE subresources/images — the "page interactive" signal,
   // earlier than load-finish/onload). Fires the registered callback.
@@ -691,6 +695,9 @@ class MbWebView {
 
   bool load_finished_ = false;        // main-frame load event has fired (DidFinishLoad)
   std::function<void()> on_load_finish_;  // optional embedder finish callback
+  // Fired on main-frame commit (url) / top-level load failure (url, error).
+  std::function<void(const std::string&)> on_begin_loading_;
+  std::function<void(const std::string&, const std::string&)> on_fail_loading_;
   std::function<void()> on_dom_content_loaded_;  // optional DOMContentLoaded callback
   ConsoleFn on_console_;  // optional live console-message callback
   NavigationFn on_navigation_;  // optional page-initiated navigation policy callback

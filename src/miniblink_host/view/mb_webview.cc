@@ -496,6 +496,8 @@ void MbWebView::NotifyLoadFailed() {
   // it finished and fire the load-finish callback, so mbIsLoadFinished is true and a
   // caller awaiting completion isn't stuck. (Success runs through DidFinishLoad instead.)
   load_finished_ = true;
+  if (on_fail_loading_)
+    on_fail_loading_(GetURL(), last_error_);
   if (on_load_finish_)
     on_load_finish_();
 }
@@ -1804,6 +1806,8 @@ void MbWebView::StopLoading() {
 }
 
 void MbWebView::OnDidCommitMainFrame(const std::string& url, bool standard) {
+  if (on_begin_loading_)
+    on_begin_loading_(url);
   // Notify on every main-frame commit (host load, page navigation, redirect, reload) —
   // the "URL changed" signal, before the history bookkeeping below.
   if (on_url_changed_ && !url.empty())
@@ -1880,6 +1884,16 @@ void MbWebView::OnDidFinishLoad() {
 
 void MbWebView::SetLoadFinishCallback(std::function<void()> cb) {
   on_load_finish_ = std::move(cb);
+}
+
+void MbWebView::SetBeginLoadingCallback(
+    std::function<void(const std::string&)> cb) {
+  on_begin_loading_ = std::move(cb);
+}
+
+void MbWebView::SetFailLoadingCallback(
+    std::function<void(const std::string&, const std::string&)> cb) {
+  on_fail_loading_ = std::move(cb);
 }
 
 void MbWebView::OnDOMContentLoaded() {
