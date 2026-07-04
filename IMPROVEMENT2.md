@@ -124,10 +124,10 @@ foundation it builds on.
 
 | # | Proposal | State |
 |---|----------|-------|
-| 1 | Bounded update slice | Open |
-| 2 | Per-view user stylesheet | Open |
-| 3 | Zero-copy response bodies | Open |
-| 4 | mbPurgeMemory / mbLogMemoryUsage | Open |
-| 5 | JS exception channel + lifecycle doc | Open |
-| 6 | Sessions | Open |
+| 1 | Bounded update slice | **Shipped** (871a40b): mbSetMaxUpdateTime; delayed hard-quit races quit-on-idle. Glyph runs an 8 ms budget. |
+| 2 | Per-view user stylesheet | **Shipped** (871a40b): mbSetUserStylesheet via StyleEngine::InjectSheet, re-applied per commit. ADOPTION CAVEAT: user origin ranks below author styles without !important - Glyph keeps its author-level prelude until the CSS is hardened (or a kAuthor variant is added). |
+| 3 | Zero-copy response bodies | **Deferred by cost**: the body is a std::string threaded through MbFindMock/MbFetchUrl/the async deliver path; an owned-buffer type means retyping that plumbing end to end, against a measured saving of one memcpy of already-cached bytes per serve (~ms per page). Revisit if a host serves large media. |
+| 4 | mbPurgeMemory / mbLogMemoryUsage | **Shipped** (871a40b): critical pressure broadcast + V8 low-memory GC; coarse V8/malloc log. |
+| 5 | JS exception channel + lifecycle doc | **Shipped** (871a40b): mbEvalJSCatch (message + line); binding-lifecycle contract documented in view.h. |
+| 6 | Sessions | Open - the remaining big item. |
 | 7 | Font defaults / update timestamp / inspector | Notes only |
