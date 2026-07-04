@@ -1,6 +1,8 @@
 // mb_frame_client.cc — blink::WebLocalFrameClient. Status: Phase 2.
 #include "miniblink_host/frame/mb_frame_client.h"
 
+#include "miniblink_host/session/mb_session.h"
+
 #include <memory>
 #include <string>
 #include <utility>
@@ -373,6 +375,13 @@ void MbFrameClient::DidCommitNavigation(
         web_frame_->Top()->GetSecurityOrigin().ToString().Utf8();
     std::string scope =
         (top_origin == origin) ? origin : (origin + "\x1f""3p""\x1f" + top_origin);
+    // SESSION PARTITIONING (IMPROVEMENT2 item 6): the owning view's session id
+    // prefixes the scope, so every origin-keyed service (DOM storage, IDB,
+    // OPFS, buckets, locks) isolates per profile. All views share Default()
+    // unless rebound, which keys identically to the pre-session world modulo
+    // the constant prefix.
+    if (owner_ && owner_->session())
+      scope = owner_->session()->id() + "\x1f" + scope;
     MbSetFrameOrigin(frame_key_, scope);
   }
   // Only the main frame feeds the view's history (child/iframe commits don't).
