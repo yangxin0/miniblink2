@@ -318,9 +318,11 @@ MbWebView::MbWebView() = default;
 MbWebView::~MbWebView() {
   session_ = MbSession::Default();
   session_->AddRef();
+  MbSetLoaderSessionKey(this, session_->id());
   // Erase this view's per-context mock hook before anything else — a fetch
   // fired during teardown must not consult a hook whose captures are dying.
   MbSetRequestMockHookForContext(this, {});
+  MbSetLoaderSessionKey(this, {});
   if (session_)
     session_->Release();
   // Tear down the blink object graph (WebViewImpl -> Page -> main LocalFrame ->
@@ -1161,7 +1163,7 @@ std::string MbWebView::DrainConsole() {
 }
 
 std::string MbWebView::GetCookies(const char* url) {
-  return url ? MbGetCookiesForUrl(url) : std::string();
+  return url ? MbGetCookiesForUrl(url, session_->id()) : std::string();
 }
 
 bool MbWebView::GetCookieValue(const char* url, const char* name,
@@ -1171,7 +1173,7 @@ bool MbWebView::GetCookieValue(const char* url, const char* name,
   // Pull one cookie's value out of the "n1=v1; n2=v2" jar string for `url` (the
   // common "read the session/auth cookie" check, without caller-side parsing).
   // Returns false if `name` isn't present; an empty value (name=) returns true.
-  const std::string jar = MbGetCookiesForUrl(url);
+  const std::string jar = MbGetCookiesForUrl(url, session_->id());
   const std::string key(name);
   for (size_t i = 0; i < jar.size();) {
     size_t semi = jar.find("; ", i);
@@ -1191,18 +1193,18 @@ bool MbWebView::GetCookieValue(const char* url, const char* name,
 }
 
 std::string MbWebView::GetAllCookies() {
-  return MbGetAllCookies();  // whole jar as a Netscape cookie file (in memory)
+  return MbGetAllCookies(session_->id());  // whole jar as a Netscape cookie file (in memory)
 }
 
 void MbWebView::SetCookie(const char* url, const char* cookie) {
   // Inject a cookie (a "name=value[; attrs]" string) into the shared HTTP jar for
   // `url`'s origin — the inverse of GetCookies, for restoring a saved session.
   if (url && cookie)
-    MbAddCookieToJar(url, cookie);
+    MbAddCookieToJar(url, cookie, session_->id());
 }
 
 void MbWebView::ClearCookies() {
-  MbClearCookieJar();
+  MbClearCookieJar(session_->id());
 }
 
 std::string MbWebView::GetURL() {
@@ -3156,6 +3158,7 @@ void MbWebView::SetSession(MbSession* session) {
   if (session_)
     session_->Release();
   session_ = session;
+  MbSetLoaderSessionKey(this, session_->id());
 }
 
 bool MbWebView::IsDirty() const {

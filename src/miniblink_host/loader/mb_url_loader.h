@@ -45,28 +45,42 @@ const std::string& MbDefaultUserAgent();
 // Add a cookie (a "name=value[; attrs]" string, as from document.cookie) to the
 // shared HTTP cookie jar for `url`'s origin, so JS-set cookies are sent on later
 // network requests. No-op for non-http(s) URLs. Bridges document.cookie -> fetches.
-void MbAddCookieToJar(const std::string& url, const std::string& cookie);
+// SESSION COOKIE JARS (IMPROVEMENT2 item 6, stage 2): every session id keys
+// its own curl cookie share, so profiles cannot see each other's cookies.
+// An empty/unknown key routes to the DEFAULT session's jar (the pre-session
+// behavior for untracked contexts like workers).
+//
+// Fetch paths resolve their jar from the opaque host context (the owning
+// view) via this registry — same pattern as the per-context request mocks.
+void MbSetLoaderSessionKey(const void* ctx, const std::string& key);
+std::string MbLoaderSessionKeyFor(const void* ctx);
+// The partition scope has been "<session-id>\x1f<origin...>" since sessions
+// landed; this extracts the session id (empty for unprefixed scopes).
+std::string MbSessionKeyFromScope(const std::string& scope);
+
+void MbAddCookieToJar(const std::string& url, const std::string& cookie,
+                      const std::string& session_key = std::string());
 
 // Read the shared HTTP jar's non-HttpOnly cookies for `url`'s host as a
 // "name=value; name2=value2" string. Empty for non-http(s). For session extraction.
-std::string MbGetCookiesForUrl(const std::string& url);
+std::string MbGetCookiesForUrl(const std::string& url, const std::string& session_key = std::string());
 
 // Erase all cookies from the shared HTTP jar (e.g. to reset a session).
-void MbClearCookieJar();
+void MbClearCookieJar(const std::string& session_key = std::string());
 
 // Save the WHOLE shared cookie jar (every host, session + persistent) to `path`
 // as a Netscape cookie file, and load it back. For session persistence across
 // process runs — log in once, reuse the jar next run. Save returns false if the
 // file can't be written; Load returns false if `path` is missing/unreadable.
 // (Netscape format = curl's native --cookie-jar format, so it interoperates.)
-bool MbSaveCookies(const std::string& path);
-bool MbLoadCookies(const std::string& path);
+bool MbSaveCookies(const std::string& path, const std::string& session_key = std::string());
+bool MbLoadCookies(const std::string& path, const std::string& session_key = std::string());
 
 // Snapshot the WHOLE shared cookie jar (every host, session + persistent) as a
 // Netscape cookie file in memory — the same content MbSaveCookies writes, but
 // returned as a string for in-memory session export (DB, network) with no temp
 // file. Empty if the cookie engine is unavailable.
-std::string MbGetAllCookies();
+std::string MbGetAllCookies(const std::string& session_key = std::string());
 
 // Process-wide request log: every subresource URL the loader fetches (img, css,
 // fetch/XHR, etc.) is appended via MbRecordRequest. MbGetRequestLog returns the

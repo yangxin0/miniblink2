@@ -1,5 +1,7 @@
 // mb_url_loader.cc — file-backed blink::URLLoader. Status: Phase 2 (subresources).
 #include "miniblink_host/loader/mb_url_loader.h"
+
+#include "miniblink_host/session/mb_session.h"
 #include "miniblink_host/loader/mb_retry_policy.h"
 
 #include <curl/curl.h>
@@ -119,18 +121,36 @@ void CookieShareUnlockCb(CURL*, curl_lock_data, void*)
     NO_THREAD_SAFETY_ANALYSIS {
   CookieShareLock().Release();
 }
-CURLSH* CookieShare() {
-  static CURLSH* share = [] {
-    CURLSH* s = curl_share_init();
-    if (s) {
-      curl_share_setopt(s, CURLSHOPT_SHARE, CURL_LOCK_DATA_COOKIE);
-      curl_share_setopt(s, CURLSHOPT_LOCKFUNC, CookieShareLockCb);
-      curl_share_setopt(s, CURLSHOPT_UNLOCKFUNC, CookieShareUnlockCb);
-    }
-    return s;
-  }();
+CURLSH* NewCookieShare() {
+  CURLSH* s = curl_share_init();
+  if (s) {
+    curl_share_setopt(s, CURLSHOPT_SHARE, CURL_LOCK_DATA_COOKIE);
+    curl_share_setopt(s, CURLSHOPT_LOCKFUNC, CookieShareLockCb);
+    curl_share_setopt(s, CURLSHOPT_UNLOCKFUNC, CookieShareUnlockCb);
+  }
+  return s;
+}
+
+// One cookie share per session id (leaked; sessions are few). "" and unknown
+// ids alias the default session's jar — the pre-session behavior.
+CURLSH* CookieShareForKey(const std::string& key) {
+  static auto* shares = new std::map<std::string, CURLSH*>();
+  std::string k = key.empty() ? mb::MbSession::Default()->id() : key;
+  auto it = shares->find(k);
+  if (it != shares->end())
+    return it->second;
+  CURLSH* share = NewCookieShare();
+  (*shares)[k] = share;
   return share;
 }
+
+// Fetch-path resolution: opaque host ctx (the owning view) -> session key.
+std::map<const void*, std::string>& LoaderSessionKeys() {
+  static auto* m = new std::map<const void*, std::string>();
+  return *m;
+}
+
+
 
 // Synchronous HTTP(S) fetch via the system libcurl (HTTPS via SecureTransport on macOS).
 // Blocks the calling task; fine for the headless/synchronous render model. Retries
@@ -194,7 +214,8 @@ curl_slist* ConfigureCurlEasy(CURL* curl,
                               const std::string& http_method,
                               bool follow_redirects,
                               std::string* header_block,
-                              std::string* body) {
+                              std::string* body,
+                              const std::string& cookie_session_key) {
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   // Restrict to http(s) on BOTH the initial request and any libcurl-followed
   // redirect, so a "302 Location: file:///etc/passwd" (or other non-web scheme)
@@ -250,7 +271,7 @@ curl_slist* ConfigureCurlEasy(CURL* curl,
                    (user_agent.empty() ? mb::MbDefaultUserAgent() : user_agent).c_str());
   curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");  // allow gzip, auto-decode
   curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");  // enable the in-memory cookie engine
-  if (CURLSH* share = CookieShare())
+  if (CURLSH* share = CookieShareForKey(cookie_session_key))
     curl_easy_setopt(curl, CURLOPT_SHARE, share);  // shared jar across all fetches
 
   // Request headers: the host's extra "Name: Value" lines, plus a default
@@ -314,14 +335,16 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
                std::string* out_headers = nullptr,
                std::string* out_final_url = nullptr,
                bool follow_redirects = true,
-               std::string* out_error = nullptr) {
+               std::string* out_error = nullptr,
+               const void* host_ctx = nullptr) {
   CURL* curl = curl_easy_init();
   if (!curl)
     return false;
   std::string header_block;  // final response's raw header lines (for the caller)
   curl_slist* header_list = ConfigureCurlEasy(
       curl, url, user_agent, extra_headers, post_body, post_content_type,
-      http_method, follow_redirects, &header_block, body);
+      http_method, follow_redirects, &header_block, body,
+      mb::MbLoaderSessionKeyFor(host_ctx));
   // Re-derive the effective method (same rule ConfigureCurlEasy uses) for the retry
   // decision below — only SAFE methods are retried.
   std::string method = http_method;
@@ -418,6 +441,7 @@ class MbCurlReactor {
   };
   struct Request {
     std::string url, method, body, post_content_type, user_agent, extra_headers;
+    std::string cookie_session_key;  // the submitting view's session jar
   };
 
   static MbCurlReactor* Get() {
@@ -512,7 +536,8 @@ class MbCurlReactor {
         job->headers = ConfigureCurlEasy(
             job->easy, p->req.url, p->req.user_agent, p->req.extra_headers,
             p->req.body, p->req.post_content_type, p->req.method,
-            /*follow_redirects=*/false, &job->header_block, &job->body);
+            /*follow_redirects=*/false, &job->header_block, &job->body,
+            p->req.cookie_session_key);
         curl_easy_setopt(job->easy, CURLOPT_PRIVATE, job.get());
         curl_multi_add_handle(lane->multi, job->easy);
         lane->active.push_back(std::move(job));
@@ -681,7 +706,8 @@ std::string AttrValue(const std::string& attrs_lower, const std::string& attrs,
 }
 }  // namespace
 
-void MbAddCookieToJar(const std::string& url, const std::string& cookie) {
+void MbAddCookieToJar(const std::string& url, const std::string& cookie,
+                      const std::string& session_key) {
   GURL gurl(url);
   if (!gurl.SchemeIsHTTPOrHTTPS())
     return;  // cookies only make sense for network origins
@@ -745,24 +771,24 @@ void MbAddCookieToJar(const std::string& url, const std::string& cookie) {
   if (!curl)
     return;
   curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");  // enable the cookie engine
-  if (CURLSH* share = CookieShare())
+  if (CURLSH* share = CookieShareForKey(session_key))
     curl_easy_setopt(curl, CURLOPT_SHARE, share);
   curl_easy_setopt(curl, CURLOPT_COOKIELIST, ns.c_str());
   curl_easy_cleanup(curl);
 }
 
-void MbClearCookieJar() {
+void MbClearCookieJar(const std::string& session_key) {
   CURL* curl = curl_easy_init();
   if (!curl)
     return;
   curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");  // enable the cookie engine
-  if (CURLSH* share = CookieShare())
+  if (CURLSH* share = CookieShareForKey(session_key))
     curl_easy_setopt(curl, CURLOPT_SHARE, share);
   curl_easy_setopt(curl, CURLOPT_COOKIELIST, "ALL");  // erase every cookie
   curl_easy_cleanup(curl);
 }
 
-std::string MbGetAllCookies() {
+std::string MbGetAllCookies(const std::string& session_key) {
   // Snapshot the WHOLE shared jar (every host, session + persistent) via
   // CURLINFO_COOKIELIST — the same list MbGetCookiesForUrl reads — formatted as a
   // Netscape cookie file in memory. We format it ourselves rather than relying on
@@ -772,7 +798,7 @@ std::string MbGetAllCookies() {
   if (!curl)
     return std::string();
   curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");  // enable the cookie engine
-  if (CURLSH* share = CookieShare())
+  if (CURLSH* share = CookieShareForKey(session_key))
     curl_easy_setopt(curl, CURLOPT_SHARE, share);
   struct curl_slist* list = nullptr;
   curl_easy_getinfo(curl, CURLINFO_COOKIELIST, &list);
@@ -788,7 +814,7 @@ std::string MbGetAllCookies() {
   return out;
 }
 
-bool MbSaveCookies(const std::string& path) {
+bool MbSaveCookies(const std::string& path, const std::string& session_key) {
   if (path.empty())
     return false;
   // Write the whole-jar snapshot (a Netscape cookie file, curl's native format,
@@ -797,7 +823,7 @@ bool MbSaveCookies(const std::string& path) {
                          MbGetAllCookies());
 }
 
-bool MbLoadCookies(const std::string& path) {
+bool MbLoadCookies(const std::string& path, const std::string& session_key) {
   std::string contents;
   if (path.empty() ||
       !base::ReadFileToString(base::FilePath::FromUTF8Unsafe(path), &contents))
@@ -806,7 +832,7 @@ bool MbLoadCookies(const std::string& path) {
   if (!curl)
     return false;
   curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");  // enable the cookie engine
-  if (CURLSH* share = CookieShare())
+  if (CURLSH* share = CookieShareForKey(session_key))
     curl_easy_setopt(curl, CURLOPT_SHARE, share);
   // Inject each Netscape line via COOKIELIST (same path as MbAddCookieToJar), so
   // no transfer is needed. Keep "#HttpOnly_..." lines (curl's HttpOnly marker);
@@ -826,7 +852,8 @@ bool MbLoadCookies(const std::string& path) {
   return true;
 }
 
-std::string MbGetCookiesForUrl(const std::string& url) {
+std::string MbGetCookiesForUrl(const std::string& url,
+                               const std::string& session_key) {
   GURL gurl(url);
   if (!gurl.SchemeIsHTTPOrHTTPS())
     return {};
@@ -836,7 +863,7 @@ std::string MbGetCookiesForUrl(const std::string& url) {
     return {};
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");  // enable engine
-  if (CURLSH* share = CookieShare())
+  if (CURLSH* share = CookieShareForKey(session_key))
     curl_easy_setopt(curl, CURLOPT_SHARE, share);
   struct curl_slist* list = nullptr;
   curl_easy_getinfo(curl, CURLINFO_COOKIELIST, &list);
@@ -1045,6 +1072,34 @@ std::map<const void*, MbRequestMockHook>& ContextMockHooks() {
 }
 }  // namespace
 
+std::string MbLoaderSessionKeyFor(const void* ctx) {
+  if (!ctx)
+    return std::string();
+  auto it = LoaderSessionKeys().find(ctx);
+  return it != LoaderSessionKeys().end() ? it->second : std::string();
+}
+
+void MbSetLoaderSessionKey(const void* ctx, const std::string& key) {
+  if (!ctx)
+    return;
+  if (key.empty())
+    LoaderSessionKeys().erase(ctx);
+  else
+    LoaderSessionKeys()[ctx] = key;
+}
+
+std::string MbSessionKeyFromScope(const std::string& scope) {
+  auto pos = scope.find('\x1f');
+  // Session ids start "e:" or "p:" (mb_session.cc); anything else predates
+  // sessions or is a worker's raw origin - default jar.
+  if (pos == std::string::npos)
+    return std::string();
+  const std::string head = scope.substr(0, pos);
+  if (head.rfind("e:", 0) == 0 || head.rfind("p:", 0) == 0)
+    return head;
+  return std::string();
+}
+
 void MbSetRequestMockHookForContext(const void* ctx, MbRequestMockHook hook) {
   if (!ctx)
     return;
@@ -1227,7 +1282,8 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
   if (url.SchemeIsHTTPOrHTTPS())
     return FetchHttp(url_spec, body, content_type, user_agent, extra_headers,
                      post_body, post_content_type, http_method, out_status,
-                     out_headers, out_final_url, MbFollowRedirects(), out_error);
+                     out_headers, out_final_url, MbFollowRedirects(), out_error,
+                     host_ctx);
   if (url.SchemeIs("data")) {
     std::string mime, charset;
     if (!net::DataURL::Parse(url, &mime, &charset, body))
@@ -1253,11 +1309,13 @@ class MbSseStream : public std::enable_shared_from_this<MbSseStream> {
   using ChunkCb = base::RepeatingCallback<void(std::string)>;
   using DoneCb = base::OnceCallback<void()>;
   MbSseStream(std::string url,
+              std::string cookie_session_key,
               std::string req_headers,
               std::string user_agent,
               ChunkCb chunk,
               DoneCb done)
       : url_(std::move(url)),
+        cookie_session_key_(std::move(cookie_session_key)),
         req_headers_(std::move(req_headers)),
         user_agent_(std::move(user_agent)),
         chunk_(std::move(chunk)),
@@ -1301,7 +1359,7 @@ class MbSseStream : public std::enable_shared_from_this<MbSseStream> {
         (user_agent_.empty() ? MbDefaultUserAgent() : user_agent_).c_str());
     curl_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");
     curl_easy_setopt(c, CURLOPT_COOKIEFILE, "");  // in-memory cookie engine
-    if (CURLSH* share = CookieShare())
+    if (CURLSH* share = CookieShareForKey(cookie_session_key_))
       curl_easy_setopt(c, CURLOPT_SHARE, share);
     curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 15L);
@@ -1334,6 +1392,8 @@ class MbSseStream : public std::enable_shared_from_this<MbSseStream> {
   }
 
   std::string url_;
+
+  std::string cookie_session_key_;
   std::string req_headers_;
   std::string user_agent_;
   ChunkCb chunk_;
@@ -1577,6 +1637,7 @@ void MbURLLoader::StartHttpFetch(std::unique_ptr<FetchState> state) {
   req.post_content_type = state->post_ct;
   req.user_agent = user_agent_;
   req.extra_headers = std::move(req_headers);
+  req.cookie_session_key = MbLoaderSessionKeyFor(host_ctx_);
 
   auto main_runner = base::SingleThreadTaskRunner::GetCurrentDefault();
   auto weak = weak_factory_.GetWeakPtr();
@@ -1918,7 +1979,7 @@ void MbURLLoader::StartSse(const std::string& fetch_url,
 
   auto runner = base::SingleThreadTaskRunner::GetCurrentDefault();
   sse_stream_ = std::make_shared<MbSseStream>(
-      fetch_url, req_headers, user_agent_,
+      fetch_url, MbLoaderSessionKeyFor(host_ctx_), req_headers, user_agent_,
       base::BindPostTask(runner, base::BindRepeating(
                                      &MbURLLoader::OnSseChunk,
                                      weak_factory_.GetWeakPtr())),

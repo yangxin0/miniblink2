@@ -174,6 +174,7 @@ std::string ToLowerAscii(std::string s) {
 
 class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
  public:
+  explicit MbCookieManager(uint64_t frame_key) : frame_key_(frame_key) {}
   void SetCookieFromString(
       const blink::KURL& url,
       const net::SiteForCookies&,
@@ -250,7 +251,8 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
     // GetCookiesString merges the HTTP jar, so erasing only the in-memory copy would
     // let the stale HTTP-jar copy reappear. MbAddCookieToJar honors the past Expires/
     // Max-Age in `raw` and drops the cookie. No-op for non-http(s) origins.
-    MbAddCookieToJar(url.GetString().Utf8(), raw);
+    MbAddCookieToJar(url.GetString().Utf8(), raw,
+                     MbSessionKeyFromScope(MbGetFrameOrigin(frame_key_)));
     // Fan out a cookieStore 'change' event (document.cookie writes are observable).
     NotifyCookieChange(url, name, value,
                        deleting
@@ -279,7 +281,8 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
     // Also surface the shared HTTP jar's non-HttpOnly cookies (server Set-Cookie and
     // mbSetCookie-restored cookies never reach the in-memory store) so document.cookie
     // reflects them like a real browser. Empty for non-http(s). Store names win.
-    const std::string jar = MbGetCookiesForUrl(url.GetString().Utf8());
+    const std::string jar = MbGetCookiesForUrl(url.GetString().Utf8(),
+                       MbSessionKeyFromScope(MbGetFrameOrigin(frame_key_)));
     for (size_t pos = 0; pos < jar.size();) {
       const size_t semi = jar.find("; ", pos);
       const std::string pair =
@@ -354,7 +357,8 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
     // Also surface the HTTP jar's non-HttpOnly cookies (server Set-Cookie / mbSetCookie),
     // names not already from the store — keeping cookieStore.getAll consistent with
     // document.cookie (GetCookiesString).
-    const std::string jar = MbGetCookiesForUrl(url.GetString().Utf8());
+    const std::string jar = MbGetCookiesForUrl(url.GetString().Utf8(),
+                       MbSessionKeyFromScope(MbGetFrameOrigin(frame_key_)));
     for (size_t pos = 0; pos < jar.size();) {
       const size_t semi = jar.find("; ", pos);
       const std::string pair =
@@ -427,6 +431,8 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
             std::move(listener)));
     std::move(callback).Run();
   }
+
+  uint64_t frame_key_ = 0;
 };
 
 // True when a geolocation fix is configured (mbSetGeolocation). Defined with the geo
@@ -1396,7 +1402,7 @@ class MbBrowserInterfaceBroker
     }
     if (auto r =
             receiver.As<network::mojom::blink::RestrictedCookieManager>()) {
-      mojo::MakeSelfOwnedReceiver(std::make_unique<MbCookieManager>(),
+      mojo::MakeSelfOwnedReceiver(std::make_unique<MbCookieManager>(frame_key_),
                                   std::move(r));
       return;
     }
