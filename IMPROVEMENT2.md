@@ -180,3 +180,35 @@ Implementation staging (the design is the contract; durability matures):
 2. Per-session cookie jars (curl share handles keyed by session).
 3. Persistence: restore at create; durability barriers at mbSessionFlush /
    destroy first, converging to write-through per service.
+
+## Inspector: the staged plan (item 7c)
+
+Scoped 2026-07-04. The surprise that makes this tractable: blink's inspector
+core (DevToolsAgent / DevToolsSession, renderer/core/inspector) already
+compiles into libminiblink2 - the CDP *backend* is in the binary, unexported.
+And with a CDP endpoint speaking the standard /json discovery protocol,
+ORDINARY CHROME is the frontend (devtools://devtools/bundled/inspector.html
+connects to any ws:// CDP target) - bundling/building devtools-frontend is
+unnecessary.
+
+- **Stage A - engine CDP pipe.** Bind the main frame's mojo DevToolsAgent
+  in-process and expose it flat:
+    typedef void (*mbDevToolsMessageCallback)(mbView*, void* userdata,
+                                              const char* json, int len);
+    MB_EXPORT int  mbDevToolsAttach(mbView*, mbDevToolsMessageCallback, void*);
+    MB_EXPORT void mbDevToolsSend(mbView*, const char* json, int len);
+    MB_EXPORT void mbDevToolsDetach(mbView*);
+  One session per view; messages are CDP JSON both ways. The work is mojo
+  plumbing (session channel, IO-vs-main routing) - the protocol itself is
+  blink's.
+
+- **Stage B - host WebSocket bridge.** The embedder (not the engine) serves
+  ws://127.0.0.1:<port>/ + /json/list, pumping frames to/from the pipe. In
+  Glyph: a debug menu item "Inspect dictionary popup" that starts the bridge
+  and copies the devtools:// URL. Keeps sockets out of the engine.
+
+- **Stage C - bundled frontend: intentionally skipped.** Chrome is the
+  frontend; shipping one inside the SDK adds megabytes and a TypeScript
+  build for zero capability.
+
+Status: plan agreed; Stage A is the next engine work item.
