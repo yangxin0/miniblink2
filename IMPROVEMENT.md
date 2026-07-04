@@ -134,3 +134,20 @@ comment. One header per concern also keeps the ABI reviewable per release.
   endangering interactive hosts.
 - A C++ RefPtr-style surface: the flat C ABI is the right call for a
   dlopen-able engine; ownership rules just need to stay explicit in comments.
+
+---
+
+## Status (2026-07-04)
+
+| # | Proposal | State |
+|---|----------|-------|
+| 1 | mbUpdate / mbInEngineCall / mbDefer | **Shipped** (01805da). EngineScope guards all 42 engine-entering exports; mbUpdate no-ops instead of nesting and drains the mbDefer queue. Note: a nested pump in a PRIVATE run-loop mode is NOT possible on stock Chromium M150 (the pump sources live in kCFRunLoopCommonModes only), so host code can still run inside blocking calls — mbUpdate + mbInEngineCall are the mitigation. |
+| 2 | Damage tracking | **Shipped, flag-level** (01805da): mbViewIsDirty via ScheduleNonCompositedAnimation, snapshot semantics. Dirty RECTS and an engine-owned lockable surface remain open. |
+| 3 | Load lifecycle callbacks | **Shipped** (e047aff): mbOnBeginLoading (main-frame commit) + mbOnFailLoading (top-level failure funnel, with last_error_). mbLoadHTML/mbLoadURL already return before the load event, so no separate Async variants were needed. |
+| 4 | Per-view request hooks | **Blocked on loader plumbing**: MbFindMock call sites (sync fetch helper, async Deliver, worker scripts) carry no frame/view identity. Thread the initiating frame key through the fetch paths first, then add mbOnRequestMock(view, cb, userdata) with process-wide fallback. |
+| 5 | Typed input events | **Shipped** (01805da): mbMouseEvent / mbWheelEvent with struct_size versioning, float deltas, reserved phase. |
+| 6 | view/auto header split | Open. Mechanical; touches package.sh staging. |
+
+Verified in the Glyph host: engine smoke test + a 720-sample pointer-sweep
+harness with a damage-gated blit path and a liveness beacon (0 flicker,
+frames stay live).
