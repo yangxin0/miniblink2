@@ -54,7 +54,17 @@ class MbRuntime {
   static void Shutdown();
 
   // Drain the main-thread task runner once (loading, parsing, lifecycle steps).
-  void PumpOnce();
+  // Run ready main-thread work. budget_seconds > 0 bounds the slice: the
+  // drain stops at the deadline even if the queue is still busy (remaining
+  // work runs on the next pump). 0 = drain to idle (the historic behavior).
+  void PumpOnce(double budget_seconds = 0);
+  // Release as much memory as possible: critical memory-pressure broadcast
+  // (blink caches, decoded images, font caches listen) + a V8 low-memory
+  // notification (full GC), then a drain so listeners run now.
+  void PurgeMemory();
+  // Log a coarse memory summary (V8 heap + malloc footprint) via fprintf,
+  // for diagnosing what a purge did.
+  void LogMemoryUsage();
 
   MbPlatform* platform() { return platform_.get(); }
 

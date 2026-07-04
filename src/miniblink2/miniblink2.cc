@@ -120,15 +120,34 @@ void mbPumpMessages(void) {
     rt->PumpOnce();
 }
 
+namespace {
+double g_max_update_time = 0;  // seconds; 0 = drain to idle
+}  // namespace
+
+void mbSetMaxUpdateTime(double seconds) {
+  g_max_update_time = seconds > 0 ? seconds : 0;
+}
+
 void mbUpdate(void) {
   if (g_engine_depth > 0)
     return;  // fired inside an engine call; the outermost caller updates next
   {
     EngineScope engine_scope;
     if (auto* rt = mb::MbRuntime::Get())
-      rt->PumpOnce();
+      rt->PumpOnce(g_max_update_time);
   }
   DrainDeferred();
+}
+
+void mbPurgeMemory(void) {
+  EngineScope engine_scope;
+  if (auto* rt = mb::MbRuntime::Get())
+    rt->PurgeMemory();
+}
+
+void mbLogMemoryUsage(void) {
+  if (auto* rt = mb::MbRuntime::Get())
+    rt->LogMemoryUsage();
 }
 
 int mbInEngineCall(void) {
@@ -392,6 +411,24 @@ void mbRunJS(mbView* v, const char* utf8_script) {
 void mbSetInitScript(mbView* v, const char* utf8_script) {
   if (v && v->impl)
     v->impl->SetInitScript(utf8_script);
+}
+
+void mbSetUserStylesheet(mbView* v, const char* css) {
+  EngineScope engine_scope;
+  if (v && v->impl)
+    v->impl->SetUserStylesheet(css);
+}
+
+int mbEvalJSCatch(mbView* v, const char* utf8_script, char* out_value,
+                  int value_cap, char* out_exception, int exc_cap) {
+  EngineScope engine_scope;
+  if (!v || !v->impl)
+    return 0;
+  std::string exc;
+  std::string value = v->impl->EvalCatch(utf8_script, &exc);
+  CopyToBuffer(value, out_value, value_cap);
+  CopyToBuffer(exc, out_exception, exc_cap);
+  return static_cast<int>(std::min<size_t>(value.size(), INT_MAX));
 }
 
 int mbInsertCSS(mbView* v, const char* css) {

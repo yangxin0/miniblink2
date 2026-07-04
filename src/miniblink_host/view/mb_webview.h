@@ -351,6 +351,12 @@ class MbWebView {
   // restyle or hide elements (cookie banners, ads) before a capture. Returns
   // true on success.
   bool InsertCSS(const char* css);
+  // Persistent per-view USER-origin stylesheet: injected into every document
+  // this view commits (StyleEngine::InjectSheet, WebCssOrigin::kUser), so it
+  // survives navigations and never appears in the page's DOM — unlike
+  // InsertCSS, which appends a one-shot <style> the page can see. Empty/null
+  // clears it (takes effect on the next commit).
+  void SetUserStylesheet(const char* css);
   // localStorage access for the document's origin (inject an auth token, read
   // SPA state). Get returns false if the key is absent or storage is unavailable
   // (opaque origin); Set returns false on a SecurityError/quota failure. Needs a
@@ -553,6 +559,10 @@ class MbWebView {
   // "number"/"string"/"boolean"/"object"/"function"/"undefined"/"array"/"null")
   // via *out_type — captured from the SAME single eval (no re-run / side effects).
   std::string EvalWithType(const char* utf8_script, std::string* out_type);
+  // Like EvalToString, but reports a thrown exception's message (with source
+  // line when available) in *out_exception instead of swallowing it. An empty
+  // exception string means the script completed.
+  std::string EvalCatch(const char* utf8_script, std::string* out_exception);
   // Eval JS in a dedicated isolated world: separate globals from the page, shared DOM.
   std::string EvalIsolated(const char* utf8_script);
   // Drive the engine for ~ms of real time (lets setTimeout / async work run).
@@ -701,6 +711,7 @@ class MbWebView {
   bool load_finished_ = false;        // main-frame load event has fired (DidFinishLoad)
   std::function<void()> on_load_finish_;  // optional embedder finish callback
   // Fired on main-frame commit (url) / top-level load failure (url, error).
+  std::string user_stylesheet_;  // injected per commit; empty = none
   std::function<void(const std::string&)> on_begin_loading_;
   std::function<void(const std::string&, const std::string&)> on_fail_loading_;
   std::function<void()> on_dom_content_loaded_;  // optional DOMContentLoaded callback
