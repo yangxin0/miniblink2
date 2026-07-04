@@ -103,9 +103,14 @@ MB_EXPORT mbSession* mbDefaultSession(void);
 // A view's session is fixed before its first navigation commits.
 MB_EXPORT mbView* mbCreateViewInSession(int width, int height, mbSession*);
 MB_EXPORT mbSession* mbViewGetSession(mbView*);
-// Staged, per the design in IMPROVEMENT2.md: mbSessionClearStorage (wipe) and
-// mbSessionFlush (durability barrier) land with stages 2/3 rather than
-// shipping as stubs.
+// Wipe this profile: cookies, IndexedDB, OPFS. Live documents DOM storage
+// (local/sessionStorage) is blink-internal and not reachable service-side -
+// clear it per document via JS if needed (mbClearStorage in automation.h).
+MB_EXPORT void mbSessionClearStorage(mbSession*);
+// Durability barrier: write a PERSISTENT profile cookies/IndexedDB/OPFS
+// under its persist dir now (also happens at final teardown). No-op for
+// ephemeral profiles. localStorage is not persisted (see above).
+MB_EXPORT void mbSessionFlush(mbSession*);
 
 MB_EXPORT mbView* mbCreateView(int width, int height);
 MB_EXPORT void    mbDestroyView(mbView*);

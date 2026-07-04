@@ -1343,11 +1343,18 @@ constexpr char kIdbMagic[] = "MBIDB002";    // + per-record Blob/File bytes
 // Set/cleared around a single save on the service thread, so a bare pointer is safe.
 using BlobByteMap = std::map<const blink::WebBlobInfo*, std::string>;
 
-std::string SerializeRegistry(const BlobByteMap* blob_bytes) {
+std::string SerializeRegistry(const BlobByteMap* blob_bytes,
+                              const std::string& scope_prefix = std::string()) {
   std::string o;
   o.append(kIdbMagic, 8);
-  WU32(&o, Registry().size());  // all databases (secondary indexes now persisted)
+  uint32_t db_count = 0;  // registry keys are "scope\ndbname"; filter by scope
+  for (const auto& [name, b] : Registry())
+    if (scope_prefix.empty() || name.rfind(scope_prefix, 0) == 0)
+      ++db_count;
+  WU32(&o, db_count);
   for (const auto& [name, b] : Registry()) {
+    if (!scope_prefix.empty() && name.rfind(scope_prefix, 0) != 0)
+      continue;
     const blink::IDBDatabaseMetadata& md = b->metadata;
     WStr(&o, name);
     WI64(&o, md.version);
@@ -1423,7 +1430,7 @@ std::string SerializeRegistry(const BlobByteMap* blob_bytes) {
   return o;
 }
 
-bool DeserializeRegistry(const std::string& buf) {
+bool DeserializeRegistry(const std::string& buf, bool merge = false) {
   Reader r(buf);
   const bool v2 = buf.size() >= 8 && buf.compare(0, 8, kIdbMagic, 8) == 0;
   const bool v1 = buf.size() >= 8 && buf.compare(0, 8, kIdbMagicV1, 8) == 0;
@@ -1538,7 +1545,12 @@ bool DeserializeRegistry(const std::string& buf) {
   // backend_ points into one of them (freeing here was a use-after-free).
   for (auto& kv : Registry())
     RetireBackend(std::move(kv.second));
-  Registry() = std::move(loaded);
+  if (merge) {
+    for (auto& [k, v] : loaded)
+      Registry()[k] = std::move(v);  // same-key: file wins
+  } else {
+    Registry() = std::move(loaded);
+  }
   return true;
 }
 
@@ -1580,7 +1592,8 @@ void RunOnServiceSync(base::OnceClosure task) {
 // Runs entirely on the service thread; the main thread is blocked on `done`, but the service
 // thread stays free to drive the async reads — no deadlock. Records are immutable for the
 // duration (no IDB op runs while the caller blocks), so the &bi pointers stay valid.
-void SerializeWithBlobsOnService(std::string* out, base::WaitableEvent* done) {
+void SerializeWithBlobsOnService(std::string* out, base::WaitableEvent* done,
+                                 const std::string& scope_prefix = std::string()) {
   auto byte_map = std::make_unique<BlobByteMap>();
   std::vector<const blink::WebBlobInfo*> blobs;
   for (const auto& [name, b] : Registry())
@@ -1589,7 +1602,7 @@ void SerializeWithBlobsOnService(std::string* out, base::WaitableEvent* done) {
         for (const blink::WebBlobInfo& bi : rec.blob_info)
           blobs.push_back(&bi);
   if (blobs.empty()) {
-    *out = SerializeRegistry(byte_map.get());
+    *out = SerializeRegistry(byte_map.get(), scope_prefix);
     done->Signal();
     return;
   }
@@ -1598,11 +1611,11 @@ void SerializeWithBlobsOnService(std::string* out, base::WaitableEvent* done) {
       blobs.size(),
       base::BindOnce(
           [](std::string* out, base::WaitableEvent* done,
-             std::unique_ptr<BlobByteMap> map) {
-            *out = SerializeRegistry(map.get());
+             std::unique_ptr<BlobByteMap> map, const std::string& prefix) {
+            *out = SerializeRegistry(map.get(), prefix);
             done->Signal();
           },
-          out, done, std::move(byte_map)));
+          out, done, std::move(byte_map), scope_prefix));
   for (const blink::WebBlobInfo* bi : blobs) {
     mojo::PendingRemote<blink::mojom::blink::Blob> remote = bi->CloneBlobRemote();
     MbReadBlobRemoteBytes(
@@ -1618,6 +1631,50 @@ void SerializeWithBlobsOnService(std::string* out, base::WaitableEvent* done) {
 }
 }  // namespace
 
+bool MbSaveIndexedDBScoped(const std::string& path,
+                           const std::string& scope_prefix) {
+  std::string blob;
+  scoped_refptr<base::SingleThreadTaskRunner> runner =
+      MbRuntime::ServiceTaskRunner();
+  if (!runner || runner->RunsTasksInCurrentSequence()) {
+    blob = SerializeRegistry(nullptr, scope_prefix);
+  } else {
+    base::WaitableEvent done;
+    runner->PostTask(FROM_HERE,
+                     base::BindOnce(&SerializeWithBlobsOnService, &blob, &done,
+                                    scope_prefix));
+    done.Wait();
+  }
+  return base::WriteFile(base::FilePath(path), blob);
+}
+
+bool MbLoadIndexedDBMerge(const std::string& path) {
+  std::string blob;
+  if (!base::ReadFileToString(base::FilePath(path), &blob))
+    return false;
+  bool ok = false;
+  RunOnServiceSync(base::BindOnce(
+      [](const std::string& b, bool* out) {
+        *out = DeserializeRegistry(b, /*merge=*/true);
+      },
+      blob, &ok));
+  return ok;
+}
+
+void MbClearIndexedDBScoped(const std::string& scope_prefix) {
+  RunOnServiceSync(base::BindOnce(
+      [](const std::string& prefix) {
+        auto& reg = Registry();
+        for (auto it = reg.begin(); it != reg.end();) {
+          if (it->first.rfind(prefix, 0) == 0)
+            it = reg.erase(it);
+          else
+            ++it;
+        }
+      },
+      scope_prefix));
+}
+
 bool MbSaveIndexedDB(const std::string& path) {
   std::string blob;
   scoped_refptr<base::SingleThreadTaskRunner> runner =
@@ -1629,7 +1686,8 @@ bool MbSaveIndexedDB(const std::string& path) {
   } else {
     base::WaitableEvent done;
     runner->PostTask(
-        FROM_HERE, base::BindOnce(&SerializeWithBlobsOnService, &blob, &done));
+        FROM_HERE, base::BindOnce(&SerializeWithBlobsOnService, &blob, &done,
+                                  std::string()));
     done.Wait();
   }
   return base::WriteFile(base::FilePath(path), blob);

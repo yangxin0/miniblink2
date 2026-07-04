@@ -1,5 +1,11 @@
 #include "miniblink_host/session/mb_session.h"
 
+#include "base/files/file_path.h"
+#include "base/files/file_util.h"
+#include "miniblink_host/frame/mb_indexeddb.h"
+#include "miniblink_host/frame/mb_opfs.h"
+#include "miniblink_host/loader/mb_url_loader.h"
+
 namespace mb {
 
 MbSession::MbSession(std::string name, std::string persist_dir)
@@ -31,7 +37,35 @@ MbSession* MbSession::Create(const std::string& name,
       dir += '/';
     dir += name;
   }
-  return new MbSession(name, dir);
+  auto* session = new MbSession(name, dir);
+  session->RestoreFromDisk();  // no-op for ephemeral / first-run profiles
+  return session;
+}
+
+void MbSession::FlushToDisk() {
+  if (!persistent())
+    return;
+  const base::FilePath dir(persist_dir_);
+  base::CreateDirectory(dir);
+  MbSaveCookies(dir.Append("cookies.dat").value(), id_);
+  MbSaveIndexedDBScoped(dir.Append("idb.dat").value(), scope_prefix());
+  MbSaveOPFSScoped(dir.Append("opfs.dat").value(), scope_prefix());
+}
+
+void MbSession::RestoreFromDisk() {
+  if (!persistent())
+    return;
+  const base::FilePath dir(persist_dir_);
+  // Best-effort per file: a first run has none of them.
+  MbLoadCookies(dir.Append("cookies.dat").value(), id_);
+  MbLoadIndexedDBMerge(dir.Append("idb.dat").value());
+  MbLoadOPFS(dir.Append("opfs.dat").value());  // MbLoadOPFS merges per scope
+}
+
+void MbSession::ClearStorage() {
+  MbClearCookieJar(id_);
+  MbClearIndexedDBScoped(scope_prefix());
+  MbClearOPFSScoped(scope_prefix());
 }
 
 void MbSession::Release() {
@@ -46,8 +80,10 @@ void MbSession::Detach() {
 }
 
 void MbSession::MaybeDelete() {
-  if (!is_default_ && detached_ && refs_ == 0)
-    delete this;
+  if (is_default_ || !detached_ || refs_ != 0)
+    return;
+  FlushToDisk();  // final durability barrier for persistent profiles
+  delete this;
 }
 
 }  // namespace mb
