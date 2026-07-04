@@ -129,7 +129,7 @@ foundation it builds on.
 | 3 | Zero-copy response bodies | **Deferred by cost**: the body is a std::string threaded through MbFindMock/MbFetchUrl/the async deliver path; an owned-buffer type means retyping that plumbing end to end, against a measured saving of one memcpy of already-cached bytes per serve (~ms per page). Revisit if a host serves large media. |
 | 4 | mbPurgeMemory / mbLogMemoryUsage | **Shipped** (871a40b): critical pressure broadcast + V8 low-memory GC; coarse V8/malloc log. |
 | 5 | JS exception channel + lifecycle doc | **Shipped** (871a40b): mbEvalJSCatch (message + line); binding-lifecycle contract documented in view.h. |
-| 6 | Sessions | **Design agreed, implementation staged** - see the Sessions section below. |
+| 6 | Sessions | **Stage 1 shipped**: MbSession identity + refcount/detach lifetime, default session, mbCreateViewInSession/mbViewGetSession, session-id prefix on the storage partition scope (DOM storage/IDB/OPFS/buckets/locks isolate per profile). Stage 2 (cookie jars) and 3 (persistence/Clear/Flush) open - see the design below. |
 | 7 | Font defaults / update timestamp / inspector | Notes only |
 
 ## Sessions: the agreed design (item 6)
