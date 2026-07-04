@@ -32,6 +32,16 @@ class MbSession {
   void Release();
   void Detach();
 
+  // Stage 3 (persistence): persistent sessions restore at Create and flush at
+  // FlushToDisk / final teardown; ephemeral sessions no-op. ClearStorage wipes
+  // this profile's cookies + IndexedDB + OPFS (live documents' DOM storage is
+  // blink-internal and not reachable service-side - documented gap).
+  void FlushToDisk();
+  void RestoreFromDisk();
+  void ClearStorage();
+  // The prefix every partition scope of this session starts with.
+  std::string scope_prefix() const { return id_ + "\x1f"; }
+
   void set_host_handle(mbSession* h) { host_handle_ = h; }
   mbSession* host_handle() const { return host_handle_; }
 

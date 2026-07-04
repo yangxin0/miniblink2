@@ -629,6 +629,35 @@ void ReadNodeInto(OpfsReader* r, FsNode* dst) {
 
 }  // namespace
 
+bool MbSaveOPFSScoped(const std::string& path,
+                      const std::string& scope_prefix) {
+  std::string o;
+  o.append(kOpfsMagic, 8);
+  const auto& roots = OpfsRoots();
+  uint32_t n = 0;
+  for (const auto& [scope, root] : roots)
+    if (scope.rfind(scope_prefix, 0) == 0)
+      ++n;
+  WLen(&o, n);
+  for (const auto& [scope, root] : roots) {
+    if (scope.rfind(scope_prefix, 0) != 0)
+      continue;
+    WBlob(&o, scope);
+    WNode(&o, root.get());
+  }
+  return base::WriteFile(base::FilePath(path), o);
+}
+
+void MbClearOPFSScoped(const std::string& scope_prefix) {
+  auto& roots = OpfsRoots();
+  for (auto it = roots.begin(); it != roots.end();) {
+    if (it->first.rfind(scope_prefix, 0) == 0)
+      it = roots.erase(it);
+    else
+      ++it;
+  }
+}
+
 bool MbSaveOPFS(const std::string& path) {
   std::string o;
   o.append(kOpfsMagic, 8);

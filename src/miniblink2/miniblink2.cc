@@ -237,6 +237,18 @@ mbSession* mbDefaultSession(void) {
   return def;
 }
 
+void mbSessionClearStorage(mbSession* s) {
+  EngineScope engine_scope;
+  if (s && s->impl)
+    s->impl->ClearStorage();
+}
+
+void mbSessionFlush(mbSession* s) {
+  EngineScope engine_scope;
+  if (s && s->impl)
+    s->impl->FlushToDisk();
+}
+
 mbView* mbCreateViewInSession(int width, int height, mbSession* session) {
   mbView* v = mbCreateView(width, height);
   if (v && v->impl && session && session->impl)
