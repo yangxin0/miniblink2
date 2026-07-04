@@ -1018,6 +1018,20 @@ mbRequestMockCallback g_request_mock_cb = nullptr;
 void* g_request_mock_ud = nullptr;
 }  // namespace
 
+void mbOnRequestMock(mbView* v, mbRequestMockCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetRequestMockCallback(
+        [cb, userdata](const std::string& url, std::string* body,
+                          std::string* ct, int* status) -> bool {
+          mbRequestMock m{body, ct, status};
+          return cb(url.c_str(), &m, userdata) != 0;
+        });
+  else
+    v->impl->SetRequestMockCallback({});
+}
+
 void mbSetRequestMockCallback(mbRequestMockCallback cb, void* userdata) {
   g_request_mock_cb = cb;
   g_request_mock_ud = userdata;

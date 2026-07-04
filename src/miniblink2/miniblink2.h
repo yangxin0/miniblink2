@@ -744,6 +744,14 @@ MB_EXPORT void mbRequestMockResponse(mbRequestMock*, const char* body, int len,
 typedef int (*mbRequestMockCallback)(const char* url, mbRequestMock*, void* userdata);
 MB_EXPORT void mbSetRequestMockCallback(mbRequestMockCallback, void* userdata);
 
+// Per-VIEW dynamic request mock: same callback shape as
+// mbSetRequestMockCallback but scoped to requests initiated by THIS view (its
+// document and subresource loads). Consulted after the static mock table and
+// before the process-wide callback. Worker scripts and other viewless fetches
+// fall through to the process-wide hook. Pass NULL to remove; removed
+// automatically when the view is destroyed.
+MB_EXPORT void mbOnRequestMock(mbView*, mbRequestMockCallback, void* userdata);
+
 // Request URL rewriting — the request-side counterpart to mocking. Before any
 // fetch, the first occurrence of `from` in a request URL is replaced with `to`
 // (host swap, http->https, point a CDN/API at a local mock). The rewrite is
