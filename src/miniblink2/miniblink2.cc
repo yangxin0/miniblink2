@@ -19,6 +19,7 @@
 #include "miniblink_host/frame/mb_notification_service.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/runtime/mb_runtime.h"
+#include "miniblink_host/session/mb_session.h"
 #include "miniblink_host/view/mb_webview.h"
 
 // --- ThinLTO keep-alive for the Rust global allocator ------------------------------------
@@ -203,6 +204,51 @@ int mbWaitForFunction(mbView* v, const char* js_expr, int timeout_ms) {
   if (!v || !v->impl || !js_expr)
     return 0;
   return v->impl->WaitForFunction(js_expr, timeout_ms) ? 1 : 0;
+}
+
+struct mbSession {
+  mb::MbSession* impl = nullptr;
+};
+
+mbSession* mbCreateSession(const char* name, const char* persist_path) {
+  EngineScope engine_scope;
+  auto s = std::make_unique<mbSession>();
+  s->impl = mb::MbSession::Create(name && *name ? name : "unnamed",
+                                  persist_path ? persist_path : "");
+  s->impl->set_host_handle(s.get());
+  return s.release();
+}
+
+void mbDestroySession(mbSession* s) {
+  if (!s)
+    return;
+  if (s->impl)
+    s->impl->Detach();
+  delete s;
+}
+
+mbSession* mbDefaultSession(void) {
+  static mbSession* def = [] {
+    auto* h = new mbSession();
+    h->impl = mb::MbSession::Default();
+    h->impl->set_host_handle(h);
+    return h;
+  }();
+  return def;
+}
+
+mbView* mbCreateViewInSession(int width, int height, mbSession* session) {
+  mbView* v = mbCreateView(width, height);
+  if (v && v->impl && session && session->impl)
+    v->impl->SetSession(session->impl);
+  return v;
+}
+
+mbSession* mbViewGetSession(mbView* v) {
+  if (!v || !v->impl || !v->impl->session())
+    return mbDefaultSession();
+  mbSession* h = v->impl->session()->host_handle();
+  return h ? h : mbDefaultSession();
 }
 
 mbView* mbCreateView(int width, int height) {

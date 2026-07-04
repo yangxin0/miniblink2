@@ -83,6 +83,8 @@ component("miniblink_host") {
     "runtime/mb_script_watchdog.cc",
     "runtime/mb_script_watchdog.h",
     "view/mb_webview.cc",
+    "session/mb_session.cc",
+    "session/mb_session.h",
     "view/mb_webview.h",
     "widget/mb_widget.cc",
     "widget/mb_widget.h",

@@ -6,6 +6,8 @@
 
 #include "miniblink_host/view/mb_webview.h"
 
+#include "miniblink_host/session/mb_session.h"
+
 #include "third_party/blink/public/web/web_css_origin.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
@@ -314,9 +316,13 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
 MbWebView::MbWebView() = default;
 
 MbWebView::~MbWebView() {
+  session_ = MbSession::Default();
+  session_->AddRef();
   // Erase this view's per-context mock hook before anything else — a fetch
   // fired during teardown must not consult a hook whose captures are dying.
   MbSetRequestMockHookForContext(this, {});
+  if (session_)
+    session_->Release();
   // Tear down the blink object graph (WebViewImpl -> Page -> main LocalFrame ->
   // WebFrameWidget) HERE, in the destructor body, while frame_client_/view_client_/
   // agent_group_scheduler_ are still alive — those blink objects hold references to
@@ -3141,6 +3147,15 @@ bool MbWebView::PaintToBitmap(void* out_bgra, int w, int h, int stride, bool set
   if (!ok && widget_ && was_dirty)
     widget_->set_needs_frame(true);  // nothing painted; the request stands
   return ok;
+}
+
+void MbWebView::SetSession(MbSession* session) {
+  if (!session || session == session_)
+    return;
+  session->AddRef();
+  if (session_)
+    session_->Release();
+  session_ = session;
 }
 
 bool MbWebView::IsDirty() const {

@@ -35,6 +35,8 @@ class WebAgentGroupScheduler;
 
 namespace mb {
 
+class MbSession;
+
 class MbViewClient;     // blink::WebViewClient (minimal)
 class MbFrameClient;    // blink::WebLocalFrameClient
 class MbWidget;
@@ -592,6 +594,11 @@ class MbWebView {
   // True when blink has requested a frame since the last successful paint (see
   // MbWidget::needs_frame). Composited views conservatively report true.
   bool IsDirty() const;
+  // The session (storage profile) this view lives in; Default() unless
+  // SetSession replaced it BEFORE the first navigation commits (storage keys
+  // are computed at commit). The view holds a ref for its lifetime.
+  MbSession* session() const { return session_; }
+  void SetSession(MbSession* session);
   bool SavePng(const char* path, int w, int h);  // render + encode PNG to disk
   // Render the full view to a w×h PNG held in memory (encoded_png_) — for
   // embedders that want the bytes (serve over HTTP, store in a DB) without a temp
@@ -711,6 +718,7 @@ class MbWebView {
   bool load_finished_ = false;        // main-frame load event has fired (DidFinishLoad)
   std::function<void()> on_load_finish_;  // optional embedder finish callback
   // Fired on main-frame commit (url) / top-level load failure (url, error).
+  MbSession* session_ = nullptr;  // never null after construction
   std::string user_stylesheet_;  // injected per commit; empty = none
   std::function<void(const std::string&)> on_begin_loading_;
   std::function<void(const std::string&, const std::string&)> on_fail_loading_;

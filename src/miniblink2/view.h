@@ -84,6 +84,29 @@ typedef void (*mbDeferredCallback)(void* userdata);
 MB_EXPORT void mbDefer(mbDeferredCallback cb, void* userdata);
 
 // View lifecycle. A view owns one WebView + main LocalFrame + WebFrameWidget.
+// ---- Sessions (browsing profiles) -------------------------------------------
+// A session isolates everything origin-keyed (DOM storage, IndexedDB, OPFS,
+// storage buckets, locks; cookies join in stage 2) per profile. Sessions are
+// capability handles: whoever holds the mbSession* controls the profile.
+// persist_path == NULL -> EPHEMERAL (memory only). Non-NULL -> the profile
+// roots at <persist_path>/<name>/ (durability lands in stage 3; the identity
+// and layout are already stable). The mode is fixed for the session's life.
+typedef struct mbSession mbSession;
+MB_EXPORT mbSession* mbCreateSession(const char* name, const char* persist_path);
+// Safe with views still open: the handle detaches, the profile tears down
+// when the last view bound to it is destroyed.
+MB_EXPORT void mbDestroySession(mbSession*);
+// The implicit shared EPHEMERAL profile plain mbCreateView uses. Never
+// destroy it.
+MB_EXPORT mbSession* mbDefaultSession(void);
+// Create a view inside `session` (falls back to the default session if NULL).
+// A view's session is fixed before its first navigation commits.
+MB_EXPORT mbView* mbCreateViewInSession(int width, int height, mbSession*);
+MB_EXPORT mbSession* mbViewGetSession(mbView*);
+// Staged, per the design in IMPROVEMENT2.md: mbSessionClearStorage (wipe) and
+// mbSessionFlush (durability barrier) land with stages 2/3 rather than
+// shipping as stubs.
+
 MB_EXPORT mbView* mbCreateView(int width, int height);
 MB_EXPORT void    mbDestroyView(mbView*);
 MB_EXPORT void    mbResize(mbView*, int width, int height);
