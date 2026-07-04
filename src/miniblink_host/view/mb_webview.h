@@ -203,6 +203,10 @@ class MbWebView {
   void SendMouseMove(int x, int y);
   // Trusted mouse-wheel at (x,y); DOM-convention pixel deltas (deltaY>0 scrolls down).
   void SendWheel(int x, int y, int delta_x, int delta_y, int modifiers);
+  void SendMouseEvent(int type, int x, int y, int button, int click_count,
+                      int modifiers);
+  bool SendWheelEx(int x, int y, float delta_x, float delta_y, bool precise,
+                   int modifiers);
   void SendText(const char* utf8);
   void SendKey(const char* key_name);  // press a named non-text key (Enter, Tab, ...)
   void SendKeyEx(const char* key, int modifiers);  // key (named or 1 char) + modifiers
@@ -566,6 +570,9 @@ class MbWebView {
   // settle=true: one-shot screenshot (full lifecycle settle). settle=false: fast
   // interactive paint (wkePaint) — single lifecycle update + paint, no task-queue drain.
   bool PaintToBitmap(void* out_bgra, int w, int h, int stride, bool settle = true);
+  // True when blink has requested a frame since the last successful paint (see
+  // MbWidget::needs_frame). Composited views conservatively report true.
+  bool IsDirty() const;
   bool SavePng(const char* path, int w, int h);  // render + encode PNG to disk
   // Render the full view to a w×h PNG held in memory (encoded_png_) — for
   // embedders that want the bytes (serve over HTTP, store in a DB) without a temp

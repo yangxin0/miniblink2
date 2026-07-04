@@ -324,6 +324,8 @@ MbWebView::~MbWebView() {
 
 void MbWebView::Resize(int width, int height) {
   if (widget_)
+    widget_->set_needs_frame(true);
+  if (widget_)
     widget_->Resize(width, height);
 }
 
@@ -1003,6 +1005,34 @@ void MbWebView::SendMouseMove(int x, int y) {
     RunInFrameTask(base::BindOnce(&MbWidget::SendMouseMove,
                                   base::Unretained(widget_.get()), x, y),
                    /*settle=*/false);
+}
+
+void MbWebView::SendMouseEvent(int type, int x, int y, int button,
+                               int click_count, int modifiers) {
+  // Same out-of-task hazard as SendMouseMove/SendMouseClick: bracket in a task.
+  if (widget_)
+    RunInFrameTask(base::BindOnce(&MbWidget::SendMouseEvent,
+                                  base::Unretained(widget_.get()), type, x, y,
+                                  button, click_count, modifiers),
+                   /*settle=*/false);
+}
+
+bool MbWebView::SendWheelEx(int x, int y, float delta_x, float delta_y,
+                            bool precise, int modifiers) {
+  if (!widget_)
+    return false;
+  // Mirrors SendWheel: deliver the trusted event, then apply the default
+  // scroll unless a blocking listener consumed it - with FLOAT deltas.
+  const bool consumed =
+      widget_->SendWheelEx(x, y, delta_x, delta_y, precise, modifiers);
+  if (consumed || !main_frame_)
+    return consumed;
+  auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
+  blink::LocalFrame* frame = impl->GetFrame();
+  if (frame && frame->DomWindow())
+    frame->DomWindow()->scrollByForTesting(static_cast<double>(delta_x),
+                                           static_cast<double>(delta_y));
+  return consumed;
 }
 
 void MbWebView::SendWheel(int x, int y, int delta_x, int delta_y, int modifiers) {
@@ -2950,6 +2980,12 @@ bool MbWebView::PaintInto(SkCanvas& canvas, int origin_x, int origin_y,
 bool MbWebView::PaintToBitmap(void* out_bgra, int w, int h, int stride, bool settle) {
   if (!out_bgra || w <= 0 || h <= 0)
     return false;
+  // Snapshot semantics for the dirty flag: clear BEFORE painting so a frame
+  // request landing mid-paint (rAF scheduling the next frame, style dirtied by
+  // a drained task) marks the NEXT frame instead of being wiped by this one.
+  const bool was_dirty = widget_ && widget_->needs_frame();
+  if (widget_)
+    widget_->set_needs_frame(false);
   // Compositing view: copy the compositor's captured frame (cc -> viz::Display ->
   // bitmap) so the screenshot reflects the REAL composited output instead of the
   // software paint record. Drives one fresh synchronous frame first. Falls through
@@ -2984,10 +3020,25 @@ bool MbWebView::PaintToBitmap(void* out_bgra, int w, int h, int stride, bool set
   if (!bitmap.installPixels(
           SkImageInfo::Make(w, h, kBGRA_8888_SkColorType, kPremul_SkAlphaType),
           out_bgra, stride)) {
+    if (widget_ && was_dirty)
+      widget_->set_needs_frame(true);  // nothing painted; the request stands
     return false;
   }
   SkCanvas canvas(bitmap);
-  return PaintInto(canvas, 0, 0, /*apply_device_scale=*/true, settle);
+  const bool ok = PaintInto(canvas, 0, 0, /*apply_device_scale=*/true, settle);
+  if (!ok && widget_ && was_dirty)
+    widget_->set_needs_frame(true);  // nothing painted; the request stands
+  return ok;
+}
+
+bool MbWebView::IsDirty() const {
+  if (!widget_)
+    return true;
+  // Composited views produce frames through the frame sink, not this flag;
+  // report dirty so polling hosts keep drawing them.
+  if (widget_->composited())
+    return true;
+  return widget_->needs_frame();
 }
 
 bool MbWebView::PaintRectToBitmap(void* out_bgra, int x, int y, int w, int h,
