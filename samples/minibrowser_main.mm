@@ -11,7 +11,7 @@
 // Build: scripts/build-samples.sh (links libminiblink2.dylib or the merged .a).
 #import <Cocoa/Cocoa.h>
 #include <vector>
-#include "miniblink2/miniblink2.h"
+#include "miniblink2/automation.h"
 
 static mbView* g_view = nullptr;
 static NSView* g_contentView = nil;

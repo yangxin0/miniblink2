@@ -8,7 +8,7 @@
 // just that element to a PNG. Each step asserts, so running it doubles as an
 // integration check. Returns 0 on success, 1 on any failed step.
 
-#include "miniblink2/miniblink2.h"
+#include "miniblink2/automation.h"
 
 #include <cstdio>
 #include <cstring>

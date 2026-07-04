@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-#include "miniblink2/miniblink2.h"
+#include "miniblink2/automation.h"
 
 namespace mbsmoke {
 

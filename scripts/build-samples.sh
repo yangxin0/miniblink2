@@ -41,8 +41,8 @@ DIST="$HERE/dist/$MODE"
 SRC="$HERE/samples/minibrowser_main.mm"
 [ -f "$SRC" ] || { echo "error: missing $SRC" >&2; exit 1; }
 
-# samples #include "miniblink2/miniblink2.h"; -I src resolves it (the same header the
-# SDK ships as dist/include/miniblink2/miniblink2.h).
+# samples #include "miniblink2/automation.h"; -I src resolves it (the same header the
+# SDK ships as dist/include/miniblink2/automation.h).
 # -isysroot is explicit: the Chromium clang++ (used for the static/LTO link) has no default
 # macOS SDK, unlike the system clang++.
 SDKROOT="$(xcrun --show-sdk-path 2>/dev/null || echo /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk)"
