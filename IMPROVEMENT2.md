@@ -129,5 +129,54 @@ foundation it builds on.
 | 3 | Zero-copy response bodies | **Deferred by cost**: the body is a std::string threaded through MbFindMock/MbFetchUrl/the async deliver path; an owned-buffer type means retyping that plumbing end to end, against a measured saving of one memcpy of already-cached bytes per serve (~ms per page). Revisit if a host serves large media. |
 | 4 | mbPurgeMemory / mbLogMemoryUsage | **Shipped** (871a40b): critical pressure broadcast + V8 low-memory GC; coarse V8/malloc log. |
 | 5 | JS exception channel + lifecycle doc | **Shipped** (871a40b): mbEvalJSCatch (message + line); binding-lifecycle contract documented in view.h. |
-| 6 | Sessions | Open - the remaining big item. |
+| 6 | Sessions | **Design agreed, implementation staged** - see the Sessions section below. |
 | 7 | Font defaults / update timestamp / inspector | Notes only |
+
+## Sessions: the agreed design (item 6)
+
+Decided 2026-07-04, optimizing for API quality over implementation cost.
+
+```c
+typedef struct mbSession mbSession;
+
+// A browsing profile. `name` is its stable identity (and its directory name).
+// persist_path == NULL  -> EPHEMERAL: memory only, gone at teardown.
+// persist_path != NULL  -> PERSISTENT: durable under <path>/<name>/.
+// Same (name, path) later reopens the same profile. The mode is fixed for the
+// session's lifetime (no switching - that is how half-migrated profiles happen).
+MB_EXPORT mbSession* mbCreateSession(const char* name, const char* persist_path);
+
+// Safe with views still open: the handle detaches; storage tears down when the
+// last view in the session closes. No destroy-order footgun.
+MB_EXPORT void mbDestroySession(mbSession*);
+
+MB_EXPORT mbView* mbCreateViewInSession(int width, int height, mbSession*);
+MB_EXPORT mbSession* mbViewGetSession(mbView*);
+MB_EXPORT mbSession* mbDefaultSession(void);      // the implicit ephemeral one
+
+MB_EXPORT void mbSessionClearStorage(mbSession*); // logout-everything wipe
+MB_EXPORT void mbSessionFlush(mbSession*);        // durability barrier
+```
+
+Design properties:
+- Sessions are CAPABILITY HANDLES, not name strings in a global registry -
+  whoever holds the handle controls the profile.
+- Ephemeral vs persistent is a creation-time binary, visible at the call site.
+- COOKIES ARE IN, unconditionally: account isolation is the reason sessions
+  exist; per-session cookie jars in the curl layer are an accepted consequence.
+- Storage completeness: everything origin-keyed partitions by session
+  (cookies, local/session storage, IndexedDB, OPFS, CacheStorage,
+  BroadcastChannel/locks). The HTTP byte cache may stay shared - it is
+  content-addressed, not identity-bearing.
+- Default session is EPHEMERAL and implicit: plain mbCreateView keeps working,
+  nothing touches disk unless a host opts in (privacy-safe default).
+- The mbSave/Load* snapshot pairs live on in automation.h as export/import
+  TOOLS; sessions are the ownership model, snapshots are operations on one.
+
+Implementation staging (the design is the contract; durability matures):
+1. Session object + default session + view binding; session id prefixes the
+   existing frame-origin partition scope, isolating every origin-keyed
+   service in memory; ClearStorage.
+2. Per-session cookie jars (curl share handles keyed by session).
+3. Persistence: restore at create; durability barriers at mbSessionFlush /
+   destroy first, converging to write-through per service.
