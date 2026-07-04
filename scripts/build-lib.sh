@@ -380,7 +380,7 @@ mkdir -p "$DIST/include/miniblink2"
 # Public API header — the SDK surface: the miniblink2 mb* C API, self-contained
 # (standard-library includes only). Consumer:
 #   -Idist/<mode>/include   +   #include "miniblink2/miniblink2.h"
-cp "$HERE/src/miniblink2/miniblink2.h" "$DIST/include/miniblink2/miniblink2.h"
+cp "$HERE"/src/miniblink2/*.h "$DIST/include/miniblink2/"
 rm -f "$DIST/include/miniblink2/wke.h" "$DIST/include/miniblink2/mb_capi.h"  # pre-rename leftovers
 
 # 2+3. Run the profile's pass(es). DATA_OUT is where runtime data (V8 snapshots,
