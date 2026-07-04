@@ -262,6 +262,28 @@ void mbOnLoadFinish(mbView* v, mbLoadFinishCallback cb, void* userdata) {
     v->impl->SetLoadFinishCallback({});
 }
 
+void mbOnBeginLoading(mbView* v, mbBeginLoadingCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetBeginLoadingCallback(
+        [v, cb, userdata](const std::string& url) { cb(v, userdata, url.c_str()); });
+  else
+    v->impl->SetBeginLoadingCallback({});
+}
+
+void mbOnFailLoading(mbView* v, mbFailLoadingCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetFailLoadingCallback(
+        [v, cb, userdata](const std::string& url, const std::string& error) {
+          cb(v, userdata, url.c_str(), error.c_str());
+        });
+  else
+    v->impl->SetFailLoadingCallback({});
+}
+
 void mbOnDOMContentLoaded(mbView* v, mbDOMContentLoadedCallback cb, void* userdata) {
   if (!v || !v->impl)
     return;

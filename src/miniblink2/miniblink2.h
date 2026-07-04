@@ -148,6 +148,21 @@ MB_EXPORT int mbDownloadURL(mbView*, const char* url, const char* dest_path);
 // load starts), so callers can wait on the real finish instead of a fixed delay.
 typedef void (*mbLoadFinishCallback)(mbView*, void* userdata);
 MB_EXPORT void mbOnLoadFinish(mbView*, mbLoadFinishCallback, void* userdata);
+
+// Fires when a MAIN-FRAME navigation commits: the previous document is gone
+// and the new one starts loading subresources. Completes the lifecycle set
+// (begin -> DOMContentLoaded -> finish, or begin -> fail). `url` is the
+// committed document URL, valid only for the duration of the call.
+typedef void (*mbBeginLoadingCallback)(mbView*, void* userdata, const char* url);
+MB_EXPORT void mbOnBeginLoading(mbView*, mbBeginLoadingCallback, void* userdata);
+
+// Fires when a TOP-LEVEL load fails before producing a document (file unread-
+// able, fetch error). `error` is a short description (may be empty). The
+// load-finish callback still fires right after — mbIsLoadFinished stays the
+// single completion signal; this adds the failure reason.
+typedef void (*mbFailLoadingCallback)(mbView*, void* userdata, const char* url,
+                                      const char* error);
+MB_EXPORT void mbOnFailLoading(mbView*, mbFailLoadingCallback, void* userdata);
 MB_EXPORT int  mbIsLoadFinished(mbView*);
 
 // Fires when the main document's DOMContentLoaded event dispatches — the DOM is parsed and
