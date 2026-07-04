@@ -130,7 +130,7 @@ foundation it builds on.
 | 4 | mbPurgeMemory / mbLogMemoryUsage | **Shipped** (871a40b): critical pressure broadcast + V8 low-memory GC; coarse V8/malloc log. |
 | 5 | JS exception channel + lifecycle doc | **Shipped** (871a40b): mbEvalJSCatch (message + line); binding-lifecycle contract documented in view.h. |
 | 6 | Sessions | **Stage 1 shipped**: MbSession identity + refcount/detach lifetime, default session, mbCreateViewInSession/mbViewGetSession, session-id prefix on the storage partition scope (DOM storage/IDB/OPFS/buckets/locks isolate per profile). Stage 2 shipped: per-session curl cookie jars (keyed shares; fetch paths resolve via the view registry, document.cookie via the session-prefixed scope; unknown contexts alias the default jar). Stage 3 shipped: persistent profiles restore at create and flush at mbSessionFlush/teardown (cookies + prefix-filtered IndexedDB + OPFS under persist_dir); mbSessionClearStorage wipes the profile. localStorage is blink-internal: not persisted per session (documented). THE SESSIONS DESIGN IS COMPLETE. |
-| 7 | Font defaults / update timestamp / inspector | Notes only |
+| 7 | Font defaults / update timestamp / inspector | **7a shipped**: mbSetFontFamilies (generic families, USCRIPT_COMMON). **7b shipped**: mbUpdateAt stamps rAF with the host display-link frame time. **7c**: staged plan below (CDP pipe + host WS bridge; Chrome is the frontend); Stage A is the open engine item. |
 
 ## Sessions: the agreed design (item 6)
 
