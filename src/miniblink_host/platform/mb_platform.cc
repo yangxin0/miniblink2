@@ -9,6 +9,9 @@
 
 #include "miniblink_host/platform/mb_platform.h"
 
+#include "base/run_loop.h"
+#include "miniblink_host/runtime/mb_runtime.h"
+
 #include <memory>
 #include <vector>
 
@@ -322,6 +325,41 @@ MbPlatform::CreateWebGLGraphicsContextProvider(
   // (getContext returns null), same as before this override existed, so it degrades.
   return MakeWebGLContextProvider(
       context_type == blink::Platform::kWebGL2ContextType);
+}
+
+scoped_refptr<base::SingleThreadTaskRunner> MbPlatform::GetIOTaskRunner()
+    const {
+  // The runtime's IO thread ("mb-io", started before MbPlatform is installed)
+  // is the process's ONE IO-pumped thread; mojo binds message-pipe watchers on
+  // it. Do not spawn a second one here - the process already had this thread,
+  // and blink::Initialize calls this at startup for every embedder.
+  return MbRuntime::ServiceTaskRunner();
+}
+
+namespace {
+class MbNestedLoop : public blink::Platform::NestedMessageLoopRunner {
+ public:
+  void Run() override {
+    // Debugger pause: spin a NESTED run loop (host tasks + mojo keep flowing,
+    // so a Debugger.resume can arrive) until QuitNow. Never entered for
+    // non-pausing CDP traffic (Runtime.evaluate etc.).
+    base::RunLoop loop(base::RunLoop::Type::kNestableTasksAllowed);
+    quit_ = loop.QuitClosure();
+    loop.Run();
+  }
+  void QuitNow() override {
+    if (quit_)
+      std::move(quit_).Run();
+  }
+
+ private:
+  base::OnceClosure quit_;
+};
+}  // namespace
+
+std::unique_ptr<blink::Platform::NestedMessageLoopRunner>
+MbPlatform::CreateNestedMessageLoopRunner() const {
+  return std::make_unique<MbNestedLoop>();
 }
 
 }  // namespace mb

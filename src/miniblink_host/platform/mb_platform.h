@@ -33,6 +33,16 @@ namespace mb {
 
 class MbPlatform : public blink::Platform {
  public:
+  // blink's default returns null; the DevTools agent (and other mojo users)
+  // bind receivers on it - the CDP bridge (IMPROVEMENT2 item 7c) needs a real
+  // IO-pumped thread here. Returns the runtime's existing mb-io service
+  // thread; never spawns one.
+  scoped_refptr<base::SingleThreadTaskRunner> GetIOTaskRunner() const override;
+  // Nested loop for debugger pause (breakpoints): DevTools requires a non-null
+  // runner at session attach even when never paused.
+  std::unique_ptr<blink::Platform::NestedMessageLoopRunner>
+  CreateNestedMessageLoopRunner() const override;
+
   MbPlatform();
   MbPlatform(const MbPlatform&) = delete;
   MbPlatform& operator=(const MbPlatform&) = delete;

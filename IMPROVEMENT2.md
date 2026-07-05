@@ -130,7 +130,7 @@ foundation it builds on.
 | 4 | mbPurgeMemory / mbLogMemoryUsage | **Shipped** (871a40b): critical pressure broadcast + V8 low-memory GC; coarse V8/malloc log. |
 | 5 | JS exception channel + lifecycle doc | **Shipped** (871a40b): mbEvalJSCatch (message + line); binding-lifecycle contract documented in view.h. |
 | 6 | Sessions | **Stage 1 shipped**: MbSession identity + refcount/detach lifetime, default session, mbCreateViewInSession/mbViewGetSession, session-id prefix on the storage partition scope (DOM storage/IDB/OPFS/buckets/locks isolate per profile). Stage 2 shipped: per-session curl cookie jars (keyed shares; fetch paths resolve via the view registry, document.cookie via the session-prefixed scope; unknown contexts alias the default jar). Stage 3 shipped: persistent profiles restore at create and flush at mbSessionFlush/teardown (cookies + prefix-filtered IndexedDB + OPFS under persist_dir); mbSessionClearStorage wipes the profile. localStorage is blink-internal: not persisted per session (documented). THE SESSIONS DESIGN IS COMPLETE. |
-| 7 | Font defaults / update timestamp / inspector | **7a shipped**: mbSetFontFamilies (generic families, USCRIPT_COMMON). **7b shipped**: mbUpdateAt stamps rAF with the host display-link frame time. **7c**: staged plan below (CDP pipe + host WS bridge; Chrome is the frontend); Stage A is the open engine item. |
+| 7 | Font defaults / update timestamp / inspector | **7a shipped**: mbSetFontFamilies. **7b shipped**: mbUpdateAt. **7c Stage A shipped (draft)**: in-process CDP pipe (mbDevToolsAttach/Send/Detach) driving blink's DevToolsAgent standalone - verified by a Runtime.evaluate round trip. Root causes: null blink::String mojo params (validation-dropped), JSON-vs-CBOR command encoding, a null LayerTreeDebugState overlay deref (patch 0024), a null WidgetInputHandlerManager deref on session detach (patch 0025), and needing a real non-associated primary pipe. **7c Stage B open**: the host WebSocket + /json bridge (embedder-side, per the staged plan below) is not in this tree - no MiniblinkDevToolsBridge/GLYPH_DEVTOOLS code exists here yet. |
 
 ## Sessions: the agreed design (item 6)
 
@@ -211,4 +211,6 @@ unnecessary.
   frontend; shipping one inside the SDK adds megabytes and a TypeScript
   build for zero capability.
 
-Status: plan agreed; Stage A is the next engine work item.
+Status: Stage A shipped (draft) - see item 7 in the table above. Stage B (the
+host WebSocket bridge) is the open item; it lives in the embedder, not this
+repo's engine sources.

@@ -6,6 +6,7 @@
 
 #include "miniblink_host/view/mb_webview.h"
 
+#include "miniblink_host/devtools/mb_devtools.h"
 #include "miniblink_host/session/mb_session.h"
 
 #include "third_party/blink/public/web/web_css_origin.h"
@@ -325,6 +326,11 @@ MbWebView::~MbWebView() {
   MbSetLoaderSessionKey(this, {});
   if (session_)
     session_->Release();
+  // Detach DevTools while the frame is still alive: devtools_ is a member, so
+  // without this it would be destroyed only AFTER Close() has freed the frame,
+  // and the bridge's teardown flushes protocol notifications through the
+  // still-attached session (use-after-free).
+  DetachDevTools();
   // Tear down the blink object graph (WebViewImpl -> Page -> main LocalFrame ->
   // WebFrameWidget) HERE, in the destructor body, while frame_client_/view_client_/
   // agent_group_scheduler_ are still alive — those blink objects hold references to
@@ -1615,6 +1621,27 @@ void InjectUserSheet(blink::WebLocalFrame* frame, const std::string& css) {
                                         blink::WebCssOrigin::kUser);
 }
 }  // namespace
+
+bool MbWebView::AttachDevTools(
+    std::function<void(const std::string&)> on_message) {
+  if (devtools_ || !main_frame_)
+    return false;
+  // No visibility games here: the view is created visible, and the inspector
+  // task queue (kInternalInspector) is unfreezable by design, so CDP traffic
+  // flows regardless of the page's visibility state.
+  auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
+  devtools_ = MbDevToolsBridge::Attach(impl, std::move(on_message));
+  return !!devtools_;
+}
+
+void MbWebView::SendDevTools(const char* json, int len) {
+  if (devtools_ && json && len > 0)
+    devtools_->Send(std::string(json, static_cast<size_t>(len)));
+}
+
+void MbWebView::DetachDevTools() {
+  devtools_.reset();
+}
 
 void MbWebView::SetFontFamilies(const char* standard, const char* fixed,
                                 const char* serif, const char* sans_serif) {

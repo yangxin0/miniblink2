@@ -38,6 +38,7 @@ namespace mb {
 // Item 7b: host display-refresh timestamp for rAF (see mbUpdateAt).
 void MbSetHostFrameTime(double seconds);
 
+class MbDevToolsBridge;
 class MbSession;
 
 class MbViewClient;     // blink::WebViewClient (minimal)
@@ -368,6 +369,11 @@ class MbWebView {
   // specific per-script mapping) - the CJK-fallback knob dictionary hosts need.
   void SetFontFamilies(const char* standard, const char* fixed,
                        const char* serif, const char* sans_serif);
+  // CDP bridge (item 7c stage A): one session per view. Messages both ways
+  // are CDP JSON; delivery pumps through the task queue (keep updating).
+  bool AttachDevTools(std::function<void(const std::string&)> on_message);
+  void SendDevTools(const char* json, int len);
+  void DetachDevTools();
   // localStorage access for the document's origin (inject an auth token, read
   // SPA state). Get returns false if the key is absent or storage is unavailable
   // (opaque origin); Set returns false on a SecurityError/quota failure. Needs a
@@ -727,6 +733,7 @@ class MbWebView {
   bool load_finished_ = false;        // main-frame load event has fired (DidFinishLoad)
   std::function<void()> on_load_finish_;  // optional embedder finish callback
   // Fired on main-frame commit (url) / top-level load failure (url, error).
+  std::unique_ptr<MbDevToolsBridge> devtools_;  // live while attached
   MbSession* session_ = nullptr;  // never null after construction
   std::string user_stylesheet_;  // injected per commit; empty = none
   std::function<void(const std::string&)> on_begin_loading_;

@@ -1,0 +1,35 @@
+Subject: [PATCH] inspector: generate addScriptToEvaluateOnNewDocument id
+ when browserless
+
+Page.addScriptToEvaluateOnNewDocument takes its identifier from the
+command's associated data, which only the browser process populates. An
+in-process / directly-attached CDP client sends no associated data, so the
+identifier arrives as a null String and is used as a HashMap key, crashing
+in StringImpl::HashSlowCase. Generate an identifier when none was supplied
+and return it to the client.
+---
+diff --git a/third_party/blink/renderer/core/inspector/inspector_page_agent.cc b/third_party/blink/renderer/core/inspector/inspector_page_agent.cc
+index 5f9a22e..c30aeab 100644
+--- a/third_party/blink/renderer/core/inspector/inspector_page_agent.cc
++++ b/third_party/blink/renderer/core/inspector/inspector_page_agent.cc
+@@ -689,9 +689,18 @@ protocol::Response InspectorPageAgent::addScriptToEvaluateOnNewDocument(
+   // not normally evaluate the script, but we should.
+   bool run_immediately = runImmediately.value_or(false) ||
+                          (client_ && client_->IsPausedForNewWindow());
++  // In the browser-hosted flow the browser process generates a unique
++  // identifier and hands it to the renderer as the command's associated
++  // data. A directly-attached DevTools client (an in-process CDP bridge
++  // with no browser in the loop) sends none, leaving the identifier null;
++  // using a null String as a HashMap key would deref a null StringImpl.
++  // Mint one here and return it so the client can remove the script later.
++  String identifier = browser_generated_identifier.empty()
++                          ? IdentifiersFactory::CreateIdentifier()
++                          : browser_generated_identifier;
+   injected_script_manager_->AddScriptToEvaluateOnNewDocument(
+-      browser_generated_identifier, std::move(script), run_immediately);
+-  *out_identifier = browser_generated_identifier;
++      identifier, std::move(script), run_immediately);
++  *out_identifier = identifier;
+   return protocol::Response::Success();
+ }
+ 

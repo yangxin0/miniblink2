@@ -1,0 +1,27 @@
+WebFrameWidgetImpl: survive a null WidgetInputHandlerManager on a
+non-compositing widget.
+
+The software-paint embedder path never creates the widget input handler
+manager, and SetNeedsUnbufferedInputForDebugger dereferenced it
+unconditionally. The inspector overlay calls it on every session detach
+(InspectorOverlayAgent::disable -> ChromeClientImpl), so detaching a DevTools
+session SIGSEGVd. Guard the null, mirroring the DidNavigate guard just below.
+
+diff --git a/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc b/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
+index 0000000..0000001 100644
+--- a/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
++++ b/third_party/blink/renderer/core/frame/web_frame_widget_impl.cc
+@@ -4178,6 +4178,13 @@
+ }
+ 
+ void WebFrameWidgetImpl::SetNeedsUnbufferedInputForDebugger(bool unbuffered) {
++  // Null for a NON-COMPOSITING widget (a single-process embedder's
++  // software-paint view, which never creates the input handler manager). The
++  // inspector overlay calls this unconditionally on session detach
++  // (InspectorOverlayAgent::disable), which segfaulted. Same guard as
++  // DidNavigate below.
++  if (!widget_base_->widget_input_handler_manager())
++    return;
+   widget_base_->widget_input_handler_manager()
+       ->input_event_queue()
+       ->SetNeedsUnbufferedInputForDebugger(unbuffered);

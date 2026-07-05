@@ -267,6 +267,20 @@ MB_EXPORT void mbSetFontFamilies(mbView*, const char* standard,
                                  const char* fixed, const char* serif,
                                  const char* sans_serif);
 
+// ---- DevTools (CDP) --------------------------------------------------------
+// One Chrome-DevTools-Protocol session per view (stage A of the inspector
+// plan in IMPROVEMENT2.md). Attach starts the session; Send dispatches ONE
+// client command (CDP JSON, must carry "id" and "method"); responses and
+// notifications arrive on the callback as CDP JSON, delivered from the task
+// queue - keep calling mbUpdate for messages to flow. Bridge the pipe to a
+// WebSocket + /json discovery endpoint and ordinary Chrome connects as the
+// frontend. Returns 1 on attach success; a second attach fails (one session).
+typedef void (*mbDevToolsMessageCallback)(mbView*, void* userdata,
+                                          const char* json, int len);
+MB_EXPORT int  mbDevToolsAttach(mbView*, mbDevToolsMessageCallback, void* userdata);
+MB_EXPORT void mbDevToolsSend(mbView*, const char* json, int len);
+MB_EXPORT void mbDevToolsDetach(mbView*);
+
 // Synthesize a left mouse click (down+up) at (x,y) in the view.
 // ---- Typed input events -----------------------------------------------------
 // Structured alternatives to the positional mbSend* shorthands: explicit
