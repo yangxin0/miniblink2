@@ -1,0 +1,26 @@
+InspectorOverlayAgent: survive a null LayerTreeDebugState on a non-compositing widget.
+
+GetLayerTreeDebugState() returns null when the widget does not composite (a
+single-process embedder using the software-paint path). The overlay ctor
+dereferenced it unconditionally, so attaching a DevTools session SIGSEGVd.
+Guard the null - the overlay visual features need a compositor anyway; the
+DOM / CSS / Runtime / Network domains work without it.
+
+diff --git a/third_party/blink/renderer/core/inspector/inspector_overlay_agent.cc b/third_party/blink/renderer/core/inspector/inspector_overlay_agent.cc
+index 45481a5..8a99a3e 100644
+--- a/third_party/blink/renderer/core/inspector/inspector_overlay_agent.cc
++++ b/third_party/blink/renderer/core/inspector/inspector_overlay_agent.cc
+@@ -418,7 +418,12 @@ InspectorOverlayAgent::InspectorOverlayAgent(
+ 
+   frame_impl_->GetFrame()->GetProbeSink()->AddInspectorOverlayAgent(this);
+ 
+-  if (GetFrame()->GetWidgetForLocalRoot()) {
++  // GetLayerTreeDebugState() is null for a NON-COMPOSITING widget (a
++  // single-process embedder's software-paint view); dereferencing it here
++  // segfaulted on DevTools attach. Guard it - the overlay's visual features
++  // need a compositor anyway; DOM/CSS/Runtime/Network still work.
++  if (GetFrame()->GetWidgetForLocalRoot() &&
++      GetFrame()->GetWidgetForLocalRoot()->GetLayerTreeDebugState()) {
+     original_layer_tree_debug_state_ =
+         std::make_unique<cc::LayerTreeDebugState>(
+             *GetFrame()->GetWidgetForLocalRoot()->GetLayerTreeDebugState());

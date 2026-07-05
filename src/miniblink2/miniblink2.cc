@@ -156,6 +156,30 @@ void mbUpdateAt(double frame_time_seconds) {
   mbUpdate();
 }
 
+int mbDevToolsAttach(mbView* v, mbDevToolsMessageCallback cb, void* userdata) {
+  EngineScope engine_scope;
+  if (!v || !v->impl || !cb)
+    return 0;
+  return v->impl->AttachDevTools(
+             [v, cb, userdata](const std::string& msg) {
+               cb(v, userdata, msg.c_str(), static_cast<int>(msg.size()));
+             })
+             ? 1
+             : 0;
+}
+
+void mbDevToolsSend(mbView* v, const char* json, int len) {
+  EngineScope engine_scope;
+  if (v && v->impl)
+    v->impl->SendDevTools(json, len);
+}
+
+void mbDevToolsDetach(mbView* v) {
+  EngineScope engine_scope;
+  if (v && v->impl)
+    v->impl->DetachDevTools();
+}
+
 void mbSetFontFamilies(mbView* v, const char* standard, const char* fixed,
                        const char* serif, const char* sans_serif) {
   EngineScope engine_scope;
