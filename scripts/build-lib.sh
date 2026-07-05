@@ -41,7 +41,7 @@
 #
 # Each dist/<mode>/ is a self-contained SDK:
 #   libminiblink2.{dylib,a}            the library (exposes the miniblink2 mb* C API)
-#   include/miniblink2/{view,automation}.h    the public headers
+#   include/miniblink2/{webview,automation}.h    the public headers
 #   blink_resources.pak, icudtl.dat, snapshot_blob.bin, v8_context_snapshot.bin
 #                               runtime data the engine loads at startup
 set -euo pipefail
@@ -381,7 +381,7 @@ mkdir -p "$DIST/include/miniblink2"
 # (standard-library includes only). Consumer:
 #   -Idist/<mode>/include   +   #include "miniblink2/miniblink2.h"
 cp "$HERE"/src/miniblink2/*.h "$DIST/include/miniblink2/"
-rm -f "$DIST/include/miniblink2/wke.h" "$DIST/include/miniblink2/mb_capi.h"  # pre-rename leftovers
+rm -f "$DIST/include/miniblink2/wke.h" "$DIST/include/miniblink2/mb_capi.h" "$DIST/include/miniblink2/view.h"  # pre-rename leftovers
 
 # 2+3. Run the profile's pass(es). DATA_OUT is where runtime data (V8 snapshots,
 # ANGLE dylibs) is collected from afterwards.
