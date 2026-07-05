@@ -31,7 +31,7 @@ component("miniblink_host") {
     # The public C API (staged alongside at ../miniblink2; the mb* ABI).
     "../miniblink2/miniblink2.cc",
     "../miniblink2/automation.h",
-    "../miniblink2/view.h",
+    "../miniblink2/webview.h",
     "blob/mb_blob_registry.cc",
     "blob/mb_blob_registry.h",
     "frame/mb_broadcast_channel.cc",

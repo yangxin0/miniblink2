@@ -2,7 +2,7 @@
 // no Blink types cross this boundary.
 
 #include "miniblink2/automation.h"
-#include "miniblink2/view.h"
+#include "miniblink2/webview.h"
 
 #include <algorithm>
 #include <cctype>

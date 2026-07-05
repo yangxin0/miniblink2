@@ -1,4 +1,4 @@
-// view.h — the INTERACTIVE-EMBEDDER core of the miniblink2 C API (mb* ABI):
+// webview.h — the INTERACTIVE-EMBEDDER core of the miniblink2 C API (mb* ABI):
 // engine/view lifecycle, loads + lifecycle callbacks, interactive paint,
 // input, resource interception, JS bridge, cookies, navigation. The
 // automation/testing surface lives in automation.h (which includes this).
@@ -9,8 +9,8 @@
 //
 // Status: Phase 1 v0 (render-to-bitmap, no input/JS-interaction yet).
 
-#ifndef MINIBLINK2_VIEW_H_
-#define MINIBLINK2_VIEW_H_
+#ifndef MINIBLINK2_WEBVIEW_H_
+#define MINIBLINK2_WEBVIEW_H_
 
 #include <stddef.h>
 #include <stdint.h>
@@ -784,4 +784,4 @@ MB_EXPORT int mbViewIsDirty(mbView*);
 }  // extern "C"
 #endif
 
-#endif  // MINIBLINK2_VIEW_H_
+#endif  // MINIBLINK2_WEBVIEW_H_

@@ -3,13 +3,13 @@
 // PDF, device emulation, storage snapshots, the request log. Several calls
 // here PUMP the engine (mbWait, mbWaitFor*) — do not call them from an
 // interactive host's frame tick; they are meant for headless drivers.
-// Includes the embedder core (view.h); there is no umbrella header —
-// embedders include view.h, drivers include automation.h.
+// Includes the embedder core (webview.h); there is no umbrella header —
+// embedders include webview.h, drivers include automation.h.
 
 #ifndef MINIBLINK2_AUTOMATION_H_
 #define MINIBLINK2_AUTOMATION_H_
 
-#include "view.h"
+#include "webview.h"
 
 #if defined(__cplusplus)
 extern "C" {
