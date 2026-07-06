@@ -3,7 +3,9 @@
 > Consolidated reference for everything that is **missing, deferred, low-value/unfixable,
 > or accepted by-design**. The numbered gap list (#1–#18) and all high-value follow-ups are
 > DONE — see `PROGRESS.md`. This file is *only* the not-done set, with the rationale for each.
-> Last reviewed: 2026-06-28.
+> Last reviewed: 2026-07-06. Since the 06-28 review the project grew an interactive-host
+> audience (Glyph; see IMPROVEMENT.md) alongside headless automation — rationales below were
+> re-checked against both.
 
 ---
 
@@ -52,17 +54,13 @@ These *could* be built; none is worth the effort relative to its value. Listed w
   remains, and the candidate fix risks page-blocking **hangs** (worse than the intermittent-empty).
   Not safely fixable from the embedder layer.
 
-### B2. Real audio output — gap #14
-- Audio *processing* works (`OfflineAudioContext`, decode, WebAudio graph). Real speaker output is
-  meaningless and untestable headless. **N/A by-design.**
-
-### B3. PWA install flow — gap #5
+### B2. PWA install flow — gap #5
 - `getInstalledRelatedApps` works; the Web App Manifest is readable via DOM. The install flow
   (`beforeinstallprompt` → prompt → `appinstalled`) is browser-UI-driven and meaningless headless
   (it doesn't hang). Exposing blink's *parsed* manifest (ManifestManager) is the only possible
   value-add and needs frame-interface plumbing for marginal gain over `fetch()`. **N/A / deferred.**
 
-### B4. Device-emulation visual transform — gap #16
+### B3. Device-emulation visual transform — gap #16
 - `mbEmulateDevice` does the valuable layout/media-query emulation (pointer/hover/viewport/dpr). The
   DevTools "fit-to-window" *visual* scale is cosmetic for headless (screenshots already render at
   device size via resize+DPR) and crashes on the null LayerTreeHost. **N/A / deferred.**
@@ -134,16 +132,12 @@ attributed `__text`). These are the *patch-level* leftovers, hardest-first:
 - **If ever done:** own toggle (`--webrtc`, include-only), and per the A2 rationale the default
   probably stays ON given signaling is a feature. Revisit only if 3.3 MB matters more than that.
 
-### E2. Inspector / DevTools protocol — ~1.3 MB (0.9 Blink inspector + 0.36 v8_inspector)
-- No GN off-switch upstream (inspector is unconditional in Blink core). Would need a
-  `--devtools`-style include-toggle patch that stubs the InspectorAgent registration + drops
-  the protocol dispatcher. Only worth it if wke devtools support is definitively out of scope.
-
-### E3. WebXR bindings — ~0.27 MB; device APIs (USB/BT/serial/HID/NFC) — ~0.23 MB
+### E2. WebXR bindings — ~0.27 MB; device APIs (USB/BT/serial/HID/NFC) — ~0.23 MB
 - Dead on macOS headless, but wired through generated bindings like E1 (small payoff, same
-  surgery class). Bundle with E1/E2 if that work ever happens.
+  surgery class). Bundle with E1 if that work ever happens. (The inspector, once listed
+  here as a prune candidate, is a shipped public API now — no longer cuttable.)
 
-### E4. Misc measured, no seam yet
+### E3. Misc measured, no seam yet
 - **perfetto core** ~0.5 MB (client library is mandatory in M150 base; only the
   OPTIONAL_TRACE_EVENT layer is gated — that's the `--tracing` toggle).
 - **zstd** ~0.33 MB (Content-Encoding: zstd / shared-dictionary support in the fetch stack).
@@ -159,7 +153,7 @@ attributed `__text`). These are the *patch-level* leftovers, hardest-first:
 | Bucket | Count | Net |
 |--------|-------|-----|
 | Deferred real features (A) | 3 | Service workers (huge/low-value), WebRTC connectivity (zero headless value), per-entry frame-tree history (complex/low-value) |
-| Unfixable / N/A headless (B) | 4 | Cache large-blob (provider stall), audio output, PWA install, device visual transform |
+| Unfixable / N/A headless (B) | 3 | Cache large-blob (provider stall), PWA install, device visual transform |
 | Accepted by-design (C) | 5 | WebGL renderer string, `window.open`, viewport/emoji, `<select>` keys, native popups |
 | Robustness edges (D) | — | All handled |
 
@@ -182,7 +176,8 @@ fixed and given regression tests:
 
 A **second correctness-review pass** (subsystem audit of the hand-written backends) found and fixed a
 further tail of edge bugs the capability suites didn't exercise (all green after; IDB-range + wke cases
-given regression tests in `mb_smoke`/`wke_smoke`):
+given regression tests in `mb_smoke`/`wke_smoke` — the `wke` layer and its suite were later removed
+in v0.2, so the wke bullets below are history, not living surface):
 - **IndexedDB key ranges**: `get()`/`getKey()`/`delete()`/`count()` treated a range as its exact
   lower-bound key — `get(lowerBound(5))` missed 6,7…, `delete(bound(2,4))` left 3,4, `count(range)`≤1.
   Now they honor the full range (matching `getAll`/`openCursor`). Also: `count()`/`get()` honor the
