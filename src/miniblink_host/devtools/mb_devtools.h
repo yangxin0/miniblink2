@@ -23,9 +23,16 @@ namespace mb {
 class MbDevToolsBridge {
  public:
   using MessageCallback = std::function<void(const std::string&)>;
+  // Fired when the main-thread debugger pauses (true) / resumes (false) —
+  // e.g. a breakpoint hit. While paused the main thread sits in a nested
+  // inspector loop: mbUpdate/paint won't advance the page, so a host should
+  // stop its frame tick and show a "paused" state instead of suspecting a
+  // hang. May be null.
+  using PauseCallback = std::function<void(bool paused)>;
 
   static std::unique_ptr<MbDevToolsBridge> Attach(blink::WebLocalFrameImpl*,
-                                                  MessageCallback on_message);
+                                                  MessageCallback on_message,
+                                                  PauseCallback on_pause = {});
   virtual ~MbDevToolsBridge() = default;
   virtual void Send(const std::string& json) = 0;
 };

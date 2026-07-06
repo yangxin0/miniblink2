@@ -1,0 +1,39 @@
+Subject: [PATCH] inspector: deliver DebuggerPaused/Resumed to a worker-style
+ bound agent host (browserless)
+
+DevToolsAgent::DebuggerPaused/DebuggerResumed assume a frame agent is
+always bound over the browser's associated channel: they CHECK that the
+worker-style pipe (host_remote_) is NOT bound and notify only
+associated_host_remote_. A browserless in-process embedder has no
+browser channel, so its CDP bridge binds the frame agent via
+BindReceiverForWorker - host_remote_ IS bound, the CHECK aborts the
+process the moment a `debugger` statement pauses, and even without the
+CHECK the pause notification would go nowhere (associated_host_remote_
+is unbound). Notify whichever host remote is actually bound instead.
+---
+--- a/third_party/blink/renderer/core/inspector/devtools_agent.cc
++++ b/third_party/blink/renderer/core/inspector/devtools_agent.cc
+@@ -328,16 +328,21 @@
+ }
+ 
+ void DevToolsAgent::DebuggerPaused() {
+-  CHECK(!host_remote_.is_bound());
+   if (associated_host_remote_.is_bound()) {
+     associated_host_remote_->MainThreadDebuggerPaused();
++  } else if (host_remote_.is_bound()) {
++    // Worker-style binding of a FRAME agent: the browserless embedder path
++    // (no associated browser channel). Deliver the pause there instead.
++    host_remote_->MainThreadDebuggerPaused();
+   }
+ }
+ 
+ void DevToolsAgent::DebuggerResumed() {
+-  CHECK(!host_remote_.is_bound());
+   if (associated_host_remote_.is_bound()) {
+     associated_host_remote_->MainThreadDebuggerResumed();
++  } else if (host_remote_.is_bound()) {
++    // See DebuggerPaused above.
++    host_remote_->MainThreadDebuggerResumed();
+   }
+ }
+ 

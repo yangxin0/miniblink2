@@ -54,8 +54,12 @@ class BridgeImpl : public MbDevToolsBridge,
                    public blink::mojom::blink::DevToolsSessionHost,
                    public blink::mojom::blink::DevToolsAgentHost {
  public:
-  BridgeImpl(blink::WebDevToolsAgentImpl* agent, MessageCallback on_message)
-      : on_message_(std::move(on_message)), web_agent_(agent) {
+  BridgeImpl(blink::WebDevToolsAgentImpl* agent,
+             MessageCallback on_message,
+             PauseCallback on_pause)
+      : on_message_(std::move(on_message)),
+        on_pause_(std::move(on_pause)),
+        web_agent_(agent) {
     // The agent/host at BindReceiver are the association ROOT: a fresh
     // AssociatedRemote/Receiver's BindNewEndpointAndPass* creates a dedicated
     // primary pipe (the standalone-embedder equivalent of the frame's
@@ -156,8 +160,18 @@ class BridgeImpl : public MbDevToolsBridge,
       const base::UnguessableToken&,
       bool,
       blink::mojom::blink::DevToolsExecutionContextType) override {}
-  void MainThreadDebuggerPaused() override {}
-  void MainThreadDebuggerResumed() override {}
+  // Debugger pause/resume: forwarded so a host can stop its frame tick (the
+  // main thread is parked in the inspector's nested loop) instead of treating
+  // the freeze as a hang. Called from that nested loop, so the callback must
+  // not re-enter blocking engine work.
+  void MainThreadDebuggerPaused() override {
+    if (on_pause_)
+      on_pause_(true);
+  }
+  void MainThreadDebuggerResumed() override {
+    if (on_pause_)
+      on_pause_(false);
+  }
   void BringToForeground() override {}
 
  private:
@@ -170,6 +184,7 @@ class BridgeImpl : public MbDevToolsBridge,
   }
 
   MessageCallback on_message_;
+  PauseCallback on_pause_;
   blink::Persistent<blink::WebDevToolsAgentImpl> web_agent_;
   mojo::Remote<blink::mojom::blink::DevToolsAgent> agent_;
   mojo::AssociatedRemote<blink::mojom::blink::DevToolsSession> session_;
@@ -187,7 +202,8 @@ class BridgeImpl : public MbDevToolsBridge,
 // static
 std::unique_ptr<MbDevToolsBridge> MbDevToolsBridge::Attach(
     blink::WebLocalFrameImpl* frame,
-    MessageCallback on_message) {
+    MessageCallback on_message,
+    PauseCallback on_pause) {
   if (!frame)
     return nullptr;
   // Use the frame-owned agent (WebLocalFrameImpl::dev_tools_agent_), never a
@@ -198,7 +214,8 @@ std::unique_ptr<MbDevToolsBridge> MbDevToolsBridge::Attach(
       frame->DevToolsAgentImpl(/*create_if_necessary=*/true);
   if (!agent)
     return nullptr;
-  return std::make_unique<BridgeImpl>(agent, std::move(on_message));
+  return std::make_unique<BridgeImpl>(agent, std::move(on_message),
+                                      std::move(on_pause));
 }
 
 }  // namespace mb

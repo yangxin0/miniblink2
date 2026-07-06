@@ -374,6 +374,11 @@ class MbWebView {
   bool AttachDevTools(std::function<void(const std::string&)> on_message);
   void SendDevTools(const char* json, int len);
   void DetachDevTools();
+  // Debugger pause/resume notification (fired from the inspector's nested
+  // loop while script is parked at a breakpoint — see webview.h
+  // mbOnDevToolsPaused for the host-side contract). Settable before or after
+  // AttachDevTools; survives detach/re-attach; {} clears.
+  void SetDevToolsPausedCallback(std::function<void(bool)> cb);
   // localStorage access for the document's origin (inject an auth token, read
   // SPA state). Get returns false if the key is absent or storage is unavailable
   // (opaque origin); Set returns false on a SecurityError/quota failure. Needs a
@@ -734,6 +739,7 @@ class MbWebView {
   std::function<void()> on_load_finish_;  // optional embedder finish callback
   // Fired on main-frame commit (url) / top-level load failure (url, error).
   std::unique_ptr<MbDevToolsBridge> devtools_;  // live while attached
+  std::function<void(bool)> devtools_paused_cb_;  // debugger paused/resumed
   MbSession* session_ = nullptr;  // never null after construction
   std::string user_stylesheet_;  // injected per commit; empty = none
   std::function<void(const std::string&)> on_begin_loading_;

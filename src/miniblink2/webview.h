@@ -281,6 +281,20 @@ MB_EXPORT int  mbDevToolsAttach(mbView*, mbDevToolsMessageCallback, void* userda
 MB_EXPORT void mbDevToolsSend(mbView*, const char* json, int len);
 MB_EXPORT void mbDevToolsDetach(mbView*);
 
+// Debugger pause/resume notification. Fires with paused=1 when the inspector
+// parks the main thread at a breakpoint (Debugger.pause, a `debugger`
+// statement, an exception with pause-on-exceptions) and paused=0 on resume.
+// While paused, the main thread sits in a nested inspector loop: mbUpdate and
+// the paint calls will not advance the page — stop the frame tick and show a
+// "paused in debugger" state instead of treating it as a hang. The callback
+// fires from INSIDE that nested loop: keep it cheap and do not call blocking
+// mb* entry points from it (mbDevToolsSend of interrupt-class commands like
+// Debugger.resume is safe — it rides the IO session). May be registered
+// before or after mbDevToolsAttach; survives detach/re-attach; NULL clears.
+typedef void (*mbDevToolsPausedCallback)(mbView*, void* userdata, int paused);
+MB_EXPORT void mbOnDevToolsPaused(mbView*, mbDevToolsPausedCallback,
+                                  void* userdata);
+
 // Synthesize a left mouse click (down+up) at (x,y) in the view.
 // ---- Typed input events -----------------------------------------------------
 // Structured alternatives to the positional mbSend* shorthands: explicit
@@ -624,9 +638,13 @@ typedef int (*mbRequestMockCallback)(const char* url, mbRequestMock*, void* user
 MB_EXPORT void mbSetRequestMockCallback(mbRequestMockCallback, void* userdata);
 
 // Per-VIEW dynamic request mock: same callback shape as
-// mbSetRequestMockCallback but scoped to requests initiated by THIS view (its
-// document and subresource loads). Consulted after the static mock table and
-// before the process-wide callback. Worker scripts and other viewless fetches
+// mbSetRequestMockCallback but scoped to requests initiated by THIS view: its
+// document (navigations), subresource loads, view-level fetch helpers
+// (downloads), and worker main scripts — a dedicated worker uses its creating
+// document's view; a shared worker uses the view of the connection that
+// STARTS it (later connections reuse the running worker). Consulted after the
+// static mock table and before the process-wide callback. Residual viewless
+// fetches (a NESTED worker's script, fetches after the view is destroyed)
 // fall through to the process-wide hook. Pass NULL to remove; removed
 // automatically when the view is destroyed.
 MB_EXPORT void mbOnRequestMock(mbView*, mbRequestMockCallback, void* userdata);
