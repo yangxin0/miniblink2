@@ -31,6 +31,7 @@
 
 namespace blink {
 class HistoryItem;
+class LocalFrame;
 class WebMediaPlayerBuilder;
 struct UserAgentMetadata;
 }  // namespace blink
@@ -42,6 +43,17 @@ class MbWebView;  // owner / callback sink
 // Realistic UA Client Hints metadata matching MbDefaultUserAgent() (Chrome 150 /
 // macOS). Shared so document frames and workers report the same brands/platform.
 blink::UserAgentMetadata MbDefaultUserAgentMetadata();
+
+// Resolve the MbWebView owning a live frame client's frame_key (main or child
+// frame), or null for unknown/worker keys. Main-thread only (clients are
+// created/destroyed there). Lets broker-routed paths (shared worker connector)
+// scope fetches to their creating view.
+MbWebView* MbViewForFrameKey(uint64_t frame_key);
+
+// Resolve the MbWebView owning a blink LocalFrame (every local frame in this
+// embedder has an MbFrameClient), or null. Main-thread only. Lets worker hosts
+// scope the main-script fetch to the parent document's view.
+MbWebView* MbViewForFrame(blink::LocalFrame* frame);
 
 // In-renderer PolicyContainerHost for committing navigations: it gives each commit a
 // FRESH, empty (advisory CSP/referrer; no-op) policy container with a bound dedicated
@@ -67,6 +79,10 @@ class MbFrameClient : public blink::WebLocalFrameClient {
  public:
   explicit MbFrameClient(MbWebView* owner);
   ~MbFrameClient() override;
+
+  // The owning view — the per-context key for request-mock hooks and session
+  // cookie jars (child frame clients inherit the main frame's owner).
+  MbWebView* owner() const { return owner_; }
 
   // The production loader path calls this (loader_factory_for_frame.cc:151); returning
   // a non-null loader makes Blink use it for subresources. -> our file-backed loader.

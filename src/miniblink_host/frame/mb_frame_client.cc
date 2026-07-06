@@ -3,6 +3,7 @@
 
 #include "miniblink_host/session/mb_session.h"
 
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -70,11 +71,41 @@ uint64_t NextFrameKey() {
   static uint64_t counter = 0;  // main-thread only (clients created on main thread)
   return ++counter;
 }
+
+// frame_key -> owning view, for broker-routed paths (shared worker connector)
+// that carry a frame_key but no pointer. Main-thread only, like NextFrameKey.
+// Leaked (no exit-time destructor); entries erased in ~MbFrameClient.
+std::map<uint64_t, MbWebView*>& FrameKeyViews() {
+  static auto* m = new std::map<uint64_t, MbWebView*>();
+  return *m;
+}
 }  // namespace
 
+MbWebView* MbViewForFrameKey(uint64_t frame_key) {
+  auto& m = FrameKeyViews();
+  auto it = m.find(frame_key);
+  return it != m.end() ? it->second : nullptr;
+}
+
+MbWebView* MbViewForFrame(blink::LocalFrame* frame) {
+  if (!frame)
+    return nullptr;
+  auto* web_frame = blink::WebLocalFrameImpl::FromFrame(frame);
+  if (!web_frame)
+    return nullptr;
+  // Every local frame in this embedder is created with an MbFrameClient (main
+  // frame in MbWebView, children in CreateChildFrame), so the cast is safe.
+  auto* client = static_cast<MbFrameClient*>(web_frame->Client());
+  return client ? client->owner() : nullptr;
+}
+
 MbFrameClient::MbFrameClient(MbWebView* owner)
-    : owner_(owner), frame_key_(NextFrameKey()) {}
+    : owner_(owner), frame_key_(NextFrameKey()) {
+  if (owner_)
+    FrameKeyViews()[frame_key_] = owner_;
+}
 MbFrameClient::~MbFrameClient() {
+  FrameKeyViews().erase(frame_key_);
   // Clear our history-traversal sink (the main frame registers via SetFrame,
   // child frames via CreateChildFrame's joint-history routing) so a stray
   // GoToEntryAtOffset doesn't post to a freed client. Erasing by frame_key is a
@@ -274,12 +305,15 @@ void MbFrameClient::DoCommit(std::unique_ptr<blink::WebNavigationInfo> info) {
     // with subresource/fetch interception — so a navigation can be served offline.
     std::string mock_body, mock_ct;
     int mock_status = 0;
-    if (MbFindMock(url.GetString().Utf8(), &mock_body, &mock_ct, &mock_status)) {
+    if (MbFindMock(url.GetString().Utf8(), &mock_body, &mock_ct, &mock_status,
+                   owner_)) {
       body = std::move(mock_body);
       content_type = mock_ct;
     } else {
       MbFetchUrl(url.GetString().Utf8(), &body, &content_type, user_agent_,
-                 extra_headers_, post_body, post_ct);
+                 extra_headers_, post_body, post_ct, /*http_method=*/"",
+                 /*out_final_url=*/nullptr, /*out_status=*/nullptr,
+                 /*out_headers=*/nullptr, /*out_error=*/nullptr, owner_);
     }
     if (!content_type.empty()) {
       std::string m = content_type.substr(0, content_type.find(';'));
