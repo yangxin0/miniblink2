@@ -77,7 +77,7 @@ class MbWorkerScript : public network::mojom::URLLoader {
 }  // namespace
 
 std::unique_ptr<blink::WorkerMainScriptLoadParameters> MakeWorkerMainScriptParams(
-    const std::string& url) {
+    const std::string& url, const void* host_ctx) {
   std::string body, content_type;
   if (url.rfind("blob:", 0) == 0) {
     // `new Worker(URL.createObjectURL(blob))` — the bundler-standard way to spawn a
@@ -110,7 +110,12 @@ std::unique_ptr<blink::WorkerMainScriptLoadParameters> MakeWorkerMainScriptParam
       return nullptr;  // unknown/revoked blob URL
     body.assign(bytes.begin(), bytes.end());
     content_type = "text/javascript";
-  } else if (!MbFetchUrl(url, &body, &content_type)) {
+  } else if (!MbFetchUrl(url, &body, &content_type, /*user_agent=*/"",
+                         /*extra_headers=*/"", /*post_body=*/"",
+                         /*post_content_type=*/"", /*http_method=*/"",
+                         /*out_final_url=*/nullptr, /*out_status=*/nullptr,
+                         /*out_headers=*/nullptr, /*out_error=*/nullptr,
+                         host_ctx)) {
     return nullptr;
   }
   std::string mime = content_type.substr(0, content_type.find(';'));

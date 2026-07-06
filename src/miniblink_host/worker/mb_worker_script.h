@@ -19,8 +19,11 @@ namespace mb {
 // Fetch `url` and build the worker main-script load parameters. Returns nullptr if the
 // fetch fails (the caller should then report a script-load failure to blink). On success,
 // a delivery object is spawned that streams the bytes and self-destructs when consumed.
+// `host_ctx` (the creating document's MbWebView, may be null) scopes the fetch to that
+// view's per-view request-mock hook and session cookie jar; null falls back to the
+// process-wide hook and default jar.
 std::unique_ptr<blink::WorkerMainScriptLoadParameters> MakeWorkerMainScriptParams(
-    const std::string& url);
+    const std::string& url, const void* host_ctx = nullptr);
 
 }  // namespace mb
 

@@ -1396,7 +1396,8 @@ class MbBrowserInterfaceBroker
       if (main_runner_) {
         main_runner_->PostTask(
             FROM_HERE,
-            base::BindOnce(&BindSharedWorkerConnector, std::move(r)));
+            base::BindOnce(&BindSharedWorkerConnector, std::move(r),
+                           frame_key_));
       }
       return;
     }
