@@ -1,4 +1,4 @@
-// One CDP session bridged flat to the host (IMPROVEMENT2 item 7c, stage A).
+// One CDP session bridged flat to the host (IMPROVEMENT.md item 13c, stage A).
 // Attach binds blink's in-binary DevToolsAgent (the frame-owned agent) over
 // in-process mojo endpoints; Send dispatches one client CDP command (JSON with
 // "id"/"method"); responses and notifications arrive on the callback as CDP

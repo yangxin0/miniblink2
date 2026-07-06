@@ -35,7 +35,7 @@ MbBindOpfsRootDirectory(const std::string& scope);
 // any time — existing directory/file handles stay valid. Returns false on I/O / format
 // error. (navigator.storage.getDirectory() files survive a save/load across sessions.)
 bool MbSaveOPFS(const std::string& path);
-// Session-scoped variants (IMPROVEMENT2 item 6 stage 3): Save writes only the
+// Session-scoped variants (IMPROVEMENT.md item 12 stage 3): Save writes only the
 // roots whose scope starts with `scope_prefix`; LoadMerge inserts a file's
 // roots whose scope starts with `scope_prefix` (plain MbLoadOPFS already
 // MERGES per scope, so it restores a per-session file in place);
