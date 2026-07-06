@@ -180,6 +180,20 @@ void mbDevToolsDetach(mbView* v) {
     v->impl->DetachDevTools();
 }
 
+void mbOnDevToolsPaused(mbView* v, mbDevToolsPausedCallback cb,
+                        void* userdata) {
+  EngineScope engine_scope;
+  if (!v || !v->impl)
+    return;
+  if (cb) {
+    v->impl->SetDevToolsPausedCallback([v, cb, userdata](bool paused) {
+      cb(v, userdata, paused ? 1 : 0);
+    });
+  } else {
+    v->impl->SetDevToolsPausedCallback({});
+  }
+}
+
 void mbSetFontFamilies(mbView* v, const char* standard, const char* fixed,
                        const char* serif, const char* sans_serif) {
   EngineScope engine_scope;

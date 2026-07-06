@@ -4619,6 +4619,46 @@ int main() {
            "key=[" + key + "]");
   }
 
+  // 42. DevTools pause/resume notification (mbOnDevToolsPaused): with the CDP
+  // bridge attached and Debugger enabled, a `debugger` statement parks the main
+  // thread in the inspector's nested loop — the host callback fires paused=1
+  // FROM that loop, resumes via Debugger.resume (interrupt-class, routed over
+  // the IO session, so sending it from inside the callback is safe), and gets
+  // paused=0 after. Without the resume the mbRunJS below would never return.
+  {
+    struct PauseLog {
+      mbView* view;
+      std::string log;
+    } pl{v, ""};
+    Expect(mbDevToolsAttach(
+               v, [](mbView*, void*, const char*, int) {}, nullptr) == 1,
+           "devtools attaches for the pause test", "");
+    mbOnDevToolsPaused(
+        v,
+        [](mbView* pv, void* ud, int paused) {
+          auto* s = static_cast<PauseLog*>(ud);
+          s->log += paused ? 'P' : 'R';
+          if (paused) {
+            const char* kResume = "{\"id\":99,\"method\":\"Debugger.resume\"}";
+            mbDevToolsSend(pv, kResume,
+                           static_cast<int>(std::strlen(kResume)));
+          }
+        },
+        &pl);
+    const char* kEnable = "{\"id\":1,\"method\":\"Debugger.enable\"}";
+    mbDevToolsSend(v, kEnable, static_cast<int>(std::strlen(kEnable)));
+    mbWait(v, 100);  // let the enable dispatch before the script runs
+    mbRunJS(v, "debugger; window.__afterpause='yes';");
+    mbWait(v, 100);
+    const std::string after = Eval(v, "window.__afterpause");
+    Expect(pl.log == "PR" && after == "yes",
+           "mbOnDevToolsPaused fires paused/resumed around a debugger statement",
+           "log=[" + pl.log + "] after=[" + after + "]");
+    mbOnDevToolsPaused(v, nullptr, nullptr);
+    mbDevToolsDetach(v);
+    mbWait(v, 50);  // let the async session detach settle before teardown
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
