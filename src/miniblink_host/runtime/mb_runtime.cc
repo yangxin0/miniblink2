@@ -30,6 +30,7 @@
 #include "base/files/file_path.h"
 #include "base/memory/discardable_memory_allocator.h"
 #include "base/message_loop/message_pump.h"
+#include "base/message_loop/message_pump_apple.h"
 #include "base/message_loop/message_pump_type.h"
 #include "base/memory/discardable_memory.h"
 #include "base/path_service.h"
@@ -206,10 +207,21 @@ MbRuntime::MbRuntime() {
   // The REAL main-thread scheduler (owns the message pump). The simple
   // CreateMainThreadAndInitialize path yields a degenerate scheduler whose
   // CreateAgentGroupScheduler() returns null -> WebViewImpl ctor DCHECKs.
+  //
+  // The pump must be MessagePumpNSRunLoop, NOT MessagePump::Create(UI): on the
+  // main thread Create(UI) yields MessagePumpNSApplication, whose nested runs
+  // drain the HOST's NSApp event queue (nextEventMatchingMask + sendEvent).
+  // Every mbUpdate/PumpOnce then dispatched the embedder's pending input
+  // events from inside the engine call — a host wheel/mouse event arriving
+  // re-entrantly like that was dropped by the embedder's re-entrancy guard
+  // (scroll stalls). The NSRunLoop pump services Chromium tasks through
+  // CFRunLoop sources only and never touches the application event queue;
+  // input stays where it belongs, in the host's own event loop. Its
+  // signalable quit source also ends the old "nested pump only quits
+  // reliably inside a running NSApp" constraint.
   MB_STEP("9 CreateMainThreadScheduler");
   main_thread_scheduler_ = blink::scheduler::WebThreadScheduler::
-      CreateMainThreadScheduler(
-          base::MessagePump::Create(base::MessagePumpType::UI));
+      CreateMainThreadScheduler(std::make_unique<base::MessagePumpNSRunLoop>());
 
   // Full init with our platform + real scheduler. Empty BinderMap (no browser ifaces).
   // CRITICAL: blink::Initialize() CREATES the main-thread isolate internally
