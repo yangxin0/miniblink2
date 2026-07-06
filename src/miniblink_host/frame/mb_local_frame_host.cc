@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -14,6 +15,7 @@
 #include "base/no_destructor.h"
 #include "base/synchronization/lock.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/self_owned_associated_receiver.h"
 #include "skia/public/mojom/skcolor.mojom-blink.h"
 #include "third_party/blink/public/mojom/choosers/popup_menu.mojom-blink.h"
@@ -308,14 +310,93 @@ void MbLocalFrameHost::FocusedElementChanged(bool,
 void MbLocalFrameHost::TextSelectionChanged(const blink::String&,
                                             uint32_t,
                                             const gfx::Range&) {}
+namespace {
+
+// Wraps the PopupMenuClient remote for the host. Lives on the MAIN thread
+// (constructed there; the PendingRemote is bound on first use). Exactly-once:
+// a second Accept/Cancel is a no-op, and destruction without either cancels,
+// so a host that forgets to reply still lets blink fire PopupDidHide.
+class PopupClientImpl final : public MbSelectPopupClient {
+ public:
+  explicit PopupClientImpl(
+      mojo::PendingRemote<blink::mojom::blink::PopupMenuClient> pending)
+      : pending_(std::move(pending)) {}
+  ~PopupClientImpl() override { Cancel(); }
+
+  void Accept(const std::vector<int32_t>& indices) override {
+    if (done_)
+      return;
+    done_ = true;
+    mojo::Remote<blink::mojom::blink::PopupMenuClient> remote(
+        std::move(pending_));
+    if (remote)
+      remote->DidAcceptIndices(blink::Vector<int32_t>(indices));
+  }
+
+  void Cancel() override {
+    if (done_)
+      return;
+    done_ = true;
+    mojo::Remote<blink::mojom::blink::PopupMenuClient> remote(
+        std::move(pending_));
+    if (remote)
+      remote->DidCancel();
+  }
+
+ private:
+  mojo::PendingRemote<blink::mojom::blink::PopupMenuClient> pending_;
+  bool done_ = false;
+};
+
+}  // namespace
+
 void MbLocalFrameHost::ShowPopupMenu(
-    mojo::PendingRemote<blink::mojom::blink::PopupMenuClient>,
-    const gfx::Rect&,
-    double,
-    int32_t,
-    blink::Vector<blink::mojom::blink::MenuItemPtr>,
-    bool,
-    bool) {}
+    mojo::PendingRemote<blink::mojom::blink::PopupMenuClient> popup_client,
+    const gfx::Rect& bounds,
+    double font_size,
+    int32_t selected_item,
+    blink::Vector<blink::mojom::blink::MenuItemPtr> menu_items,
+    bool right_aligned,
+    bool allow_multiple_selection) {
+  // A <select> (or date/color chooser menulist) opened: convert to plain data
+  // and route to the owning view on the MAIN thread (we're on the service
+  // thread here). The indices the host later passes to Accept are indices
+  // into this items array — the same "external" index space blink expects in
+  // DidAcceptIndices (ExternalPopupMenu translates them back internally).
+  MbSelectPopupData data;
+  data.x = bounds.x();
+  data.y = bounds.y();
+  data.width = bounds.width();
+  data.height = bounds.height();
+  data.font_size = font_size;
+  data.selected_index = selected_item;
+  data.right_aligned = right_aligned;
+  data.allow_multiple = allow_multiple_selection;
+  data.items.reserve(menu_items.size());
+  for (const auto& mi : menu_items) {
+    MbSelectPopupData::Item item;
+    item.label = mi->label.IsNull() ? std::string() : mi->label.Utf8();
+    item.type = static_cast<int>(mi->type);
+    item.enabled = mi->enabled;
+    item.checked = mi->checked;
+    data.items.push_back(std::move(item));
+  }
+  SinkEntry sink;
+  if (!LookupSink(frame_key_, &sink) || !sink.runner) {
+    // No registered frame (shutting down): let the pipe drop -> blink cancels.
+    return;
+  }
+  sink.runner->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          [](uint64_t frame_key, MbSelectPopupData data,
+             mojo::PendingRemote<blink::mojom::blink::PopupMenuClient> client) {
+            MbRouteSelectPopupToView(
+                frame_key, std::move(data),
+                std::make_unique<PopupClientImpl>(std::move(client)));
+          },
+          frame_key_, std::move(data), std::move(popup_client)));
+}
 void MbLocalFrameHost::CreateNewPopupWidget(
     mojo::PendingAssociatedReceiver<blink::mojom::blink::PopupWidgetHost>,
     mojo::PendingAssociatedReceiver<blink::mojom::blink::WidgetHost>,

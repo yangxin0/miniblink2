@@ -295,6 +295,51 @@ typedef void (*mbDevToolsPausedCallback)(mbView*, void* userdata, int paused);
 MB_EXPORT void mbOnDevToolsPaused(mbView*, mbDevToolsPausedCallback,
                                   void* userdata);
 
+// ---- <select> popup menus ---------------------------------------------------
+// The engine renders no native popups: clicking a <select> (or any menulist
+// chooser) surfaces the menu to the HOST via this callback — show your own
+// menu UI at (x,y,width,height) (view coordinates, the element's anchor rect),
+// then reply exactly once with mbSelectPopupCommit (indices into the delivered
+// items array — group headers/separators count in that index space) or
+// mbSelectPopupCancel. Replying is REQUIRED for the page to proceed (blink
+// waits for PopupDidHide); destroying the view cancels automatically. With no
+// callback registered the menu cancels immediately (the legacy no-op, done
+// cleanly). item/info pointers are valid only during the callback — copy what
+// you keep. A second popup opening replaces an unanswered first (it cancels).
+
+#define MB_POPUP_ITEM_OPTION           0
+#define MB_POPUP_ITEM_CHECKABLE_OPTION 1
+#define MB_POPUP_ITEM_GROUP            2  /* <optgroup> header, not selectable */
+#define MB_POPUP_ITEM_SEPARATOR        3
+#define MB_POPUP_ITEM_SUBMENU          4
+
+typedef struct mbSelectPopupItem {
+  const char* label;   // UTF-8
+  int type;            // MB_POPUP_ITEM_*
+  int enabled;
+  int checked;
+} mbSelectPopupItem;
+
+typedef struct mbSelectPopupInfo {
+  int struct_size;     // = sizeof(mbSelectPopupInfo), ABI versioning
+  int x, y, width, height;  // anchor rect of the <select>, view coordinates
+  double font_size;    // the element's font size (px) — size your menu like it
+  int selected_index;  // currently selected item index, -1 = none
+  int right_aligned;
+  int allow_multiple;  // multi-<select>: commit may carry several indices
+  int item_count;
+  const mbSelectPopupItem* items;
+} mbSelectPopupInfo;
+
+typedef void (*mbSelectPopupCallback)(mbView*, void* userdata,
+                                      const mbSelectPopupInfo* info);
+MB_EXPORT void mbOnSelectPopup(mbView*, mbSelectPopupCallback, void* userdata);
+// Commit the pending popup with the chosen item indices (usually one; several
+// only when allow_multiple). count==0 cancels. Returns 1 if a popup was
+// pending, 0 otherwise.
+MB_EXPORT int  mbSelectPopupCommit(mbView*, const int* indices, int count);
+MB_EXPORT void mbSelectPopupCancel(mbView*);
+
 // Synthesize a left mouse click (down+up) at (x,y) in the view.
 // ---- Typed input events -----------------------------------------------------
 // Structured alternatives to the positional mbSend* shorthands: explicit

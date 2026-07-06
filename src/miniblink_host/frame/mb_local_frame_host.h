@@ -14,8 +14,10 @@
 #define MINIBLINK_HOST_FRAME_MB_LOCAL_FRAME_HOST_H_
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "base/functional/callback.h"
 #include "base/memory/scoped_refptr.h"
@@ -63,6 +65,43 @@ void MbClearHistoryGoToHandler(uint64_t frame_key);
 // identifies which frame's registered callbacks its host calls route to.
 void MbBindLocalFrameHost(mojo::ScopedInterfaceEndpointHandle handle,
                           uint64_t frame_key);
+
+// One <select> popup surfaced to the host (blink's external popup path:
+// ExternalPopupMenu -> LocalFrameHost::ShowPopupMenu). Plain data — safe to
+// carry across threads.
+struct MbSelectPopupData {
+  struct Item {
+    std::string label;  // UTF-8
+    int type = 0;       // blink::mojom::MenuItem::Type: 0 option, 1 checkable
+                        // option, 2 group, 3 separator, 4 submenu
+    bool enabled = true;
+    bool checked = false;
+  };
+  int x = 0, y = 0, width = 0, height = 0;  // anchor rect, view coordinates
+  double font_size = 0;
+  int selected_index = -1;  // index into items, -1 = none
+  bool right_aligned = false;
+  bool allow_multiple = false;
+  std::vector<Item> items;
+};
+
+// The reply channel for a surfaced popup: Accept (indices into
+// MbSelectPopupData::items) or Cancel, exactly once, on the MAIN thread.
+// Destroying the handle without either cancels (blink's PopupDidHide fires
+// either way). Wraps the mojo PopupMenuClient remote.
+class MbSelectPopupClient {
+ public:
+  virtual ~MbSelectPopupClient() = default;
+  virtual void Accept(const std::vector<int32_t>& indices) = 0;
+  virtual void Cancel() = 0;
+};
+
+// Main-thread: deliver a surfaced popup to the frame_key's owning view (the
+// view cancels immediately when no host callback is registered). Implemented
+// in mb_webview.cc.
+void MbRouteSelectPopupToView(uint64_t frame_key,
+                              MbSelectPopupData data,
+                              std::unique_ptr<MbSelectPopupClient> client);
 
 class MbLocalFrameHost : public blink::mojom::blink::LocalFrameHost {
  public:

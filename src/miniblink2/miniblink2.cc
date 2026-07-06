@@ -15,6 +15,7 @@
 
 #include "miniblink_host/frame/mb_frame_broker.h"
 #include "miniblink_host/frame/mb_indexeddb.h"
+#include "miniblink_host/frame/mb_local_frame_host.h"
 #include "miniblink_host/frame/mb_opfs.h"
 #include "miniblink_host/frame/mb_notification_service.h"
 #include "miniblink_host/loader/mb_url_loader.h"
@@ -178,6 +179,51 @@ void mbDevToolsDetach(mbView* v) {
   EngineScope engine_scope;
   if (v && v->impl)
     v->impl->DetachDevTools();
+}
+
+void mbOnSelectPopup(mbView* v, mbSelectPopupCallback cb, void* userdata) {
+  EngineScope engine_scope;
+  if (!v || !v->impl)
+    return;
+  if (!cb) {
+    v->impl->SetSelectPopupCallback({});
+    return;
+  }
+  v->impl->SetSelectPopupCallback([v, cb,
+                                   userdata](const mb::MbSelectPopupData& d) {
+    std::vector<mbSelectPopupItem> items;
+    items.reserve(d.items.size());
+    for (const auto& it : d.items)
+      items.push_back(mbSelectPopupItem{it.label.c_str(), it.type,
+                                        it.enabled ? 1 : 0,
+                                        it.checked ? 1 : 0});
+    mbSelectPopupInfo info{};
+    info.struct_size = static_cast<int>(sizeof(mbSelectPopupInfo));
+    info.x = d.x;
+    info.y = d.y;
+    info.width = d.width;
+    info.height = d.height;
+    info.font_size = d.font_size;
+    info.selected_index = d.selected_index;
+    info.right_aligned = d.right_aligned ? 1 : 0;
+    info.allow_multiple = d.allow_multiple ? 1 : 0;
+    info.item_count = static_cast<int>(items.size());
+    info.items = items.empty() ? nullptr : items.data();
+    cb(v, userdata, &info);
+  });
+}
+
+int mbSelectPopupCommit(mbView* v, const int* indices, int count) {
+  EngineScope engine_scope;
+  if (!v || !v->impl)
+    return 0;
+  return v->impl->CommitSelectPopup(indices, count);
+}
+
+void mbSelectPopupCancel(mbView* v) {
+  EngineScope engine_scope;
+  if (v && v->impl)
+    v->impl->CancelSelectPopup();
 }
 
 void mbOnDevToolsPaused(mbView* v, mbDevToolsPausedCallback cb,

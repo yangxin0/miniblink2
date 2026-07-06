@@ -24,6 +24,7 @@
 
 #include "miniblink_host/frame/mb_frame_broker.h"
 #include "miniblink_host/frame/mb_frame_client.h"
+#include "miniblink_host/frame/mb_local_frame_host.h"
 #include "third_party/blink/public/platform/web_policy_container.h"
 #include "miniblink_host/frame/mb_view_client.h"
 #include "miniblink_host/loader/mb_url_loader.h"
@@ -339,6 +340,9 @@ MbWebView::~MbWebView() {
   // and the bridge's teardown flushes protocol notifications through the
   // still-attached session (use-after-free).
   DetachDevTools();
+  // Same reasoning for a pending <select> popup: cancel it while the frame's
+  // ExternalPopupMenu (the other end of the PopupMenuClient pipe) is alive.
+  CancelSelectPopup();
   // Tear down the blink object graph (WebViewImpl -> Page -> main LocalFrame ->
   // WebFrameWidget) HERE, in the destructor body, while frame_client_/view_client_/
   // agent_group_scheduler_ are still alive — those blink objects hold references to
@@ -406,8 +410,13 @@ void MbWebView::LoadHTML(const char* utf8_html, const char* base_url) {
   pending_is_html_ = true;
   pending_html_.assign(html, std::strlen(html));
   pending_base_ = base_url ? base_url : "";
-  pending_charset_.clear();
-  CommitHtml(html, std::strlen(html), base_url);
+  // The ABI contract is UTF-8 (`utf8_html`), so commit with an AUTHORITATIVE
+  // UTF-8 encoding. With an empty (tentative) charset and no <meta charset>
+  // in the string, the parser fell back to the spec default windows-1252 and
+  // mojibake'd every non-ASCII byte — the bug that made 😀 render as four
+  // Latin-1 glyphs (and was long mis-filed as "emoji render monochrome").
+  pending_charset_ = "UTF-8";
+  CommitHtml(html, std::strlen(html), base_url, pending_charset_);
 }
 
 namespace {
@@ -1651,6 +1660,50 @@ bool MbWebView::AttachDevTools(
 
 void MbWebView::SetDevToolsPausedCallback(std::function<void(bool)> cb) {
   devtools_paused_cb_ = std::move(cb);
+}
+
+void MbRouteSelectPopupToView(uint64_t frame_key,
+                              MbSelectPopupData data,
+                              std::unique_ptr<MbSelectPopupClient> client) {
+  // Main thread. Unknown frame_key (view died between post and run) -> the
+  // client handle cancels in its destructor.
+  if (MbWebView* view = MbViewForFrameKey(frame_key))
+    view->OnShowSelectPopup(data, std::move(client));
+}
+
+void MbWebView::SetSelectPopupCallback(
+    std::function<void(const MbSelectPopupData&)> cb) {
+  select_popup_cb_ = std::move(cb);
+}
+
+void MbWebView::OnShowSelectPopup(const MbSelectPopupData& data,
+                                  std::unique_ptr<MbSelectPopupClient> client) {
+  // A popup opening while one is pending replaces it; the old handle's
+  // destructor cancels its menu so blink fires PopupDidHide for it.
+  select_popup_client_ = std::move(client);
+  if (!select_popup_cb_) {
+    select_popup_client_.reset();  // no host UI -> cancel immediately
+    return;
+  }
+  select_popup_cb_(data);
+}
+
+int MbWebView::CommitSelectPopup(const int32_t* indices, int count) {
+  if (!select_popup_client_)
+    return 0;
+  std::vector<int32_t> idx;
+  if (indices && count > 0)
+    idx.assign(indices, indices + count);
+  auto client = std::move(select_popup_client_);
+  if (idx.empty())
+    client->Cancel();  // empty commit = cancel (a <select> needs a choice)
+  else
+    client->Accept(idx);
+  return 1;
+}
+
+void MbWebView::CancelSelectPopup() {
+  select_popup_client_.reset();  // dtor cancels
 }
 
 void MbWebView::SendDevTools(const char* json, int len) {
