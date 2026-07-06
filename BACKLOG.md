@@ -46,21 +46,22 @@ These *could* be built; none is worth the effort relative to its value. Listed w
 
 ## B. Unfixable from our layer (or N/A by the nature of headless)
 
-### B1. Cache-storage large-blob durability — gap #3
-- **Symptom:** `>256 KB` cached response bodies read in *rapid succession* intermittently come back
-  empty. Root cause is blink's in-process `BlobBytesProvider` stalling/emptying under load.
-- **Why unfixable here:** 4 separate investigations. Found a real sub-bug (`MbBlob::Clone` copied empty
-  `data_` before async materialize — fix worked for 3/5 iterations) but the deeper provider stall
-  remains, and the candidate fix risks page-blocking **hangs** (worse than the intermittent-empty).
-  Not safely fixable from the embedder layer.
+(B1, the cache-storage large-blob stall, lived here through four investigations
+as "unfixable". The fifth found it: the registered MbBlob was SELF-OWNED on its
+mojo pipe, so the page dropping its last JS handle deleted the blob
+MID-MATERIALIZE — tearing down the BytesProvider before it replied (the empty)
+and stranding queued readers (the hang). Registered blobs now use
+deferred-delete ownership: they outlive their pipe until the bytes are
+assembled and every queued consumer is served. Regression: mb_smoke_render 73e,
+10/10 rapid >256KB put/match/read cycles.)
 
-### B2. PWA install flow — gap #5
+### B1. PWA install flow — gap #5
 - `getInstalledRelatedApps` works; the Web App Manifest is readable via DOM. The install flow
   (`beforeinstallprompt` → prompt → `appinstalled`) is browser-UI-driven and meaningless headless
   (it doesn't hang). Exposing blink's *parsed* manifest (ManifestManager) is the only possible
   value-add and needs frame-interface plumbing for marginal gain over `fetch()`. **N/A / deferred.**
 
-### B3. Device-emulation visual transform — gap #16
+### B2. Device-emulation visual transform — gap #16
 - `mbEmulateDevice` does the valuable layout/media-query emulation (pointer/hover/viewport/dpr). The
   DevTools "fit-to-window" *visual* scale is cosmetic for headless (screenshots already render at
   device size via resize+DPR) and crashes on the null LayerTreeHost. **N/A / deferred.**
@@ -82,18 +83,28 @@ These *could* be built; none is worth the effort relative to its value. Listed w
 - The embedder owns view creation; the requested URL + name are surfaced via the `OnCreateNewWindow`
   callback. Not a bug — don't make it return a view.
 
-### C3. `<meta viewport>` desktop-ignored; color emoji monochrome
-- Desktop rendering ignores `<meta viewport>` by design. Color emoji render monochrome (no color-emoji
-  font is bundled).
+### C3. `<meta viewport>` desktop-ignored
+- Desktop rendering ignores `<meta viewport>` by design.
+- (This entry used to also claim "color emoji render monochrome — no color-emoji font bundled".
+  That diagnosis was wrong twice over: Apple Color Emoji is a SYSTEM font needing no bundling, and
+  the actual bug was mbLoadHTML committing without an authoritative charset — the parser fell back
+  to windows-1252 and mojibake'd the emoji's UTF-8 bytes into four Latin-1 glyphs that Times
+  rendered in gray. mbLoadHTML now commits UTF-8 per its ABI contract (`utf8_html`), and patch 0028
+  additionally stops blink's mac fallback from downgrading a substituted color face to monochrome
+  "Apple Symbols" unless text presentation was explicitly requested. Emoji render in color;
+  regression: mb_smoke_render 56b asserts vivid pixels.)
 
 ### C4. `<select>` arrow-keys on a CLOSED menulist don't cycle options inline
-- macOS-correct: the input opens the native popup (which headless doesn't render). For automation, set
-  `.value` or click options directly.
+- macOS-correct: the input opens the popup. For automation, set `.value` or click options directly.
+- Interactive hosts now RECEIVE the popup instead of a dead-end: `mbOnSelectPopup` delivers the
+  items/bounds/selection and the host commits with `mbSelectPopupCommit`/`mbSelectPopupCancel`
+  (blink's external popup path; smoke: mb_smoke 43). Date/file choosers remain host-side concerns
+  (`mbSetFileForSelector` for file upload).
 
 ### C5. Native popups don't render (but never crash)
-- Clicking `<select>` / `<input type=file|date>` renders no popup but is crash-free. Sub-frame synthetic
-  input (click/move/wheel/drag/contextmenu/keyboard) routes correctly and is crash-free. For file
-  upload automation use `mbSetFileForSelector` (sets the FileList programmatically).
+- The engine never renders OS popups itself; sub-frame synthetic input (click/move/wheel/drag/
+  contextmenu/keyboard) routes correctly and is crash-free. `<select>` menulists are surfaced to
+  the host via mbOnSelectPopup (see C4); `<input type=file>` uses `mbSetFileForSelector`.
 
 ---
 
@@ -153,9 +164,13 @@ attributed `__text`). These are the *patch-level* leftovers, hardest-first:
 | Bucket | Count | Net |
 |--------|-------|-----|
 | Deferred real features (A) | 3 | Service workers (huge/low-value), WebRTC connectivity (zero headless value), per-entry frame-tree history (complex/low-value) |
-| Unfixable / N/A headless (B) | 3 | Cache large-blob (provider stall), PWA install, device visual transform |
-| Accepted by-design (C) | 5 | WebGL renderer string, `window.open`, viewport/emoji, `<select>` keys, native popups |
+| Unfixable / N/A headless (B) | 2 | PWA install, device visual transform |
+| Accepted by-design (C) | 5 | WebGL renderer string, `window.open`, viewport, `<select>` keys, native popups |
 | Robustness edges (D) | — | All handled |
+
+(Fixed out of this file on 2026-07-06: the cache-storage large-blob stall — a blob-lifetime bug,
+not an unfixable provider stall; monochrome emoji — an mbLoadHTML charset bug, not a missing font;
+and `<select>` clicks dead-ending — now surfaced to the host via mbOnSelectPopup.)
 
 The **feature surface** is complete and validated five ways (feature sweep, functional sweep, real-site,
 SPA, adversarial-robustness). A later **correctness-review pass** of the implementation (not features)
