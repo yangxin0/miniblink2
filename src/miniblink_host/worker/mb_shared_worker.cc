@@ -36,8 +36,10 @@
 
 #include "miniblink_host/frame/mb_frame_broker.h"
 #include "miniblink_host/frame/mb_frame_origin.h"
-#include "miniblink_host/frame/mb_frame_client.h"  // MbDefaultUserAgentMetadata
+#include "miniblink_host/frame/mb_frame_client.h"  // MbDefaultUserAgentMetadata, MbViewForFrameKey
 #include "miniblink_host/loader/mb_url_loader.h"
+#include "miniblink_host/session/mb_session.h"
+#include "miniblink_host/view/mb_webview.h"
 #include "miniblink_host/worker/mb_worker_fetch_context.h"
 #include "miniblink_host/worker/mb_worker_script.h"
 
@@ -115,8 +117,12 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
   explicit MbSharedWorkerInstance(std::string key) : key_(std::move(key)) {}
 
   // Create + start the worker. Returns false on script-load failure.
-  bool Start(const blink::mojom::blink::SharedWorkerInfoPtr& info) {
-    auto params = MakeWorkerMainScriptParams(info->url.GetString().Utf8());
+  // `view` (the STARTING connection's view, may be null) scopes the
+  // main-script fetch and the session prefix of the storage partition.
+  bool Start(const blink::mojom::blink::SharedWorkerInfoPtr& info,
+             MbWebView* view) {
+    auto params =
+        MakeWorkerMainScriptParams(info->url.GetString().Utf8(), view);
     if (!params)
       return false;
 
@@ -125,8 +131,16 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
     // Scope this shared worker's per-origin storage (IndexedDB) by its origin,
     // published under a synthetic worker frame_key, so same-origin documents +
     // the worker share IDB and cross-origin ones are isolated.
+    // SESSION PARTITIONING: windows register session-PREFIXED scopes, so a
+    // concrete worker origin carries the starting view's session prefix or a
+    // same-origin worker no longer matches its documents (IDB sharing,
+    // BroadcastChannel). Opaque ("null") stays unprefixed — the literal is a
+    // BroadcastChannel wildcard (see mb_dedicated_worker_host.cc).
     worker_frame_key_ = MbAllocWorkerFrameKey();
-    MbSetFrameOrigin(worker_frame_key_, origin.ToString().Utf8());
+    std::string scope = origin.ToString().Utf8();
+    if (view && view->session() && scope != "null")
+      scope = view->session()->id() + "\x1f" + scope;
+    MbSetFrameOrigin(worker_frame_key_, scope);
 
     mojo::PendingRemote<blink::mojom::WorkerContentSettingsProxy> content_settings;
     mojo::MakeSelfOwnedReceiver(
@@ -222,6 +236,9 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
 class MbSharedWorkerConnector
     : public blink::mojom::blink::SharedWorkerConnector {
  public:
+  explicit MbSharedWorkerConnector(uint64_t frame_key)
+      : frame_key_(frame_key) {}
+
   void Connect(
       blink::mojom::blink::SharedWorkerInfoPtr info,
       mojo::PendingRemote<blink::mojom::blink::SharedWorkerClient> client,
@@ -240,7 +257,10 @@ class MbSharedWorkerConnector
       inst = it->second;  // reuse the running worker
     } else {
       inst = new MbSharedWorkerInstance(key);
-      if (!inst->Start(info)) {
+      // Scope the one-time main-script fetch to the creating frame's view (its
+      // per-view mock hook + session cookie jar); null when the view is gone
+      // or the key is unknown -> process-wide fallback.
+      if (!inst->Start(info, MbViewForFrameKey(frame_key_))) {
         mojo::Remote<blink::mojom::blink::SharedWorkerClient> c(std::move(client));
         c->OnCreated(creation_context_type);
         c->OnScriptLoadFailed("shared worker script failed to load");
@@ -252,13 +272,17 @@ class MbSharedWorkerConnector
     inst->AddClient(std::move(client), creation_context_type,
                     std::move(message_port));
   }
+
+ private:
+  const uint64_t frame_key_;  // requesting frame (0 = unknown)
 };
 
 }  // namespace
 
 void BindSharedWorkerConnector(
-    mojo::PendingReceiver<blink::mojom::blink::SharedWorkerConnector> receiver) {
-  mojo::MakeSelfOwnedReceiver(std::make_unique<MbSharedWorkerConnector>(),
+    mojo::PendingReceiver<blink::mojom::blink::SharedWorkerConnector> receiver,
+    uint64_t frame_key) {
+  mojo::MakeSelfOwnedReceiver(std::make_unique<MbSharedWorkerConnector>(frame_key),
                               std::move(receiver));
 }
 

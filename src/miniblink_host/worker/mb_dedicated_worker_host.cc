@@ -31,8 +31,15 @@
 #include "third_party/blink/public/platform/web_security_origin.h"
 #include "third_party/blink/public/platform/web_url.h"
 
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/workers/dedicated_worker.h"
+
 #include "miniblink_host/frame/mb_frame_broker.h"
+#include "miniblink_host/frame/mb_frame_client.h"
 #include "miniblink_host/frame/mb_frame_origin.h"
+#include "miniblink_host/session/mb_session.h"
+#include "miniblink_host/view/mb_webview.h"
 #include "miniblink_host/worker/mb_worker_fetch_context.h"
 #include "miniblink_host/worker/mb_worker_script.h"
 
@@ -79,6 +86,17 @@ class MbWorkerHostFactoryClient
     mojo::MakeSelfOwnedReceiver(
         std::make_unique<MbDedicatedWorkerHost>(),
         host_remote.InitWithNewPipeAndPassReceiver());
+    // The creating document's view (worker_ IS blink's DedicatedWorker — the
+    // only WebDedicatedWorker implementation — and its execution context is
+    // the creating window; a NESTED worker's context is a WorkerGlobalScope
+    // -> null frame -> null view, the documented residual). It scopes both
+    // the storage partition below and the script fetch.
+    MbWebView* view = nullptr;
+    if (auto* window = blink::DynamicTo<blink::LocalDOMWindow>(
+            static_cast<blink::DedicatedWorker*>(worker_)
+                ->GetExecutionContext())) {
+      view = MbViewForFrame(window->GetFrame());
+    }
     // Scope the worker's per-origin storage (IndexedDB) by its origin, published
     // under a synthetic worker frame_key, so a same-origin worker SHARES its
     // window's IDB (and a cross-origin worker is isolated). The script origin is
@@ -88,13 +106,26 @@ class MbWorkerHostFactoryClient
     blink::WebSecurityOrigin origin =
         blink::WebSecurityOrigin::Create(script_url);
     worker_frame_key_ = MbAllocWorkerFrameKey();
-    MbSetFrameOrigin(worker_frame_key_, origin.ToString().Utf8());
+    // SESSION PARTITIONING: windows register session-PREFIXED scopes
+    // (MbFrameClient::DidCommitNavigation), so a concrete worker origin must
+    // carry the same prefix or a same-origin worker no longer matches its
+    // window (IDB sharing, BroadcastChannel bridging). Opaque origins ("null")
+    // stay UNPREFIXED: the BroadcastChannel registry treats the literal
+    // "null" as a wildcard, which is what keeps data:/blob: worker<->window
+    // bridging alive.
+    std::string scope = origin.ToString().Utf8();
+    if (view && view->session() && scope != "null")
+      scope = view->session()->id() + "\x1f" + scope;
+    MbSetFrameOrigin(worker_frame_key_, scope);
     worker_->OnWorkerHostCreated(MakeFrameInterfaceBroker(worker_frame_key_),
                                  std::move(host_remote), origin);
 
     // 2-3. Fetch the top-level script (file://, http(s)://, or data:) and synthesize the
     //      browser-fetched-script load parameters (shared with shared workers).
-    auto params = MakeWorkerMainScriptParams(script_url.GetString().Utf8());
+    //      The view scopes the fetch to its per-view request-mock hook and
+    //      session cookie jar (null -> process-wide hook, default jar).
+    auto params =
+        MakeWorkerMainScriptParams(script_url.GetString().Utf8(), view);
     if (!params) {
       worker_->OnScriptLoadStartFailed();
       return;

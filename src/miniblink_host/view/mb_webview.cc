@@ -314,12 +314,20 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
   return v;
 }
 
-MbWebView::MbWebView() = default;
-
-MbWebView::~MbWebView() {
+MbWebView::MbWebView() {
+  // Every view starts in the implicit default session — session_ is "never
+  // null after construction" (SetCookie/ClearCookies/session-scope lookups
+  // rely on it); CreateViewInSession swaps it later via SetSession. These
+  // lines previously sat at the top of the DESTRUCTOR (a misplaced edit in
+  // Sessions stage 1), leaving every plain mbCreateView view with a null
+  // session_ for its whole life — the first mbSetCookie/mbClearCookies
+  // crashed on session_->id().
   session_ = MbSession::Default();
   session_->AddRef();
   MbSetLoaderSessionKey(this, session_->id());
+}
+
+MbWebView::~MbWebView() {
   // Erase this view's per-context mock hook before anything else — a fetch
   // fired during teardown must not consult a hook whose captures are dying.
   MbSetRequestMockHookForContext(this, {});
@@ -546,7 +554,7 @@ bool MbWebView::FetchDownloadBody(const std::string& orig,
   bool ok = false;
   std::string mock_body, mock_ct;
   int mock_status = 0;
-  if (MbFindMock(url, &mock_body, &mock_ct, &mock_status)) {
+  if (MbFindMock(url, &mock_body, &mock_ct, &mock_status, this)) {
     *body = std::move(mock_body);
     *content_type = std::move(mock_ct);
     status = mock_status > 0 ? mock_status : 200;
@@ -556,7 +564,8 @@ bool MbWebView::FetchDownloadBody(const std::string& orig,
                     frame_client_ ? frame_client_->user_agent() : std::string(),
                     frame_client_ ? frame_client_->extra_headers() : std::string(),
                     /*post_body=*/std::string(), /*post_content_type=*/std::string(),
-                    /*http_method=*/std::string(), &final_url, &status, &headers);
+                    /*http_method=*/std::string(), &final_url, &status, &headers,
+                    /*out_error=*/nullptr, this);
   }
   if (!ok)
     return false;
@@ -1630,8 +1639,18 @@ bool MbWebView::AttachDevTools(
   // task queue (kInternalInspector) is unfreezable by design, so CDP traffic
   // flows regardless of the page's visibility state.
   auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
-  devtools_ = MbDevToolsBridge::Attach(impl, std::move(on_message));
+  // The pause relay reads the CURRENT callback at fire time (not a snapshot),
+  // so mbOnDevToolsPaused works whether registered before or after attach.
+  devtools_ = MbDevToolsBridge::Attach(
+      impl, std::move(on_message), [this](bool paused) {
+        if (devtools_paused_cb_)
+          devtools_paused_cb_(paused);
+      });
   return !!devtools_;
+}
+
+void MbWebView::SetDevToolsPausedCallback(std::function<void(bool)> cb) {
+  devtools_paused_cb_ = std::move(cb);
 }
 
 void MbWebView::SendDevTools(const char* json, int len) {
