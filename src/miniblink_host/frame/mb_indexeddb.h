@@ -35,7 +35,7 @@ void BindIDBFactory(
 // file can't be written; Load returns false if it's missing/unreadable/corrupt. Call Load
 // BEFORE the page opens its databases. Blob-valued records are not captured.
 bool MbSaveIndexedDB(const std::string& path);
-// Session-scoped variants (IMPROVEMENT2 item 6 stage 3): registry keys embed
+// Session-scoped variants (IMPROVEMENT.md item 12 stage 3): registry keys embed
 // the session-prefixed scope, so Save filters by prefix, LoadMerge restores a
 // per-session file without touching other sessions, ClearScoped erases by
 // prefix. All hop to the service thread like their unscoped peers.

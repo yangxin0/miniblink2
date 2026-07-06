@@ -1,4 +1,4 @@
-// A browsing profile (IMPROVEMENT2 item 6). Stage 1: identity + the storage
+// A browsing profile (IMPROVEMENT.md item 12). Stage 1: identity + the storage
 // partition prefix - every origin-keyed service scopes by id(), so two
 // sessions never see each other's storage. Ephemeral unless created with a
 // persist path (persistence itself lands in stage 3; the id/layout are

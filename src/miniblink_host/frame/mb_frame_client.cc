@@ -375,7 +375,7 @@ void MbFrameClient::DidCommitNavigation(
         web_frame_->Top()->GetSecurityOrigin().ToString().Utf8();
     std::string scope =
         (top_origin == origin) ? origin : (origin + "\x1f""3p""\x1f" + top_origin);
-    // SESSION PARTITIONING (IMPROVEMENT2 item 6): the owning view's session id
+    // SESSION PARTITIONING (IMPROVEMENT.md item 12): the owning view's session id
     // prefixes the scope, so every origin-keyed service (DOM storage, IDB,
     // OPFS, buckets, locks) isolates per profile. All views share Default()
     // unless rebound, which keys identically to the pre-session world modulo

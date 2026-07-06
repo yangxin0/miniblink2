@@ -45,7 +45,7 @@ const std::string& MbDefaultUserAgent();
 // Add a cookie (a "name=value[; attrs]" string, as from document.cookie) to the
 // shared HTTP cookie jar for `url`'s origin, so JS-set cookies are sent on later
 // network requests. No-op for non-http(s) URLs. Bridges document.cookie -> fetches.
-// SESSION COOKIE JARS (IMPROVEMENT2 item 6, stage 2): every session id keys
+// SESSION COOKIE JARS (IMPROVEMENT.md item 12, stage 2): every session id keys
 // its own curl cookie share, so profiles cannot see each other's cookies.
 // An empty/unknown key routes to the DEFAULT session's jar (the pre-session
 // behavior for untracked contexts like workers).

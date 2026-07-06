@@ -269,7 +269,7 @@ MB_EXPORT void mbSetFontFamilies(mbView*, const char* standard,
 
 // ---- DevTools (CDP) --------------------------------------------------------
 // One Chrome-DevTools-Protocol session per view (stage A of the inspector
-// plan in IMPROVEMENT2.md). Attach starts the session; Send dispatches ONE
+// plan in IMPROVEMENT.md). Attach starts the session; Send dispatches ONE
 // client command (CDP JSON, must carry "id" and "method"); responses and
 // notifications arrive on the callback as CDP JSON, delivered from the task
 // queue - keep calling mbUpdate for messages to flow. Bridge the pipe to a
