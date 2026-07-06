@@ -167,9 +167,11 @@ void MbSetRequestMockHook(MbRequestMockHook hook);
 // Per-CONTEXT dynamic request mock: same shape as the process-wide hook but
 // keyed by an opaque host context (the owning MbWebView), so two views can
 // serve the same URL differently. Consulted by MbFindMock after the static
-// table and BEFORE the process-wide hook, only for fetches that carry the
-// context (a view's document, subresources, and view-level fetch helpers;
-// workers and other viewless fetches fall through to the process-wide hook).
+// table and BEFORE the process-wide hook, for every fetch that carries the
+// context: a view's document (navigations), subresources, view-level fetch
+// helpers, and worker main scripts (dedicated: the creating document's view;
+// shared: the view of the starting connection). Residual viewless fetches
+// (nested workers' scripts) fall through to the process-wide hook.
 // Pass {} to erase. The registrant must erase before the context dies.
 void MbSetRequestMockHookForContext(const void* ctx, MbRequestMockHook hook);
 

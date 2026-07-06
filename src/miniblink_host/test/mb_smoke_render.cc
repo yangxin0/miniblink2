@@ -416,6 +416,45 @@ static void RunCases(mbView* v, int W, int H) {
     mbClearMocks();
   }
 
+  // 37j2. PER-VIEW request mock serves a dedicated Worker's http(s) script
+  // (IMPROVEMENT.md item 4 closure): the worker main-script fetch carries the
+  // creating document's view, so mbOnRequestMock — not just the process-wide
+  // hook — intercepts it. Before the fix this fetch had no view context and
+  // silently bypassed the per-view hook (the documented residual).
+  {
+    static bool saw_worker_url;  // set by the capture-less hook below
+    saw_worker_url = false;
+    mbOnRequestMock(
+        v,
+        [](const char* url, mbRequestMock* m, void*) -> int {
+          if (!std::strstr(url, "pvworker.test/w.js"))
+            return 0;  // not ours: fall through
+          saw_worker_url = true;
+          const char* body = "onmessage=function(e){postMessage(e.data*7)}";
+          mbRequestMockResponse(m, body, static_cast<int>(std::strlen(body)),
+                                "application/javascript", 200);
+          return 1;
+        },
+        nullptr);
+    mbLoadHTML(v, "<body>pv-worker</body>", "https://pvworker.test/");
+    mbRunJS(v,
+            "window.__pvreply='';"
+            "var __pv=new Worker('https://pvworker.test/w.js');"
+            "__pv.onmessage=function(e){window.__pvreply=String(e.data)};"
+            "__pv.postMessage(3);");
+    std::string r;
+    for (int i = 0; i < 120; ++i) {
+      mbWait(v, 25);
+      r = Eval(v, "window.__pvreply");
+      if (!r.empty())
+        break;
+    }
+    Expect(r == "21" && saw_worker_url,
+           "the PER-VIEW request mock serves a dedicated Worker's script",
+           "reply=[" + r + "] hook_saw_url=" + (saw_worker_url ? "1" : "0"));
+    mbOnRequestMock(v, nullptr, nullptr);
+  }
+
   // 37k. SharedWorker EVICTION: a SharedWorker lives only while a client is
   // connected. When the last page disconnects (navigates away), the worker is
   // terminated, so a later new SharedWorker(sameUrl) starts FRESH — its instance
