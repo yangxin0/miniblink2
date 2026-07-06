@@ -7,8 +7,9 @@ maps to a real integration incident, not a style preference; each round is
 ordered by leverage-per-effort for the Glyph host.
 
 Round 1 (items 1–6) is fully shipped. Round 2 (items 7–13) is shipped except
-zero-copy bodies (deferred by cost) and the inspector's host-side bridge
-(stage B, lives in the embedder). Per-item status is inline under each item.
+zero-copy bodies (item 9, deferred by cost); the inspector's host-side bridge
+(stage B) shipped in the Glyph embedder, where the plan places it. Per-item
+status is inline under each item.
 
 Verified in the Glyph host: engine smoke test + a 720-sample pointer-sweep
 harness with a damage-gated blit path and a liveness beacon (0 flicker,
@@ -255,16 +256,28 @@ See "Sessions: the agreed design" below for the API contract.
   hardening for dictionary-style content. **Shipped**: `mbSetFontFamilies`.
 - **Per-display animation cadence**: Ultralight's `RefreshDisplay(display_id)`
   ties rAF to a monitor's vsync. **Shipped**: `mbUpdateAt`.
-- **Inspector**: **Stage A shipped (draft)** — in-process CDP pipe
-  (`mbDevToolsAttach/Send/Detach`) driving blink's DevToolsAgent standalone,
-  verified by a Runtime.evaluate round trip. Root causes fixed along the way:
+- **Inspector**: **Stage A shipped** (8bc330c) — in-process CDP pipe
+  (`mbDevToolsAttach/Send/Detach`) driving blink's frame-owned DevToolsAgent
+  over in-process mojo: JSON↔CBOR transcoding with crdtp validation
+  (malformed/id-less commands rejected, not DCHECKed), interrupt-class
+  commands routed via the IO session (content's ShouldSendOnIO list),
+  empty-but-non-null session_id so a directly-connected frontend receives
+  events, detach-before-Close teardown. Root causes fixed along the way:
   null blink::String mojo params (validation-dropped), JSON-vs-CBOR command
   encoding, a null LayerTreeDebugState overlay deref (patch 0024), a null
-  WidgetInputHandlerManager deref on session detach (patch 0025), and needing a
-  real non-associated primary pipe. **Stage B open**: the host WebSocket +
-  /json bridge (embedder-side) is not in this tree — no
-  MiniblinkDevToolsBridge/GLYPH_DEVTOOLS code exists here yet. See "Inspector:
-  the staged plan" below.
+  WidgetInputHandlerManager deref on session detach (patch 0025), a null
+  addScriptToEvaluateOnNewDocument identifier from browserless clients
+  (patch 0026), and needing a real non-associated primary pipe.
+  **Stage B shipped in the Glyph embedder** (not this repo, by design):
+  Stage A was verified end-to-end against a real Chrome
+  Elements/Console/Sources session over the embedder's WebSocket bridge
+  (live DOM updates across reloads), plus Runtime.evaluate round trips,
+  detach/re-attach, destroy-while-attached, and a second-view session.
+  **Remaining engine-side gaps** (explicit no-ops in the bridge):
+  ChildTargetCreated — child worker/iframe targets are not surfaced
+  (single-target v1) — and MainThreadDebuggerPaused/Resumed — no host
+  notification when the debugger pauses. See "Inspector: the staged plan"
+  below.
 
 ---
 
@@ -365,5 +378,8 @@ unnecessary.
   frontend; shipping one inside the SDK adds megabytes and a TypeScript
   build for zero capability.
 
-Status: Stage A shipped (draft). Stage B (the host WebSocket bridge) is the
-open item; it lives in the embedder, not this repo's engine sources.
+Status: Stage A shipped (8bc330c) and proven against a real Chrome frontend.
+Stage B shipped where it belongs — in the Glyph embedder (this repo's engine
+sources stay socket-free). Engine-side follow-ups, not scheduled: surface
+child worker/iframe targets (ChildTargetCreated is a single-target-v1 no-op)
+and a host callback for debugger pause/resume.
