@@ -1977,13 +1977,13 @@ static void RunCases(mbView* v, int W, int H) {
            "text: glyphs rasterize (dark strokes + white gaps present)");
   }
 
-  // 56b. Emoji rasterize to glyph pixels — but MONOCHROME in this build. A color-
-  // emoji font is not bundled, so U+1F600 😀 paints as a grayscale/black glyph
-  // (saturated color pixels = 0), not Apple-Color-Emoji yellow. This is a known,
-  // documented limitation (emoji in screenshots won't be colorful); the guard is
-  // that it still rasterizes a real glyph (dark strokes + light gaps, like text)
-  // and degrades gracefully rather than crashing or rendering tofu boxes. If a
-  // color-emoji font is ever bundled, `colorful` jumps and this comment is stale.
+  // 56b. Emoji rasterize IN COLOR: U+1F600 😀 paints with Apple Color Emoji
+  // (the macOS system font — nothing bundled). Historically this rendered
+  // monochrome: blink's mac fallback downgraded the substituted color face to
+  // "Apple Symbols" even for emoji-presentation runs when the direct
+  // Apple-Color-Emoji family lookup failed (patch 0028 guards that
+  // downgrade). The assertions: a real glyph rasterizes (dark + light
+  // pixels), and it carries vivid color (the yellow face).
   {
     mbLoadHTML(v,
       "<body style='margin:0;background:#fff'>"
@@ -2001,8 +2001,8 @@ static void RunCases(mbView* v, int W, int H) {
         if (mx - mn > 60 && mx > 80) ++colorful;  // a vivid, non-gray pixel
         if (r < 60) ++dark; else if (r > 200) ++light;
       }
-    Expect(dark > 20 && light > 20 && colorful == 0,
-           "emoji rasterizes (monochrome glyph; no color-emoji font bundled)",
+    Expect(light > 20 && colorful > 50,
+           "emoji rasterizes in COLOR (Apple Color Emoji via patch 0028)",
            std::string("dark=") + std::to_string(dark) + " light=" +
                std::to_string(light) + " colorful=" + std::to_string(colorful));
   }
@@ -2681,6 +2681,38 @@ static void RunCases(mbView* v, int W, int H) {
     }
     if (a) mbDestroyView(a);
     if (b) mbDestroyView(b);
+  }
+
+  // 73e. Cache-storage LARGE-body durability under rapid succession (BACKLOG
+  // B1): a >256000-byte body registers via a BytesProvider (not embedded
+  // bytes), and rapid put+match+read cycles historically came back empty
+  // ~50% of the time (provider stall). 10 cycles, every read must return the
+  // full 300*1024 bytes.
+  {
+    mbLoadHTML(v, "<body>b1</body>", "https://blobstall.test/");
+    Eval(v,
+      "window.__b1='';"
+      "(async function(){try{"
+      "  const out=[];"
+      "  for(let i=0;i<10;i++){"
+      "    const c=await caches.open('b1-'+i);"
+      "    await c.put('https://blobstall.test/big',"
+      "                new Response('x'.repeat(300*1024)));"
+      "    const m=await c.match('https://blobstall.test/big');"
+      "    const t=await m.text();"
+      "    out.push(t.length);"
+      "  }"
+      "  window.__b1=out.join(',');"
+      "}catch(e){window.__b1='err:'+e;}})();");
+    for (int i = 0; i < 400 && Eval(v, "window.__b1") == ""; ++i)
+      mbWait(v, 25);
+    const std::string r = Eval(v, "window.__b1");
+    std::string want;
+    for (int i = 0; i < 10; ++i)
+      want += (i ? "," : "") + std::to_string(300 * 1024);
+    Expect(r == want,
+           "cache-storage >256KB bodies survive 10 rapid put/match/read cycles (B1)",
+           "lengths=[" + r + "]");
   }
 
   // 78b. Storage partitioning across views: two views are independent top-level browsing

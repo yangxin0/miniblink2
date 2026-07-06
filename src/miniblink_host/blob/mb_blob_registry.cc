@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <utility>
@@ -24,6 +26,7 @@
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/self_owned_associated_receiver.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "mojo/public/cpp/system/data_pipe.h"
@@ -306,6 +309,23 @@ class MbBlob : public blink::mojom::blink::Blob {
     Materialize(0);  // assemble data_ in element order (async if providers)
   }
 
+  // Bind the REGISTERED blob with deferred-delete ownership: the object dies
+  // only when its pipe has disconnected AND materialization finished (queues
+  // drained). The old MakeSelfOwnedReceiver deleted the blob the instant the
+  // page dropped its last JS handle — which under rapid cache.put/match
+  // happened MID-MATERIALIZE: the Part remotes died (tearing down the
+  // BytesProvider before it replied) and every queued read/clone was
+  // stranded, the B1 large-body empty/hang. cache_storage and friends
+  // reference the bytes through those queued ops, so the blob must outlive
+  // its own pipe until they're served.
+  static void BindOwned(std::unique_ptr<MbBlob> blob,
+                        mojo::PendingReceiver<blink::mojom::blink::Blob> r) {
+    MbBlob* raw = blob.release();
+    raw->receiver_.Bind(std::move(r));
+    raw->receiver_.set_disconnect_handler(
+        base::BindOnce(&MbBlob::OnPipeDisconnected, base::Unretained(raw)));
+  }
+
   void Clone(
       mojo::PendingReceiver<blink::mojom::blink::Blob> receiver) override {
     // The clone must serve the FULLY materialized bytes. If this blob isn't ready
@@ -426,9 +446,32 @@ class MbBlob : public blink::mojom::blink::Blob {
     }
     ready_ = true;
     DrainPending();
+    MaybeDelete();  // if the pipe already dropped, we lived to serve the queues
+  }
+
+  void OnPipeDisconnected() {
+    disconnected_ = true;
+    MaybeDelete();
+  }
+
+  // Deferred delete (BindOwned blobs only; self-owned clones never set
+  // disconnected_): gone once the page dropped its handle AND the bytes were
+  // assembled + queued consumers served. NOT deleted while a BytesProvider
+  // reply is outstanding — that keeps the Part remotes (and so the provider
+  // itself) alive until it answers.
+  void MaybeDelete() {
+    if (disconnected_ && ready_)
+      delete this;
   }
 
   void OnProviderBytes(size_t i, const blink::Vector<uint8_t>& bytes) {
+    // B1 diagnostics: an EMPTY provider reply is the smoking gun for the
+    // large-blob stall (the part's bytes are gone; the blob completes as
+    // net::OK size 0 — the silent-empty). Gated so normal runs stay quiet.
+    if (bytes.empty() && getenv("MB_BLOB_DEBUG")) {
+      fprintf(stderr, "mb_blob: BytesProvider part %zu replied EMPTY (blob so far %zu bytes)\n",
+              i, data_.size());
+    }
     data_.insert(data_.end(), bytes.begin(), bytes.end());
     Materialize(i + 1);
   }
@@ -512,6 +555,9 @@ class MbBlob : public blink::mojom::blink::Blob {
   std::vector<CaptureSnapshotCallback> pending_snapshots_;
   // Clone requests received before the bytes finished materializing (see Clone()).
   std::vector<mojo::PendingReceiver<blink::mojom::blink::Blob>> pending_clones_;
+  // BindOwned lifetime (registered blobs): bound pipe + disconnect flag.
+  mojo::Receiver<blink::mojom::blink::Blob> receiver_{this};
+  bool disconnected_ = false;
   base::WeakPtrFactory<MbBlob> weak_factory_{this};
 };
 
@@ -600,7 +646,7 @@ class MbBlobRegistry : public blink::mojom::blink::BlobRegistry {
       }
       parts.push_back(std::move(p));
     }
-    mojo::MakeSelfOwnedReceiver(
+    MbBlob::BindOwned(
         std::make_unique<MbBlob>(uuid, content_type, std::move(parts)),
         std::move(blob));
     std::move(callback).Run();  // reply () — unblocks Blink's [Sync] Register
