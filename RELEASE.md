@@ -5,6 +5,76 @@ Release notes for miniblink2. Each release is an annotated git tag
 
 ---
 
+## v0.3 — 2026-07-06 (`v0.3`)
+
+**The embedder-API release.** Both rounds of the Ultralight-informed API
+program (IMPROVEMENT.md, items 1–13, distilled from the Glyph host
+integration) are designed, shipped, and verified — a 720-sample pointer-sweep
+harness with a damage-gated blit path shows 0 flicker with frames staying
+live. The public header also splits by audience.
+
+**Interactive-host surface (round 1).**
+
+- `mbUpdate` — a re-entrancy-safe update tick that never nests the host's run
+  loop; EngineScope guards all engine-entering exports; `mbInEngineCall` +
+  `mbDefer` for work scheduled while the engine is on the stack.
+- Damage flag (`mbViewIsDirty`) with strict snapshot semantics —
+  `mbRepaintToBitmap` returning 0 now guarantees "buffer untouched" (kills the
+  blank-flash-on-hover class of bug).
+- Load lifecycle completed: `mbOnBeginLoading` (main-frame commit) +
+  `mbOnFailLoading` (top-level failure funnel) join finish/DOM-ready.
+- Per-view request mocking: `mbOnRequestMock(view, cb, userdata)` on the
+  subresource loader path (process-wide hook remains the fallback).
+- Typed input events: `mbMouseEvent` / `mbWheelEvent` with struct_size
+  versioning, float deltas, reserved gesture phase.
+- **Header split by audience** (breaking): `include/miniblink2/webview.h`
+  (117 embedder exports) + `automation.h` (79 automation exports,
+  pumping/blocking calls flagged). No umbrella header — every consumer names
+  its audience.
+
+**Round 2: profiles, budgets, diagnostics.**
+
+- **Sessions** — browsing profiles as capability handles:
+  `mbCreateSession(name, persist_path)` / `mbCreateViewInSession` /
+  `mbSessionClearStorage` / `mbSessionFlush`. Everything origin-keyed
+  partitions per session (DOM storage, IndexedDB, OPFS, buckets, locks,
+  BroadcastChannel) plus per-session curl cookie jars; persistent profiles
+  restore at create and flush at teardown. Ephemeral, implicit default
+  session keeps plain `mbCreateView` disk-free.
+- `mbSetMaxUpdateTime` — time-bounded update slice (Glyph runs 8 ms);
+  `mbPumpMessages` stays run-to-idle for automation.
+- `mbSetUserStylesheet` — per-view engine-side CSS, invisible to the document
+  (user origin; author-level variant noted as follow-up).
+- `mbPurgeMemory` / `mbLogMemoryUsage` — memory-pressure broadcast + V8
+  low-memory GC for pooled hidden views.
+- `mbEvalJSCatch` — JS exceptions surface (message + line) instead of being
+  swallowed; the binding-lifecycle contract (what dies on navigation, where
+  to re-inject) is documented in webview.h.
+- `mbSetFontFamilies` (per-view CJK-aware font defaults), `mbUpdateAt`
+  (frame-timestamped updates for display-link hosts).
+- **DevTools stage A**: in-process CDP bridge — `mbDevToolsAttach` /
+  `mbDevToolsSend` / `mbDevToolsDetach` drive blink's compiled-in
+  DevToolsAgent directly (verified by a Runtime.evaluate round trip); ordinary
+  Chrome is the intended frontend via a host-side WS bridge (stage B, lives in
+  the embedder). Patches 0024–0026 fix the null-deref/browserless corners this
+  exposed.
+- Scrollbar clicks scroll instead of crashing (patch 0023); paint-purity fix:
+  the lifecycle update is unconditionally the last step before paint replay.
+
+**Build & docs.**
+
+- `BUILD.md`: full build guide — profiles, feature flags, and the one-time
+  macOS arm64 bootstrap for a tarball Chromium tree (cipd gn, pinned clang +
+  objdump package, Metal toolchain, pinned node, and the
+  Linux-binaries-in-the-tarball trap: rustc, esbuild, ninja, rollup's native
+  binding), plus the missing-REF-paks gotcha.
+- `MB_JOBS=N` caps ninja parallelism for shared machines.
+- IMPROVEMENT.md and IMPROVEMENT2.md merged into one ledger with continuous
+  item numbering; source comments repointed.
+- API header renamed `view.h` → `webview.h`.
+
+---
+
 ## v0.2 — 2026-07-03 (`v0.2`)
 
 **API consolidation.** The public surface is now exactly one header —
