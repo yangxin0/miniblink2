@@ -13,7 +13,11 @@
 
 These *could* be built; none is worth the effort relative to its value. Listed worst-value first.
 
-### A1. Service Workers — INVESTIGATED + DECLINED
+### A1. Service Workers — INVESTIGATED + DECLINED, then EXPLICITLY REQUESTED
+- **2026-07-06 update:** the effort-aware request arrived; the staged plan is
+  `docs/SERVICE_WORKERS.md` (S1 registration/lifecycle → S2 running worker →
+  S3 fetch interception → S4 persistence; gated off until S3 so the
+  no-fake-success rule below is never violated). The original analysis stands:
 - **State today:** `navigator.serviceWorker` exists; `register()` **rejects cleanly with a
   `TypeError`** (no hang). Feature-detecting sites degrade gracefully — the correct non-support state.
 - **Scope to actually support:** 28 service-worker mojom interfaces + ~40 renderer `.cc` files, plus
