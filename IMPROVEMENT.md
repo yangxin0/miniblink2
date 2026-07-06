@@ -95,11 +95,19 @@ via synthetic per-dictionary hosts baked into the base URL.
 GPUDriver, SurfaceFactory) are injectable interfaces, and every view callback
 carries `user_data`.
 
-**Shipped, loader path** (c395cc8): `mbOnRequestMock(view, cb, userdata)` —
+**Shipped, all fetch paths**: `mbOnRequestMock(view, cb, userdata)` —
 MbFindMock takes an opaque host context, subresource loaders inherit the view
-from their frame client, hook self-erases on view destroy. Worker scripts and
-view-level MbFetchUrl helpers still fall back to the process-wide hook. The
+from their frame client, hook self-erases on view destroy (c395cc8, loader
+path). The former residuals are closed: view-level fetch helpers (downloads),
+page-navigation mock checks, and worker main scripts now carry the view —
+dedicated workers via the creating document's window, shared workers via the
+starting connection's frame_key. The same context keys the session cookie
+jar, so worker script fetches also use the right session's cookies. Remaining
+residual: a NESTED worker's script (its context is a WorkerGlobalScope, no
+frame) falls back to the process-wide hook — documented in webview.h. The
 static block/mock/rewrite tables stay global — they are config, not routing.
+Smoke: a per-view mock serving a dedicated worker's http(s) script
+(mb_smoke_render 37j2).
 
 ### 5. Typed input events
 
@@ -273,11 +281,31 @@ See "Sessions: the agreed design" below for the API contract.
   Elements/Console/Sources session over the embedder's WebSocket bridge
   (live DOM updates across reloads), plus Runtime.evaluate round trips,
   detach/re-attach, destroy-while-attached, and a second-view session.
-  **Remaining engine-side gaps** (explicit no-ops in the bridge):
-  ChildTargetCreated — child worker/iframe targets are not surfaced
-  (single-target v1) — and MainThreadDebuggerPaused/Resumed — no host
-  notification when the debugger pauses. See "Inspector: the staged plan"
-  below.
+  **Pause/resume notification shipped**: `mbOnDevToolsPaused(view, cb, ud)`
+  fires paused=1/0 from blink's MainThreadDebuggerPaused/Resumed — the host
+  can stop its frame tick instead of treating a breakpoint as a hang;
+  Debugger.resume from inside the callback is safe (IO session). Needed
+  patch 0027: blink CHECK-aborts DebuggerPaused on a worker-style-bound
+  frame agent (the browserless binding) and would deliver the signal only to
+  the absent associated channel. Smoke: mb_smoke 42 (P→R around a `debugger`
+  statement). **Remaining engine-side gap**: ChildTargetCreated — child
+  worker/iframe targets are not surfaced (single-target v1). See "Inspector:
+  the staged plan" below.
+
+---
+
+## What's left (summary)
+
+Everything not listed here is shipped or a documented decision (nested-worker
+fallback, localStorage persistence limit, inspector Stage C, the user-origin
+stylesheet caveat).
+
+| Item | What's left | Status |
+|---|---|---|
+| 2 | Dirty rects + engine-owned lockable surface (flag level shipped) | Open — the one real performance feature remaining |
+| 9 | Zero-copy resource bodies (`mbResponseSetBodyOwned`) | Deferred by cost — revisit if a host serves large media |
+| 10 | Memory budget knobs (cache sizes) | Only if `mbPurgeMemory` proves insufficient |
+| 13c | Child worker/iframe DevTools targets (multi-session bridge) | Open, unscheduled |
 
 ---
 
@@ -380,6 +408,7 @@ unnecessary.
 
 Status: Stage A shipped (8bc330c) and proven against a real Chrome frontend.
 Stage B shipped where it belongs — in the Glyph embedder (this repo's engine
-sources stay socket-free). Engine-side follow-ups, not scheduled: surface
-child worker/iframe targets (ChildTargetCreated is a single-target-v1 no-op)
-and a host callback for debugger pause/resume.
+sources stay socket-free). Debugger pause/resume host notification shipped
+(mbOnDevToolsPaused + patch 0027). Engine-side follow-up, not scheduled:
+surface child worker/iframe targets (ChildTargetCreated is a
+single-target-v1 no-op).
