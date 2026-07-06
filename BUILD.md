@@ -166,6 +166,18 @@ Without this, ninja reports `unknown target
 
 ## Gotchas
 
+- **Cap build parallelism** with `MB_JOBS=N scripts/build-lib.sh …` (passes
+  `ninja -j N`; unset = ninja's cores+2 default).
+- **Missing paks in dist**: `blink_resources.pak` / `icudtl.dat` /
+  `media_controls_resources_100_percent.pak` are copied from a reference
+  component build (`REF`, default `$CHROMIUM/out/Release`); if none exists the
+  copy is silently skipped. Either run `./build.sh` once to create it, or take
+  the paks from the mono out dir
+  (`out/mono-release/gen/third_party/blink/public/resources/blink_resources.pak`,
+  `…/media_controls/resources/media_controls_resources_100_percent.pak`) and
+  trim ICU from the source tree:
+  `python3 scripts/trim_icu.py --keep en,zh $CHROMIUM/third_party/icu/common/icudtl.dat dist/release/icudtl.dat`.
+
 - **"another build-lib.sh is already building"** with no build running usually
   means `$CHROMIUM/out/` doesn't exist yet (the lock `mkdir` fails on the
   missing parent). `mkdir "$CHROMIUM/out"` — or remove the stale lock dir the
