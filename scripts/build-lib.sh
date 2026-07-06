@@ -121,6 +121,8 @@ command -v gn >/dev/null 2>&1 || {
   exit 1
 }
 NINJA="ninja"
+# MB_JOBS caps ninja parallelism (default: ninja's own cores+2 heuristic).
+MB_JOBS="${MB_JOBS:-}"
 
 DEST="$CHROMIUM/third_party/blink/renderer/miniblink_host"
 MB2_DEST="$CHROMIUM/third_party/blink/renderer/miniblink2"
@@ -360,7 +362,7 @@ build_pass() {
   local targets=("$SHARED")
   [ "$want_snapshot" = 1 ] && targets+=(v8_context_snapshot.arm64.bin)
   echo "==> $NINJA -C $out ${targets[*]}   (first build of a profile is a full compile — slow)"
-  ( cd "$CHROMIUM" && "$NINJA" -C "$out" "${targets[@]}" )
+  ( cd "$CHROMIUM" && "$NINJA" -C "$out" ${MB_JOBS:+-j "$MB_JOBS"} "${targets[@]}" )
 
   if [ "$want_dylib" = 1 ]; then
     cp "$CHROMIUM/$out/libminiblink2.dylib" "$DIST/"
