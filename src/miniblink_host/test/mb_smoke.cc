@@ -4659,6 +4659,49 @@ int main() {
     mbWait(v, 50);  // let the async session detach settle before teardown
   }
 
+  // 43. <select> popup surfaces to the HOST (mbOnSelectPopup): clicking the
+  // closed menulist delivers items/bounds/selection to the callback, and
+  // committing an index from inside it selects that option (blink's external
+  // popup path; previously the click was a silent dead-end). Committing an
+  // index in the delivered array's index space also proves the plumbing all
+  // the way back through PopupMenuClient::DidAcceptIndices.
+  {
+    struct PopupState {
+      std::string labels;
+      int selected = -1;
+      int fired = 0;
+    } ps;
+    mbOnSelectPopup(
+        v,
+        [](mbView* pv, void* ud, const mbSelectPopupInfo* info) {
+          auto* s = static_cast<PopupState*>(ud);
+          ++s->fired;
+          s->selected = info->selected_index;
+          for (int i = 0; i < info->item_count; ++i) {
+            if (i)
+              s->labels += "|";
+            s->labels += info->items[i].label ? info->items[i].label : "";
+          }
+          int idx = 2;  // choose "gamma"
+          mbSelectPopupCommit(pv, &idx, 1);
+        },
+        &ps);
+    mbLoadHTML(v,
+               "<body style='margin:0'><select id='s' style='font-size:20px'>"
+               "<option>alpha</option><option selected>beta</option>"
+               "<option>gamma</option></select></body>",
+               "about:blank");
+    mbSendMouseClick(v, 30, 15);  // open the menulist
+    mbWait(v, 250);          // popup routes via the service thread; commit applies
+    const std::string val = Eval(v, "document.getElementById('s').value");
+    Expect(ps.fired == 1 && ps.labels == "alpha|beta|gamma" &&
+               ps.selected == 1 && val == "gamma",
+           "<select> popup surfaces to the host and commits the chosen option",
+           "fired=" + std::to_string(ps.fired) + " labels=[" + ps.labels +
+               "] sel=" + std::to_string(ps.selected) + " value=[" + val + "]");
+    mbOnSelectPopup(v, nullptr, nullptr);
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

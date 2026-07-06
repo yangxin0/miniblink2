@@ -1,0 +1,70 @@
+Subject: [PATCH] fonts/mac: don't downgrade emoji to monochrome unless text
+ presentation was asked for
+
+The SystemFallbackEmojiVSSupport block replaces a substituted "Apple Color
+Emoji" face with the monochrome "Apple Symbols" cascade. Upstream only
+reaches it for text-presentation runs (emoji-presentation ones are served
+the color font earlier via a GetFontData family lookup), but in this
+embedder that AppKit-backed lookup can fail, dropping ordinary kText and
+emoji-presentation runs into the substitution path where they were all
+downgraded. Thread the run's fallback priority down and downgrade ONLY
+when text presentation (VS15 / emoji-text segmentation) explicitly asked
+for a monochrome face.
+---
+--- a/third_party/blink/renderer/platform/fonts/mac/font_cache_mac.mm
++++ b/third_party/blink/renderer/platform/fonts/mac/font_cache_mac.mm
+@@ -116,7 +116,8 @@
+ 
+ ScopedCFTypeRef<CTFontRef> GetSubstituteFont(CTFontRef ct_font,
+                                              UChar32 character,
+-                                             float size) {
++                                             float size,
++                                             FontFallbackPriority fallback_priority) {
+   auto bytes = base::bit_cast<std::array<UInt8, 4>>(character);
+   ScopedCFTypeRef<CFStringRef> string(CFStringCreateWithBytes(
+       kCFAllocatorDefault, std::data(bytes), std::size(bytes),
+@@ -151,7 +152,15 @@
+   // presentation of emoji. To do that we will replace colored emoji font with
+   // the "Apple Symbols" monochromatic emoji font with "Apple Color Emoji"
+   // cascade list since it has better glyph coverage.
+-  if (RuntimeEnabledFeatures::SystemFallbackEmojiVSSupportEnabled() &&
++  // miniblink2: downgrade the colored face ONLY when the run explicitly asks
++  // for TEXT presentation (VS15 / emoji-text segmentation). Upstream reached
++  // this block just for those runs (emoji-presentation ones were served the
++  // color font earlier via GetFontData("Apple Color Emoji")), but in this
++  // embedder that AppKit-family lookup can fail and generic kText runs land
++  // here too - and were all downgraded to monochrome "Apple Symbols". When
++  // CoreText picked Apple Color Emoji for an emoji character and nothing
++  // demanded text presentation, keep the color.
++  if (IsTextPresentationEmoji(fallback_priority) &&
+       RuntimeEnabledFeatures::SystemFallbackEmojiVSSupportEnabled() &&
+       substitute_font_name &&
+       CFStringCompare(substitute_font_name.get(), CFSTR("Apple Color Emoji"),
+@@ -194,13 +203,14 @@
+ const FontPlatformData* GetAlternateFontPlatformData(
+     const FontDescription& font_description,
+     UChar32 character,
+-    const FontPlatformData& platform_data) {
++    const FontPlatformData& platform_data,
++    FontFallbackPriority fallback_priority) {
+   CTFontRef ct_font = platform_data.CtFont();
+ 
+   float size = font_description.ComputedPixelSize();
+ 
+   ScopedCFTypeRef<CTFontRef> substitute_font(
+-      GetSubstituteFont(ct_font, character, size));
++      GetSubstituteFont(ct_font, character, size, fallback_priority));
+   if (!substitute_font) {
+     return nullptr;
+   }
+@@ -351,8 +361,8 @@
+     }
+   }
+ 
+-  const FontPlatformData* alternate_font =
+-      GetAlternateFontPlatformData(font_description, character, platform_data);
++  const FontPlatformData* alternate_font = GetAlternateFontPlatformData(
++      font_description, character, platform_data, fallback_priority);
+   if (!alternate_font) {
+     return nullptr;
+   }

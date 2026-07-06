@@ -40,6 +40,8 @@ void MbSetHostFrameTime(double seconds);
 
 class MbDevToolsBridge;
 class MbSession;
+class MbSelectPopupClient;   // reply channel for a surfaced <select> popup
+struct MbSelectPopupData;    // items/bounds of one popup (mb_local_frame_host.h)
 
 class MbViewClient;     // blink::WebViewClient (minimal)
 class MbFrameClient;    // blink::WebLocalFrameClient
@@ -379,6 +381,17 @@ class MbWebView {
   // mbOnDevToolsPaused for the host-side contract). Settable before or after
   // AttachDevTools; survives detach/re-attach; {} clears.
   void SetDevToolsPausedCallback(std::function<void(bool)> cb);
+  // <select>/menulist popup surfaced to the host (blink's external popup
+  // path). The callback receives the items/bounds; the host replies with
+  // CommitSelectPopup (indices into the delivered items array) or
+  // CancelSelectPopup. No callback registered -> immediate cancel (the
+  // pre-API behavior, minus the dropped pipe). A new popup cancels a pending
+  // one. All main-thread.
+  void SetSelectPopupCallback(std::function<void(const MbSelectPopupData&)>);
+  void OnShowSelectPopup(const MbSelectPopupData& data,
+                         std::unique_ptr<MbSelectPopupClient> client);
+  int CommitSelectPopup(const int32_t* indices, int count);  // 0 = none pending
+  void CancelSelectPopup();
   // localStorage access for the document's origin (inject an auth token, read
   // SPA state). Get returns false if the key is absent or storage is unavailable
   // (opaque origin); Set returns false on a SecurityError/quota failure. Needs a
@@ -740,6 +753,8 @@ class MbWebView {
   // Fired on main-frame commit (url) / top-level load failure (url, error).
   std::unique_ptr<MbDevToolsBridge> devtools_;  // live while attached
   std::function<void(bool)> devtools_paused_cb_;  // debugger paused/resumed
+  std::function<void(const MbSelectPopupData&)> select_popup_cb_;
+  std::unique_ptr<MbSelectPopupClient> select_popup_client_;  // pending popup
   MbSession* session_ = nullptr;  // never null after construction
   std::string user_stylesheet_;  // injected per commit; empty = none
   std::function<void(const std::string&)> on_begin_loading_;
