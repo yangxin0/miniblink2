@@ -347,6 +347,20 @@ MB_EXPORT void mbSetFontFamilies(mbView*, const char* standard,
                                  const char* fixed, const char* serif,
                                  const char* sans_serif);
 
+// Per-character font fallback: when no mapped font covers a character (a rare
+// CJK ideograph, a symbol), the callback is consulted BEFORE the platform
+// cascade with the codepoint (UTF-32), the run's weight (100-900) and italic
+// flag. Return 1 and write a font family name (UTF-8) into out[out_cap] to
+// use that family; return 0 to defer to the engine's platform fallback. The
+// named family must actually cover the character or the answer is ignored (no
+// tofu from a wrong answer). Process-wide; called on the engine thread during
+// layout — keep it fast (cache your answers). NULL clears. The dynamic
+// counterpart of mbSetFontFamilies' static defaults.
+typedef int (*mbFontFallbackCallback)(void* userdata, unsigned int codepoint,
+                                      int weight, int italic,
+                                      char* out, int out_cap);
+MB_EXPORT void mbSetFontFallbackCallback(mbFontFallbackCallback, void* userdata);
+
 // ---- DevTools (CDP) --------------------------------------------------------
 // One Chrome-DevTools-Protocol session per view (stage A of the inspector
 // plan in IMPROVEMENT.md). Attach starts the session; Send dispatches ONE

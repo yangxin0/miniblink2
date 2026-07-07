@@ -20,6 +20,7 @@
 #include "miniblink_host/frame/mb_opfs.h"
 #include "miniblink_host/frame/mb_notification_service.h"
 #include "miniblink_host/loader/mb_url_loader.h"
+#include "miniblink_host/platform/mb_platform.h"
 #include "miniblink_host/runtime/mb_runtime.h"
 #include "miniblink_host/session/mb_session.h"
 #include "miniblink_host/view/mb_webview.h"
@@ -282,6 +283,22 @@ void mbOnDevToolsPaused(mbView* v, mbDevToolsPausedCallback cb,
   } else {
     v->impl->SetDevToolsPausedCallback({});
   }
+}
+
+void mbSetFontFallbackCallback(mbFontFallbackCallback cb, void* userdata) {
+  if (!cb) {
+    mb::MbSetFontFallbackHook({});
+    return;
+  }
+  mb::MbSetFontFallbackHook(
+      [cb, userdata](uint32_t codepoint, int weight, bool italic) {
+        char family[256] = {0};
+        if (!cb(userdata, codepoint, weight, italic ? 1 : 0, family,
+                static_cast<int>(sizeof(family))))
+          return std::string();
+        family[sizeof(family) - 1] = '\0';
+        return std::string(family);
+      });
 }
 
 void mbSetFontFamilies(mbView* v, const char* standard, const char* fixed,

@@ -1,0 +1,84 @@
+Subject: [PATCH] fonts: host-pluggable per-character fallback hook
+
+When no mapped font covers a character, blink walks the platform cascade
+(CoreText on mac) and can land on a poor or last-resort face. Embedders
+serving script-heavy content (CJK dictionaries) know better which installed
+family renders a given codepoint. Add a process-global hook the host installs
+(miniblink2's mbSetFontFallbackCallback): consulted FIRST in the mac
+PlatformFallbackFontForCharacter with (character, weight, italic); returns a
+family name, or a null String to defer to the platform lookup. The named
+family must actually cover the character (unicharToGlyph) or the answer is
+ignored — a wrong host answer can't produce tofu.
+---
+--- a/third_party/blink/renderer/platform/fonts/font_cache.h
++++ b/third_party/blink/renderer/platform/fonts/font_cache.h
+@@ -102,6 +102,16 @@
+   static FontCache& Get();
+ 
+   void Trace(Visitor*) const;
++
++  // miniblink2: host-pluggable per-character fallback, consulted before the
++  // platform cascade. The hook returns the family name to try for `character`
++  // at (weight, italic), or a null String to defer. Installed once by the
++  // embedding host; called on the main thread during layout.
++  using HostFallbackFontHook = String (*)(UChar32 character,
++                                          int weight,
++                                          bool italic);
++  static void SetHostFallbackFontHook(HostFallbackFontHook);
++  static String ConsultHostFallbackFontHook(UChar32, const FontDescription&);
+ 
+   const SimpleFontData* FallbackFontForCharacter(
+       const FontDescription&,
+--- a/third_party/blink/renderer/platform/fonts/font_cache.cc
++++ b/third_party/blink/renderer/platform/fonts/font_cache.cc
+@@ -97,6 +97,27 @@
+ 
+ FontCache::FontCache() = default;
+ 
++namespace {
++// Process-global (set once at embedder startup, before layout runs).
++FontCache::HostFallbackFontHook g_host_fallback_font_hook = nullptr;
++}  // namespace
++
++void FontCache::SetHostFallbackFontHook(HostFallbackFontHook hook) {
++  g_host_fallback_font_hook = hook;
++}
++
++String FontCache::ConsultHostFallbackFontHook(
++    UChar32 character,
++    const FontDescription& font_description) {
++  if (!g_host_fallback_font_hook)
++    return String();
++  const int weight =
++      static_cast<int>(static_cast<float>(font_description.Weight()));
++  const bool italic = static_cast<float>(font_description.Style()) >=
++                      static_cast<float>(kItalicSlopeValue);
++  return g_host_fallback_font_hook(character, weight, italic);
++}
++
+ FontCache::~FontCache() = default;
+ 
+ void FontCache::Trace(Visitor* visitor) const {
+--- a/third_party/blink/renderer/platform/fonts/mac/font_cache_mac.mm
++++ b/third_party/blink/renderer/platform/fonts/mac/font_cache_mac.mm
+@@ -320,6 +320,20 @@
+     UChar32 character,
+     const SimpleFontData* font_data_to_substitute,
+     FontFallbackPriority fallback_priority) {
++  // miniblink2: the host's per-character fallback answer trumps the platform
++  // cascade — but only when the named family really covers the character, so
++  // a wrong answer falls through instead of rendering tofu.
++  const String host_family =
++      ConsultHostFallbackFontHook(character, font_description);
++  if (!host_family.empty()) {
++    if (const SimpleFontData* host_font =
++            GetFontData(font_description, AtomicString(host_family))) {
++      if (host_font->PlatformData().TypefaceSp() &&
++          host_font->PlatformData().TypefaceSp()->unicharToGlyph(character)) {
++        return host_font;
++      }
++    }
++  }
+   if (IsEmojiPresentationEmoji(fallback_priority)) {
+     if (const SimpleFontData* emoji_font =
+             GetFontData(font_description, AtomicString(kColorEmojiFontMac))) {

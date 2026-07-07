@@ -52,6 +52,8 @@
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
 #include "third_party/blink/public/platform/web_worker_fetch_context.h"
 #include "third_party/blink/public/platform/web_string.h"
+#include "base/no_destructor.h"
+#include "third_party/blink/renderer/platform/fonts/font_cache.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -360,6 +362,33 @@ class MbNestedLoop : public blink::Platform::NestedMessageLoopRunner {
 std::unique_ptr<blink::Platform::NestedMessageLoopRunner>
 MbPlatform::CreateNestedMessageLoopRunner() const {
   return std::make_unique<MbNestedLoop>();
+}
+
+namespace {
+// The host's fallback answer, bridged into blink::FontCache (patch 0029).
+// Main-thread only: layout consults the hook on the main thread and the
+// setter is an engine-entering API call.
+std::function<std::string(uint32_t, int, bool)>& FontFallbackFn() {
+  static base::NoDestructor<std::function<std::string(uint32_t, int, bool)>> f;
+  return *f;
+}
+
+blink::String FontFallbackBridge(UChar32 character, int weight, bool italic) {
+  const auto& fn = FontFallbackFn();
+  if (!fn)
+    return blink::String();
+  std::string family = fn(static_cast<uint32_t>(character), weight, italic);
+  if (family.empty())
+    return blink::String();
+  return blink::String::FromUtf8(family);
+}
+}  // namespace
+
+void MbSetFontFallbackHook(
+    std::function<std::string(uint32_t, int, bool)> hook) {
+  FontFallbackFn() = std::move(hook);
+  blink::FontCache::SetHostFallbackFontHook(
+      FontFallbackFn() ? &FontFallbackBridge : nullptr);
 }
 
 }  // namespace mb

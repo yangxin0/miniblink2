@@ -11,6 +11,7 @@
 #ifndef MINIBLINK_HOST_PLATFORM_MB_PLATFORM_H_
 #define MINIBLINK_HOST_PLATFORM_MB_PLATFORM_H_
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -132,6 +133,13 @@ class MbPlatform : public blink::Platform {
   // BoringSSL-backed WebCrypto impl returned from Crypto(); threadsafe.
   std::unique_ptr<webcrypto::WebCryptoImpl> web_crypto_;
 };
+
+// Install (or clear, with {}) the host's per-character font-fallback answer:
+// called with (codepoint, weight 100-900, italic) when no mapped font covers
+// a character; returns the family name to try, or "" to defer to the platform
+// cascade (patch 0029 wires it into blink's FontCache). Main thread only.
+void MbSetFontFallbackHook(
+    std::function<std::string(uint32_t, int, bool)> hook);
 
 }  // namespace mb
 

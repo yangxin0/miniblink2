@@ -4828,6 +4828,52 @@ int main() {
            "hits=" + std::to_string(log_hits));
   }
 
+  // (g) Per-character font fallback hook: layout of a CJK ideograph the
+  // default Times/Helvetica families don't cover consults the host callback
+  // (codepoint + weight/italic) BEFORE the platform cascade; a real family
+  // answer is used, and a bogus answer must fall through without breaking
+  // rendering (the tofu guard).
+  {
+    struct FbState {
+      unsigned int last_cp = 0;
+      int fired = 0;
+      const char* answer = "";
+    } fs;
+    fs.answer = "PingFang SC";
+    mbSetFontFallbackCallback(
+        [](void* ud, unsigned int cp, int weight, int italic, char* out,
+           int cap) -> int {
+          auto* s = static_cast<FbState*>(ud);
+          if (cp != 0x9F98)
+            return 0;  // only answer for the probe character
+          ++s->fired;
+          s->last_cp = cp;
+          (void)weight;
+          (void)italic;
+          std::snprintf(out, cap, "%s", s->answer);
+          return 1;
+        },
+        &fs);
+    std::vector<unsigned char> fbpx(static_cast<size_t>(W) * H * 4);
+    mbLoadHTML(v, "<body><div id=c style='font-family:Times'>&#x9F98;</div>"
+                  "</body>", "about:blank");
+    mbPaintToBitmap(v, fbpx.data(), W, H, W * 4);  // layout+paint runs fallback
+    const int fired_real = fs.fired;
+    // Bogus family: the unicharToGlyph guard must reject it and fall through
+    // to the platform cascade — the glyph still renders (no crash, no tofu).
+    fs.fired = 0;
+    fs.answer = "NoSuchFamily-12345";
+    mbLoadHTML(v, "<body><div style='font-family:Times'>&#x9F98;</div></body>",
+               "about:blank");
+    mbPaintToBitmap(v, fbpx.data(), W, H, W * 4);
+    const int fired_bogus = fs.fired;
+    mbSetFontFallbackCallback(nullptr, nullptr);
+    Expect(fired_real > 0 && fs.last_cp == 0x9F98 && fired_bogus > 0,
+           "mbSetFontFallbackCallback consulted per character (tofu-guarded)",
+           "real=" + std::to_string(fired_real) + " bogus=" +
+               std::to_string(fired_bogus));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
