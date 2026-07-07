@@ -10,8 +10,7 @@ Round 1 (items 1–6) is fully shipped. Round 2 (items 7–13) is shipped except
 zero-copy bodies (item 9, deferred by cost); the inspector's host-side bridge
 (stage B) shipped in the Glyph embedder, where the plan places it. Round 3
 (items 14–21, the page → host UI-state channel and the platform-service
-corners) is shipped except the font-fallback hook (item 20). Per-item status
-is inline under each item.
+corners) is fully shipped. Per-item status is inline under each item.
 
 Verified in the Glyph host: engine smoke test + a 720-sample pointer-sweep
 harness with a damage-gated blit path and a liveness beacon (0 flicker,
@@ -390,8 +389,13 @@ can land on last-resort. The engine already needed a last-resort-font fix once.
 characters, int weight, bool italic)` — the host answers "what font renders
 these characters?" at glyph-resolution time.
 
-**Open** — highest-value remaining item of this round, but it patches blink's
-FontCache fallback path; scoped separately from the callback items above.
+**Shipped**: `mbSetFontFallbackCallback(cb, ud)` — process-wide; consulted
+with (codepoint, weight, italic) BEFORE the platform cascade (patch 0029 adds
+`FontCache::SetHostFallbackFontHook`, consulted at the top of the mac
+`PlatformFallbackFontForCharacter`). The named family must actually cover the
+character (unicharToGlyph guard) or the answer is ignored — a wrong host
+answer falls through instead of rendering tofu. Smoke: mb_smoke 44g (real
+family used; bogus family tofu-guarded).
 
 ### 21. Noted, not adopted (round-3 counterpart of "what NOT to copy")
 
@@ -428,7 +432,6 @@ stylesheet caveat).
 | 9 | Zero-copy resource bodies (`mbResponseSetBodyOwned`) | Deferred by cost — revisit if a host serves large media |
 | 10 | Memory budget knobs (cache sizes) | Only if `mbPurgeMemory` proves insufficient |
 | 13c | Child worker/iframe DevTools targets (multi-session bridge) | Open, unscheduled |
-| 20 | Per-character font fallback hook | Open — blink FontCache patch |
 | 21 | TLS pinning / streaming downloads / ImageSource | Deferred by trigger (no host needs them yet) |
 
 ---
