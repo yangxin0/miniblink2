@@ -10,7 +10,9 @@ Round 1 (items 1–6) is fully shipped. Round 2 (items 7–13) is shipped except
 zero-copy bodies (item 9, deferred by cost); the inspector's host-side bridge
 (stage B) shipped in the Glyph embedder, where the plan places it. Round 3
 (items 14–21, the page → host UI-state channel and the platform-service
-corners) is fully shipped. Per-item status is inline under each item.
+corners) is fully shipped. Round 4 (items 22–31, the corners rounds 1–3
+skipped: child views/window.open, per-view JS, typed keys, paint-contract
+hardening) is fully shipped. Per-item status is inline under each item.
 
 Verified in the Glyph host: engine smoke test + a 720-sample pointer-sweep
 harness with a damage-gated blit path and a liveness beacon (0 flicker,
@@ -420,6 +422,141 @@ family used; bogus family tofu-guarded).
 
 ---
 
+## Round 4
+
+Fourth pass (2026-07-07), through the headers rounds 1–3 didn't dissect:
+Surface/GPUDriver/Bitmap/RenderTarget, View/Renderer corners, KeyEvent,
+Session getters, Config diagnostics, the AppCore layer. De-duplicated against
+the shipped mb* surface and the open/deferred tables first.
+
+### 22. Child views: window.open() that actually works
+
+**Then:** `mbOnNewWindow` is notification-only — `window.open()` returns null,
+severing the opener/`postMessage` relationship. Any login-in-popup / OAuth
+flow that opens a child window and posts back to its opener is dead; the host
+loading the URL in a fresh view doesn't restore the link.
+
+**Ultralight:** `ViewListener::OnCreateChildView(caller, opener_url,
+target_url, is_popup, popup_rect)` returns a `RefPtr<View>` — the host
+supplies the view, the engine wires it as the opener's child.
+
+**Shipped** (two-phase, the honest C-ABI shape): `mbOnCreateChildView(view,
+cb, ud)` — the engine creates the child (opener page passed to
+WebView::Create, opener frame to CreateMainFrame, SetOpenedByDOM; it inherits
+the parent's session and shares the opener's agent group scheduler — same
+agent cluster); the host returns 1 to ADOPT (owns the view) or 0 to decline
+(deferred engine teardown off the window.open stack; window.open == null; no
+single-window default navigation — a registered mbOnNewWindow still fires).
+Adopted children: live window object, working opener/postMessage both ways,
+window.close() allowed. LIFETIME: destroy the child before its parent.
+Landed along the way: a restore-merge bug in IndexedDB session persistence
+(merge retired EVERY live backend but only replaced same-key slots, leaving
+null registry entries that crashed the next whole-registry flush) — fixed to
+retire only replaced backends. Smoke: mb_smoke (adopt + postMessage-to-opener
++ geometry + decline).
+
+### 23. Per-view JavaScript toggle
+
+**Then:** `mbSetLoadImages` exists, but no way to disable script — the one
+ViewConfig boolean with no mb counterpart. Script-off is hardening AND a perf
+switch for static dictionary HTML.
+
+**Ultralight:** `ViewConfig::enable_javascript`.
+
+**Shipped**: `mbSetEnableJavascript(view, int)` via
+`WebSettings::SetJavaScriptEnabled`, call-before-load semantics like
+mbSetLoadImages. CAVEAT (documented): blink reads the live setting, so while
+disabled HOST eval is refused too — re-enable to script the document.
+
+### 24. Typed keyboard event — the unfinished half of item 5
+
+**Then:** item 5 shipped `mbMouseEvent`/`mbWheelEvent`, but keys are still
+string shorthands (`mbSendKey/Ex/Text/KeyUp`) — can't express auto-repeat,
+keypad distinction, down-without-up, or unmodified_text for shortcut
+resolution.
+
+**Ultralight:** `KeyEvent{type(RawKeyDown|KeyUp|Char), modifiers,
+virtual_key_code, native_key_code, text, unmodified_text, is_keypad,
+is_auto_repeat, is_system_key}` plus an `NSEvent` constructor.
+
+**Shipped**: `mbKeyEvent` struct (struct_size-versioned) →
+`mbSendKeyEvent(view, const mbKeyEvent*)`; the header documents the
+NSEvent→field mapping (no ObjC types in the C ABI). One WebKeyboardEvent per
+call; MB_KEY_DOWN with text types the character (blink splits it into
+RawKeyDown+Char itself). Smoke: typed text + auto-repeat flag.
+
+### 25. Pixel-format contract: state the alpha semantics
+
+**Then:** paint docs say "BGRA8888" and never state premultiplied-vs-straight
+alpha or color space — with `mbSetTransparentBackground` shipped, a
+compositing host MUST know.
+
+**Ultralight:** `BGRA8_UNORM_SRGB` ("sRGB gamma with premultiplied linear
+alpha") stated on every pixel surface, plus straight↔premultiplied
+converters.
+
+**Shipped** (docs): the paint exports and the header-top pixel contract now
+state BGRA, PREMULTIPLIED alpha, sRGB.
+
+### 26. Host-forced repaint: the dirty setter
+
+**Then:** `mbViewIsDirty` shipped (item 2) but there's no setter — a host
+that loses its buffer (purged CALayer on hide/show, resize) can't say
+"repaint even though you think you're clean"; the damage-gated blit skips
+forever. Exactly the pooled-hidden-views scenario Glyph has.
+
+**Ultralight:** `View::set_needs_paint(bool)`.
+
+**Shipped**: `mbViewSetDirty(view)`.
+
+### 27. Load/history nuances
+
+- `LoadHTML(html, url, bool add_to_history)`. **Shipped**:
+  `mbLoadHTMLEx(view, html, base, add_to_history)` — add_to_history=0
+  REPLACES the current entry (location.replace semantics).
+- `GoToHistoryOffset(int offset)`. **Shipped**: `mbGoToOffset(view, int)`.
+
+### 28. Force-repaint diagnostic switch
+
+**Ultralight:** `Config::force_repaint` — "continuously repaint regardless
+of dirty; used to diagnose painting issues." Given the damage-gated blit was
+the source of a shipped flicker bug (item 2), an escape hatch for "the dirty
+flag is lying" is cheap insurance. **Shipped**: `mbSetForceRepaint(view,
+int)` — while on, `mbViewIsDirty` reports 1.
+
+### 29. Session introspection
+
+**Then:** `mbSession*` has zero read-back — a host holding several handles
+can't ask which is which.
+
+**Ultralight:** `Session::is_persistent()/name()/id()/disk_path()`.
+
+**Shipped**: `mbSessionGetName`, `mbSessionIsPersistent`,
+`mbSessionGetPersistPath`.
+
+### 30. Convention notes (round 4)
+
+- **One stated threading contract** at the top of webview.h (Ultralight puts
+  it on the class); ours was restated ad hoc per function. Same for the
+  logical-vs-physical px / DPR contract. **Shipped** (header-top paragraph).
+- **`MB_VERSION` string macro** beside runtime `mbVersion()` so hosts log
+  compiled-against vs loaded. **Shipped**.
+- **Creation-time config struct** (`mbCreateViewEx(w,h,const mbViewConfig*)`)
+  would structurally kill the "call before navigating" footgun class — adopt
+  only if the creation surface grows again; not worth churn today.
+
+### 31. Round-4 anti-patterns (what NOT to copy)
+
+- License-tier doc gating (`@pre Pro edition only` on functional-looking
+  exports) — keep every exported symbol functional.
+- `#pragma pack(push,1)` on public ABI structs (RenderTarget.h) — the
+  struct_size convention is strictly better.
+- Modal `ShowMessageBox` in the SDK (Dialogs.h) — re-enters the nested
+  run-loop world item 1 eliminated; host-layer concern.
+- Gamepad surface — their market (game engines), not ours; scope discipline.
+
+---
+
 ## What's left (summary)
 
 Everything not listed here is shipped or a documented decision (nested-worker
@@ -428,7 +565,7 @@ stylesheet caveat).
 
 | Item | What's left | Status |
 |---|---|---|
-| 2 | Dirty rects + engine-owned lockable surface (flag level shipped) | Open — the one real performance feature remaining |
+| 2 | Dirty rects + engine-owned lockable surface (flag+setter level shipped) | Open — the one real performance feature remaining |
 | 9 | Zero-copy resource bodies (`mbResponseSetBodyOwned`) | Deferred by cost — revisit if a host serves large media |
 | 10 | Memory budget knobs (cache sizes) | Only if `mbPurgeMemory` proves insufficient |
 | 13c | Child worker/iframe DevTools targets (multi-session bridge) | Open, unscheduled |

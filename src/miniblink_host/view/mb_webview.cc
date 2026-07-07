@@ -203,16 +203,30 @@ unsigned int MbWebView::CompositorPixel(int x, int y) const {
   return b.getColor(x, y);
 }
 
-std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
+std::unique_ptr<MbWebView> MbWebView::Create(int width, int height,
+                                             MbWebView* opener) {
   auto v = std::unique_ptr<MbWebView>(new MbWebView());
   v->view_client_ = std::make_unique<MbViewClient>();
   v->frame_client_ = std::make_unique<MbFrameClient>(v.get());
 
-  v->agent_group_scheduler_ =
-      std::make_unique<blink::scheduler::WebAgentGroupScheduler>(
-          blink::ThreadScheduler::Current()
-              ->ToMainThreadScheduler()
-              ->CreateAgentGroupScheduler());
+  // A window.open child joins the OPENER's agent cluster (the pages can
+  // script each other synchronously), so it must share the opener's agent
+  // group scheduler — a separate group breaks script execution in both
+  // windows. Standalone views get their own group as before.
+  blink::scheduler::WebAgentGroupScheduler* agent_group;
+  if (opener) {
+    agent_group = opener->agent_group_scheduler_
+                      ? opener->agent_group_scheduler_.get()
+                      : opener->shared_agent_group_;
+    v->shared_agent_group_ = agent_group;
+  } else {
+    v->agent_group_scheduler_ =
+        std::make_unique<blink::scheduler::WebAgentGroupScheduler>(
+            blink::ThreadScheduler::Current()
+                ->ToMainThreadScheduler()
+                ->CreateAgentGroupScheduler());
+    agent_group = v->agent_group_scheduler_.get();
+  }
 
   // 1. WebView::Create — all browser-side handles null (frame_test_helpers.cc:778).
   // Default: non-compositing offscreen path (InitializeNonCompositing requires
@@ -227,8 +241,9 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
       /*fenced_frame_mode=*/std::nullopt,
       /*compositing_enabled=*/composite,
       /*widgets_never_composited=*/!composite,
-      /*opener=*/nullptr, mojo::NullAssociatedReceiver(),
-      *v->agent_group_scheduler_,
+      /*opener=*/opener ? opener->web_view_ : nullptr,
+      mojo::NullAssociatedReceiver(),
+      *agent_group,
       /*session_storage_namespace_id=*/std::string(),
       /*page_base_background_color=*/std::nullopt,
       base::UnguessableToken::Create(),
@@ -272,7 +287,10 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
       v->web_view_, v->frame_client_.get(), /*previous_sibling=*/nullptr,
       MakeFrameInterfaceBroker(v->frame_client_->frame_key()),
       blink::LocalFrameToken(), blink::DocumentToken(),
-      /*policy_container=*/nullptr, /*opener=*/nullptr,
+      /*policy_container=*/nullptr,
+      // Frame-level opener is what window.opener reads (the page-level opener
+      // passed to WebView::Create above wires the browsing-context group).
+      /*opener=*/opener ? opener->main_frame_ : nullptr,
       /*name=*/blink::WebString(), network::mojom::WebSandboxFlags::kNone);
   // Let the frame client know its frame so it can parent child frames (iframes).
   v->frame_client_->SetFrame(v->main_frame_);
@@ -290,6 +308,10 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height) {
   // DidAttachLocalMainFrame so the FocusController is on a live main frame.
   v->web_view_->SetIsActive(true);
   v->web_view_->SetPageFocus(true);
+  // A window.open child: allow the page to window.close() itself (blink gates
+  // scripted close on this for windows with history).
+  if (opener)
+    v->web_view_->SetOpenedByDOM();
 
   // Initialize the process-wide online state (default true). This marks it
   // "initialized" so a later MbSetOnline(false) actually fires the offline event
@@ -1112,6 +1134,14 @@ void MbWebView::SetLoadImages(bool enabled) {
   // decode). Set before navigating to apply to that load.
   if (web_view_ && web_view_->GetSettings())
     web_view_->GetSettings()->SetLoadsImagesAutomatically(enabled);
+}
+
+void MbWebView::SetEnableJavascript(bool enabled) {
+  // Gates script for documents committed after the call. Note blink's
+  // CanExecuteScripts reads the live setting, so host-driven eval is ALSO
+  // refused while disabled (documented in webview.h).
+  if (web_view_ && web_view_->GetSettings())
+    web_view_->GetSettings()->SetJavaScriptEnabled(enabled);
 }
 
 void MbWebView::SetLocale(const char* langs) {
@@ -2011,7 +2041,6 @@ void MbWebView::OnDidCommitMainFrame(const std::string& url, bool standard) {
       return;
     }
   }
-  history_.resize(history_index_ + 1);  // a new navigation truncates forward
   HistoryEntry e;
   e.url = url;
   if (pending_is_html_) {  // an in-memory doc — cache its source for re-commit on traversal
@@ -2020,6 +2049,19 @@ void MbWebView::OnDidCommitMainFrame(const std::string& url, bool standard) {
     e.base_url = std::move(pending_base_);
     e.charset = std::move(pending_charset_);
   }
+  if (pending_replace_history_ && history_index_ >= 0 &&
+      history_index_ < static_cast<int>(history_.size())) {
+    // LoadHTMLEx(add_to_history=false): overwrite the current entry in place —
+    // no append, no forward-history truncation (location.replace semantics).
+    history_[history_index_] = std::move(e);
+    pending_is_html_ = false;
+    pending_html_.clear();
+    pending_base_.clear();
+    pending_charset_.clear();
+    NotifyHistoryChanged();
+    return;
+  }
+  history_.resize(history_index_ + 1);  // a new navigation truncates forward
   history_.push_back(std::move(e));
   history_index_ = static_cast<int>(history_.size()) - 1;
   // Cap like blink's session history (kMaxSessionHistoryEntries == 50): drop the
@@ -2217,6 +2259,31 @@ void MbWebView::SetNewWindowCallback(NewWindowFn cb) {
   on_new_window_ = std::move(cb);
 }
 
+void MbWebView::SetCreateChildViewCallback(CreateChildViewFn cb) {
+  create_child_view_ = std::move(cb);
+}
+
+void MbWebView::NotifyNewWindowDeclined(const std::string& url,
+                                        const std::string& name) {
+  if (on_new_window_)
+    on_new_window_(url, name);
+}
+
+void MbWebView::DisownOpener() {
+  if (main_frame_)
+    main_frame_->ClearOpener();
+}
+
+blink::WebView* MbWebView::OnCreateChildView(const std::string& url,
+                                             const std::string& name,
+                                             bool is_popup, int x, int y,
+                                             int w, int h) {
+  if (!create_child_view_)
+    return nullptr;
+  MbWebView* child = create_child_view_(url, name, is_popup, x, y, w, h);
+  return child ? static_cast<blink::WebView*>(child->web_view_) : nullptr;
+}
+
 // Navigate to history_[target] (assumed adjacent + valid). Re-commits a cached
 // in-memory doc or re-fetches a URL entry. in_history_nav_ tells OnDidCommitMainFrame to
 // MOVE the cursor (set above) rather than append. If the navigation does not commit (load
@@ -2257,6 +2324,23 @@ bool MbWebView::TraverseHistory(int target) {
     return false;
   }
   return true;
+}
+
+bool MbWebView::GoToOffset(int offset) {
+  const int target = history_index_ + offset;
+  if (offset == 0 || target < 0 ||
+      target >= static_cast<int>(history_.size()))
+    return false;
+  return TraverseHistory(target);
+}
+
+void MbWebView::LoadHTMLEx(const char* utf8_html, const char* base_url,
+                           bool add_to_history) {
+  // add_to_history=false: the commit hook replaces the current entry (see
+  // OnDidCommitMainFrame) instead of appending — location.replace semantics.
+  pending_replace_history_ = !add_to_history;
+  LoadHTML(utf8_html, base_url);
+  pending_replace_history_ = false;  // consumed (or the load never committed)
 }
 
 bool MbWebView::GoBack() {
@@ -2390,6 +2474,22 @@ void MbWebView::SendKeyUp(int windows_key_code) {
     RunInFrameTask(base::BindOnce(&MbWidget::SendKeyUp,
                                   base::Unretained(widget_.get()), windows_key_code),
                    /*settle=*/false);
+}
+
+void MbWebView::SendKeyEvent(int type, int modifiers, int windows_key_code,
+                             int native_key_code, const char* text,
+                             const char* unmodified_text, bool is_keypad,
+                             bool is_auto_repeat, bool is_system_key) {
+  if (!widget_)
+    return;
+  // Copy the strings: the widget call runs inside a scheduler task.
+  RunInFrameTask(
+      base::BindOnce(&MbWidget::SendKeyEvent, base::Unretained(widget_.get()),
+                     type, modifiers, windows_key_code, native_key_code,
+                     std::string(text ? text : ""),
+                     std::string(unmodified_text ? unmodified_text : ""),
+                     is_keypad, is_auto_repeat, is_system_key),
+      /*settle=*/false);
 }
 
 void MbWebView::SendIme(const char* composing, const char* committed) {
@@ -3335,7 +3435,16 @@ void MbWebView::SetSession(MbSession* session) {
   MbSetLoaderSessionKey(this, session_->id());
 }
 
+void MbWebView::SetDirty() {
+  // The host lost its copy of the last frame (purged layer, dropped buffer):
+  // re-arm the damage flag so the next damage-gated blit repaints.
+  if (widget_)
+    widget_->set_needs_frame(true);
+}
+
 bool MbWebView::IsDirty() const {
+  if (force_repaint_)
+    return true;  // diagnostic bypass of damage gating (item 28)
   if (!widget_)
     return true;
   // Composited views produce frames through the frame sink, not this flag;

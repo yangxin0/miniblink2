@@ -255,16 +255,35 @@ void MbFrameClient::BeginNavigation(
 
 blink::WebView* MbFrameClient::CreateNewWindow(
     const blink::WebURLRequest& request, const blink::WebWindowFeatures&,
-    const blink::WebString& name, const gfx::Rect&, blink::WebNavigationPolicy,
+    const blink::WebString& name, const gfx::Rect& rect,
+    blink::WebNavigationPolicy policy,
     network::mojom::WebSandboxFlags, const blink::SessionStorageNamespaceId&,
     bool& /*consumed_user_gesture*/, const std::optional<blink::Impression>&,
     const std::optional<blink::WebPictureInPictureWindowOptions>&,
     const blink::WebURL& /*base_url*/) {
-  // Notify the host that the page tried to open a new window (window.open /
-  // target=_blank). We return null (deny the auto-popup — the embedder owns view
-  // creation) but surface the URL so it can react (e.g. load it somewhere).
-  if (owner_)
-    owner_->OnCreateNewWindow(request.Url().GetString().Utf8(), name.Utf8());
+  if (!owner_)
+    return nullptr;
+  const std::string url = request.Url().GetString().Utf8();
+  // Child-view path (mbOnCreateChildView): the host adopts a real opener-wired
+  // view — window.open returns a live window object and blink navigates it.
+  const bool is_popup = policy == blink::kWebNavigationPolicyNewPopup ||
+                        policy == blink::kWebNavigationPolicyNewWindow;
+  if (blink::WebView* child = owner_->OnCreateChildView(
+          url, name.Utf8(), is_popup, rect.x(), rect.y(), rect.width(),
+          rect.height())) {
+    return child;
+  }
+  if (owner_->HasCreateChildViewCallback()) {
+    // The host explicitly DECLINED this child: notify (if a new-window
+    // callback is registered) but do NOT run OnCreateNewWindow's
+    // single-window default, which navigates THIS view to the URL.
+    owner_->NotifyNewWindowDeclined(url, name.Utf8());
+    return nullptr;
+  }
+  // Legacy notification path: no child-view factory registered — surface the
+  // URL so the host can react (e.g. load it somewhere); window.open returns
+  // null (or the single-window default navigates this view).
+  owner_->OnCreateNewWindow(url, name.Utf8());
   return nullptr;
 }
 

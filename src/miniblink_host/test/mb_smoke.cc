@@ -4874,6 +4874,201 @@ int main() {
                std::to_string(fired_bogus));
   }
 
+  // ---- Round 4 (IMPROVEMENT.md items 22-29) --------------------------------
+
+  // (h) mbSetEnableJavascript gates the PAGE's scripts per view: with JS off a
+  // <script> must not run (its DOM write never happens); re-enabling restores it.
+  {
+    mbView* jv = mbCreateView(200, 150);
+    mbSetEnableJavascript(jv, 0);
+    mbLoadHTML(jv, "<body><div id=r>static</div>"
+                   "<script>document.getElementById('r').textContent='ran';"
+                   "</script></body>", "about:blank");
+    // Host eval is also refused while script is off (blink reads the live
+    // setting); re-enable to READ — the inert <script> does not retroactively run.
+    mbSetEnableJavascript(jv, 1);
+    const std::string off = Eval(jv, "document.getElementById('r').textContent");
+    mbLoadHTML(jv, "<body><div id=r>static</div>"
+                   "<script>document.getElementById('r').textContent='ran';"
+                   "</script></body>", "about:blank");
+    const std::string on = Eval(jv, "document.getElementById('r').textContent");
+    mbDestroyView(jv);
+    Expect(off == "static" && on == "ran",
+           "mbSetEnableJavascript gates page scripts (off=inert, on=runs)",
+           "off=[" + off + "] on=[" + on + "]");
+  }
+
+  // (i) mbLoadHTMLEx(add_to_history=0) REPLACES the current entry;
+  // mbGoToOffset jumps N entries in one traversal.
+  {
+    mbView* hv = mbCreateView(200, 150);
+    mbLoadHTML(hv, "<body>A</body>", "https://r4a.example/");
+    mbLoadHTML(hv, "<body>B</body>", "https://r4b.example/");
+    mbLoadHTMLEx(hv, "<body>C</body>", "https://r4c.example/", 0);  // replaces B
+    const int back_ok = mbGoToOffset(hv, -1);            // -> A (one entry back)
+    const std::string at_a = Eval(hv, "document.body.textContent");
+    const int fwd_ok = mbGoToOffset(hv, 1);              // -> C (B was replaced)
+    const std::string at_c = Eval(hv, "document.body.textContent");
+    const int too_far = mbGoToOffset(hv, 5);             // out of range
+    mbDestroyView(hv);
+    Expect(back_ok == 1 && at_a == "A" && fwd_ok == 1 && at_c == "C" &&
+               too_far == 0,
+           "mbLoadHTMLEx(no-history) replaces the entry; mbGoToOffset jumps",
+           "back=" + std::to_string(back_ok) + " a=[" + at_a + "] fwd=" +
+               std::to_string(fwd_ok) + " c=[" + at_c + "] far=" +
+               std::to_string(too_far));
+  }
+
+  // (j) mbViewSetDirty re-arms the damage flag after a paint cleared it;
+  // mbSetForceRepaint makes mbViewIsDirty report 1 regardless.
+  {
+    mbView* dv = mbCreateView(200, 150);
+    mbLoadHTML(dv, "<body>static</body>", "about:blank");
+    std::vector<unsigned char> dpx(200 * 150 * 4);
+    mbRepaintToBitmap(dv, dpx.data(), 200, 150, 200 * 4);
+    mbRepaintToBitmap(dv, dpx.data(), 200, 150, 200 * 4);  // drain stragglers
+    const int clean = mbViewIsDirty(dv);
+    mbViewSetDirty(dv);
+    const int rearmed = mbViewIsDirty(dv);
+    mbRepaintToBitmap(dv, dpx.data(), 200, 150, 200 * 4);
+    mbSetForceRepaint(dv, 1);
+    const int forced = mbViewIsDirty(dv);
+    mbSetForceRepaint(dv, 0);
+    const int unforced = mbViewIsDirty(dv);
+    mbDestroyView(dv);
+    Expect(clean == 0 && rearmed == 1 && forced == 1 && unforced == 0,
+           "mbViewSetDirty re-arms damage; mbSetForceRepaint bypasses gating",
+           "clean=" + std::to_string(clean) + " rearmed=" +
+               std::to_string(rearmed) + " forced=" + std::to_string(forced) +
+               " unforced=" + std::to_string(unforced));
+  }
+
+  // (k) mbSendKeyEvent: a typed KeyDown with text inserts into the focused
+  // input (implicit kChar) and carries the auto-repeat flag to KeyboardEvent.
+  {
+    mbView* kv = mbCreateView(200, 150);
+    mbLoadHTML(kv,
+               "<body><input id=i autofocus><script>"
+               "window.rep=[];document.getElementById('i').addEventListener("
+               "'keydown',e=>rep.push(e.key+':'+e.repeat));</script></body>",
+               "about:blank");
+    mbFocusSelector(kv, "#i");
+    mbKeyEvent ke = {};
+    ke.struct_size = sizeof(mbKeyEvent);
+    ke.type = MB_KEY_DOWN;
+    ke.windows_key_code = 'A';
+    ke.text = "a";
+    ke.unmodified_text = "a";
+    mbSendKeyEvent(kv, &ke);
+    ke.is_auto_repeat = 1;
+    mbSendKeyEvent(kv, &ke);
+    const std::string val = Eval(kv, "document.getElementById('i').value");
+    const std::string rep = Eval(kv, "window.rep.join('|')");
+    mbDestroyView(kv);
+    Expect(val == "aa" && rep == "a:false|a:true",
+           "mbSendKeyEvent types text and carries the auto-repeat flag",
+           "value=[" + val + "] keydowns=[" + rep + "]");
+  }
+
+  // (l) Session introspection getters: name / persistence mode / persist path
+  // read back from the handle; the default session is ephemeral.
+  {
+    mbSession* es = mbCreateSession("r4-ephemeral", nullptr);
+    char name[64] = {0};
+    mbSessionGetName(es, name, sizeof(name));
+    const int eph = mbSessionIsPersistent(es);
+    char epath[256] = {0};
+    const int eplen = mbSessionGetPersistPath(es, epath, sizeof(epath));
+    mbSession* ps = mbCreateSession("r4-persistent", "/tmp/mb-smoke-r4-profiles");
+    const int per = mbSessionIsPersistent(ps);
+    char ppath[256] = {0};
+    mbSessionGetPersistPath(ps, ppath, sizeof(ppath));
+    const std::string ppath_s = ppath;
+    mbDestroySession(ps);
+    mbDestroySession(es);
+    Expect(std::string(name) == "r4-ephemeral" && eph == 0 && eplen == 0 &&
+               per == 1 && ppath_s.find("r4-persistent") != std::string::npos &&
+               mbSessionIsPersistent(mbDefaultSession()) == 0,
+           "session introspection getters (name / persistent / persist path)",
+           "name=[" + std::string(name) + "] eph=" + std::to_string(eph) +
+               " per=" + std::to_string(per) + " path=[" + ppath_s + "]");
+  }
+
+  // (m) Child views: with mbOnCreateChildView registered, window.open returns
+  // a LIVE window — the engine creates an opener-wired child view, the host
+  // adopts it, blink navigates it (mock-served), and the child can postMessage
+  // back to its opener. A declining callback keeps window.open null.
+  {
+    struct ChildState {
+      mbView* child = nullptr;
+      std::string url, name;
+      int is_popup = -1, w = 0, h = 0;
+      int adopt = 1;  // second round declines
+      int fired = 0;
+    };
+    static ChildState* cs = new ChildState();  // -Wexit-time-destructors
+    *cs = ChildState();
+    mbView* pv = mbCreateView(300, 200);
+    mbMockResponse("r4child.test/pop",
+                   "<body id=childbody>child"
+                   "<script>window.opener.postMessage('hi-opener','*');"
+                   "</script></body>",
+                   "text/html", 200);
+    mbOnCreateChildView(
+        pv,
+        [](mbView*, void*, mbView* child, const char* url, const char* name,
+           int is_popup, int, int, int w, int h) -> int {
+          ++cs->fired;
+          if (!cs->adopt)
+            return 0;
+          cs->child = child;
+          cs->url = url;
+          cs->name = name;
+          cs->is_popup = is_popup;
+          cs->w = w;
+          cs->h = h;
+          return 1;
+        },
+        nullptr);
+    mbLoadHTML(pv,
+               "<body><div id=m>?</div><script>"
+               "window.addEventListener('message',e=>{"
+               "document.getElementById('m').textContent=e.data;});"
+               "window.w=window.open('https://r4child.test/pop','pop',"
+               "'width=320,height=240');"
+               "document.title=window.w?'got-window':'null-window';"
+               "</script></body>",
+               "https://r4parent.test/");
+    // The child commits its (mock-served) document on posted tasks; wait for
+    // its script to have posted back to the opener.
+    mbWaitForFunction(pv, "document.getElementById('m').textContent!=='?'",
+                      3000);
+    const std::string title = Eval(pv, "document.title");
+    const std::string msg = Eval(pv, "document.getElementById('m').textContent");
+    const std::string childbody =
+        cs->child ? Eval(cs->child, "document.body.id") : "";
+    const bool geom_ok = cs->is_popup == 1 && cs->w == 320 && cs->h == 240;
+    // Decline path: the callback returns 0 -> the page sees null.
+    cs->adopt = 0;
+    mbRunJS(pv, "document.title = window.open('https://r4child.test/pop')?"
+                "'second-got':'second-null';");
+    mbUpdate();  // drain the deferred teardown of the declined child
+    const std::string declined = Eval(pv, "document.title");
+    if (cs->child)
+      mbDestroyView(cs->child);
+    mbOnCreateChildView(pv, nullptr, nullptr);
+    mbDestroyView(pv);
+    Expect(cs->fired == 2 && title == "got-window" && msg == "hi-opener" &&
+               childbody == "childbody" &&
+               cs->url == "https://r4child.test/pop" && cs->name == "pop" &&
+               geom_ok && declined == "second-null",
+           "mbOnCreateChildView: window.open returns a live opener-wired view",
+           "title=[" + title + "] msg=[" + msg + "] child=[" + childbody +
+               "] url=[" + cs->url + "] name=[" + cs->name + "] popup=" +
+               std::to_string(cs->is_popup) + " " + std::to_string(cs->w) +
+               "x" + std::to_string(cs->h) + " declined=[" + declined + "]");
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
