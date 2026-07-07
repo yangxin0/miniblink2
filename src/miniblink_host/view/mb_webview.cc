@@ -1993,6 +1993,7 @@ void MbWebView::OnDidCommitMainFrame(const std::string& url, bool standard) {
       }
       pending_history_url_.clear();
     }
+    NotifyHistoryChanged();  // the cursor moved: back/forward flags may flip
     return;  // position already set; do not append
   }
   if (pending_reload_) {
@@ -2034,6 +2035,7 @@ void MbWebView::OnDidCommitMainFrame(const std::string& url, bool standard) {
   pending_html_.clear();
   pending_base_.clear();
   pending_charset_.clear();
+  NotifyHistoryChanged();
 }
 
 void MbWebView::OnDidFinishLoad() {
@@ -2111,6 +2113,52 @@ void MbWebView::SetFaviconChangedCallback(FaviconChangedFn cb) {
 void MbWebView::OnFaviconChanged(const std::string& favicon_urls) {
   if (on_favicon_changed_)
     on_favicon_changed_(favicon_urls);
+}
+
+void MbWebView::SetCursorChangedCallback(std::function<void(int)> cb) {
+  if (widget_)
+    widget_->SetCursorChangedCallback(std::move(cb));
+}
+
+void MbWebView::SetTooltipChangedCallback(
+    std::function<void(const std::string&)> cb) {
+  if (widget_)
+    widget_->SetTooltipChangedCallback(std::move(cb));
+}
+
+bool MbWebView::HasInputFocus() const {
+  return widget_ && widget_->HasInputFocus();
+}
+
+void MbWebView::SetRequestCloseCallback(RequestCloseFn cb) {
+  on_request_close_ = std::move(cb);
+}
+
+void MbWebView::OnRequestClose() {
+  if (on_request_close_)
+    on_request_close_();
+}
+
+void MbWebView::SetHistoryChangedCallback(HistoryChangedFn cb) {
+  on_history_changed_ = std::move(cb);
+  // Push the current state to a fresh subscriber only when it differs from the
+  // initial (false, false) a host assumes — same dedupe rule as every push.
+  if (on_history_changed_) {
+    last_can_go_back_ = false;
+    last_can_go_forward_ = false;
+    NotifyHistoryChanged();
+  }
+}
+
+void MbWebView::NotifyHistoryChanged() {
+  const bool back = CanGoBack();
+  const bool fwd = CanGoForward();
+  if (back == last_can_go_back_ && fwd == last_can_go_forward_)
+    return;
+  last_can_go_back_ = back;
+  last_can_go_forward_ = fwd;
+  if (on_history_changed_)
+    on_history_changed_(back, fwd);
 }
 
 void MbWebView::SetDownloadCallback(DownloadFn cb) {
@@ -2205,6 +2253,7 @@ bool MbWebView::TraverseHistory(int target) {
   if (!committed) {  // never committed (load failure / download diversion)
     in_history_nav_ = false;
     history_index_ = prev;
+    NotifyHistoryChanged();
     return false;
   }
   return true;

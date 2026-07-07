@@ -27,6 +27,23 @@ component("miniblink_host") {
     "//third_party/blink/renderer",
   ]
 
+  # mbChromiumVersion(): the donor tree's version, read from //chrome/VERSION
+  # at gn time so it tracks uprevs with no hardcoded string. (read_file, not
+  # exec_script — the latter is allowlisted-only in Chromium's //.gn.)
+  _version_lines = read_file("//chrome/VERSION", "list lines")
+  _chromium_version = ""
+  foreach(_line, _version_lines) {
+    _value = string_replace(string_replace(string_replace(string_replace(
+                 _line, "MAJOR=", ""), "MINOR=", ""), "BUILD=", ""),
+                 "PATCH=", "")
+    if (_chromium_version == "") {
+      _chromium_version = _value
+    } else {
+      _chromium_version += ".$_value"
+    }
+  }
+  defines = [ "MB_CHROMIUM_VERSION=\"$_chromium_version\"" ]
+
   sources = [
     # The public C API (staged alongside at ../miniblink2; the mb* ABI).
     "../miniblink2/miniblink2.cc",
@@ -210,7 +227,7 @@ component("miniblink_host") {
       "//third_party/dawn/src/dawn/native",
       "//third_party/dawn/src/dawn/wire",
     ]
-    defines = [ "MINIBLINK_ENABLE_WEBGPU=1" ]
+    defines += [ "MINIBLINK_ENABLE_WEBGPU=1" ]
   }
   # WebGPU OFF needs no stubs or -U: patches/0017 gates the mac GPU path's Dawn references
   # (iosurface_image_backing + the SkiaGraphite feature default) on BUILDFLAG(SKIA_USE_DAWN),

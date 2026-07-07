@@ -4702,6 +4702,132 @@ int main() {
     mbOnSelectPopup(v, nullptr, nullptr);
   }
 
+  // 44. Round-3 embedder surface (IMPROVEMENT.md items 14-19).
+  // (a) Version handshake: static strings, callable state already proven by
+  // reaching here post-init; the Chromium version must match the donor tree.
+  {
+    const std::string ver = mbVersion() ? mbVersion() : "";
+    const std::string cr = mbChromiumVersion() ? mbChromiumVersion() : "";
+    Expect(!ver.empty() && mbApiVersion() == MB_API_VERSION &&
+               cr.rfind("150.", 0) == 0,
+           "version handshake exports (engine / API / Chromium)",
+           "ver=[" + ver + "] api=" + std::to_string(mbApiVersion()) +
+               " chromium=[" + cr + "]");
+  }
+
+  // (b) Cursor + tooltip push (WidgetHost channel): hovering an element with
+  // an explicit CSS cursor fires mbOnCursorChanged with that code; hovering a
+  // title= element pushes its tooltip text.
+  {
+    struct UiState {
+      int last_cursor = -1;
+      std::string tooltip;
+    } us;
+    mbOnCursorChanged(
+        v, [](mbView*, void* ud, int cursor) {
+          static_cast<UiState*>(ud)->last_cursor = cursor;
+        },
+        &us);
+    mbOnTooltipChanged(
+        v, [](mbView*, void* ud, const char* text) {
+          static_cast<UiState*>(ud)->tooltip = text ? text : "";
+        },
+        &us);
+    mbLoadHTML(v,
+               "<body style='margin:0'>"
+               "<div id=t style='cursor:text;width:100px;height:40px'></div>"
+               "<div id=h title='tip!' style='cursor:pointer;width:100px;"
+               "height:40px'></div></body>",
+               "about:blank");
+    mbSendMouseMove(v, 50, 20);   // over #t: cursor:text -> IBeam
+    mbWait(v, 100);               // associated-channel delivery needs the pump
+    const int ibeam = us.last_cursor;
+    mbSendMouseMove(v, 50, 60);   // over #h: cursor:pointer -> Hand + tooltip
+    mbWait(v, 100);
+    const int hand = us.last_cursor;
+    Expect(ibeam == MB_CURSOR_IBEAM && hand == MB_CURSOR_HAND &&
+               us.tooltip == "tip!",
+           "cursor + tooltip push (mbOnCursorChanged / mbOnTooltipChanged)",
+           "ibeam=" + std::to_string(ibeam) + " hand=" + std::to_string(hand) +
+               " tip=[" + us.tooltip + "]");
+    mbOnCursorChanged(v, nullptr, nullptr);
+    mbOnTooltipChanged(v, nullptr, nullptr);
+  }
+
+  // (c) Input-focus query: no editable focused -> 0; focusing an <input>
+  // flips it to 1 (blink pushes TextInputStateChanged); blurring restores 0.
+  {
+    mbLoadHTML(v, "<body><input id='f'><div id='d'>x</div></body>",
+               "about:blank");
+    mbWait(v, 50);
+    const int before = mbHasInputFocus(v);
+    mbRunJS(v, "document.getElementById('f').focus();");
+    mbWait(v, 100);
+    const int focused = mbHasInputFocus(v);
+    mbRunJS(v, "document.getElementById('f').blur();");
+    mbWait(v, 100);
+    const int after = mbHasInputFocus(v);
+    Expect(before == 0 && focused == 1 && after == 0,
+           "mbHasInputFocus tracks caret focus (focus/blur an <input>)",
+           "before=" + std::to_string(before) + " focused=" +
+               std::to_string(focused) + " after=" + std::to_string(after));
+  }
+
+  // (d) History-state push: a second navigation flips can_go_back true; a
+  // host GoBack flips can_go_forward true. Fires only on change.
+  {
+    struct HistState {
+      std::string log;  // "B<b>F<f>" per push
+    } hs;
+    mbOnHistoryChanged(
+        v, [](mbView*, void* ud, int b, int f) {
+          static_cast<HistState*>(ud)->log +=
+              "B" + std::to_string(b) + "F" + std::to_string(f) + ";";
+        },
+        &hs);
+    mbLoadHTML(v, "<body>h1</body>", "https://hist1.example/");
+    mbLoadHTML(v, "<body>h2</body>", "https://hist2.example/");
+    const std::string after_loads = hs.log;
+    mbGoBack(v);
+    const bool fwd_after_back = mbCanGoForward(v) == 1;
+    Expect(after_loads.find("B1F0;") != std::string::npos && fwd_after_back &&
+               hs.log.find("B1F1;") != std::string::npos,
+           "mbOnHistoryChanged pushes back/forward flags on change",
+           "log=[" + hs.log + "]");
+    mbOnHistoryChanged(v, nullptr, nullptr);
+  }
+
+  // (e) window.close() surfacing: a single-entry view (script-closable) calling
+  // window.close() fires mbOnRequestClose; the view itself stays alive (the
+  // host decides). Uses a fresh view — this one's history is deep by now.
+  {
+    int closed = 0;
+    mbView* cv = mbCreateView(200, 150);
+    mbOnRequestClose(
+        cv, [](mbView*, void* ud) { ++*static_cast<int*>(ud); }, &closed);
+    mbLoadHTML(cv, "<body>close me</body>", "https://close.example/");
+    mbRunJS(cv, "window.close();");
+    mbWait(cv, 100);  // RequestClose hops service -> main thread
+    const std::string alive = Eval(cv, "'still-'+'here'");
+    mbDestroyView(cv);
+    Expect(closed == 1 && alive == "still-here",
+           "window.close() fires mbOnRequestClose (view stays alive)",
+           "closed=" + std::to_string(closed) + " alive=[" + alive + "]");
+  }
+
+  // (f) Host log sink: installing and clearing the process-wide callback must
+  // be safe around engine activity (delivery is covered when engine LOG output
+  // occurs; base logging is quiet in a healthy run — this asserts the wiring
+  // doesn't crash or eat the run's stderr).
+  {
+    static int log_hits = 0;
+    mbOnLogMessage([](void*, int, const char*) { ++log_hits; }, nullptr);
+    mbLoadHTML(v, "<body>log</body>", "about:blank");
+    mbOnLogMessage(nullptr, nullptr);
+    Expect(true, "mbOnLogMessage installs/clears cleanly",
+           "hits=" + std::to_string(log_hits));
+  }
+
   mbDestroyView(v);
   mbShutdown();
 

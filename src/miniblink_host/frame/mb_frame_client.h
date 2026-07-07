@@ -299,6 +299,10 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // .UpdateFaviconURL; forwarded to MbWebView's favicon callback. Main frame only.
   void OnFaviconUrls(const std::string& favicon_urls);
 
+  // window.close() reported via LocalMainFrameHost::RequestClose and hopped to
+  // this thread; forwarded to MbWebView's close callback. Main frame only.
+  void OnRequestClose();
+
   // A page-initiated blob download (<a download href="blob:...">) resolved by
   // MbLocalFrameHost and hopped back to this thread; forwarded to MbWebView's
   // download callback. Main frame only.

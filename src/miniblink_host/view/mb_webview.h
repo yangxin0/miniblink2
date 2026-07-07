@@ -539,6 +539,23 @@ class MbWebView {
   using FaviconChangedFn = std::function<void(const std::string& favicon_urls)>;
   void SetFaviconChangedCallback(FaviconChangedFn cb);
   void OnFaviconChanged(const std::string& favicon_urls);
+  // Pointer-UI state pushed by blink over the widget's WidgetHost channel:
+  // cursor code (ui::mojom::CursorType value; fires on change) and hover
+  // tooltip text ("" = hide; deduped). {} clears. Delegates to the widget.
+  void SetCursorChangedCallback(std::function<void(int)> cb);
+  void SetTooltipChangedCallback(std::function<void(const std::string&)> cb);
+  // True while the focused element accepts text input (blink last reported a
+  // non-NONE text-input type) — host keystroke routing (mbHasInputFocus).
+  bool HasInputFocus() const;
+  // window.close() from the page (LocalMainFrameHost::RequestClose, routed via
+  // the frame client). Notification only; the host decides what to do.
+  using RequestCloseFn = std::function<void()>;
+  void SetRequestCloseCallback(RequestCloseFn cb);
+  void OnRequestClose();
+  // (can_go_back, can_go_forward) push, fired only when either flag flips —
+  // after commits, traversals, and history truncation. {} clears.
+  using HistoryChangedFn = std::function<void(bool, bool)>;
+  void SetHistoryChangedCallback(HistoryChangedFn cb);
   // Register a callback for a top-level navigation that is a DOWNLOAD (Content-Disposition
   // attachment / non-renderable MIME) — it receives the URL, MIME, suggested filename and
   // body bytes INSTEAD of the response being rendered as a document. {} clears (default:
@@ -764,6 +781,13 @@ class MbWebView {
   NavigationFn on_navigation_;  // optional page-initiated navigation policy callback
   UrlChangedFn on_url_changed_;  // optional per-commit URL-changed notification
   TitleChangedFn on_title_changed_;  // optional title-changed notification
+  RequestCloseFn on_request_close_;  // optional window.close() notification
+  HistoryChangedFn on_history_changed_;  // optional back/forward-state push
+  bool last_can_go_back_ = false;    // last pushed history flags (dedupe)
+  bool last_can_go_forward_ = false;
+  // Fire on_history_changed_ if (CanGoBack, CanGoForward) differs from the
+  // last pushed pair. Called after every history mutation.
+  void NotifyHistoryChanged();
   FaviconChangedFn on_favicon_changed_;  // optional favicon-changed notification
   DownloadFn on_download_;  // optional top-level-download diversion callback
   NewWindowFn on_new_window_;   // optional window.open / target=_blank notification

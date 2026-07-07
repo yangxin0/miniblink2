@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "base/logging.h"
 #include "miniblink_host/frame/mb_frame_broker.h"
 #include "miniblink_host/frame/mb_indexeddb.h"
 #include "miniblink_host/frame/mb_local_frame_host.h"
@@ -107,6 +108,49 @@ void DrainDeferred() {
 }  // namespace
 
 extern "C" {
+
+const char* mbVersion(void) {
+  return "0.4.0-dev";
+}
+
+int mbApiVersion(void) {
+  return MB_API_VERSION;
+}
+
+const char* mbChromiumVersion(void) {
+  // Injected by BUILD.gn from //chrome/VERSION (tracks the donor tree).
+#if defined(MB_CHROMIUM_VERSION)
+  return MB_CHROMIUM_VERSION;
+#else
+  return "unknown";
+#endif
+}
+
+namespace {
+mbLogCallback g_log_cb = nullptr;
+void* g_log_ud = nullptr;
+
+// base logging hook: severity is logging::LOGGING_* (0 info .. 3 fatal); `str`
+// holds the whole formatted line, `message_start` where the payload begins.
+bool MbLogHandler(int severity, const char* /*file*/, int /*line*/,
+                  size_t message_start, const std::string& str) {
+  mbLogCallback cb = g_log_cb;
+  if (!cb)
+    return false;  // sink cleared between check and dispatch: default handling
+  std::string msg = str.substr(message_start);
+  while (!msg.empty() && (msg.back() == '\n' || msg.back() == '\r'))
+    msg.pop_back();
+  int level = severity < 0 ? 0 : (severity > 3 ? 3 : severity);
+  cb(g_log_ud, level, msg.c_str());
+  return true;  // consumed: keep it out of stderr
+}
+}  // namespace
+
+void mbOnLogMessage(mbLogCallback cb, void* userdata) {
+  g_log_ud = userdata;
+  g_log_cb = cb;
+  logging::SetLogMessageHandler(cb ? &MbLogHandler : nullptr);
+}
 
 int mbInitialize(void) {
   return mb::MbRuntime::Initialize() ? 1 : 0;
@@ -526,6 +570,52 @@ void mbOnDownload(mbView* v, mbDownloadCallback cb, void* userdata) {
         });
   else
     v->impl->SetDownloadCallback({});
+}
+
+void mbOnCursorChanged(mbView* v, mbCursorChangedCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetCursorChangedCallback(
+        [v, cb, userdata](int cursor) { cb(v, userdata, cursor); });
+  else
+    v->impl->SetCursorChangedCallback({});
+}
+
+void mbOnTooltipChanged(mbView* v, mbTooltipChangedCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetTooltipChangedCallback(
+        [v, cb, userdata](const std::string& text) {
+          cb(v, userdata, text.c_str());
+        });
+  else
+    v->impl->SetTooltipChangedCallback({});
+}
+
+void mbOnRequestClose(mbView* v, mbRequestCloseCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetRequestCloseCallback([v, cb, userdata]() { cb(v, userdata); });
+  else
+    v->impl->SetRequestCloseCallback({});
+}
+
+int mbHasInputFocus(mbView* v) {
+  return (v && v->impl && v->impl->HasInputFocus()) ? 1 : 0;
+}
+
+void mbOnHistoryChanged(mbView* v, mbHistoryChangedCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetHistoryChangedCallback([v, cb, userdata](bool back, bool fwd) {
+      cb(v, userdata, back ? 1 : 0, fwd ? 1 : 0);
+    });
+  else
+    v->impl->SetHistoryChangedCallback({});
 }
 
 void mbOnNewWindow(mbView* v, mbNewWindowCallback cb, void* userdata) {
