@@ -1422,9 +1422,19 @@ static void RunCases(mbView* v, int W, int H) {
     }
     const std::string vendor = Eval(v, "window.__wgvendor");
     const std::string arch = Eval(v, "window.__wgarch");
+#if defined(MB_TEST_HAS_WEBGPU)
     Expect(wg == "device",
            "navigator.gpu.requestAdapter()+requestDevice() return a real adapter+device",
            "wg=[" + wg + "] vendor=[" + vendor + "] arch=[" + arch + "]");
+#else
+    // Dawn compiled out (built without --webgpu): the documented degradation
+    // is requestAdapter() SETTLING to null — never a hang (the pre-C2 bug),
+    // never a throw. A 'device' here would mean the define plumbing broke.
+    Expect(wg == "null",
+           "navigator.gpu degrades gracefully with Dawn compiled out "
+           "(requestAdapter settles to null; --webgpu for the real path)",
+           "wg=[" + wg + "]");
+#endif
   }
 
   // 41n2. Compositor-ADJACENT CSS/animation features work (no crash/hang) without the
@@ -1632,9 +1642,19 @@ static void RunCases(mbView* v, int W, int H) {
       "}catch(e){window.__wasm='err:'+(e&&e.message?e.message:e);}})();");
     std::string w;
     for (int i = 0; i < 200 && w.empty(); ++i) { mbWait(v, 25); w = Eval(v, "window.__wasm"); }
+#if defined(MB_TEST_HAS_WASM)
     Expect(w == "inst=5 stream=42",
            "WebAssembly: instantiate + instantiateStreaming compile and run an exported func",
            "wasm=[" + w + "]");
+#else
+    // v8_enable_webassembly=false (built without --wasm): window.WebAssembly
+    // is absent by design (see build-lib.sh / patch 0020's no-wasm stubs) —
+    // the async body must reject with the documented signature, not crash.
+    Expect(w == "err:WebAssembly is not defined",
+           "WebAssembly is cleanly absent with wasm compiled out "
+           "(ReferenceError; --wasm for the real path)",
+           "wasm=[" + w + "]");
+#endif
   }
 
   // 42. Drawing to a canvas via mbEvalJS (not just mbRunJS) must also be

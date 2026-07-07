@@ -12,6 +12,7 @@
 
 import("//build/config/ui.gni")
 import("//ui/gl/features.gni")  # use_dawn — gates WebGPU (Dawn) in/out of the library
+import("//v8/gni/v8.gni")       # v8_enable_webassembly — feature-aware smoke tests
 
 component("miniblink_host") {
   output_name = "miniblink_host"
@@ -291,6 +292,16 @@ executable("mb_smoke_render") {
   sources = [ "test/mb_smoke_render.cc" ]
   include_dirs = [ "//third_party/blink/renderer" ]
   deps = [ ":miniblink_host" ]
+  # Feature-aware assertions: the WebGPU / WebAssembly cases test the real
+  # end-to-end path when the feature is compiled in (--webgpu / --wasm), and
+  # the DOCUMENTED graceful degradation when it is compiled out.
+  defines = []
+  if (use_dawn) {
+    defines += [ "MB_TEST_HAS_WEBGPU=1" ]
+  }
+  if (v8_enable_webassembly) {
+    defines += [ "MB_TEST_HAS_WASM=1" ]
+  }
 }
 
 # mb_compositor_widget_smoke: SOFTWARE COMPOSITOR milestone D2b-2 — the live widget flip
