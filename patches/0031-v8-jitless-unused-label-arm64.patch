@@ -1,0 +1,22 @@
+Subject: [PATCH] v8: guard unused is_code label in jitless arm64 builtins
+
+With v8_enable_lite_mode (V8_JITLESS), the CODE_TYPE dispatch entry and
+the is_code bind in GetSharedFunctionInfoBytecodeOrBaseline are compiled
+out behind !V8_JITLESS_BOOL, but the Label itself was declared
+unconditionally. Chromium builds with -Werror, so -Wunused-variable
+breaks the jitless build. Guard the declaration the same way as its uses.
+---
+--- a/v8/src/builtins/arm64/builtins-arm64.cc
++++ b/v8/src/builtins/arm64/builtins-arm64.cc
+@@ -402,7 +402,10 @@ static void GetSharedFunctionInfoBytecodeOrBaseline(
+     Label* is_baseline, Label* is_unavailable) {
+   ASM_CODE_COMMENT(masm);
+   DCHECK(!AreAliased(bytecode, scratch1));
+-  Label is_interpreter_data, is_bytecode_array, is_code;
++  Label is_interpreter_data, is_bytecode_array;
++#if !V8_JITLESS_BOOL
++  Label is_code;
++#endif
+
+   Register data = bytecode;
+   __ LoadTrustedUnknownPointerField(
