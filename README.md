@@ -71,6 +71,7 @@ Deployment rules:
 ```sh
 scripts/build-lib.sh [--release|--debug] [--ship]
                      [--webgpu] [--video] [--ml] [--wasm] [--webrtc] [--av1-encode]
+                     [--turbofan] [--maglev]
                      [--tracing] [--swiftshader] [--icu-full]
                      [--chromium DIR] [--depot DIR] [--no-stage] [--print-only]
 ```
@@ -92,6 +93,8 @@ Feature flags (apply to any profile):
 | `--wasm` | include WebAssembly (V8 wasm engine). Off = `window.WebAssembly` absent (miniblink49 parity) | +~4.5 MB |
 | `--ml` | include WebNN on-device ML (TFLite/LiteRT/XNNPACK) + the TFLite language-detection model + WebRTC's neural echo estimator (patches 0019/0021) | +~4 MB |
 | `--webrtc` | include the WebRTC stack: `RTCPeerConnection` + SDP/signaling, libwebrtc core, Blink RTC bindings, p2p platform layer (patch 0030). Off keeps getUserMedia/mediaDevices surfaces (headless: no devices) but `window.RTCPeerConnection` is absent | +~3.3 MB |
+| `--turbofan` | include V8's TurboFan top-tier optimizing JIT. Default is **V8 lite mode** (Ignition interpreter + Sparkplug baseline JIT only, low-memory heap) — fine for automation/scraping; sustained-hot JS runs ~5-20x slower without it | +~11 MB |
+| `--maglev` | include V8's Maglev mid-tier JIT as well (implies `--turbofan`); the full 4-tier pipeline, i.e. stock Chromium JS performance | +~5 MB |
 | `--av1-encode` | include AV1 *encoding* (libaom: WebCodecs/MediaRecorder/WebRTC send; decode always in) | +~1 MB |
 | `--tracing` | include OPTIONAL_TRACE_EVENT instrumentation (perf-investigation builds) | +~0.5 MB |
 | `--swiftshader` | ship SwiftShader software Vulkan in `dist/` (headless/CI/no-GPU `--use-angle=swiftshader`) | +20 MB (dist) |

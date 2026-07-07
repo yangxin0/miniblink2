@@ -3,6 +3,7 @@
 #
 #   scripts/build-lib.sh [--release|--debug] [--ship]
 #                        [--webgpu] [--video] [--ml] [--wasm] [--webrtc] [--av1-encode]
+#                        [--turbofan] [--maglev]
 #                        [--tracing] [--swiftshader] [--icu-full]
 #                        [--chromium DIR] [--depot DIR] [--no-stage] [--print-only]
 #
@@ -24,7 +25,9 @@
 # Feature flags are include-only (default OFF, to trim toward miniblink49's footprint):
 #   --webgpu  WebGPU/Dawn      --video  <video> decode (audio is always on)
 #   --ml      WebNN on-device ML (TFLite/LiteRT/XNNPACK backend)
-#   --wasm    WebAssembly (V8 wasm engine: Liftoff + wasm TurboFan + builtins)
+#   --wasm    WebAssembly (V8 wasm engine; implies --turbofan, which wasm requires)
+#   --turbofan  V8 TurboFan top-tier JIT (~11MB; default is V8 lite mode: no optimizing JIT)
+#   --maglev    V8 Maglev mid-tier JIT (~5MB; implies --turbofan)
 #   --webrtc  WebRTC (RTCPeerConnection/SDP signaling; libwebrtc + RTC bindings, ~3.3MB)
 #   --av1-encode  AV1 encoding via libaom (WebCodecs/MediaRecorder/WebRTC send; decode stays)
 #   --tracing  OPTIONAL_TRACE_EVENT instrumentation (extra trace-event coverage + strings)
@@ -64,6 +67,8 @@ VIDEO=0              # <video> decode OFF by default (audio stays on); --video a
 ML=0                 # WebNN on-device ML (TFLite/LiteRT/XNNPACK) OFF by default; --ml adds it
 WASM=0               # WebAssembly OFF by default (window.WebAssembly absent); --wasm adds it
 WEBRTC=0             # WebRTC/RTCPeerConnection OFF by default (~3.3MB); --webrtc adds it
+TURBOFAN=0           # TurboFan top-tier JIT OFF by default -> V8 lite mode; --turbofan adds it
+MAGLEV=0             # Maglev mid-tier JIT OFF by default; --maglev adds it (implies --turbofan)
 AV1ENC=0             # AV1 encoding (libaom) OFF by default; --av1-encode adds it
 TRACING=0            # OPTIONAL_TRACE_EVENT macros OFF by default; --tracing adds them
 SWIFTSHADER=0        # SwiftShader NOT shipped in dist by default; --swiftshader adds it
@@ -83,6 +88,8 @@ while [ $# -gt 0 ]; do
     --ml) ML=1 ;;                   # include WebNN on-device ML (TFLite backend); default off
     --wasm) WASM=1 ;;               # include WebAssembly (V8 wasm engine); default off
     --webrtc) WEBRTC=1 ;;           # include the WebRTC stack (RTCPeerConnection); default off
+    --turbofan) TURBOFAN=1 ;;       # include the TurboFan top-tier JIT (~11MB); default off (V8 lite mode)
+    --maglev) MAGLEV=1 ;;           # include Maglev mid-tier JIT (~5MB more; implies --turbofan)
     --av1-encode) AV1ENC=1 ;;       # include AV1 encoding (libaom); default off
     --tracing) TRACING=1 ;;         # include OPTIONAL_TRACE_EVENT coverage; default off
     --swiftshader) SWIFTSHADER=1 ;; # ship SwiftShader software Vulkan in dist; default off
@@ -203,6 +210,16 @@ fi
 [ "$ML" = 1 ] && MLV=true || MLV=false           # WebNN TFLite/LiteRT/XNNPACK backend
 [ "$WASM" = 1 ] && WASMV=true || WASMV=false     # V8 WebAssembly engine
 [ "$WEBRTC" = 1 ] && RTCV=true || RTCV=false     # WebRTC stack (patch 0030 seam)
+# V8 execution tiers. Default is LITE MODE: Ignition + Sparkplug only (no optimizing
+# JITs, wasm forced off, low-memory heap) — the smallest supported V8 (~16MB less).
+# --turbofan restores the top tier; --maglev restores the mid tier too (Maglev is
+# built on TurboFan, so it implies it). WebAssembly REQUIRES TurboFan (v8.gni
+# assert), so --wasm also lifts lite mode and enables TurboFan automatically.
+[ "$MAGLEV" = 1 ] && TURBOFAN=1                  # Maglev sits on TurboFan
+[ "$WASM" = 1 ] && TURBOFAN=1                    # wasm needs TurboFan (or Drumbrake)
+[ "$TURBOFAN" = 1 ] && TFV=true || TFV=false
+[ "$MAGLEV" = 1 ] && MGV=true || MGV=false
+[ "$TURBOFAN" = 1 ] && LITEV=false || LITEV=true
 [ "$AV1ENC" = 1 ] && AOMV=true || AOMV=false     # libaom AV1 encoder
 [ "$TRACING" = 1 ] && TRACEV=true || TRACEV=false # OPTIONAL_TRACE_EVENT macros
 
@@ -269,6 +286,13 @@ build_tflite_with_xnnpack = $MLV
 # Blink's unconditional references (WasmStreaming, WasmModuleObject, SetWasm*Callback)
 # still link; window.WebAssembly is simply absent at runtime. Absent in miniblink49 too.
 v8_enable_webassembly = $WASMV
+# V8 tier configuration (see the --turbofan/--maglev notes above): default is V8
+# LITE MODE — interpreter + baseline JIT only. Lite mode implies turbofan/maglev
+# off and low-memory heap defaults; the explicit args below keep gn honest when
+# a flag lifts lite mode.
+v8_enable_lite_mode = $LITEV
+v8_enable_turbofan = $TFV
+v8_enable_maglev = $MGV
 # WebRTC (~3.3MB: libwebrtc core + Blink RTC bindings + platform peerconnection) — off
 # by default; --webrtc adds it back. There is NO upstream GN seam (the old enable_webrtc
 # arg is long gone); patch 0030 creates one (mb_enable_webrtc in blink config.gni): gates
