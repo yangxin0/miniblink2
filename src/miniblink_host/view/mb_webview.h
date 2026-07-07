@@ -26,6 +26,7 @@
 class SkCanvas;  // global scope (skia is not namespaced)
 
 namespace blink {
+class WebView;
 class WebViewImpl;
 class WebLocalFrame;
 namespace scheduler {
@@ -49,7 +50,11 @@ class MbWidget;
 
 class MbWebView {
  public:
-  static std::unique_ptr<MbWebView> Create(int width, int height);
+  // `opener` non-null creates the view as a window.open child of that view:
+  // blink wires the opener relationship (window.opener / postMessage back)
+  // and window.close() is allowed (SetOpenedByDOM).
+  static std::unique_ptr<MbWebView> Create(int width, int height,
+                                           MbWebView* opener = nullptr);
   ~MbWebView();
 
   // Opt-in: when enabled, the NEXT Create() attaches its widget COMPOSITING (blink
@@ -219,6 +224,13 @@ class MbWebView {
   void SendKey(const char* key_name);  // press a named non-text key (Enter, Tab, ...)
   void SendKeyEx(const char* key, int modifiers);  // key (named or 1 char) + modifiers
   void SendKeyUp(int windows_key_code);  // standalone key release (fires `keyup`)
+  // Typed keyboard event (item 24, mbSendKeyEvent): type 0=RawKeyDown 1=KeyDown
+  // 2=KeyUp 3=Char; modifiers bitmask 1=ctrl 2=shift 4=alt 8=meta; text /
+  // unmodified_text are UTF-8 (may be null). Lossless host-event forwarding.
+  void SendKeyEvent(int type, int modifiers, int windows_key_code,
+                    int native_key_code, const char* text,
+                    const char* unmodified_text, bool is_keypad,
+                    bool is_auto_repeat, bool is_system_key);
   // IME composition into the focused editable: `composing` previews, `committed` inserts.
   void SendIme(const char* composing, const char* committed);
   // Set the device pixel ratio (HiDPI). The page lays out in CSS px but reports
@@ -256,6 +268,9 @@ class MbWebView {
   std::string GetUserAgent();
   // Enable/disable automatic image loading (off = faster text/HTML scraping).
   void SetLoadImages(bool enabled);
+  // Enable/disable JavaScript for documents committed after the call (item 23).
+  // Gates the PAGE's scripts; host-driven eval still runs.
+  void SetEnableJavascript(bool enabled);
   // Emulate prefers-color-scheme: dark (true) or light (false). Set before loading.
   void SetDarkMode(bool dark);
   // Set navigator.language(s) (comma-separated, e.g. "fr-FR,fr,en"). Before loading.
@@ -464,6 +479,14 @@ class MbWebView {
   }
   bool GoBack();
   bool GoForward();
+  // Jump `offset` entries in one traversal (negative = back). False when the
+  // target is out of range or offset is 0.
+  bool GoToOffset(int offset);
+  // LoadHTML with history control (item 27): add_to_history=false REPLACES the
+  // current host history entry (location.replace semantics) instead of
+  // appending, so cycling in-memory docs doesn't grow the back/forward list.
+  void LoadHTMLEx(const char* utf8_html, const char* base_url,
+                  bool add_to_history);
   // Mark that the next main-frame commit is a PAGE-driven cross-document history
   // traversal landing on `url`, so the commit MOVES the host cursor to the matching
   // entry instead of appending a new one (which would corrupt history.length /
@@ -583,6 +606,36 @@ class MbWebView {
   using NewWindowFn = std::function<void(const std::string& url,
                                          const std::string& name)>;
   void SetNewWindowCallback(NewWindowFn cb);
+  // Child views (mbOnCreateChildView): the callback CREATES and returns a new
+  // MbWebView (opener-wired to this one; ownership stays with the creator —
+  // the C layer's mbView handle) or null to decline. Called by the frame
+  // client from inside window.open; the returned view's WebView is handed to
+  // blink so window.open returns a live window object. {} clears.
+  using CreateChildViewFn = std::function<MbWebView*(
+      const std::string& url, const std::string& name, bool is_popup,
+      int x, int y, int w, int h)>;
+  void SetCreateChildViewCallback(CreateChildViewFn cb);
+  // Called by MbFrameClient::CreateNewWindow. Returns the adopted child's
+  // WebView, or null (no callback / declined) — the caller then falls back to
+  // the OnCreateNewWindow notification and window.open returns null.
+  blink::WebView* OnCreateChildView(const std::string& url,
+                                    const std::string& name, bool is_popup,
+                                    int x, int y, int w, int h);
+  // Whether a child-view factory is registered. The frame client uses this on
+  // a DECLINED request: the host explicitly said no, so the single-window
+  // default (navigate THIS view to the URL) must not kick in — only a
+  // registered mbOnNewWindow notification still fires.
+  bool HasCreateChildViewCallback() const {
+    return static_cast<bool>(create_child_view_);
+  }
+  // Fire the new-window notification callback if registered; unlike
+  // OnCreateNewWindow this never falls back to navigating the current view.
+  void NotifyNewWindowDeclined(const std::string& url, const std::string& name);
+  // Sever this view's opener link (WebFrame::ClearOpener). MUST be called on
+  // a DECLINED child before tearing it down: blink never adopted it, so its
+  // opener wiring would otherwise dangle into the opener's page on Close and
+  // break script execution there.
+  void DisownOpener();
   // True once the current navigation's load has finished; reset when a new load
   // is started (see ResetLoadFinished). Lets the load primitives wait for the real
   // finish instead of a fixed delay.
@@ -644,6 +697,11 @@ class MbWebView {
   // True when blink has requested a frame since the last successful paint (see
   // MbWidget::needs_frame). Composited views conservatively report true.
   bool IsDirty() const;
+  // Host-forced repaint (item 26): mark the view dirty so a damage-gated blit
+  // repaints even though blink considers the last frame current.
+  void SetDirty();
+  // Diagnostic (item 28): while on, IsDirty always reports true.
+  void SetForceRepaint(bool on) { force_repaint_ = on; }
   // The session (storage profile) this view lives in; Default() unless
   // SetSession replaced it BEFORE the first navigation commits (storage keys
   // are computed at commit). The view holds a ref for its lifetime.
@@ -720,6 +778,10 @@ class MbWebView {
   std::unique_ptr<MbFrameClient> frame_client_;
   std::unique_ptr<MbWidget> widget_;
   std::unique_ptr<blink::scheduler::WebAgentGroupScheduler> agent_group_scheduler_;
+  // Set instead of the above for a window.open child: the OPENER's agent
+  // group (shared agent cluster — see Create). Not owned; the opener must
+  // outlive the child, documented on mbOnCreateChildView.
+  blink::scheduler::WebAgentGroupScheduler* shared_agent_group_ = nullptr;
   // [[maybe_unused]] until the handshake bodies (currently scaffolded) use them.
   [[maybe_unused]] blink::WebViewImpl* web_view_ = nullptr;     // owned by blink; Close() in dtor
   [[maybe_unused]] blink::WebLocalFrame* main_frame_ = nullptr; // owned by blink
@@ -735,6 +797,10 @@ class MbWebView {
   bool dialog_registered_ = false;       // __mbDlg bridge pushed into js_bindings_ once
   void InstallJsBindings();  // install all bindings into the current main world
   bool transparent_bg_ = false;  // omitBackground: clear to alpha 0
+  bool force_repaint_ = false;   // SetForceRepaint: IsDirty always true
+  // Set by LoadHTMLEx(add_to_history=false): the next standard commit REPLACES
+  // the current history entry instead of appending.
+  bool pending_replace_history_ = false;
 
   // Main-frame navigation stack. A URL nav stores its URL and re-fetches on traversal;
   // an in-memory LoadHTML doc caches its source so back/forward can re-commit it (its
@@ -791,6 +857,7 @@ class MbWebView {
   FaviconChangedFn on_favicon_changed_;  // optional favicon-changed notification
   DownloadFn on_download_;  // optional top-level-download diversion callback
   NewWindowFn on_new_window_;   // optional window.open / target=_blank notification
+  CreateChildViewFn create_child_view_;  // optional child-view factory (item 22)
 
   std::vector<uint8_t> encoded_png_;  // retained bytes from the last EncodePng
   int http_status_ = 0;  // HTTP status of the last http(s) load; 0 if none/failed

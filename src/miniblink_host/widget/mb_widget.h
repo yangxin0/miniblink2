@@ -93,6 +93,15 @@ class MbWidget : public blink::WebNonCompositedWidgetClient,
   // handlers fire on release. Pairs with SendKey for callers that drive down/up
   // separately (a standalone keyup dispatch).
   void SendKeyUp(int windows_key_code);
+  // Typed keyboard event (mbSendKeyEvent): dispatch ONE WebKeyboardEvent built
+  // from explicit fields — type 0=RawKeyDown 1=KeyDown 2=KeyUp 3=Char;
+  // modifiers bitmask 1=ctrl 2=shift 4=alt 8=meta; text/unmodified_text UTF-8
+  // (kChar inserts `text`). Lossless forwarding of a real host key event,
+  // including auto-repeat / keypad / system-key flags the shorthands can't say.
+  void SendKeyEvent(int type, int modifiers, int windows_key_code,
+                    int native_key_code, const std::string& text,
+                    const std::string& unmodified_text, bool is_keypad,
+                    bool is_auto_repeat, bool is_system_key);
   // Drive the focused editable through an IME sequence: `composing` shows the in-progress
   // reading (compositionstart/update), `committed` inserts the final text + fires
   // compositionend + input. Either may be empty/null.

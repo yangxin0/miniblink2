@@ -828,6 +828,56 @@ void MbWidget::SendKeyUp(int windows_key_code) {
       blink::WebCoalescedInputEvent(e, ui::LatencyInfo()));
 }
 
+void MbWidget::SendKeyEvent(int type, int modifiers, int windows_key_code,
+                            int native_key_code, const std::string& text,
+                            const std::string& unmodified_text, bool is_keypad,
+                            bool is_auto_repeat, bool is_system_key) {
+  if (!widget_)
+    return;
+  int mods = 0;
+  if (modifiers & 1) mods |= blink::WebInputEvent::kControlKey;
+  if (modifiers & 2) mods |= blink::WebInputEvent::kShiftKey;
+  if (modifiers & 4) mods |= blink::WebInputEvent::kAltKey;
+  if (modifiers & 8) mods |= blink::WebInputEvent::kMetaKey;
+  if (is_keypad) mods |= blink::WebInputEvent::kIsKeyPad;
+  if (is_auto_repeat) mods |= blink::WebInputEvent::kIsAutoRepeat;
+  using T = blink::WebInputEvent::Type;
+  const T t = type == 0   ? T::kRawKeyDown
+              : type == 1 ? T::kKeyDown
+              : type == 2 ? T::kKeyUp
+                          : T::kChar;
+  blink::WebKeyboardEvent e(t, mods, base::TimeTicks::Now());
+  e.windows_key_code = windows_key_code;
+  e.native_key_code = native_key_code;
+  e.is_system_key = is_system_key;
+  // text[] holds UTF-16 code units (capacity kTextLengthCap, NUL-padded).
+  const std::u16string t16 = base::UTF8ToUTF16(text);
+  const std::u16string u16 = base::UTF8ToUTF16(unmodified_text);
+  const size_t cap = blink::WebKeyboardEvent::kTextLengthCap - 1;
+  for (size_t k = 0; k < t16.size() && k < cap; ++k)
+    e.text[k] = t16[k];
+  for (size_t k = 0; k < u16.size() && k < cap; ++k)
+    e.unmodified_text[k] = u16[k];
+  // KeyboardEvent.key: the unmodified character when the key produces text
+  // (surrogate pairs decoded), else the named key for a known VK code.
+  const std::u16string& key_src = u16.empty() ? t16 : u16;
+  if (!key_src.empty()) {
+    char32_t cp = key_src[0];
+    if (cp >= 0xD800 && cp <= 0xDBFF && key_src.size() > 1 &&
+        key_src[1] >= 0xDC00 && key_src[1] <= 0xDFFF) {
+      cp = 0x10000 + ((cp - 0xD800) << 10) + (key_src[1] - 0xDC00);
+    }
+    e.dom_key = static_cast<int>(ui::DomKey::FromCharacter(cp));
+  } else if (const KeyDef* k = FindKeyByVk(windows_key_code)) {
+    e.dom_key = static_cast<int>(k->dom_key);
+  }
+  auto* impl = static_cast<blink::WebFrameWidgetImpl*>(widget_);
+  // One event per call. Note kKeyDown is split by blink itself into
+  // RawKeyDown + Char (carrying text[]), so a KeyDown with text types the
+  // character without an explicit kChar from the caller.
+  impl->HandleInputEvent(blink::WebCoalescedInputEvent(e, ui::LatencyInfo()));
+}
+
 void MbWidget::SendIme(const char* composing, const char* committed) {
   if (!widget_)
     return;

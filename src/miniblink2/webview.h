@@ -8,6 +8,19 @@
 // Pure C, no Blink types leak across this boundary.
 //
 // Status: Phase 1 v0 (render-to-bitmap, no input/JS-interaction yet).
+//
+// THREADING CONTRACT (applies to the whole mb* ABI unless a function says
+// otherwise): the engine lives on the thread that called mbInitialize — call
+// every mb* function from that thread. Callbacks fire on it too, except
+// mbOnLogMessage's (any engine thread, documented there). The API is not
+// thread-safe; marshal cross-thread work yourself (e.g. via mbDefer from the
+// engine thread).
+//
+// COORDINATE/PIXEL CONTRACT: sizes and positions are LOGICAL (CSS) px unless
+// stated otherwise; physical px = logical px * device scale factor
+// (mbSetDeviceScaleFactor). Pixel buffers are BGRA8888, PREMULTIPLIED alpha,
+// sRGB — with mbSetTransparentBackground, composite them as premultiplied
+// (do not treat the channels as straight alpha).
 
 #ifndef MINIBLINK2_WEBVIEW_H_
 #define MINIBLINK2_WEBVIEW_H_
@@ -32,6 +45,9 @@ typedef struct mbView mbView;
 // load time instead of failing at the first missing symbol (or worse, silently
 // running a mismatched pair). Returned strings are static; do not free.
 // Engine (this library) version, e.g. "0.4.0-dev".
+// MB_VERSION is the compile-time string this header shipped with — log both
+// (compiled-against vs loaded) when diagnosing a dlopen'd engine.
+#define MB_VERSION "0.4.0-dev"
 MB_EXPORT const char* mbVersion(void);
 // Header/ABI compatibility number; bumped on any breaking change to this API.
 // A host built against MB_API_VERSION N should refuse an engine reporting < N.
@@ -142,6 +158,15 @@ MB_EXPORT void mbSessionClearStorage(mbSession*);
 // under its persist dir now (also happens at final teardown). No-op for
 // ephemeral profiles. localStorage is not persisted (see above).
 MB_EXPORT void mbSessionFlush(mbSession*);
+// Introspection — a host juggling several handles can ask which is which.
+// mbSessionGetName / mbSessionGetPersistPath write into out (NUL-terminated,
+// truncated to out_cap; size first with out=NULL) and return the full length.
+// The persist path is the profile's root directory ("<persist_path>/<name>");
+// empty (returns 0) for an ephemeral profile. mbSessionIsPersistent returns 1
+// for a disk-backed profile, 0 for ephemeral.
+MB_EXPORT int mbSessionGetName(mbSession*, char* out, int out_cap);
+MB_EXPORT int mbSessionIsPersistent(mbSession*);
+MB_EXPORT int mbSessionGetPersistPath(mbSession*, char* out, int out_cap);
 
 MB_EXPORT mbView* mbCreateView(int width, int height);
 MB_EXPORT void    mbDestroyView(mbView*);
@@ -167,6 +192,14 @@ MB_EXPORT unsigned int mbViewCompositorPixel(mbView*, int x, int y);
 //   mbLoadURL   — fetch via libcurl (mb_url_loader) then render.
 MB_EXPORT void mbLoadHTML(mbView*, const char* utf8_html, const char* base_url);
 MB_EXPORT void mbLoadURL(mbView*, const char* utf8_url);
+
+// mbLoadHTML with explicit history control. add_to_history=1 behaves exactly
+// like mbLoadHTML (the load appends a back/forward entry). add_to_history=0
+// REPLACES the current entry instead (location.replace semantics) — a host
+// cycling in-memory documents (e.g. dictionary entries per hover) doesn't
+// pollute the back/forward list with every variant it shows.
+MB_EXPORT void mbLoadHTMLEx(mbView*, const char* utf8_html,
+                            const char* base_url, int add_to_history);
 
 // Push notification of load completion — the real Blink DidFinishLoad signal (the
 // main document's `load` event, all subresources done), not a poll or a fixed timer.
@@ -245,6 +278,33 @@ MB_EXPORT void mbOnDownload(mbView*, mbDownloadCallback, void* userdata);
 typedef void (*mbNewWindowCallback)(mbView*, void* userdata, const char* url,
                                     const char* name);
 MB_EXPORT void mbOnNewWindow(mbView*, mbNewWindowCallback, void* userdata);
+
+// Child views: make window.open() actually WORK (vs mbOnNewWindow, which only
+// observes). When registered, a page-initiated window request creates a real
+// child view wired as the opener's child — window.open returns a live window
+// object, the opener/postMessage relationship works (OAuth popups that post
+// back, pages that drive their popup) — and the callback delivers it:
+//   `child`      a fully functional mbView the HOST now owns. Return 1 to
+//                ADOPT it (size it, show it, and mbDestroyView it when done;
+//                it inherits the parent's session). Return 0 to DECLINE —
+//                the engine destroys it and the page sees window.open == null.
+//   `url`/`name` the requested URL (loads into the child right after the
+//                callback returns) and window name.
+//   `is_popup`   1 for a popup/new-window disposition, 0 for a tab-like one.
+//   `x,y,width,height` the window.open features geometry; 0 when unspecified
+//                (the child defaults to the parent's size — mbResize it).
+// The callback fires from INSIDE the page's JS (window.open is synchronous):
+// keep it cheap, don't pump, defer heavy host work (mbDefer). Registering
+// this takes precedence over mbOnNewWindow for the views it adopts; declined
+// requests still fire mbOnNewWindow. NULL clears (window.open returns null
+// again). LIFETIME: the child shares the opener's JS agent cluster — destroy
+// the child BEFORE its parent view.
+typedef int (*mbCreateChildViewCallback)(mbView* parent, void* userdata,
+                                         mbView* child, const char* url,
+                                         const char* name, int is_popup,
+                                         int x, int y, int width, int height);
+MB_EXPORT void mbOnCreateChildView(mbView*, mbCreateChildViewCallback,
+                                   void* userdata);
 
 // ---- Pointer-UI state (page -> host) -----------------------------------------
 // An offscreen view has no OS window, so the engine must TELL the host when the
@@ -467,6 +527,40 @@ typedef struct mbWheelEvent {
 // the host then suppresses its default scroll.
 MB_EXPORT int mbSendWheelEvent(mbView*, const mbWheelEvent*);
 
+// Typed keyboard event — the lossless path for forwarding REAL host key events
+// (vs the mbSendKey* name-based shorthands, which can't express auto-repeat,
+// keypad keys, or down-without-up). Field mapping from a macOS NSEvent:
+//   type            keyDown -> MB_KEY_RAW_DOWN then (if it produces text and no
+//                   cmd/ctrl is held) MB_KEY_CHAR; keyUp -> MB_KEY_UP
+//   modifiers       from modifierFlags: control->1, shift->2, option->4,
+//                   command->8
+//   windows_key_code the Windows VK code for the key (map from keyCode; e.g.
+//                   kVK_ANSI_A -> 'A', kVK_Return -> 0x0D) — drives keyCode and
+//                   default actions
+//   native_key_code the platform scan code (NSEvent.keyCode), informational
+//   text            NSEvent.characters (UTF-8); unmodified_text
+//                   NSEvent.charactersIgnoringModifiers — used for shortcut
+//                   resolution; both may be NULL for non-text keys
+//   is_keypad       modifierFlags contains numericPad
+//   is_auto_repeat  NSEvent.isARepeat
+#define MB_KEY_RAW_DOWN 0  /* key press, no char yet (WebKit RawKeyDown) */
+#define MB_KEY_DOWN     1  /* press + implicit char (single-event style)  */
+#define MB_KEY_UP       2
+#define MB_KEY_CHAR     3  /* the produced text (send after RAW_DOWN)     */
+typedef struct mbKeyEvent {
+  int struct_size;             // = sizeof(mbKeyEvent)
+  int type;                    // MB_KEY_*
+  int modifiers;               // bitmask: 1 ctrl, 2 shift, 4 alt, 8 meta
+  int windows_key_code;        // Windows VK code (keyCode)
+  int native_key_code;         // platform scan code (informational)
+  const char* text;            // UTF-8 text the key produces (may be NULL)
+  const char* unmodified_text; // text without modifiers (may be NULL)
+  int is_keypad;
+  int is_auto_repeat;
+  int is_system_key;           // e.g. Alt+key menu accelerators
+} mbKeyEvent;
+MB_EXPORT void mbSendKeyEvent(mbView*, const mbKeyEvent*);
+
 MB_EXPORT void mbSendMouseClick(mbView*, int x, int y);
 // General click at (x,y): `button` 0=left/1=middle/2=right; `modifiers` is a bitmask
 // 1=ctrl 2=shift 4=alt 8=meta — so the page sees e.button + e.ctrlKey/shiftKey/altKey/
@@ -587,6 +681,15 @@ MB_EXPORT void mbSetTransparentBackground(mbView*, int transparent);
 // Enable (1, default) or disable (0) automatic image loading. Disabling speeds up
 // text/HTML scraping. Call before mbLoadURL/mbLoadHTML.
 MB_EXPORT void mbSetLoadImages(mbView*, int enabled);
+
+// Enable (1, default) or disable (0) JavaScript for this view. Script-off is
+// both hardening (untrusted static content can't run code) and a perf switch
+// (no parse/compile/execute) for content that doesn't need it. Call before
+// mbLoadURL/mbLoadHTML — applies to documents committed after the call.
+// NOTE: while disabled, blink refuses ALL script in the view — the page's own
+// AND host-driven (mbEvalJS*, mbRunJS return empty). Re-enable to script the
+// document again (the page's inert <script> tags do not retroactively run).
+MB_EXPORT void mbSetEnableJavascript(mbView*, int enabled);
 
 // Emulate the prefers-color-scheme media feature: dark (1) or light (0, default),
 // so pages render their dark theme. Call before mbLoadURL/mbLoadHTML.
@@ -865,6 +968,10 @@ MB_EXPORT int mbCanGoBack(mbView*);
 MB_EXPORT int mbCanGoForward(mbView*);
 MB_EXPORT int mbGoBack(mbView*);
 MB_EXPORT int mbGoForward(mbView*);
+// Jump `offset` entries in one step (negative = back, positive = forward);
+// mbGoToOffset(v, -1) == mbGoBack. Returns 1 if it navigated, 0 when the
+// target is out of range (or offset is 0).
+MB_EXPORT int mbGoToOffset(mbView*, int offset);
 
 // History-state push: fires with the new (can_go_back, can_go_forward) whenever
 // the session history changes — commits, traversals, truncation — and only when
@@ -938,6 +1045,9 @@ MB_EXPORT int mbEvalJSIsolated(mbView*, const char* utf8_script, char* out, int 
 // one-shot lifecycle settle (no nested task-queue drain). For a host that blits the
 // view continuously (a windowed browser at ~60fps) — mbPaintToBitmap's per-call
 // settle makes that crawl on live pages. Use mbPaintToBitmap for a one-shot capture.
+// PIXEL FORMAT (all paint exports): BGRA byte order, PREMULTIPLIED alpha, sRGB.
+// With mbSetTransparentBackground, composite as premultiplied — converting to
+// straight alpha (or assuming it) fringes antialiased edges.
 MB_EXPORT int mbRepaintToBitmap(mbView*,
                                 void* out_bgra,
                                 int width,
@@ -951,6 +1061,19 @@ MB_EXPORT int mbRepaintToBitmap(mbView*,
 // request landing mid-paint marks the NEXT frame. Composited views (see
 // mbSetCompositingEnabled) always report 1. New views start dirty.
 MB_EXPORT int mbViewIsDirty(mbView*);
+
+// Force the next paint: mark the view dirty even though blink thinks the last
+// frame is current. For when the HOST lost its copy of the pixels (a purged
+// CALayer on hide/show, a buffer dropped on resize) — without this a
+// damage-gated blit loop would skip forever.
+MB_EXPORT void mbViewSetDirty(mbView*);
+
+// Diagnostic: while enabled (1), mbViewIsDirty always reports 1 for this view,
+// so a damage-gated host repaints every tick. The escape hatch for "the dirty
+// flag is lying" bugs — bypass the gating to bisect whether stale content
+// comes from damage tracking or from the paint itself. 0 (default) restores
+// normal dirty gating.
+MB_EXPORT void mbSetForceRepaint(mbView*, int enabled);
 #if defined(__cplusplus)
 }  // extern "C"
 #endif

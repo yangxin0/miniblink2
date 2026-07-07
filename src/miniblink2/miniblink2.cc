@@ -406,6 +406,26 @@ void mbSessionFlush(mbSession* s) {
     s->impl->FlushToDisk();
 }
 
+int mbSessionGetName(mbSession* s, char* out, int out_cap) {
+  if (!s || !s->impl)
+    return 0;
+  const std::string& name = s->impl->name();
+  CopyToBuffer(name, out, out_cap);
+  return static_cast<int>(std::min<size_t>(name.size(), INT_MAX));
+}
+
+int mbSessionIsPersistent(mbSession* s) {
+  return (s && s->impl && s->impl->persistent()) ? 1 : 0;
+}
+
+int mbSessionGetPersistPath(mbSession* s, char* out, int out_cap) {
+  if (!s || !s->impl)
+    return 0;
+  const std::string& dir = s->impl->persist_dir();
+  CopyToBuffer(dir, out, out_cap);
+  return static_cast<int>(std::min<size_t>(dir.size(), INT_MAX));
+}
+
 mbView* mbCreateViewInSession(int width, int height, mbSession* session) {
   mbView* v = mbCreateView(width, height);
   if (v && v->impl && session && session->impl)
@@ -473,6 +493,13 @@ void mbLoadHTML(mbView* v, const char* utf8_html, const char* base_url) {
   EngineScope engine_scope;
   if (v && v->impl)
     v->impl->LoadHTML(utf8_html, base_url);
+}
+
+void mbLoadHTMLEx(mbView* v, const char* utf8_html, const char* base_url,
+                  int add_to_history) {
+  EngineScope engine_scope;
+  if (v && v->impl)
+    v->impl->LoadHTMLEx(utf8_html, base_url, add_to_history != 0);
 }
 
 void mbLoadURL(mbView* v, const char* utf8_url) {
@@ -645,6 +672,60 @@ void mbOnNewWindow(mbView* v, mbNewWindowCallback cb, void* userdata) {
         });
   else
     v->impl->SetNewWindowCallback({});
+}
+
+void mbOnCreateChildView(mbView* v, mbCreateChildViewCallback cb,
+                         void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (!cb) {
+    v->impl->SetCreateChildViewCallback({});
+    return;
+  }
+  v->impl->SetCreateChildViewCallback(
+      [v, cb, userdata](const std::string& url, const std::string& name,
+                        bool is_popup, int x, int y, int w,
+                        int h) -> mb::MbWebView* {
+        // window.open features may leave the size unspecified (0): default to
+        // the parent's viewport so the child renders sensibly until the host
+        // resizes it.
+        int cw = w, ch = h;
+        if (cw <= 0 || ch <= 0) {
+          int pw = 0, ph = 0;
+          v->impl->GetViewSize(&pw, &ph);
+          if (cw <= 0)
+            cw = pw > 0 ? pw : 800;
+          if (ch <= 0)
+            ch = ph > 0 ? ph : 600;
+        }
+        auto child = std::make_unique<mbView>();
+        child->impl = mb::MbWebView::Create(cw, ch, v->impl.get());
+        if (!child->impl)
+          return nullptr;
+        // The child browses in the parent's profile (cookies, storage).
+        child->impl->SetSession(v->impl->session());
+        mbView* handle = child.release();
+        if (!cb(v, userdata, handle, url.c_str(), name.c_str(),
+                is_popup ? 1 : 0, x, y, w, h)) {
+          // Declined: window.open sees null. Blink never adopted this view,
+          // so sever its opener wiring first (a dangling openee corrupts the
+          // opener page's script state on Close). And we are INSIDE the
+          // opener's JS (window.open is synchronous), so closing the WebView
+          // here would re-enter blink mid-stack — defer the teardown to the
+          // next engine-off-the-stack moment instead.
+          mbDefer(
+              [](void* ud) {
+                mbView* declined = static_cast<mbView*>(ud);
+                // Sever the opener link off the opener's window.open stack,
+                // then tear the never-adopted view down.
+                declined->impl->DisownOpener();
+                mbDestroyView(declined);
+              },
+              handle);
+          return nullptr;
+        }
+        return handle->impl.get();  // adopted: host owns `handle`
+      });
 }
 
 void mbPostURL(mbView* v, const char* utf8_url, const char* utf8_body,
@@ -946,6 +1027,11 @@ void mbSetLoadImages(mbView* v, int enabled) {
     v->impl->SetLoadImages(enabled != 0);
 }
 
+void mbSetEnableJavascript(mbView* v, int enabled) {
+  if (v && v->impl)
+    v->impl->SetEnableJavascript(enabled != 0);
+}
+
 void mbSetDarkMode(mbView* v, int dark) {
   if (v && v->impl)
     v->impl->SetDarkMode(dark != 0);
@@ -1023,6 +1109,17 @@ void mbSendKeyUp(mbView* v, int windows_key_code) {
   EngineScope engine_scope;
   if (v && v->impl)
     v->impl->SendKeyUp(windows_key_code);
+}
+
+void mbSendKeyEvent(mbView* v, const mbKeyEvent* e) {
+  EngineScope engine_scope;
+  if (!v || !v->impl || !e ||
+      e->struct_size < static_cast<int>(sizeof(mbKeyEvent)))
+    return;
+  v->impl->SendKeyEvent(e->type, e->modifiers, e->windows_key_code,
+                        e->native_key_code, e->text, e->unmodified_text,
+                        e->is_keypad != 0, e->is_auto_repeat != 0,
+                        e->is_system_key != 0);
 }
 
 void mbSendIme(mbView* v, const char* composing, const char* committed) {
@@ -1704,6 +1801,11 @@ int mbGoForward(mbView* v) {
   return (v && v->impl && v->impl->GoForward()) ? 1 : 0;
 }
 
+int mbGoToOffset(mbView* v, int offset) {
+  EngineScope engine_scope;
+  return (v && v->impl && v->impl->GoToOffset(offset)) ? 1 : 0;
+}
+
 int mbEvalJSIsolated(mbView* v, const char* utf8_script, char* out, int out_cap) {
   EngineScope engine_scope;
   if (!v || !v->impl)
@@ -1778,6 +1880,16 @@ int mbViewIsDirty(mbView* v) {
   if (!v || !v->impl)
     return 0;
   return v->impl->IsDirty() ? 1 : 0;
+}
+
+void mbViewSetDirty(mbView* v) {
+  if (v && v->impl)
+    v->impl->SetDirty();
+}
+
+void mbSetForceRepaint(mbView* v, int enabled) {
+  if (v && v->impl)
+    v->impl->SetForceRepaint(enabled != 0);
 }
 
 int mbRepaintToBitmap(mbView* v, void* out_bgra, int width, int height, int stride) {
