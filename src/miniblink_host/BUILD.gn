@@ -13,6 +13,7 @@
 import("//build/config/ui.gni")
 import("//ui/gl/features.gni")  # use_dawn — gates WebGPU (Dawn) in/out of the library
 import("//v8/gni/v8.gni")       # v8_enable_webassembly — feature-aware smoke tests
+import("//third_party/blink/renderer/config.gni")  # mb_enable_webrtc (patch 0030)
 
 component("miniblink_host") {
   output_name = "miniblink_host"
@@ -301,6 +302,9 @@ executable("mb_smoke_render") {
   }
   if (v8_enable_webassembly) {
     defines += [ "MB_TEST_HAS_WASM=1" ]
+  }
+  if (mb_enable_webrtc) {
+    defines += [ "MB_TEST_HAS_WEBRTC=1" ]
   }
 }
 

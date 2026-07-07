@@ -2,7 +2,7 @@
 # build-lib.sh — build the self-contained libminiblink2 SDK from the miniblink2 sources.
 #
 #   scripts/build-lib.sh [--release|--debug] [--ship]
-#                        [--webgpu] [--video] [--ml] [--wasm] [--av1-encode]
+#                        [--webgpu] [--video] [--ml] [--wasm] [--webrtc] [--av1-encode]
 #                        [--tracing] [--swiftshader] [--icu-full]
 #                        [--chromium DIR] [--depot DIR] [--no-stage] [--print-only]
 #
@@ -25,6 +25,7 @@
 #   --webgpu  WebGPU/Dawn      --video  <video> decode (audio is always on)
 #   --ml      WebNN on-device ML (TFLite/LiteRT/XNNPACK backend)
 #   --wasm    WebAssembly (V8 wasm engine: Liftoff + wasm TurboFan + builtins)
+#   --webrtc  WebRTC (RTCPeerConnection/SDP signaling; libwebrtc + RTC bindings, ~3.3MB)
 #   --av1-encode  AV1 encoding via libaom (WebCodecs/MediaRecorder/WebRTC send; decode stays)
 #   --tracing  OPTIONAL_TRACE_EVENT instrumentation (extra trace-event coverage + strings)
 #   --swiftshader  ship SwiftShader software Vulkan in dist/ (headless/CI/no-GPU fallback)
@@ -62,6 +63,7 @@ WEBGPU=0             # WebGPU (Dawn) OFF by default (smaller lib); --webgpu link
 VIDEO=0              # <video> decode OFF by default (audio stays on); --video adds it
 ML=0                 # WebNN on-device ML (TFLite/LiteRT/XNNPACK) OFF by default; --ml adds it
 WASM=0               # WebAssembly OFF by default (window.WebAssembly absent); --wasm adds it
+WEBRTC=0             # WebRTC/RTCPeerConnection OFF by default (~3.3MB); --webrtc adds it
 AV1ENC=0             # AV1 encoding (libaom) OFF by default; --av1-encode adds it
 TRACING=0            # OPTIONAL_TRACE_EVENT macros OFF by default; --tracing adds them
 SWIFTSHADER=0        # SwiftShader NOT shipped in dist by default; --swiftshader adds it
@@ -80,6 +82,7 @@ while [ $# -gt 0 ]; do
     --video) VIDEO=1 ;;             # include <video> decode (ffmpeg video + AV1); default off
     --ml) ML=1 ;;                   # include WebNN on-device ML (TFLite backend); default off
     --wasm) WASM=1 ;;               # include WebAssembly (V8 wasm engine); default off
+    --webrtc) WEBRTC=1 ;;           # include the WebRTC stack (RTCPeerConnection); default off
     --av1-encode) AV1ENC=1 ;;       # include AV1 encoding (libaom); default off
     --tracing) TRACING=1 ;;         # include OPTIONAL_TRACE_EVENT coverage; default off
     --swiftshader) SWIFTSHADER=1 ;; # ship SwiftShader software Vulkan in dist; default off
@@ -199,6 +202,7 @@ fi
 [ "$VIDEO" = 1 ] && VID=true || VID=false        # video decoders (audio stays regardless)
 [ "$ML" = 1 ] && MLV=true || MLV=false           # WebNN TFLite/LiteRT/XNNPACK backend
 [ "$WASM" = 1 ] && WASMV=true || WASMV=false     # V8 WebAssembly engine
+[ "$WEBRTC" = 1 ] && RTCV=true || RTCV=false     # WebRTC stack (patch 0030 seam)
 [ "$AV1ENC" = 1 ] && AOMV=true || AOMV=false     # libaom AV1 encoder
 [ "$TRACING" = 1 ] && TRACEV=true || TRACEV=false # OPTIONAL_TRACE_EVENT macros
 
@@ -265,6 +269,16 @@ build_tflite_with_xnnpack = $MLV
 # Blink's unconditional references (WasmStreaming, WasmModuleObject, SetWasm*Callback)
 # still link; window.WebAssembly is simply absent at runtime. Absent in miniblink49 too.
 v8_enable_webassembly = $WASMV
+# WebRTC (~3.3MB: libwebrtc core + Blink RTC bindings + platform peerconnection) — off
+# by default; --webrtc adds it back. There is NO upstream GN seam (the old enable_webrtc
+# arg is long gone); patch 0030 creates one (mb_enable_webrtc in blink config.gni): gates
+# the RTC* IDL bindings, blink modules/{peerconnection,webrtc}, the blink platform
+# peerconnection/p2p/webrtc layers and the third_party/webrtc link. mediastream survives:
+# navigator.mediaDevices / getUserMedia keep working (headless: no devices), and
+# media/webrtc shrinks to its constants+features stubs. Off also removes
+# window.RTCPeerConnection & friends (SDP/signaling was a shipped feature — hosts that
+# need it must build with --webrtc).
+mb_enable_webrtc = $RTCV
 # AV1 ENCODING (libaom, ~1MB incl. av1/aom asm) — off by default; --av1-encode adds it.
 # Only feeds WebCodecs VideoEncoder, MediaRecorder and WebRTC AV1 *send*; AV1 DECODE is
 # untouched (dav1d + the unconditional VideoToolbox/libgav1 path stay in — see the

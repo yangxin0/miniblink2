@@ -70,7 +70,7 @@ Deployment rules:
 
 ```sh
 scripts/build-lib.sh [--release|--debug] [--ship]
-                     [--webgpu] [--video] [--ml] [--wasm] [--av1-encode]
+                     [--webgpu] [--video] [--ml] [--wasm] [--webrtc] [--av1-encode]
                      [--tracing] [--swiftshader] [--icu-full]
                      [--chromium DIR] [--depot DIR] [--no-stage] [--print-only]
 ```
@@ -91,6 +91,7 @@ Feature flags (apply to any profile):
 | `--video` | include `<video>` decode (H.264/ffmpeg-video). Off = **audio still plays** (miniblink49 parity) | +~8 MB |
 | `--wasm` | include WebAssembly (V8 wasm engine). Off = `window.WebAssembly` absent (miniblink49 parity) | +~4.5 MB |
 | `--ml` | include WebNN on-device ML (TFLite/LiteRT/XNNPACK) + the TFLite language-detection model + WebRTC's neural echo estimator (patches 0019/0021) | +~4 MB |
+| `--webrtc` | include the WebRTC stack: `RTCPeerConnection` + SDP/signaling, libwebrtc core, Blink RTC bindings, p2p platform layer (patch 0030). Off keeps getUserMedia/mediaDevices surfaces (headless: no devices) but `window.RTCPeerConnection` is absent | +~3.3 MB |
 | `--av1-encode` | include AV1 *encoding* (libaom: WebCodecs/MediaRecorder/WebRTC send; decode always in) | +~1 MB |
 | `--tracing` | include OPTIONAL_TRACE_EVENT instrumentation (perf-investigation builds) | +~0.5 MB |
 | `--swiftshader` | ship SwiftShader software Vulkan in `dist/` (headless/CI/no-GPU `--use-angle=swiftshader`) | +20 MB (dist) |

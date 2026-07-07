@@ -136,7 +136,19 @@ supported GN seam. Measurement tool: `scripts/sizemap.py` (nm-based per-componen
 of the unstripped dylib). Numbers below are from the 97 MB pre-prune release dylib (82 MB
 attributed `__text`). These are the *patch-level* leftovers, hardest-first:
 
-### E1. WebRTC stack — ~3.3 MB (2.6 core + 0.7 Blink RTC bindings) — DO NOT cut blindly
+### E1. WebRTC stack — DONE 2026-07-07 (patch 0030 + `--webrtc` toggle)
+- Implemented as an include-only build-lib.sh flag, **default OFF** (measured: 7.5 MB of
+  attributed `__text` off the dev-release dylib; webrtc bucket 3.28 MB → 0.01 MB, rest from
+  RTC bindings/absl/inlined code). `mb_enable_webrtc` (blink config.gni, default true) gates:
+  RTC IDL bindings (idl/generated_in_modules.gni), modules/{peerconnection,webrtc},
+  platform {peerconnection,p2p,webrtc} + APM proxy, the modules structured-clone
+  serializer's RTC types, and media/webrtc (shrinks to constants+features).
+  mediastream/getUserMedia survives; smoke 41p asserts RTCPeerConnection absent when off,
+  and still tests SDP offer generation when built with --webrtc.
+- NOTE: SDP/signaling was a shipped feature (A2); hosts that rely on it must build --webrtc.
+
+#### (original analysis, kept for reference)
+Was: ~3.3 MB (2.6 core + 0.7 Blink RTC bindings) — DO NOT cut blindly
 - **Tension:** A2 above — SDP/signaling **works and is a shipped feature** (RTCPeerConnection,
   offer/answer, data-channel SDP). Cutting WebRTC removes a working capability, unlike the other
   prunes which only dropped never-used code.

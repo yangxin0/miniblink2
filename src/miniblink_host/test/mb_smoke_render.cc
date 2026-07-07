@@ -1602,8 +1602,18 @@ static void RunCases(mbView* v, int W, int H) {
   // produces a valid SDP offer (type 'offer', a media section for the data channel) and
   // accepts it as the local description. Full peer connectivity needs ICE/network, but
   // the SDP machinery — what apps build signaling on — runs in-process.
+  // Compiled out (default, no --webrtc): the interface must be ABSENT, not broken.
   {
     mbLoadHTML(v, "<body>rtc</body>", "https://rtc.test/");
+#if !defined(MB_TEST_HAS_WEBRTC)
+    std::string absent = Eval(v,
+      "String(window.RTCPeerConnection===undefined&&"
+      "window.RTCSessionDescription===undefined&&"
+      "window.RTCIceCandidate===undefined)");
+    Expect(absent == "true",
+           "WebRTC compiled out: RTCPeerConnection & friends absent from window",
+           "absent=[" + absent + "]");
+#else
     mbRunJS(v,
       "window.__rtc='';try{var pc=new RTCPeerConnection();pc.createDataChannel('chat');"
       "pc.createOffer().then(function(o){return pc.setLocalDescription(o).then(function(){"
@@ -1620,6 +1630,7 @@ static void RunCases(mbView* v, int W, int H) {
     Expect(rtc == "type:offer,dc:true,local:true",
            "WebRTC: RTCPeerConnection generates a data-channel SDP offer + sets it local",
            "rtc=[" + rtc + "]");
+#endif  // MB_TEST_HAS_WEBRTC
   }
 
   // 41q. WebAssembly works end to end (a major modern feature, previously untested): the
