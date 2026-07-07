@@ -8,8 +8,10 @@ ordered by leverage-per-effort for the Glyph host.
 
 Round 1 (items 1–6) is fully shipped. Round 2 (items 7–13) is shipped except
 zero-copy bodies (item 9, deferred by cost); the inspector's host-side bridge
-(stage B) shipped in the Glyph embedder, where the plan places it. Per-item
-status is inline under each item.
+(stage B) shipped in the Glyph embedder, where the plan places it. Round 3
+(items 14–21, the page → host UI-state channel and the platform-service
+corners) is shipped except the font-fallback hook (item 20). Per-item status
+is inline under each item.
 
 Verified in the Glyph host: engine smoke test + a 720-sample pointer-sweep
 harness with a damage-gated blit path and a liveness beacon (0 flicker,
@@ -294,6 +296,126 @@ See "Sessions: the agreed design" below for the API contract.
 
 ---
 
+## Round 3
+
+Third pass (2026-07-07), through the corners rounds 1–2 skipped: Listener.h's
+ViewListener (the page → host UI-state channel), the platform/ services,
+ViewConfig, CAPI conventions. De-duplicated against the shipped header first —
+Ultralight's title/URL/console/new-window/download/clipboard/device-scale
+equivalents already exist as mb* exports; what follows is only what's
+genuinely missing.
+
+### 14. Cursor + tooltip: the page → host pointer-UI channel
+
+**Then:** an offscreen view has no OS window, so nothing tells the host the
+page wants an I-beam over selectable text, a hand over a link, or a hover
+tooltip. Glyph's popup shows a static arrow everywhere; title/URL changes are
+pushed (round 1 era) but pointer UI state is not.
+
+**Ultralight:** `ViewListener::OnChangeCursor(View*, Cursor)` (a 40+-value
+cursor enum) and `OnChangeTooltip(View*, const String&)`.
+
+**Shipped**: `mbOnCursorChanged(view, cb, ud)` — fires with an MB_CURSOR_*
+code (pointer/hand/ibeam/wait/help/resize/zoom/grab…, the full blink
+ui::mojom::CursorType set flattened) whenever blink updates the cursor over
+the view; fires only on change. `mbOnTooltipChanged(view, cb, ud)` — UTF-8
+tooltip text, empty string = hide. Both NULL-clear, both snapshot per commit.
+
+### 15. window.close() surfacing
+
+**Then:** a page calling `window.close()` was silently ignored — the host
+popup can't honor "the page dismissed itself" (dictionary pages with a close
+button; OAuth flows that close their window).
+
+**Ultralight:** `ViewListener::OnRequestClose(View*)`.
+
+**Shipped**: `mbOnRequestClose(view, cb, ud)` — notification only; the host
+decides whether to hide/destroy the view.
+
+### 16. Input-focus query for keystroke routing
+
+**Then:** `mbSetFocus` sets window focus, but a host with global hotkeys
+(menu-bar app) has no way to ask "does the page actually have a caret?" —
+so every keystroke either goes to the page or to the host by static policy.
+
+**Ultralight:** `View::HasInputFocus()` — "visible keyboard focus (blinking
+caret); use this to decide whether the View should consume keyboard input."
+
+**Shipped**: `mbHasInputFocus(view)` — 1 when the focused element accepts
+text input (editable / text control), i.e. the page would consume a
+keystroke; the host routes keys to the page only then.
+
+### 17. History-state push notification
+
+**Then:** `mbCanGoBack/Forward` exist but are poll-only — a host enabling
+nav buttons re-queries every tick.
+
+**Ultralight:** `ViewListener::OnUpdateHistory(View*)`.
+
+**Shipped**: `mbOnHistoryChanged(view, cb, ud)` — fires with
+(can_go_back, can_go_forward) whenever the session history changes; hosts
+update buttons event-driven.
+
+### 18. Version handshake exports
+
+**Then:** a dlopen-ing host had no way to verify at load time which engine
+it bound — mismatched dylib/header pairs fail at first symbol or silently.
+
+**Ultralight:** `UltralightVersionString/Major/Minor/Patch()` and
+`WebKitVersionString()` — engine AND upstream-engine versions, exported flat.
+
+**Shipped**: `mbVersion()` (engine version string), `mbApiVersion()`
+(header/ABI integer, bump on breaking change), `mbChromiumVersion()`
+("150.0.x.y") — all callable before mbInitialize.
+
+### 19. Host log sink
+
+**Then:** engine diagnostics (base logging, mbLogMemoryUsage output) went to
+stderr unconditionally — invisible to a GUI host, unroutable to its logs.
+
+**Ultralight:** injectable `Logger::LogMessage(LogLevel, const String&)`.
+
+**Shipped**: `mbOnLogMessage(cb, ud)` — process-wide sink receiving
+(level, message); NULL restores stderr. Installed via base logging's message
+handler, so LOG(ERROR)-class engine output lands in the host's logs.
+
+### 20. Per-character font fallback hook
+
+**Then:** item 13 shipped static per-view family defaults
+(`mbSetFontFamilies`) — but fallback for a specific missing glyph
+(U+9F98 in a rare-CJK dictionary entry) still walks blink's platform list and
+can land on last-resort. The engine already needed a last-resort-font fix once.
+
+**Ultralight:** `FontLoader::fallback_font_for_characters(const String&
+characters, int weight, bool italic)` — the host answers "what font renders
+these characters?" at glyph-resolution time.
+
+**Open** — highest-value remaining item of this round, but it patches blink's
+FontCache fallback path; scoped separately from the callback items above.
+
+### 21. Noted, not adopted (round-3 counterpart of "what NOT to copy")
+
+- **TLS pinning** (`NetworkRequest::EnforcePinnedPublicKey` →
+  `CURLOPT_PINNEDPUBLICKEY`): nearly free in the curl layer, but no host asks
+  for it; the per-request allow/deny half already exists (mbOnNavigation +
+  request callbacks). Deferred until a host pins.
+- **Streaming download lifecycle** (chunked OnReceiveDataForDownload +
+  CancelDownload): mbOnDownload delivers complete bodies; fine until a host
+  downloads large media. Deferred with item 9 (same "large bodies" trigger).
+- **ImageSource** (host-registered decoded/GPU images referenced by URL):
+  elegant inverse of the mock hook, heavy to build in blink. Noted only.
+- **ThreadFactory / Allocator override**: QoS-tagging engine threads is
+  attractive for a menu-bar host, but blink's thread bring-up is not
+  pluggable at reasonable cost. (Ultralight's Allocator being flat C even in
+  the C++ SDK re-validates the flat-ABI stance.)
+- **RenderOnly(views[])**: pooled hidden views already skip work via
+  mbViewIsDirty gating host-side.
+- **Ultralight's `CreateSession(is_persistent, name)`** hangs persistence off
+  a global cache_path — the shipped per-session persist_path (item 12) is
+  strictly better. No revision needed.
+
+---
+
 ## What's left (summary)
 
 Everything not listed here is shipped or a documented decision (nested-worker
@@ -306,6 +428,8 @@ stylesheet caveat).
 | 9 | Zero-copy resource bodies (`mbResponseSetBodyOwned`) | Deferred by cost — revisit if a host serves large media |
 | 10 | Memory budget knobs (cache sizes) | Only if `mbPurgeMemory` proves insufficient |
 | 13c | Child worker/iframe DevTools targets (multi-session bridge) | Open, unscheduled |
+| 20 | Per-character font fallback hook | Open — blink FontCache patch |
+| 21 | TLS pinning / streaming downloads / ImageSource | Deferred by trigger (no host needs them yet) |
 
 ---
 

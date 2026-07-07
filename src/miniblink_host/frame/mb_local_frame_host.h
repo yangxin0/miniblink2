@@ -66,6 +66,18 @@ void MbClearHistoryGoToHandler(uint64_t frame_key);
 void MbBindLocalFrameHost(mojo::ScopedInterfaceEndpointHandle handle,
                           uint64_t frame_key);
 
+// Register the MAIN frame's window.close() sink (LocalMainFrameHost::
+// RequestClose), posted to the runner registered by MbSetHistoryGoToHandler —
+// call AFTER it (SetFrame does). Cleared with the frame's other sinks.
+void MbSetRequestCloseHandler(uint64_t frame_key,
+                              base::RepeatingClosure handler);
+
+// Bind a self-owned (mostly no-op) blink::mojom::blink::LocalMainFrameHost —
+// the WebView-level peer of MbBindLocalFrameHost. RequestClose (window.close)
+// has real behavior: it routes to the registered close sink.
+void MbBindLocalMainFrameHost(mojo::ScopedInterfaceEndpointHandle handle,
+                              uint64_t frame_key);
+
 // One <select> popup surfaced to the host (blink's external popup path:
 // ExternalPopupMenu -> LocalFrameHost::ShowPopupMenu). Plain data — safe to
 // carry across threads.

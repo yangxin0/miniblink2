@@ -44,6 +44,7 @@ struct SinkEntry {
       download_handler;
   base::RepeatingCallback<void(const std::string&, const std::string&)>
       download_url_handler;
+  base::RepeatingClosure close_handler;  // window.close() (main frame only)
 };
 
 // Per-frame registry keyed by a frame id, so multiple views each route their own
@@ -103,6 +104,66 @@ void MbBindLocalFrameHost(mojo::ScopedInterfaceEndpointHandle handle,
   mojo::MakeSelfOwnedAssociatedReceiver(
       std::make_unique<MbLocalFrameHost>(frame_key),
       mojo::PendingAssociatedReceiver<blink::mojom::blink::LocalFrameHost>(
+          std::move(handle)));
+}
+
+void MbSetRequestCloseHandler(uint64_t frame_key,
+                              base::RepeatingClosure handler) {
+  SinkRegistry& s = Sinks();
+  base::AutoLock guard(s.lock);
+  s.by_frame[frame_key].close_handler = std::move(handler);
+}
+
+namespace {
+
+// The WebView-level main-frame host (bound alongside MbLocalFrameHost on the
+// same navigation-associated provider). Everything is a no-op except
+// RequestClose — window.close() — which routes to the main-thread close sink.
+// Methods with a reply run their callback so blink is never left waiting.
+class MbLocalMainFrameHost : public blink::mojom::blink::LocalMainFrameHost {
+ public:
+  explicit MbLocalMainFrameHost(uint64_t frame_key) : frame_key_(frame_key) {}
+  ~MbLocalMainFrameHost() override = default;
+
+  void ScaleFactorChanged(float) override {}
+  void ContentsPreferredSizeChanged(const gfx::Size&) override {}
+  void FocusPage() override {}
+  void TakeFocus(bool) override {}
+  void UpdateTargetURL(const blink::KURL&,
+                       UpdateTargetURLCallback callback) override {
+    std::move(callback).Run();
+  }
+  void RequestClose() override {
+    SinkEntry e;
+    if (LookupSink(frame_key_, &e) && e.runner && e.close_handler)
+      e.runner->PostTask(FROM_HERE, e.close_handler);
+  }
+  void SetWindowRect(const gfx::Rect&, SetWindowRectCallback callback) override {
+    std::move(callback).Run();
+  }
+  void DidFirstVisuallyNonEmptyPaint() override {}
+  void DidAccessInitialMainDocument() override {}
+  void DidChangeThemeColor(std::optional<::SkColor>) override {}
+  void DidChangeBackgroundColor(const ::SkColor4f&, bool) override {}
+  void Maximize() override {}
+  void Minimize() override {}
+  void Restore() override {}
+  void SetResizable(bool) override {}
+  void DraggableRegionsChanged(
+      blink::Vector<blink::mojom::blink::DraggableRegionPtr>) override {}
+  void OnFirstContentfulPaint(base::TimeDelta) override {}
+
+ private:
+  const uint64_t frame_key_;
+};
+
+}  // namespace
+
+void MbBindLocalMainFrameHost(mojo::ScopedInterfaceEndpointHandle handle,
+                              uint64_t frame_key) {
+  mojo::MakeSelfOwnedAssociatedReceiver(
+      std::make_unique<MbLocalMainFrameHost>(frame_key),
+      mojo::PendingAssociatedReceiver<blink::mojom::blink::LocalMainFrameHost>(
           std::move(handle)));
 }
 

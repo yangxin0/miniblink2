@@ -27,6 +27,19 @@ extern "C" {
 
 typedef struct mbView mbView;
 
+// ---- Version handshake -------------------------------------------------------
+// Callable BEFORE mbInitialize — a dlopen-ing host verifies what it bound at
+// load time instead of failing at the first missing symbol (or worse, silently
+// running a mismatched pair). Returned strings are static; do not free.
+// Engine (this library) version, e.g. "0.4.0-dev".
+MB_EXPORT const char* mbVersion(void);
+// Header/ABI compatibility number; bumped on any breaking change to this API.
+// A host built against MB_API_VERSION N should refuse an engine reporting < N.
+#define MB_API_VERSION 1
+MB_EXPORT int mbApiVersion(void);
+// The upstream Chromium the engine embeds, e.g. "150.0.7871.24".
+MB_EXPORT const char* mbChromiumVersion(void);
+
 // Process-wide engine bring-up / teardown. Call mbInitialize() once on the
 // thread that will be Blink's main thread, before any other call. It is idempotent:
 // extra calls return success and reuse the running engine.
@@ -77,6 +90,16 @@ MB_EXPORT void mbPurgeMemory(void);
 // Log a coarse memory summary (V8 heap, malloc footprint) to stderr —
 // before/after bookends for mbPurgeMemory.
 MB_EXPORT void mbLogMemoryUsage(void);
+
+// Host log sink: route the engine's diagnostic log (base logging — LOG(ERROR)
+// and friends, including mbLogMemoryUsage's summary) to a callback instead of
+// stderr, so it lands in the HOST's logging. `level` is 0 info / 1 warning /
+// 2 error / 3 fatal; `message` is a single NUL-terminated line without the
+// trailing newline. Process-wide; may be set before mbInitialize. The callback
+// may fire on any engine thread — keep it thread-safe and cheap. NULL restores
+// stderr.
+typedef void (*mbLogCallback)(void* userdata, int level, const char* message);
+MB_EXPORT void mbOnLogMessage(mbLogCallback cb, void* userdata);
 
 // 1 while any engine-entering mb* call is on the current stack. Hosts that must
 // gate their own work (e.g. skip a blit when a pump tick landed inside a load)
@@ -222,6 +245,63 @@ MB_EXPORT void mbOnDownload(mbView*, mbDownloadCallback, void* userdata);
 typedef void (*mbNewWindowCallback)(mbView*, void* userdata, const char* url,
                                     const char* name);
 MB_EXPORT void mbOnNewWindow(mbView*, mbNewWindowCallback, void* userdata);
+
+// ---- Pointer-UI state (page -> host) -----------------------------------------
+// An offscreen view has no OS window, so the engine must TELL the host when the
+// page wants a different pointer: an I-beam over selectable text, a hand over a
+// link, resize arrows at a draggable edge. The callback fires with an
+// MB_CURSOR_* code whenever blink changes the cursor for this view (on change
+// only, not per mouse move). The values mirror blink's cursor-type enum;
+// unlisted/custom cursors report MB_CURSOR_POINTER. NULL clears.
+#define MB_CURSOR_POINTER      0   /* default arrow */
+#define MB_CURSOR_CROSS        1
+#define MB_CURSOR_HAND         2   /* links */
+#define MB_CURSOR_IBEAM        3   /* text */
+#define MB_CURSOR_WAIT         4
+#define MB_CURSOR_HELP         5
+#define MB_CURSOR_EAST_RESIZE  6
+#define MB_CURSOR_NORTH_RESIZE 7
+#define MB_CURSOR_NORTH_EAST_RESIZE 8
+#define MB_CURSOR_NORTH_WEST_RESIZE 9
+#define MB_CURSOR_SOUTH_RESIZE 10
+#define MB_CURSOR_SOUTH_EAST_RESIZE 11
+#define MB_CURSOR_SOUTH_WEST_RESIZE 12
+#define MB_CURSOR_WEST_RESIZE  13
+#define MB_CURSOR_NS_RESIZE    14
+#define MB_CURSOR_EW_RESIZE    15
+#define MB_CURSOR_NESW_RESIZE  16
+#define MB_CURSOR_NWSE_RESIZE  17
+#define MB_CURSOR_COL_RESIZE   18
+#define MB_CURSOR_ROW_RESIZE   19
+#define MB_CURSOR_MOVE         29
+#define MB_CURSOR_VERTICAL_TEXT 30
+#define MB_CURSOR_CELL         31
+#define MB_CURSOR_CONTEXT_MENU 32
+#define MB_CURSOR_ALIAS        33
+#define MB_CURSOR_PROGRESS     34
+#define MB_CURSOR_NO_DROP      35
+#define MB_CURSOR_COPY         36
+#define MB_CURSOR_NONE         37
+#define MB_CURSOR_NOT_ALLOWED  38
+#define MB_CURSOR_ZOOM_IN      39
+#define MB_CURSOR_ZOOM_OUT     40
+#define MB_CURSOR_GRAB         41
+#define MB_CURSOR_GRABBING     42
+typedef void (*mbCursorChangedCallback)(mbView*, void* userdata, int cursor);
+MB_EXPORT void mbOnCursorChanged(mbView*, mbCursorChangedCallback, void* userdata);
+
+// Hover tooltip (the <element title="..."> bubble a browser window would show).
+// Fires with the UTF-8 text when a tooltip should appear and with "" when it
+// should hide. The pointer is valid only during the call. NULL clears.
+typedef void (*mbTooltipChangedCallback)(mbView*, void* userdata,
+                                         const char* text);
+MB_EXPORT void mbOnTooltipChanged(mbView*, mbTooltipChangedCallback, void* userdata);
+
+// window.close(): the page asked to close its window (a close button, an OAuth
+// flow finishing). Notification only — the engine does nothing; the host
+// decides whether to hide or destroy the view. NULL clears.
+typedef void (*mbRequestCloseCallback)(mbView*, void* userdata);
+MB_EXPORT void mbOnRequestClose(mbView*, mbRequestCloseCallback, void* userdata);
 
 // Host-driven POST navigation: POST `body` to an http(s) `url` with `content_type`
 // (NULL/empty -> application/x-www-form-urlencoded) and commit the response as the
@@ -503,6 +583,12 @@ MB_EXPORT void mbSetDarkMode(mbView*, int dark);
 // if the window lost focus; setting it restores focus. For simulating focus/blur.
 MB_EXPORT void mbSetFocus(mbView*, int focused);
 
+// 1 when the page has VISIBLE keyboard focus — the focused element accepts text
+// (an <input>/<textarea>/contenteditable with a caret) — 0 otherwise. Distinct
+// from window focus (mbSetFocus): a host with global hotkeys routes keystrokes
+// to the page only while this is 1, and keeps its own shortcuts otherwise.
+MB_EXPORT int mbHasInputFocus(mbView*);
+
 // Bind a native C function callable from JS as window[name](...). JS arguments
 // are coerced to UTF-8 strings (argc/argv); argtypes[i] reports each arg's JS
 // type (0=string,1=number,2=boolean,3=null,4=undefined,5=object,6=array,
@@ -765,6 +851,14 @@ MB_EXPORT int mbCanGoBack(mbView*);
 MB_EXPORT int mbCanGoForward(mbView*);
 MB_EXPORT int mbGoBack(mbView*);
 MB_EXPORT int mbGoForward(mbView*);
+
+// History-state push: fires with the new (can_go_back, can_go_forward) whenever
+// the session history changes — commits, traversals, truncation — and only when
+// one of the two flags actually flipped. Hosts enable/disable their nav buttons
+// event-driven instead of polling mbCanGoBack/Forward per tick. NULL clears.
+typedef void (*mbHistoryChangedCallback)(mbView*, void* userdata,
+                                         int can_go_back, int can_go_forward);
+MB_EXPORT void mbOnHistoryChanged(mbView*, mbHistoryChangedCallback, void* userdata);
 
 // Live console push: the callback fires for EACH page console message as it happens
 // (console.log/warn/error) with its `level` ("log"/"warn"/"error"/"verbose") and `message`

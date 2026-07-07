@@ -15,6 +15,9 @@
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "miniblink_host/platform/mb_compositor.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
+#include "ui/base/cursor/cursor.h"
+#include "ui/base/ime/mojom/text_input_state.mojom-blink.h"
+#include "ui/base/ime/text_input_type.h"
 #include "ui/display/screen_info.h"
 #include "ui/display/screen_infos.h"
 #include "third_party/blink/public/common/input/web_coalesced_input_event.h"
@@ -30,6 +33,7 @@
 #include "third_party/blink/public/mojom/page/widget.mojom-blink.h"
 #include "third_party/blink/public/mojom/widget/platform_widget.mojom-blink.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
+#include "third_party/blink/public/web/web_input_method_controller.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
 #include "ui/base/ime/ime_text_span.h"
@@ -107,6 +111,64 @@ MbWidget* g_frame_sink_hook_owner = nullptr;
 
 MbWidget::MbWidget() = default;
 
+// ---- WidgetHost: blink -> host UI state --------------------------------------
+
+void MbWidget::SetCursor(const ui::Cursor& cursor) {
+  // Flatten to the MB_CURSOR_* code space (the mojom enum's numeric values).
+  // A custom (bitmap) cursor has no flat representation — report the default.
+  int type = static_cast<int>(cursor.type());
+  if (cursor.type() == ui::mojom::CursorType::kCustom ||
+      cursor.type() == ui::mojom::CursorType::kNull) {
+    type = static_cast<int>(ui::mojom::CursorType::kPointer);
+  }
+  if (type == last_cursor_)
+    return;
+  last_cursor_ = type;
+  if (on_cursor_changed_)
+    on_cursor_changed_(type);
+}
+
+void MbWidget::UpdateTooltipUnderCursor(
+    const blink::String& tooltip_text,
+    base::i18n::TextDirection /*text_direction_hint*/) {
+  std::string text = tooltip_text.IsNull() ? std::string() : tooltip_text.Utf8();
+  if (text == last_tooltip_)
+    return;
+  last_tooltip_ = text;
+  if (on_tooltip_changed_)
+    on_tooltip_changed_(text);
+}
+
+void MbWidget::UpdateTooltipFromKeyboard(
+    const blink::String& tooltip_text,
+    base::i18n::TextDirection direction,
+    const gfx::Rect& /*bounds*/) {
+  UpdateTooltipUnderCursor(tooltip_text, direction);
+}
+
+void MbWidget::ClearKeyboardTriggeredTooltip() {
+  UpdateTooltipUnderCursor(blink::String(""), base::i18n::TextDirection());
+}
+
+bool MbWidget::HasInputFocus() const {
+  if (has_input_focus_)
+    return true;
+  if (!widget_)
+    return false;
+  blink::WebInputMethodController* controller =
+      widget_->GetActiveWebInputMethodController();
+  return controller &&
+         controller->TextInputType() != blink::kWebTextInputTypeNone;
+}
+
+void MbWidget::TextInputStateChanged(
+    ui::mojom::blink::TextInputStatePtr state) {
+  // Non-NONE text-input type == an editable with a caret has focus. Powers the
+  // synchronous mbHasInputFocus query for host keystroke routing.
+  has_input_focus_ =
+      state && state->type != ui::TEXT_INPUT_TYPE_NONE;
+}
+
 MbWidget::~MbWidget() {
   // Clear the process-global frame-sink hook if THIS widget still owns it, so the
   // dangling Unretained(compositor_.get()) can't be Run() after we (and the compositor)
@@ -135,8 +197,14 @@ void MbWidget::Attach(blink::WebLocalFrame* main_frame, int width, int height,
   auto widget_receiver =
       widget_remote.BindNewEndpointAndPassDedicatedReceiver();
 
+  // Bind the WidgetHost browser end to THIS widget (instead of dropping it),
+  // so blink's SetCursor / UpdateTooltipUnderCursor / TextInputStateChanged
+  // reports reach the embedder (mbOnCursorChanged / mbOnTooltipChanged /
+  // mbHasInputFocus).
   mojo::AssociatedRemote<blink::mojom::blink::WidgetHost> widget_host;
-  std::ignore = widget_host.BindNewEndpointAndPassDedicatedReceiver();
+  widget_host_receiver_.reset();  // re-Attach safety
+  widget_host_receiver_.Bind(
+      widget_host.BindNewEndpointAndPassDedicatedReceiver());
 
   widget_ = main_frame->InitializeFrameWidget(
       frame_widget_host.Unbind(), std::move(frame_widget_receiver),

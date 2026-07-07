@@ -132,6 +132,16 @@ void MbFrameClient::SetFrame(blink::WebLocalFrame* frame) {
                           weak_factory_.GetWeakPtr()),
       base::BindRepeating(&MbFrameClient::OnPageDownloadFetch,
                           weak_factory_.GetWeakPtr()));
+  // window.close() (LocalMainFrameHost::RequestClose) — registered after the
+  // history sink so it lands on the same entry/runner.
+  MbSetRequestCloseHandler(
+      frame_key_, base::BindRepeating(&MbFrameClient::OnRequestClose,
+                                      weak_factory_.GetWeakPtr()));
+}
+
+void MbFrameClient::OnRequestClose() {
+  if (!self_owned_ && owner_)
+    owner_->OnRequestClose();
 }
 
 void MbFrameClient::OnPageDownload(const std::string& url,

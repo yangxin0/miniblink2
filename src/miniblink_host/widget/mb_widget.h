@@ -13,8 +13,12 @@
 #ifndef MINIBLINK_HOST_WIDGET_MB_WIDGET_H_
 #define MINIBLINK_HOST_WIDGET_MB_WIDGET_H_
 
+#include <functional>
 #include <memory>
+#include <string>
 
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "third_party/blink/public/mojom/widget/platform_widget.mojom-blink.h"
 #include "third_party/blink/public/web/web_non_composited_widget_client.h"
 
 namespace blink {
@@ -26,7 +30,8 @@ namespace mb {
 
 class SoftwareCompositor;
 
-class MbWidget : public blink::WebNonCompositedWidgetClient {
+class MbWidget : public blink::WebNonCompositedWidgetClient,
+                 public blink::mojom::blink::WidgetHost {
  public:
   MbWidget();
   ~MbWidget() override;
@@ -102,6 +107,49 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   bool needs_frame() const { return needs_frame_; }
   void set_needs_frame(bool on) { needs_frame_ = on; }
 
+  // ---- WidgetHost (blink -> host UI state) ----------------------------------
+  // We bind the browser end of the widget's WidgetHost channel (previously
+  // dropped) so blink's cursor / tooltip / text-input-state reports reach the
+  // embedder instead of the void.
+  void SetCursor(const ui::Cursor& cursor) override;
+  void UpdateTooltipUnderCursor(
+      const blink::String& tooltip_text,
+      base::i18n::TextDirection text_direction_hint) override;
+  void UpdateTooltipFromKeyboard(const blink::String& tooltip_text,
+                                 base::i18n::TextDirection text_direction_hint,
+                                 const gfx::Rect& bounds) override;
+  void ClearKeyboardTriggeredTooltip() override;
+  void TextInputStateChanged(ui::mojom::blink::TextInputStatePtr state) override;
+  void SelectionBoundsChanged(const gfx::Rect& anchor_rect,
+                              base::i18n::TextDirection anchor_dir,
+                              const gfx::Rect& focus_rect,
+                              base::i18n::TextDirection focus_dir,
+                              const gfx::Rect& bounding_box_rect,
+                              bool is_anchor_first) override {}
+  void CreateFrameSink(
+      mojo::PendingReceiver<viz::mojom::blink::CompositorFrameSink>,
+      mojo::PendingRemote<viz::mojom::blink::CompositorFrameSinkClient>,
+      mojo::PendingRemote<blink::mojom::blink::RenderInputRouterClient>)
+      override {}
+  void RegisterRenderFrameMetadataObserver(
+      mojo::PendingReceiver<cc::mojom::blink::RenderFrameMetadataObserverClient>,
+      mojo::PendingRemote<cc::mojom::blink::RenderFrameMetadataObserver>)
+      override {}
+
+  // Cursor code (the ui::mojom::CursorType value; custom -> kPointer), fired on
+  // change only. Tooltip text (UTF-8; "" = hide), deduped. {} clears.
+  void SetCursorChangedCallback(std::function<void(int)> cb) {
+    on_cursor_changed_ = std::move(cb);
+  }
+  void SetTooltipChangedCallback(std::function<void(const std::string&)> cb) {
+    on_tooltip_changed_ = std::move(cb);
+  }
+  // True when the focused element accepts text input (an editable with a
+  // caret). Queried synchronously from the active input-method controller —
+  // blink only PUSHES TextInputStateChanged for browser-focused widgets, which
+  // this headless widget never is; the pushed state is kept as a fast path.
+  bool HasInputFocus() const;
+
   blink::WebFrameWidget* widget() { return widget_; }
   // The software compositor backing this widget when attached compositing, else null.
   SoftwareCompositor* compositor() { return compositor_.get(); }
@@ -120,6 +168,14 @@ class MbWidget : public blink::WebNonCompositedWidgetClient {
   void SetRealisticScreen(int view_w, int view_h);
 
   blink::WebFrameWidget* widget_ = nullptr;  // owned by Blink (the frame)
+  // Browser end of the widget's WidgetHost channel (bound in Attach).
+  mojo::AssociatedReceiver<blink::mojom::blink::WidgetHost>
+      widget_host_receiver_{this};
+  std::function<void(int)> on_cursor_changed_;
+  std::function<void(const std::string&)> on_tooltip_changed_;
+  int last_cursor_ = 0;               // ui::mojom::CursorType::kPointer
+  std::string last_tooltip_;
+  bool has_input_focus_ = false;      // last reported text-input state != NONE
   bool needs_frame_ = true;  // start dirty: the first paint is always wanted
   bool mouse_pressed_ = false;  // left button held (drag): moves carry the mask
   bool composited_ = false;

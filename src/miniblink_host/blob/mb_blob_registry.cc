@@ -770,6 +770,12 @@ class MbNavAssociatedInterfaceProvider
       MbBindLocalFrameHost(receiver.PassHandle(), frame_key_);
       return;
     }
+    // The WebView-level main-frame host: window.close() (RequestClose) routes
+    // to the host's mbOnRequestClose; everything else no-ops (with replies run).
+    if (name == blink::mojom::blink::LocalMainFrameHost::Name_) {
+      MbBindLocalMainFrameHost(receiver.PassHandle(), frame_key_);
+      return;
+    }
     // Other associated interfaces are not provided here (dropped).
   }
 
