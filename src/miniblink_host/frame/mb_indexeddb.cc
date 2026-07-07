@@ -1543,12 +1543,20 @@ bool DeserializeRegistry(const std::string& buf, bool merge = false) {
   // Commit: replace the live registry with the restored set. RETIRE (don't free)
   // the backends being replaced — a page may still hold a live IDB handle whose raw
   // backend_ points into one of them (freeing here was a use-after-free).
-  for (auto& kv : Registry())
-    RetireBackend(std::move(kv.second));
   if (merge) {
-    for (auto& [k, v] : loaded)
+    // Retire ONLY the backends actually replaced (same key). Retiring every
+    // live backend here left the untouched registry slots holding moved-out
+    // (null) unique_ptrs — the next whole-registry walk (a session flush's
+    // SerializeWithBlobsOnService) crashed dereferencing them.
+    for (auto& [k, v] : loaded) {
+      auto it = Registry().find(k);
+      if (it != Registry().end())
+        RetireBackend(std::move(it->second));
       Registry()[k] = std::move(v);  // same-key: file wins
+    }
   } else {
+    for (auto& kv : Registry())
+      RetireBackend(std::move(kv.second));
     Registry() = std::move(loaded);
   }
   return true;
