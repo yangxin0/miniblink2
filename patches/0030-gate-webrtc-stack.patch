@@ -1,0 +1,2101 @@
+--- a/third_party/blink/renderer/config.gni
++++ b/third_party/blink/renderer/config.gni
+@@ -82,3 +82,13 @@
+ # target_os="android". Using target_os is necessary as we need to compile in the
+ # same way as would happen when current_os="android".
+ target_os_is_android = target_os == "android"
++
++# miniblink (patch 0030): WebRTC/peerconnection stack is compile-time
++# optional (build-lib.sh --webrtc). mediastream (getUserMedia surface)
++# stays; only RTC* interfaces and third_party/webrtc are gated.
++declare_args() {
++  mb_enable_webrtc = true
++}
++if (mb_enable_webrtc) {
++  feature_defines_list += [ "MB_ENABLE_WEBRTC=1" ]
++}
+--- a/third_party/blink/renderer/bindings/idl_in_modules.gni
++++ b/third_party/blink/renderer/bindings/idl_in_modules.gni
+@@ -567,79 +567,6 @@
+   "//third_party/blink/renderer/modules/payments/payment_shipping_option.idl",
+   "//third_party/blink/renderer/modules/payments/payment_validation_errors.idl",
+   "//third_party/blink/renderer/modules/payments/secure_payment_confirmation_request.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/dedicated_worker_global_scope_rtc_transform.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_answer_options.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_certificate.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_codec_specifics.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_configuration.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_data_channel.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_data_channel_event.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_data_channel_event_init.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_data_channel_init.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_dtls_fingerprint.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_dtls_transport.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_dtmf_sender.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_dtmf_tone_change_event.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_dtmf_tone_change_event_init.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_encoded_audio_frame.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_encoded_audio_frame_options.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_encoded_audio_frame_metadata.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_encoded_video_frame.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_encoded_video_frame_options.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_encoded_frame_metadata.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_encoded_video_frame_metadata.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_encoding_options.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_error.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_error_event.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_error_event_init.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_error_init.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_ice_candidate.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_ice_candidate_init.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_ice_candidate_pair.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_ice_parameters.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_ice_server.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_ice_transport.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_insertable_streams.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_offer_answer_options.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_offer_options.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_ice_error_event.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_ice_error_event_init.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_ice_event.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_ice_event_init.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtcp_parameters.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_capabilities.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_codec.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_codec_capability.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_codec_parameters.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_coding_parameters.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_contributing_source.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_decoding_parameters.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_encoding_parameters.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_header_extension_capability.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_header_extension_parameters.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_parameters.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_receive_parameters.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_receiver.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_script_transform.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_script_transformer.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_send_parameters.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_sender.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_synchronization_source.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_transceiver.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_transceiver_init.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_sctp_transport.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_session_description.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_session_description_init.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_set_parameter_options.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_stats_report.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_track_event.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_track_event_init.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_transform_event.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_transport/rtc_received_packet.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_transport/rtc_transport.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_transport/rtc_transport_ice_candidate.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/rtc_transport/rtc_transport_ice_event.idl",
+   "//third_party/blink/renderer/modules/permissions/camera_device_permission_descriptor.idl",
+   "//third_party/blink/renderer/modules/permissions/clipboard_permission_descriptor.idl",
+   "//third_party/blink/renderer/modules/permissions/fullscreen_permission_descriptor.idl",
+@@ -694,9 +621,6 @@
+   "//third_party/blink/renderer/modules/quota/navigator_storage.idl",
+   "//third_party/blink/renderer/modules/remoteplayback/html_media_element_remote_playback.idl",
+   "//third_party/blink/renderer/modules/remoteplayback/remote_playback.idl",
+-  "//third_party/blink/renderer/modules/webrtc/navigator_rtc.idl",
+-  "//third_party/blink/renderer/modules/webrtc/rtc.idl",
+-  "//third_party/blink/renderer/modules/webrtc/rtc_diagnostic_logging_options.idl",
+   "//third_party/blink/renderer/modules/screen_details/screen_detailed.idl",
+   "//third_party/blink/renderer/modules/screen_details/screen_details.idl",
+   "//third_party/blink/renderer/modules/screen_details/window_screen_details.idl",
+@@ -1390,8 +1314,6 @@
+   "//third_party/blink/renderer/modules/fuzzing/internals_fuzzing.idl",
+   "//third_party/blink/renderer/modules/mediastream/testing/internals_media_stream.idl",
+   "//third_party/blink/renderer/modules/netinfo/testing/internals_net_info.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/testing/internals_rtc_certificate.idl",
+-  "//third_party/blink/renderer/modules/peerconnection/testing/internals_rtc_peer_connection.idl",
+   "//third_party/blink/renderer/modules/permissions/testing/internals_permission.idl",
+   "//third_party/blink/renderer/modules/sensor/testing/internals_sensor.idl",
+   "//third_party/blink/renderer/modules/sensor/testing/create_virtual_sensor_options.idl",
+@@ -1408,5 +1330,95 @@
+   static_idl_files_in_modules_for_testing += [
+     "//third_party/blink/renderer/modules/compute_pressure/testing/create_virtual_pressure_source_options.idl",
+     "//third_party/blink/renderer/modules/compute_pressure/testing/internals_compute_pressure.idl",
++  ]
++}
++
++# miniblink (patch 0030): WebRTC/peerconnection stack is compile-time
++# optional (build-lib.sh --webrtc). mediastream (getUserMedia surface)
++# stays; only RTC* interfaces and third_party/webrtc are gated.
++if (mb_enable_webrtc) {
++  static_idl_files_in_modules += [
++    "//third_party/blink/renderer/modules/webrtc/navigator_rtc.idl",
++    "//third_party/blink/renderer/modules/webrtc/rtc.idl",
++    "//third_party/blink/renderer/modules/webrtc/rtc_diagnostic_logging_options.idl",
++    "//third_party/blink/renderer/modules/peerconnection/dedicated_worker_global_scope_rtc_transform.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_answer_options.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_certificate.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_codec_specifics.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_configuration.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_data_channel.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_data_channel_event.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_data_channel_event_init.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_data_channel_init.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_dtls_fingerprint.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_dtls_transport.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_dtmf_sender.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_dtmf_tone_change_event.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_dtmf_tone_change_event_init.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_encoded_audio_frame.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_encoded_audio_frame_options.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_encoded_audio_frame_metadata.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_encoded_video_frame.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_encoded_video_frame_options.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_encoded_frame_metadata.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_encoded_video_frame_metadata.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_encoding_options.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_error.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_error_event.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_error_event_init.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_error_init.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_ice_candidate.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_ice_candidate_init.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_ice_candidate_pair.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_ice_parameters.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_ice_server.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_ice_transport.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_insertable_streams.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_offer_answer_options.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_offer_options.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_ice_error_event.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_ice_error_event_init.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_ice_event.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_peer_connection_ice_event_init.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtcp_parameters.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_capabilities.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_codec.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_codec_capability.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_codec_parameters.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_coding_parameters.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_contributing_source.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_decoding_parameters.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_encoding_parameters.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_header_extension_capability.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_header_extension_parameters.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_parameters.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_receive_parameters.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_receiver.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_script_transform.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_script_transformer.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_send_parameters.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_sender.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_synchronization_source.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_transceiver.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_rtp_transceiver_init.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_sctp_transport.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_session_description.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_session_description_init.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_set_parameter_options.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_stats_report.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_track_event.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_track_event_init.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_transform_event.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_transport/rtc_received_packet.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_transport/rtc_transport.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_transport/rtc_transport_ice_candidate.idl",
++    "//third_party/blink/renderer/modules/peerconnection/rtc_transport/rtc_transport_ice_event.idl",
+   ]
+ }
++if (mb_enable_webrtc) {
++  static_idl_files_in_modules_for_testing += [
++    "//third_party/blink/renderer/modules/peerconnection/testing/internals_rtc_certificate.idl",
++    "//third_party/blink/renderer/modules/peerconnection/testing/internals_rtc_peer_connection.idl",
++  ]
++}
+--- a/third_party/blink/renderer/bindings/generated_in_modules.gni
++++ b/third_party/blink/renderer/bindings/generated_in_modules.gni
+@@ -53,10 +53,6 @@
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_paint_callback.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_remote_playback_availability_callback.cc",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_remote_playback_availability_callback.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_error_callback.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_error_callback.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_session_description_callback.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_session_description_callback.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_run_function_for_shared_storage_run_operation.cc",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_run_function_for_shared_storage_run_operation.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_run_function_for_shared_storage_select_url_operation.cc",
+@@ -564,12 +560,6 @@
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_gpu_render_pass_descriptor.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_gpu_render_pass_layout.cc",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_gpu_render_pass_layout.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_send_packet_parameters.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_send_packet_parameters.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_config.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_config.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_parameters.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_parameters.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_gpu_render_pass_timestamp_writes.cc",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_gpu_render_pass_timestamp_writes.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_gpu_render_pipeline_descriptor.cc",
+@@ -1096,140 +1086,6 @@
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_router_source.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rsa_other_primes_info.cc",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rsa_other_primes_info.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_answer_options.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_answer_options.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_audio_playout_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_audio_playout_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_audio_source_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_audio_source_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_certificate_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_certificate_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_codec_specifics_vp_8.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_codec_specifics_vp_8.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_codec_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_codec_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_configuration.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_configuration.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_event_init.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_event_init.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_init.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_init.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_fingerprint.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_fingerprint.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtmf_tone_change_event_init.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtmf_tone_change_event_init.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoding_options.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoding_options.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_audio_frame_options.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_audio_frame_options.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_audio_frame_metadata.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_audio_frame_metadata.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame_options.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame_options.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame_metadata.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame_metadata.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_frame_metadata.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_frame_metadata.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_resolution_restriction.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_resolution_restriction.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error_event_init.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error_event_init.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error_init.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error_init.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_ice_candidate_init.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_ice_candidate_init.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_init.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_init.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_pair.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_pair.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_pair_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_pair_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_parameters.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_parameters.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_server.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_server.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_inbound_rtp_stream_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_inbound_rtp_stream_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_insertable_streams.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_insertable_streams.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_media_source_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_media_source_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_offer_answer_options.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_offer_answer_options.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_offer_options.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_offer_options.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_outbound_rtp_stream_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_outbound_rtp_stream_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_ice_error_event_init.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_ice_error_event_init.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_ice_event_init.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_ice_event_init.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_received_rtp_stream_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_received_rtp_stream_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_remote_inbound_rtp_stream_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_remote_inbound_rtp_stream_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_remote_outbound_rtp_stream_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_remote_outbound_rtp_stream_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtcp_parameters.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtcp_parameters.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_capabilities.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_capabilities.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_codec.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_codec.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_codec_capability.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_codec_capability.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_codec_parameters.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_codec_parameters.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_coding_parameters.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_coding_parameters.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_contributing_source.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_contributing_source.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_decoding_parameters.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_decoding_parameters.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_encoding_parameters.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_encoding_parameters.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_header_extension_capability.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_header_extension_capability.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_header_extension_parameters.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_header_extension_parameters.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_parameters.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_parameters.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_receive_parameters.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_receive_parameters.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_send_parameters.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_send_parameters.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_stream_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_stream_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_synchronization_source.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_synchronization_source.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_transceiver_init.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_transceiver_init.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_sent_rtp_stream_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_sent_rtp_stream_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_session_description_init.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_session_description_init.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_set_parameter_options.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_set_parameter_options.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_diagnostic_logging_options.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_diagnostic_logging_options.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_finish_diagnostic_logging_options.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_finish_diagnostic_logging_options.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_start_diagnostic_logging_options.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_start_diagnostic_logging_options.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_track_event_init.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_track_event_init.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_stats.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_video_source_stats.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_video_source_stats.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_save_file_picker_options.cc",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_save_file_picker_options.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_secure_payment_confirmation_request.cc",
+@@ -1848,66 +1704,6 @@
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rewriter_tone.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_router_source_enum.cc",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_router_source_enum.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_bundle_policy.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_bundle_policy.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_state.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_state.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_degradation_preference.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_degradation_preference.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_role.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_role.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_transport_state.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_transport_state.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame_type.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame_type.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error_detail_type.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error_detail_type.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_type.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_type.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_component.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_component.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_connection_state.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_connection_state.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_gathering_state.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_gathering_state.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_protocol.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_protocol.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_role.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_role.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_server_transport_protocol.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_server_transport_protocol.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_tcp_candidate_type.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_tcp_candidate_type.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_transport_policy.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_transport_policy.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_transport_state.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_transport_state.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_network_type.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_network_type.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_state.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_state.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_priority_type.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_priority_type.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_quality_limitation_reason.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_quality_limitation_reason.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtcp_mux_policy.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtcp_mux_policy.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_transceiver_direction.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_transceiver_direction.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_sctp_transport_state.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_sctp_transport_state.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_sdp_type.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_sdp_type.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_signaling_state.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_signaling_state.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_stats_ice_candidate_pair_state.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_stats_ice_candidate_pair_state.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_stats_type.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_stats_type.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_ssl_role.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_ssl_role.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_wire_protocol.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_wire_protocol.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_running_status_enum.cc",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_running_status_enum.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_screen_idle_state.cc",
+@@ -2808,66 +2604,6 @@
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_restriction_target.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rewriter.cc",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rewriter.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_received_packet.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_received_packet.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_ice_candidate.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_ice_candidate.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_ice_event.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_ice_event.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_certificate.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_certificate.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_event.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_event.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_transport.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_transport.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtmf_sender.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtmf_sender.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtmf_tone_change_event.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtmf_tone_change_event.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_audio_frame.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_audio_frame.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error_event.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error_event.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_transport.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_transport.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_ice_error_event.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_ice_error_event.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_ice_event.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_ice_event.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_script_transformer.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_script_transformer.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_script_transform.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_script_transform.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_receiver.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_receiver.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_sender.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_sender.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_transceiver.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_transceiver.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_sctp_transport.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_sctp_transport.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_session_description.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_session_description.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_stats_report.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_stats_report.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_track_event.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_track_event.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transform_event.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transform_event.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_screen.cc",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_screen.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_screen_capture_media_stream_track.cc",
+@@ -3342,8 +3078,6 @@
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_sync_iterator_midi_input_map.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_sync_iterator_midi_output_map.cc",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_sync_iterator_midi_output_map.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_sync_iterator_rtc_stats_report.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_sync_iterator_rtc_stats_report.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_sync_iterator_wgsl_language_features.cc",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_sync_iterator_wgsl_language_features.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_sync_iterator_xr_anchor_set.cc",
+@@ -3459,8 +3193,6 @@
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_union_mediakeystatus_undefined.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_union_mediasourcehandle_mediastream.cc",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_union_mediasourcehandle_mediastream.h",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_union_mediastreamtrack_string.cc",
+-  "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_union_mediastreamtrack_string.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_union_mediastreamtrackaudiostats_mediastreamtrackvideostats.cc",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_union_mediastreamtrackaudiostats_mediastreamtrackvideostats.h",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_union_path2d_string.cc",
+@@ -3698,3 +3430,300 @@
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/properties_per_feature_installer_for_testing.cc",
+   "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/properties_per_feature_installer_for_testing.h",
+ ]
++
++# miniblink (patch 0030): WebRTC/peerconnection stack is compile-time
++# optional (build-lib.sh --webrtc). mediastream (getUserMedia surface)
++# stays; only RTC* interfaces and third_party/webrtc are gated.
++if (mb_enable_webrtc) {
++  generated_callback_function_sources_in_modules += [
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_error_callback.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_error_callback.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_session_description_callback.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_session_description_callback.h",
++  ]
++}
++if (mb_enable_webrtc) {
++  generated_dictionary_sources_in_modules += [
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_send_packet_parameters.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_send_packet_parameters.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_config.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_config.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_parameters.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_parameters.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_answer_options.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_answer_options.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_audio_playout_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_audio_playout_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_audio_source_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_audio_source_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_certificate_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_certificate_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_codec_specifics_vp_8.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_codec_specifics_vp_8.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_codec_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_codec_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_configuration.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_configuration.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_event_init.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_event_init.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_init.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_init.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_fingerprint.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_fingerprint.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtmf_tone_change_event_init.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtmf_tone_change_event_init.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoding_options.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoding_options.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_audio_frame_options.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_audio_frame_options.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_audio_frame_metadata.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_audio_frame_metadata.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame_options.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame_options.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame_metadata.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame_metadata.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_frame_metadata.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_frame_metadata.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_resolution_restriction.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_resolution_restriction.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error_event_init.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error_event_init.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error_init.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error_init.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_ice_candidate_init.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_ice_candidate_init.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_init.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_init.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_pair.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_pair.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_pair_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_pair_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_parameters.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_parameters.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_server.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_server.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_inbound_rtp_stream_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_inbound_rtp_stream_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_insertable_streams.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_insertable_streams.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_media_source_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_media_source_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_offer_answer_options.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_offer_answer_options.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_offer_options.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_offer_options.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_outbound_rtp_stream_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_outbound_rtp_stream_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_ice_error_event_init.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_ice_error_event_init.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_ice_event_init.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_ice_event_init.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_received_rtp_stream_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_received_rtp_stream_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_remote_inbound_rtp_stream_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_remote_inbound_rtp_stream_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_remote_outbound_rtp_stream_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_remote_outbound_rtp_stream_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtcp_parameters.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtcp_parameters.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_capabilities.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_capabilities.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_codec.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_codec.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_codec_capability.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_codec_capability.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_codec_parameters.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_codec_parameters.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_coding_parameters.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_coding_parameters.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_contributing_source.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_contributing_source.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_decoding_parameters.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_decoding_parameters.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_encoding_parameters.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_encoding_parameters.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_header_extension_capability.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_header_extension_capability.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_header_extension_parameters.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_header_extension_parameters.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_parameters.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_parameters.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_receive_parameters.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_receive_parameters.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_send_parameters.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_send_parameters.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_stream_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_stream_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_synchronization_source.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_synchronization_source.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_transceiver_init.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_transceiver_init.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_sent_rtp_stream_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_sent_rtp_stream_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_session_description_init.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_session_description_init.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_set_parameter_options.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_set_parameter_options.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_diagnostic_logging_options.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_diagnostic_logging_options.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_finish_diagnostic_logging_options.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_finish_diagnostic_logging_options.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_start_diagnostic_logging_options.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_start_diagnostic_logging_options.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_track_event_init.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_track_event_init.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_stats.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_video_source_stats.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_video_source_stats.h",
++  ]
++}
++if (mb_enable_webrtc) {
++  generated_enumeration_sources_in_modules += [
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_bundle_policy.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_bundle_policy.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_state.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_state.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_degradation_preference.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_degradation_preference.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_role.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_role.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_transport_state.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_transport_state.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame_type.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame_type.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error_detail_type.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error_detail_type.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_type.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate_type.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_component.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_component.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_connection_state.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_connection_state.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_gathering_state.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_gathering_state.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_protocol.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_protocol.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_role.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_role.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_server_transport_protocol.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_server_transport_protocol.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_tcp_candidate_type.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_tcp_candidate_type.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_transport_policy.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_transport_policy.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_transport_state.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_transport_state.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_network_type.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_network_type.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_state.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_state.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_priority_type.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_priority_type.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_quality_limitation_reason.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_quality_limitation_reason.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtcp_mux_policy.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtcp_mux_policy.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_transceiver_direction.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_transceiver_direction.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_sctp_transport_state.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_sctp_transport_state.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_sdp_type.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_sdp_type.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_signaling_state.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_signaling_state.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_stats_ice_candidate_pair_state.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_stats_ice_candidate_pair_state.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_stats_type.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_stats_type.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_ssl_role.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_ssl_role.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_wire_protocol.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_wire_protocol.h",
++  ]
++}
++if (mb_enable_webrtc) {
++  generated_interface_sources_in_modules += [
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_received_packet.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_received_packet.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_ice_candidate.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_ice_candidate.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_ice_event.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transport_ice_event.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_certificate.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_certificate.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_event.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel_event.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_transport.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtls_transport.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtmf_sender.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtmf_sender.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtmf_tone_change_event.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_dtmf_tone_change_event.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_audio_frame.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_audio_frame.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error_event.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_error_event.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_candidate.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_transport.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_ice_transport.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_ice_error_event.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_ice_error_event.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_ice_event.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_ice_event.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_script_transformer.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_script_transformer.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_script_transform.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_script_transform.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_receiver.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_receiver.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_sender.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_sender.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_transceiver.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_rtp_transceiver.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_sctp_transport.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_sctp_transport.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_session_description.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_session_description.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_stats_report.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_stats_report.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_track_event.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_track_event.h",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transform_event.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_rtc_transform_event.h",
++  ]
++}
++if (mb_enable_webrtc) {
++  generated_sync_iterator_sources_in_modules += [
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_sync_iterator_rtc_stats_report.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_sync_iterator_rtc_stats_report.h",
++  ]
++}
++
++if (mb_enable_webrtc) {
++  generated_union_sources_in_modules += [
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_union_mediastreamtrack_string.cc",
++    "$root_gen_dir/third_party/blink/renderer/bindings/modules/v8/v8_union_mediastreamtrack_string.h",
++  ]
++}
+--- a/third_party/blink/renderer/bindings/modules/v8/serialization/v8_script_value_serializer_for_modules.cc
++++ b/third_party/blink/renderer/bindings/modules/v8/serialization/v8_script_value_serializer_for_modules.cc
+@@ -27,10 +27,13 @@
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_media_stream_track.h"
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_point_2d.h"
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_restriction_target.h"
++// miniblink (patch 0030): WebRTC types are compile-time optional.
++#if defined(MB_ENABLE_WEBRTC)
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_certificate.h"
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel.h"
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_audio_frame.h"
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame.h"
++#endif
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_video_frame.h"
+ #include "third_party/blink/renderer/core/dom/dom_exception.h"
+ #include "third_party/blink/renderer/modules/crypto/crypto_key.h"
+@@ -46,6 +49,7 @@
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_track.h"
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_utils.h"
+ #include "third_party/blink/renderer/modules/mediastream/restriction_target.h"
++#if defined(MB_ENABLE_WEBRTC)
+ #include "third_party/blink/renderer/modules/peerconnection/rtc_certificate.h"
+ #include "third_party/blink/renderer/modules/peerconnection/rtc_data_channel.h"
+ #include "third_party/blink/renderer/modules/peerconnection/rtc_data_channel_attachment.h"
+@@ -54,6 +58,7 @@
+ #include "third_party/blink/renderer/modules/peerconnection/rtc_encoded_audio_frame_delegate.h"
+ #include "third_party/blink/renderer/modules/peerconnection/rtc_encoded_video_frame.h"
+ #include "third_party/blink/renderer/modules/peerconnection/rtc_encoded_video_frame_delegate.h"
++#endif
+ #include "third_party/blink/renderer/modules/webcodecs/audio_data.h"
+ #include "third_party/blink/renderer/modules/webcodecs/audio_data_attachment.h"
+ #include "third_party/blink/renderer/modules/webcodecs/audio_data_transfer_list.h"
+@@ -112,6 +117,7 @@
+     return true;
+   }
+ 
++#if defined(MB_ENABLE_WEBRTC)
+   if (RTCDataChannel* channel =
+           V8RTCDataChannel::ToWrappable(isolate, object)) {
+     if (RuntimeEnabledFeatures::TransferableRTCDataChannelEnabled(
+@@ -131,6 +137,7 @@
+       return true;
+     }
+   }
++#endif  // defined(MB_ENABLE_WEBRTC)
+ 
+   if (MediaStreamTrack* track =
+           V8MediaStreamTrack::ToWrappable(isolate, object)) {
+@@ -224,6 +231,7 @@
+     }
+     return WriteFileSystemHandle(kFileSystemDirectoryHandleTag, dir_handle);
+   }
++#if defined(MB_ENABLE_WEBRTC)
+   if (auto* certificate = dispatcher.ToMostDerived<RTCCertificate>()) {
+     webrtc::RTCCertificatePEM pem = certificate->Certificate()->ToPEM();
+     WriteAndRequireInterfaceTag(kRTCCertificateTag);
+@@ -249,6 +257,7 @@
+     }
+     return WriteRTCEncodedVideoFrame(video_frame);
+   }
++#endif  // defined(MB_ENABLE_WEBRTC)
+   if (auto* video_frame = dispatcher.ToMostDerived<VideoFrame>()) {
+     if (IsForStorage()) {
+       exception_state.ThrowDOMException(DOMExceptionCode::kDataCloneError,
+@@ -312,6 +321,7 @@
+     }
+     return WriteMediaStreamTrack(track, dispatcher, exception_state);
+   }
++#if defined(MB_ENABLE_WEBRTC)
+   if (auto* channel = dispatcher.DowncastTo<RTCDataChannel>()) {
+     if (!RuntimeEnabledFeatures::TransferableRTCDataChannelEnabled(
+             ExecutionContext::From(GetScriptState()))) {
+@@ -332,6 +342,7 @@
+     }
+     return WriteRTCDataChannel(channel);
+   }
++#endif  // defined(MB_ENABLE_WEBRTC)
+   if (auto* crop_target = dispatcher.ToMostDerived<CropTarget>()) {
+     if (!RuntimeEnabledFeatures::RegionCaptureEnabled(
+             ExecutionContext::From(GetScriptState()))) {
+@@ -628,6 +639,7 @@
+   return true;
+ }
+ 
++#if defined(MB_ENABLE_WEBRTC)
+ bool V8ScriptValueSerializerForModules::WriteRTCEncodedAudioFrame(
+     RTCEncodedAudioFrame* audio_frame) {
+   auto* attachment =
+@@ -655,6 +667,7 @@
+   WriteUint32(index);
+   return true;
+ }
++#endif  // defined(MB_ENABLE_WEBRTC)
+ 
+ bool V8ScriptValueSerializerForModules::WriteVideoFrameHandle(
+     scoped_refptr<VideoFrameHandle> handle) {
+@@ -754,6 +767,7 @@
+   return true;
+ }
+ 
++#if defined(MB_ENABLE_WEBRTC)
+ bool V8ScriptValueSerializerForModules::WriteRTCDataChannel(
+     RTCDataChannel* channel) {
+   if (!RuntimeEnabledFeatures::TransferableRTCDataChannelEnabled()) {
+@@ -773,6 +787,7 @@
+ 
+   return true;
+ }
++#endif  // defined(MB_ENABLE_WEBRTC)
+ 
+ bool V8ScriptValueSerializerForModules::WriteCropTarget(
+     CropTarget* crop_target) {
+--- a/third_party/blink/renderer/bindings/modules/v8/serialization/v8_script_value_serializer_for_modules.h
++++ b/third_party/blink/renderer/bindings/modules/v8/serialization/v8_script_value_serializer_for_modules.h
+@@ -21,9 +21,12 @@
+ class FileSystemHandle;
+ class MediaSourceHandleImpl;
+ class RestrictionTarget;
++// miniblink (patch 0030): WebRTC types are compile-time optional.
++#if defined(MB_ENABLE_WEBRTC)
+ class RTCEncodedAudioFrame;
+ class RTCEncodedVideoFrame;
+ class RTCDataChannel;
++#endif
+ class VideoFrameHandle;
+ class WebCryptoKey;
+ 
+@@ -51,8 +54,10 @@
+   bool WriteCryptoKey(const WebCryptoKey&, ExceptionState&);
+   bool WriteFileSystemHandle(SerializationTag tag,
+                              FileSystemHandle* file_system_handle);
++#if defined(MB_ENABLE_WEBRTC)
+   bool WriteRTCEncodedAudioFrame(RTCEncodedAudioFrame*);
+   bool WriteRTCEncodedVideoFrame(RTCEncodedVideoFrame*);
++#endif
+   bool WriteVideoFrameHandle(scoped_refptr<VideoFrameHandle>);
+   bool WriteMediaAudioBuffer(scoped_refptr<media::AudioBuffer>);
+   bool WriteDecoderBuffer(scoped_refptr<media::DecoderBuffer> data,
+@@ -65,7 +70,9 @@
+   bool WriteMediaSourceHandle(MediaSourceHandleImpl* handle,
+                               ExceptionState& exception_state);
+ 
++#if defined(MB_ENABLE_WEBRTC)
+   bool WriteRTCDataChannel(RTCDataChannel*);
++#endif
+ };
+ 
+ }  // namespace blink
+--- a/third_party/blink/renderer/bindings/modules/v8/serialization/v8_script_value_deserializer_for_modules.cc
++++ b/third_party/blink/renderer/bindings/modules/v8/serialization/v8_script_value_deserializer_for_modules.cc
+@@ -27,10 +27,13 @@
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_media_source_handle.h"
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_media_stream_track.h"
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_restriction_target.h"
++// miniblink (patch 0030): WebRTC types are compile-time optional.
++#if defined(MB_ENABLE_WEBRTC)
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_certificate.h"
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_data_channel.h"
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_audio_frame.h"
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_encoded_video_frame.h"
++#endif
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_video_frame.h"
+ #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+ #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+@@ -44,6 +47,7 @@
+ #include "third_party/blink/renderer/modules/mediastream/crop_target.h"
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_track.h"
+ #include "third_party/blink/renderer/modules/mediastream/restriction_target.h"
++#if defined(MB_ENABLE_WEBRTC)
+ #include "third_party/blink/renderer/modules/peerconnection/rtc_certificate.h"
+ #include "third_party/blink/renderer/modules/peerconnection/rtc_certificate_generator.h"
+ #include "third_party/blink/renderer/modules/peerconnection/rtc_data_channel.h"
+@@ -52,6 +56,7 @@
+ #include "third_party/blink/renderer/modules/peerconnection/rtc_encoded_audio_frame_delegate.h"
+ #include "third_party/blink/renderer/modules/peerconnection/rtc_encoded_video_frame.h"
+ #include "third_party/blink/renderer/modules/peerconnection/rtc_encoded_video_frame_delegate.h"
++#endif
+ #include "third_party/blink/renderer/modules/webcodecs/audio_data.h"
+ #include "third_party/blink/renderer/modules/webcodecs/audio_data_attachment.h"
+ #include "third_party/blink/renderer/modules/webcodecs/decoder_buffer_attachment.h"
+@@ -94,6 +99,7 @@
+     case kFileSystemFileHandleTag:
+     case kFileSystemDirectoryHandleTag:
+       return ReadFileSystemHandle(tag);
++#if defined(MB_ENABLE_WEBRTC)
+     case kRTCCertificateTag: {
+       String pem_private_key;
+       String pem_certificate;
+@@ -116,6 +122,7 @@
+       return ReadRTCEncodedAudioFrame();
+     case kRTCEncodedVideoFrameTag:
+       return ReadRTCEncodedVideoFrame();
++#endif  // defined(MB_ENABLE_WEBRTC)
+     case kAudioDataTag:
+       return ReadAudioData();
+     case kVideoFrameTag:
+@@ -504,6 +511,7 @@
+   }
+ }
+ 
++#if defined(MB_ENABLE_WEBRTC)
+ RTCDataChannel* V8ScriptValueDeserializerForModules::ReadRTCDataChannel() {
+   if (!RuntimeEnabledFeatures::TransferableRTCDataChannelEnabled(
+           ExecutionContext::From(GetScriptState()))) {
+@@ -573,6 +581,7 @@
+ 
+   return MakeGarbageCollected<RTCEncodedVideoFrame>(frames[index]);
+ }
++#endif  // defined(MB_ENABLE_WEBRTC)
+ 
+ AudioData* V8ScriptValueDeserializerForModules::ReadAudioData() {
+   uint32_t index;
+@@ -782,6 +791,7 @@
+       return V8FileSystemFileHandle::IsExposed(execution_context);
+     case kFileSystemDirectoryHandleTag:
+       return V8FileSystemDirectoryHandle::IsExposed(execution_context);
++#if defined(MB_ENABLE_WEBRTC)
+     case kRTCCertificateTag:
+       return V8RTCCertificate::IsExposed(execution_context);
+     case kRTCEncodedAudioFrameTag:
+@@ -790,6 +800,7 @@
+       return V8RTCEncodedVideoFrame::IsExposed(execution_context);
+     case kRTCDataChannel:
+       return V8RTCDataChannel::IsExposed(execution_context);
++#endif  // defined(MB_ENABLE_WEBRTC)
+     case kAudioDataTag:
+       return V8AudioData::IsExposed(execution_context);
+     case kVideoFrameTag:
+--- a/third_party/blink/renderer/bindings/modules/v8/serialization/v8_script_value_deserializer_for_modules.h
++++ b/third_party/blink/renderer/bindings/modules/v8/serialization/v8_script_value_deserializer_for_modules.h
+@@ -18,9 +18,12 @@
+ class FileSystemHandle;
+ class MediaSourceHandleImpl;
+ class RestrictionTarget;
++// miniblink (patch 0030): WebRTC types are compile-time optional.
++#if defined(MB_ENABLE_WEBRTC)
+ class RTCEncodedAudioFrame;
+ class RTCEncodedVideoFrame;
+ class RTCDataChannel;
++#endif
+ class VideoFrame;
+ 
+ // Extends V8ScriptValueSerializer with support for modules/ types.
+@@ -45,14 +48,18 @@
+   }
+   CryptoKey* ReadCryptoKey();
+   FileSystemHandle* ReadFileSystemHandle(SerializationTag tag);
++#if defined(MB_ENABLE_WEBRTC)
+   RTCEncodedAudioFrame* ReadRTCEncodedAudioFrame();
+   RTCEncodedVideoFrame* ReadRTCEncodedVideoFrame();
++#endif
+   AudioData* ReadAudioData();
+   VideoFrame* ReadVideoFrame();
+   EncodedAudioChunk* ReadEncodedAudioChunk();
+   EncodedVideoChunk* ReadEncodedVideoChunk();
+   MediaStreamTrack* ReadMediaStreamTrack();
++#if defined(MB_ENABLE_WEBRTC)
+   RTCDataChannel* ReadRTCDataChannel();
++#endif
+   CropTarget* ReadCropTarget();
+   RestrictionTarget* ReadRestrictionTarget();
+   MediaSourceHandleImpl* ReadMediaSourceHandle();
+--- a/third_party/blink/renderer/modules/BUILD.gn
++++ b/third_party/blink/renderer/modules/BUILD.gn
+@@ -127,7 +127,6 @@
+     "//third_party/blink/renderer/modules/notifications",
+     "//third_party/blink/renderer/modules/payments",
+     "//third_party/blink/renderer/modules/payments/goods",
+-    "//third_party/blink/renderer/modules/peerconnection",
+     "//third_party/blink/renderer/modules/permissions",
+     "//third_party/blink/renderer/modules/picture_in_picture",
+     "//third_party/blink/renderer/modules/plugins",
+@@ -157,7 +156,6 @@
+     "//third_party/blink/renderer/modules/webgl",
+     "//third_party/blink/renderer/modules/webgpu",
+     "//third_party/blink/renderer/modules/webmidi",
+-    "//third_party/blink/renderer/modules/webrtc",
+     "//third_party/blink/renderer/modules/webshare",
+     "//third_party/blink/renderer/modules/websockets",
+     "//third_party/blink/renderer/modules/webtransport",
+@@ -194,23 +192,37 @@
+ 
+   if (enable_compute_pressure) {
+     sub_modules += [ "//third_party/blink/renderer/modules/compute_pressure" ]
++  }
++
++  # miniblink (patch 0030): RTCPeerConnection + the webrtc audio-device layer
++  # are compile-time optional (build-lib.sh --webrtc); mediastream stays.
++  if (mb_enable_webrtc) {
++    sub_modules += [
++      "//third_party/blink/renderer/modules/peerconnection",
++      "//third_party/blink/renderer/modules/webrtc",
++    ]
+   }
+ 
+   deps = [
+     ":make_modules_generated",
+     "//build:android_buildflags",
+     "//cc",
+-    "//components/webrtc:thread_wrapper",
+     "//gin",
+     "//net",
+     "//third_party/blink/renderer/bindings/modules/v8:generated",
+     "//third_party/blink/renderer/core",
+     "//third_party/icu",
+-    "//third_party/webrtc_overrides:webrtc_component",
+     "//third_party/zlib",
+     "//tools/v8_context_snapshot:buildflags",
+   ]
+ 
++  if (mb_enable_webrtc) {
++    deps += [
++      "//components/webrtc:thread_wrapper",
++      "//third_party/webrtc_overrides:webrtc_component",
++    ]
++  }
++
+   public_deps = sub_modules
+   allow_circular_includes_from = sub_modules
+ 
+--- a/third_party/blink/renderer/modules/modules_initializer.cc
++++ b/third_party/blink/renderer/modules/modules_initializer.cc
+@@ -78,7 +78,9 @@
+ #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
+ #include "third_party/blink/renderer/modules/mediasource/media_source_registry_impl.h"
+ #include "third_party/blink/renderer/modules/mediastream/user_media_request_provider_impl.h"
++#if defined(MB_ENABLE_WEBRTC)
+ #include "third_party/blink/renderer/modules/peerconnection/peer_connection_tracker.h"
++#endif
+ #include "third_party/blink/renderer/modules/presentation/presentation.h"
+ #include "third_party/blink/renderer/modules/push_messaging/push_messaging_client.h"
+ #include "third_party/blink/renderer/modules/remoteplayback/html_media_element_remote_playback.h"
+@@ -107,7 +109,9 @@
+ #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
+ #include "third_party/blink/renderer/platform/wtf/functional.h"
+ #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
++#if defined(MB_ENABLE_WEBRTC)
+ #include "third_party/webrtc_overrides/init_webrtc.h"
++#endif
+ #include "ui/accessibility/accessibility_features.h"
+ 
+ #if BUILDFLAG(IS_ANDROID)
+@@ -217,7 +221,9 @@
+   V8PerIsolateData::SetTaskAttributionTrackerFactory(
+       &scheduler::TaskAttributionTrackerImpl::Create);
+ 
++#if defined(MB_ENABLE_WEBRTC)
+   ::InitializeWebRtcModule();
++#endif
+ }
+ 
+ void ModulesInitializer::InitLocalFrame(LocalFrame& frame) const {
+@@ -246,9 +252,11 @@
+       &RemoteObjectGatewayFactoryImpl::Bind, WrapWeakPersistent(&frame)));
+ #endif  // BUILDFLAG(IS_ANDROID)
+ 
++#if defined(MB_ENABLE_WEBRTC)
+   frame.GetInterfaceRegistry()->AddInterface(
+       BindRepeating(&PeerConnectionTracker::BindToFrame,
+                     WrapCrossThreadWeakPersistent(&frame)));
++#endif
+ 
+   frame.GetInterfaceRegistry()->AddInterface(
+       BindRepeating(&InnerTextAgent::BindReceiver, WrapWeakPersistent(&frame)));
+--- a/third_party/blink/renderer/modules/media_capabilities/media_capabilities.cc
++++ b/third_party/blink/renderer/modules/media_capabilities/media_capabilities.cc
+@@ -460,6 +460,10 @@
+   return web_configuration;
+ }
+ 
++// miniblink (patch 0030): with the WebRTC stack compiled out, decodingInfo/
++// encodingInfo of type:"webrtc" resolve as unsupported instead of consulting
++// the (absent) webrtc codec factories.
++#if defined(MB_ENABLE_WEBRTC)
+ webrtc::SdpAudioFormat ToSdpAudioFormat(
+     const AudioConfiguration* configuration) {
+   DCHECK(configuration->hasContentType());
+@@ -491,6 +495,7 @@
+       ConvertToSdpVideoFormatParameters(parsed_content_type.GetParameters());
+   return {codec_name.Utf8(), parameters};
+ }
++#endif  // defined(MB_ENABLE_WEBRTC)
+ 
+ bool CheckMseSupport(const String& mime_type, const String& codec) {
+   // For MSE queries, we assume the queried audio and video streams will be
+@@ -822,6 +827,7 @@
+     // undefined. See comment above Promise() in script_promise_resolver.h
+     auto promise = resolver->Promise();
+ 
++#if defined(MB_ENABLE_WEBRTC)
+     if (auto* handler = webrtc_decoding_info_handler_for_test_
+                             ? webrtc_decoding_info_handler_for_test_.get()
+                             : WebrtcDecodingInfoHandler::Instance()) {
+@@ -876,6 +882,7 @@
+     // memory or something similar. Add UMA metric to count how often it
+     // happens.
+     DCHECK(false);
++#endif  // defined(MB_ENABLE_WEBRTC)
+     DVLOG(2) << __func__ << " Could not get DecodingInfoHandler.";
+     MediaCapabilitiesDecodingInfo* info = CreateDecodingInfoWith(false);
+     resolver->Resolve(info);
+@@ -1034,7 +1041,7 @@
+     return EmptyPromise();
+   }
+ 
+-  const base::TimeTicks request_time = base::TimeTicks::Now();
++  [[maybe_unused]] const base::TimeTicks request_time = base::TimeTicks::Now();
+ 
+   const bool is_webrtc = config->type() == V8MediaEncodingType::Enum::kWebrtc;
+   String message;
+@@ -1058,6 +1065,7 @@
+     UseCounter::Count(ExecutionContext::From(script_state),
+                       WebFeature::kMediaCapabilitiesEncodingInfoWebrtc);
+ 
++#if defined(MB_ENABLE_WEBRTC)
+     if (auto* handler = webrtc_encoding_info_handler_for_test_
+                             ? webrtc_encoding_info_handler_for_test_.get()
+                             : WebrtcEncodingInfoHandler::Instance()) {
+@@ -1112,6 +1120,7 @@
+     // memory or something similar. Add UMA metric to count how often it
+     // happens.
+     DCHECK(false);
++#endif  // defined(MB_ENABLE_WEBRTC)
+     DVLOG(2) << __func__ << " Could not get EncodingInfoHandler.";
+     MediaCapabilitiesInfo* info = CreateEncodingInfoWith(false);
+     resolver->Resolve(info);
+--- a/third_party/blink/renderer/modules/mediastream/BUILD.gn
++++ b/third_party/blink/renderer/modules/mediastream/BUILD.gn
+@@ -42,8 +42,6 @@
+     "media_stream.h",
+     "media_stream_audio_processing_layout.cc",
+     "media_stream_audio_processing_layout.h",
+-    "media_stream_audio_processor.cc",
+-    "media_stream_audio_processor.h",
+     "media_stream_audio_renderer.h",
+     "media_stream_constraints_util.cc",
+     "media_stream_constraints_util.h",
+@@ -91,10 +89,6 @@
+     "navigator_media_stream.h",
+     "overconstrained_error.cc",
+     "overconstrained_error.h",
+-    "processed_local_audio_source.cc",
+-    "processed_local_audio_source.h",
+-    "remote_media_stream_track_adapter.cc",
+-    "remote_media_stream_track_adapter.h",
+     "restriction_target.cc",
+     "restriction_target.h",
+     "scoped_media_stream_tracer.cc",
+@@ -133,6 +127,20 @@
+     "webaudio_media_stream_audio_sink.cc",
+     "webaudio_media_stream_audio_sink.h",
+   ]
++  # miniblink (patch 0030): the webrtc-audio-processing capture path (APM) and
++  # the remote-track adapter (peerconnection) go with the --webrtc toggle; the
++  # rest of getUserMedia/MediaDevices stays.
++  if (mb_enable_webrtc) {
++    sources += [
++      "media_stream_audio_processor.cc",
++      "media_stream_audio_processor.h",
++      "processed_local_audio_source.cc",
++      "processed_local_audio_source.h",
++      "remote_media_stream_track_adapter.cc",
++      "remote_media_stream_track_adapter.h",
++    ]
++  }
++
+   deps = [
+     "//build:chromecast_buildflags",
+     "//media/capture/mojom:image_capture_blink",
+@@ -143,6 +151,9 @@
+     "//third_party/blink/renderer/modules/screen_details",
+     "//third_party/libyuv",
+   ]
++  if (mb_enable_webrtc) {
++    deps += [ "//third_party/webrtc_overrides:webrtc_component" ]
++  }
+   allow_circular_includes_from =
+       [ "//third_party/blink/renderer/modules/imagecapture:imagecapture" ]
+ 
+@@ -186,7 +197,6 @@
+     "//third_party/blink/public:test_headers",
+     "//third_party/blink/public/mojom:mojom_platform_blink_headers",
+     "//third_party/blink/renderer/modules",
+-    "//third_party/webrtc_overrides:webrtc_component",
+   ]
+ 
+   public_deps = [ "//third_party/blink/renderer/platform:test_support" ]
+--- a/third_party/blink/renderer/modules/mediastream/media_stream.cc
++++ b/third_party/blink/renderer/modules/mediastream/media_stream.cc
+@@ -419,8 +419,10 @@
+ }
+ 
+ void MediaStream::NotifyEnabledStateChangeForWebRtcAudio(bool enabled) {
++#if defined(MB_ENABLE_WEBRTC)
+   CHECK(
+       base::FeatureList::IsEnabled(kPropagateEnabledEventForWebRtcAudioTrack));
++#endif
+   if (!GetExecutionContext()) {
+     return;
+   }
+--- a/third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_audio.cc
++++ b/third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_audio.cc
+@@ -25,7 +25,9 @@
+ #include "third_party/blink/renderer/modules/mediastream/media_constraints.h"
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_audio.h"
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_sets.h"
++#if defined(MB_ENABLE_WEBRTC)
+ #include "third_party/blink/renderer/modules/mediastream/processed_local_audio_source.h"
++#endif
+ #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.h"
+ #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
+ #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+--- a/third_party/blink/renderer/modules/mediastream/media_stream_renderer_factory.cc
++++ b/third_party/blink/renderer/modules/mediastream/media_stream_renderer_factory.cc
+@@ -38,6 +38,7 @@
+ // be rendered to a matching output device, should one exist.
+ // Note that if there are more than one open capture devices the function
+ // will not be able to pick an appropriate device and return 0.
++#if defined(MB_ENABLE_WEBRTC)
+ base::UnguessableToken GetSessionIdForWebRtcAudioRenderer(
+     ExecutionContext& context) {
+   WebRtcAudioDeviceImpl* audio_device =
+@@ -46,6 +47,7 @@
+              ? audio_device->GetAuthorizedDeviceSessionIdForAudioRenderer()
+              : base::UnguessableToken();
+ }
++#endif  // defined(MB_ENABLE_WEBRTC)
+ 
+ void SendLogMessage(const String& message) {
+   WebRtcLogMessage("MSRF::" + message.Utf8());
+@@ -129,7 +131,15 @@
+ 
+   // If the track has a local source, or is a remote track that does not use the
+   // WebRTC audio pipeline, return a new TrackAudioRenderer instance.
+-  if (!PeerConnectionRemoteAudioTrack::From(audio_track)) {
++#if defined(MB_ENABLE_WEBRTC)
++  const bool use_track_renderer =
++      !PeerConnectionRemoteAudioTrack::From(audio_track);
++#else
++  // miniblink (patch 0030): no WebRTC pipeline — remote WebRTC tracks cannot
++  // exist, so every audio track renders through the TrackAudioRenderer.
++  const bool use_track_renderer = true;
++#endif
++  if (use_track_renderer) {
+     // TODO(xians): Add support for the case where the media stream contains
+     // multiple audio tracks.
+     SendLogMessage(UNSAFE_TODO(String::Format(
+@@ -141,6 +151,7 @@
+         std::move(on_render_error_callback));
+   }
+ 
++#if defined(MB_ENABLE_WEBRTC)
+   // Get the AudioDevice associated with the frame where this track was created,
+   // in case the track has been moved to eg a same origin iframe. Without this,
+   // one can get into a situation where media is piped to a different audio
+@@ -192,6 +203,9 @@
+         "%s => (ERROR: CreateSharedAudioRendererProxy failed)", __func__));
+   }
+   return ret;
++#else
++  NOTREACHED();
++#endif  // defined(MB_ENABLE_WEBRTC)
+ }
+ 
+ }  // namespace blink
+--- a/third_party/blink/renderer/modules/mediastream/media_stream_track_impl.cc
++++ b/third_party/blink/renderer/modules/mediastream/media_stream_track_impl.cc
+@@ -62,7 +62,9 @@
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_utils.h"
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_video_track.h"
+ #include "third_party/blink/renderer/modules/mediastream/overconstrained_error.h"
++#if defined(MB_ENABLE_WEBRTC)
+ #include "third_party/blink/renderer/modules/mediastream/processed_local_audio_source.h"
++#endif
+ #include "third_party/blink/renderer/modules/mediastream/transferred_media_stream_track.h"
+ #include "third_party/blink/renderer/modules/mediastream/user_media_client.h"
+ #include "third_party/blink/renderer/modules/mediastream/webaudio_media_stream_audio_sink.h"
+@@ -349,10 +351,12 @@
+ 
+   component_->SetEnabled(enabled);
+ 
++#if defined(MB_ENABLE_WEBRTC)
+   if (base::FeatureList::IsEnabled(kPropagateEnabledEventForWebRtcAudioTrack)) {
+     // Propagate the enabled state to the underlying platform track.
+     PropagateTrackEnabled(enabled);
+   }
++#endif
+ 
+   SendLogMessage(String::Format("%s({enabled=%s})", __func__,
+                                 base::ToString(enabled).c_str()));
+@@ -1026,6 +1030,10 @@
+ }
+ 
+ void MediaStreamTrackImpl::PropagateTrackEnabled(bool enabled) {
++#if !defined(MB_ENABLE_WEBRTC)
++  // miniblink (patch 0030): only WebRTC remote audio tracks need this.
++  return;
++#else
+   CHECK(
+       base::FeatureList::IsEnabled(kPropagateEnabledEventForWebRtcAudioTrack));
+   // The enabled state is propagated only when the track belongs to a WebRTC
+@@ -1051,6 +1059,7 @@
+     stream->NotifyEnabledStateChangeForWebRtcAudio(enabled);
+   }
+   is_iterating_registered_media_streams_ = false;
++#endif  // defined(MB_ENABLE_WEBRTC)
+ }
+ 
+ bool MediaStreamTrackImpl::HasPendingActivity() const {
+--- a/third_party/blink/renderer/modules/mediastream/transferred_media_stream_track.cc
++++ b/third_party/blink/renderer/modules/mediastream/transferred_media_stream_track.cc
+@@ -36,7 +36,9 @@
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_utils.h"
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_video_track.h"
+ #include "third_party/blink/renderer/modules/mediastream/overconstrained_error.h"
++#if defined(MB_ENABLE_WEBRTC)
+ #include "third_party/blink/renderer/modules/mediastream/processed_local_audio_source.h"
++#endif
+ #include "third_party/blink/renderer/modules/mediastream/user_media_client.h"
+ #include "third_party/blink/renderer/modules/mediastream/webaudio_media_stream_audio_sink.h"
+ #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+--- a/third_party/blink/renderer/modules/mediastream/user_media_client.cc
++++ b/third_party/blink/renderer/modules/mediastream/user_media_client.cc
+@@ -355,6 +355,7 @@
+ 
+   // TODO(crbug.com/787254): Communicate directly with the
+   // PeerConnectionTrackerHost mojo object once it is available from Blink.
++#if defined(MB_ENABLE_WEBRTC)
+   if (auto* window = user_media_request->GetWindow()) {
+     if (user_media_request->MediaRequestType() ==
+         UserMediaRequestType::kUserMedia) {
+@@ -365,6 +366,7 @@
+           user_media_request);
+     }
+   }
++#endif  // defined(MB_ENABLE_WEBRTC)
+ 
+   user_media_request->set_has_transient_user_activation(
+       has_transient_user_activation);
+--- a/third_party/blink/renderer/modules/mediastream/user_media_processor.cc
++++ b/third_party/blink/renderer/modules/mediastream/user_media_processor.cc
+@@ -43,7 +43,9 @@
+ #include "third_party/blink/renderer/modules/mediastream/media_constraints.h"
+ #include "third_party/blink/renderer/modules/mediastream/media_devices.h"
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_audio_processing_layout.h"
++#if defined(MB_ENABLE_WEBRTC)
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_audio_processor.h"
++#endif
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util.h"
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_audio.h"
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_video_content.h"
+@@ -51,7 +53,9 @@
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_utils.h"
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_video_capturer_source.h"
+ #include "third_party/blink/renderer/modules/mediastream/media_stream_video_track.h"
++#if defined(MB_ENABLE_WEBRTC)
+ #include "third_party/blink/renderer/modules/mediastream/processed_local_audio_source.h"
++#endif
+ #include "third_party/blink/renderer/modules/mediastream/scoped_media_stream_tracer.h"
+ #include "third_party/blink/renderer/modules/mediastream/user_media_client.h"
+ #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_processor_options.h"
+@@ -203,6 +207,7 @@
+       static_cast<blink::MediaStreamAudioSource*>(source->GetPlatformSource());
+ 
+   // If the source is a processed source, get the properties from it.
++#if defined(MB_ENABLE_WEBRTC)
+   if (auto* processed_source = ProcessedLocalAudioSource::From(source_impl)) {
+     std::optional<AudioProcessingProperties> properties =
+         processed_source->GetAudioProcessingProperties();
+@@ -216,6 +221,7 @@
+                 kVoiceIsolationEnabled);
+     return;
+   }
++#endif  // defined(MB_ENABLE_WEBRTC)
+ 
+   if (auto* platform_source = MediaStreamAudioSource::From(source)) {
+     // TODO(http://crbug.com/428837201): this logic is broken:
+@@ -823,9 +829,13 @@
+           DCHECK(source);
+           MediaStreamAudioSource* platform_source =
+               MediaStreamAudioSource::From(source);
++#if defined(MB_ENABLE_WEBRTC)
+           ProcessedLocalAudioSource* processed_source =
+               ProcessedLocalAudioSource::From(platform_source);
+           return processed_source && source->Id() == device->device_id;
++#else
++          return platform_source && source->Id() == device->device_id;
++#endif
+         });
+     if (it != local_sources_.end()) {
+       WebPlatformMediaStreamSource* const source = (*it)->GetPlatformSource();
+@@ -1816,6 +1826,7 @@
+     DCHECK(platform_source);
+     if (platform_source->device().id == audio_source->device().id &&
+         IsAudioInputMediaType(platform_source->device().type)) {
++#if defined(MB_ENABLE_WEBRTC)
+       auto* audio_platform_source =
+           static_cast<MediaStreamAudioSource*>(platform_source);
+       auto* processed_existing_source =
+@@ -1826,6 +1837,7 @@
+         DCHECK(audio_source->HasSameNonReconfigurableSettings(
+             audio_platform_source));
+       }
++#endif  // defined(MB_ENABLE_WEBRTC)
+     }
+   }
+ #endif  // DCHECK_IS_ON()
+@@ -1913,6 +1925,7 @@
+               current_request_info_->audio_capture_settings().num_channels())
+           : std::nullopt;
+ 
++#if defined(MB_ENABLE_WEBRTC)
+   if (processing_layout && processing_layout->NeedWebrtcAudioProcessing()) {
+     // The audio device is not associated with screen capture and also requires
+     // processing.
+@@ -1923,6 +1936,8 @@
+         *frame_, device, stream_controls->disable_local_echo,
+         *processing_layout, std::move(source_ready), task_runner_);
+   }
++#endif  // defined(MB_ENABLE_WEBRTC) — without it, fall through to the
++        // unprocessed local-audio path below.
+ 
+   // Now `processing_layout` being nullptr means we are capturing non-mic audio
+   // content and no processing is needed. If it's not nullptr, we are capturing
+--- a/third_party/blink/renderer/modules/mediastream/user_media_request.cc
++++ b/third_party/blink/renderer/modules/mediastream/user_media_request.cc
+@@ -881,7 +881,8 @@
+     for (const auto& video_track : video_tracks)
+       video_track->SetInitialConstraints(video_);
+ 
+-    if (auto* window = GetWindow()) {
++  #if defined(MB_ENABLE_WEBRTC)
++  if (auto* window = GetWindow()) {
+       if (media_type_ == UserMediaRequestType::kUserMedia) {
+         PeerConnectionTracker::From(*window).TrackGetUserMediaSuccess(this,
+                                                                       stream);
+@@ -893,6 +894,7 @@
+         NOTREACHED();
+       }
+     }
++#endif  // defined(MB_ENABLE_WEBRTC)
+   }
+   // After this call, the execution context may be invalid.
+   callbacks_->OnSuccess(streams, capture_controller_);
+@@ -905,6 +907,7 @@
+   DCHECK(!is_resolved_);
+   if (!GetExecutionContext())
+     return;
++#if defined(MB_ENABLE_WEBRTC)
+   if (auto* window = GetWindow()) {
+     if (media_type_ == UserMediaRequestType::kUserMedia) {
+       PeerConnectionTracker::From(*window).TrackGetUserMediaFailure(
+@@ -917,6 +920,7 @@
+       NOTREACHED();
+     }
+   }
++#endif  // defined(MB_ENABLE_WEBRTC)
+   // After this call, the execution context may be invalid.
+   callbacks_->OnError(
+       nullptr,
+@@ -1020,6 +1024,7 @@
+   CHECK(exception_code.has_value());
+   CHECK(result_enum.has_value());
+ 
++#if defined(MB_ENABLE_WEBRTC)
+   if (auto* window = GetWindow()) {
+     if (media_type_ == UserMediaRequestType::kUserMedia) {
+       PeerConnectionTracker::From(*window).TrackGetUserMediaFailure(
+@@ -1032,6 +1037,7 @@
+       NOTREACHED();
+     }
+   }
++#endif  // defined(MB_ENABLE_WEBRTC)
+ 
+   // After this call, the execution context may be invalid.
+   callbacks_->OnError(
+--- a/third_party/blink/renderer/modules/webaudio/BUILD.gn
++++ b/third_party/blink/renderer/modules/webaudio/BUILD.gn
+@@ -192,9 +192,15 @@
+   deps = [
+     "//services/metrics/public/cpp:ukm_builders",
+     "//third_party/blink/renderer/modules/mediastream",
+-    "//third_party/blink/renderer/modules/peerconnection",
+     "//third_party/blink/renderer/modules/permissions",
+-    "//third_party/blink/renderer/modules/webrtc",
+     "//third_party/fdlibm",
+   ]
++  # miniblink (patch 0030): peerconnection/webrtc go with --webrtc (the AEC
++  # output-device hook in realtime_audio_destination_handler is #if-gated).
++  if (mb_enable_webrtc) {
++    deps += [
++      "//third_party/blink/renderer/modules/peerconnection",
++      "//third_party/blink/renderer/modules/webrtc",
++    ]
++  }
+ }
+--- a/third_party/blink/renderer/modules/webaudio/realtime_audio_destination_handler.cc
++++ b/third_party/blink/renderer/modules/webaudio/realtime_audio_destination_handler.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "third_party/blink/renderer/modules/webaudio/realtime_audio_destination_handler.h"
+ 
++#include <tuple>
++
+ #include "base/feature_list.h"
+ #include "base/metrics/histogram_macros.h"
+ #include "media/base/output_device_info.h"
+@@ -428,9 +430,13 @@
+       if (output_device_status ==
+           media::OutputDeviceStatus::OUTPUT_DEVICE_STATUS_OK) {
+         if (auto* execution_context = Context()->GetExecutionContext()) {
++#if defined(MB_ENABLE_WEBRTC)
+           PeerConnectionDependencyFactory::From(*execution_context)
+               .GetWebRtcAudioDevice()
+               ->SetOutputDeviceForAec(sink_descriptor_.SinkId());
++#else
++          std::ignore = execution_context;
++#endif
+           SendLogMessage(
+               __func__,
+               "=> sink is OK and echo cancellation reference was updated.");
+--- a/third_party/blink/renderer/platform/BUILD.gn
++++ b/third_party/blink/renderer/platform/BUILD.gn
+@@ -1298,10 +1298,6 @@
+     "media_capabilities/web_media_capabilities_info.h",
+     "media_capabilities/web_media_configuration.h",
+     "media_capabilities/web_video_configuration.h",
+-    "mediastream/aec_dump_agent_impl.cc",
+-    "mediastream/aec_dump_agent_impl.h",
+-    "mediastream/audio_service_audio_processor_proxy.cc",
+-    "mediastream/audio_service_audio_processor_proxy.h",
+     "mediastream/media_stream_audio_deliverer.h",
+     "mediastream/media_stream_audio_level_calculator.cc",
+     "mediastream/media_stream_audio_level_calculator.h",
+@@ -1363,110 +1359,6 @@
+     "mojo/security_origin_mojom_traits.h",
+     "mojo/string16_mojom_traits.cc",
+     "mojo/string16_mojom_traits.h",
+-    "p2p/empty_network_manager.cc",
+-    "p2p/empty_network_manager.h",
+-    "p2p/filtering_network_manager.cc",
+-    "p2p/filtering_network_manager.h",
+-    "p2p/host_address_request.cc",
+-    "p2p/host_address_request.h",
+-    "p2p/ipc_network_manager.cc",
+-    "p2p/ipc_network_manager.h",
+-    "p2p/ipc_socket_factory.cc",
+-    "p2p/ipc_socket_factory.h",
+-    "p2p/mdns_responder_adapter.cc",
+-    "p2p/mdns_responder_adapter.h",
+-    "p2p/network_list_manager.h",
+-    "p2p/network_list_observer.h",
+-    "p2p/network_manager_uma.h",
+-    "p2p/port_allocator.cc",
+-    "p2p/port_allocator.h",
+-    "p2p/socket_client.h",
+-    "p2p/socket_client_delegate.h",
+-    "p2p/socket_client_impl.cc",
+-    "p2p/socket_client_impl.h",
+-    "p2p/socket_dispatcher.cc",
+-    "p2p/socket_dispatcher.h",
+-    "peerconnection/audio_codec_factory.cc",
+-    "peerconnection/audio_codec_factory.h",
+-    "peerconnection/gpu_codec_support_waiter.cc",
+-    "peerconnection/gpu_codec_support_waiter.h",
+-    "peerconnection/instrumented_simulcast_adapter.cc",
+-    "peerconnection/instrumented_simulcast_adapter.h",
+-    "peerconnection/instrumented_video_encoder_wrapper.cc",
+-    "peerconnection/instrumented_video_encoder_wrapper.h",
+-    "peerconnection/linear_histogram.cc",
+-    "peerconnection/linear_histogram.h",
+-    "peerconnection/resolution_monitor.cc",
+-    "peerconnection/resolution_monitor.h",
+-    "peerconnection/rtc_answer_options_platform.h",
+-    "peerconnection/rtc_api_name.h",
+-    "peerconnection/rtc_dtmf_sender_handler.cc",
+-    "peerconnection/rtc_dtmf_sender_handler.h",
+-    "peerconnection/rtc_encoded_audio_stream_transformer.cc",
+-    "peerconnection/rtc_encoded_audio_stream_transformer.h",
+-    "peerconnection/rtc_encoded_video_stream_transformer.cc",
+-    "peerconnection/rtc_encoded_video_stream_transformer.h",
+-    "peerconnection/rtc_event_log_output_sink.h",
+-    "peerconnection/rtc_event_log_output_sink_proxy.cc",
+-    "peerconnection/rtc_event_log_output_sink_proxy.h",
+-    "peerconnection/rtc_ice_candidate_platform.cc",
+-    "peerconnection/rtc_ice_candidate_platform.h",
+-    "peerconnection/rtc_offer_options_platform.h",
+-    "peerconnection/rtc_peer_connection_handler_client.cc",
+-    "peerconnection/rtc_peer_connection_handler_client.h",
+-    "peerconnection/rtc_rtp_receiver_platform.cc",
+-    "peerconnection/rtc_rtp_receiver_platform.h",
+-    "peerconnection/rtc_rtp_sender_platform.cc",
+-    "peerconnection/rtc_rtp_sender_platform.h",
+-    "peerconnection/rtc_rtp_source.cc",
+-    "peerconnection/rtc_rtp_source.h",
+-    "peerconnection/rtc_rtp_transceiver_platform.cc",
+-    "peerconnection/rtc_rtp_transceiver_platform.h",
+-    "peerconnection/rtc_scoped_refptr_cross_thread_copier.h",
+-    "peerconnection/rtc_session_description_platform.cc",
+-    "peerconnection/rtc_session_description_platform.h",
+-    "peerconnection/rtc_session_description_request.h",
+-    "peerconnection/rtc_stats.cc",
+-    "peerconnection/rtc_stats.h",
+-    "peerconnection/rtc_video_decoder_adapter.cc",
+-    "peerconnection/rtc_video_decoder_adapter.h",
+-    "peerconnection/rtc_video_decoder_factory.cc",
+-    "peerconnection/rtc_video_decoder_factory.h",
+-    "peerconnection/rtc_video_decoder_fallback_recorder.cc",
+-    "peerconnection/rtc_video_decoder_fallback_recorder.h",
+-    "peerconnection/rtc_video_encoder.cc",
+-    "peerconnection/rtc_video_encoder.h",
+-    "peerconnection/rtc_video_encoder_factory.cc",
+-    "peerconnection/rtc_video_encoder_factory.h",
+-    "peerconnection/rtc_video_encoder_media_log.cc",
+-    "peerconnection/rtc_video_encoder_media_log.h",
+-    "peerconnection/rtc_void_request.h",
+-    "peerconnection/stats_collecting_decoder.cc",
+-    "peerconnection/stats_collecting_decoder.h",
+-    "peerconnection/stats_collecting_encoder.cc",
+-    "peerconnection/stats_collecting_encoder.h",
+-    "peerconnection/stats_collector.cc",
+-    "peerconnection/stats_collector.h",
+-    "peerconnection/two_keys_adapter_map.h",
+-    "peerconnection/video_codec_factory.cc",
+-    "peerconnection/video_codec_factory.h",
+-    "peerconnection/video_encoder_state_observer.h",
+-    "peerconnection/video_encoder_state_observer_impl.cc",
+-    "peerconnection/video_encoder_state_observer_impl.h",
+-    "peerconnection/vsync_provider.cc",
+-    "peerconnection/vsync_provider.h",
+-    "peerconnection/vsync_tick_provider.cc",
+-    "peerconnection/vsync_tick_provider.h",
+-    "peerconnection/webrtc_audio_sink.cc",
+-    "peerconnection/webrtc_audio_sink.h",
+-    "peerconnection/webrtc_decoding_info_handler.cc",
+-    "peerconnection/webrtc_decoding_info_handler.h",
+-    "peerconnection/webrtc_encoding_info_handler.cc",
+-    "peerconnection/webrtc_encoding_info_handler.h",
+-    "peerconnection/webrtc_util.cc",
+-    "peerconnection/webrtc_util.h",
+-    "peerconnection/webrtc_video_track_source.cc",
+-    "peerconnection/webrtc_video_track_source.h",
+     "region_capture_crop_id.cc",
+     "region_capture_crop_id.h",
+     "resolution_units.h",
+@@ -1600,18 +1492,7 @@
+     "weborigin/security_origin.h",
+     "weborigin/security_policy.cc",
+     "weborigin/security_policy.h",
+-    "webrtc/convert_to_webrtc_video_frame_buffer.cc",
+-    "webrtc/convert_to_webrtc_video_frame_buffer.h",
+-    "webrtc/peer_connection_remote_audio_source.cc",
+-    "webrtc/peer_connection_remote_audio_source.h",
+-    "webrtc/track_observer.cc",
+-    "webrtc/track_observer.h",
+     "webrtc/webrtc_logging.cc",
+-    "webrtc/webrtc_source.h",
+-    "webrtc/webrtc_video_frame_adapter.cc",
+-    "webrtc/webrtc_video_frame_adapter.h",
+-    "webrtc/webrtc_video_utils.cc",
+-    "webrtc/webrtc_video_utils.h",
+     "widget/compositing/blink_categorized_worker_pool_delegate.cc",
+     "widget/compositing/blink_categorized_worker_pool_delegate.h",
+     "widget/compositing/layer_tree_settings.cc",
+@@ -1817,7 +1698,6 @@
+     "//components/translate/core/language_detection",
+     "//components/viz/client",
+     "//components/viz/common",
+-    "//components/webrtc:net_address_utils",
+     "//crypto",
+     "//device/vr/public/mojom:vr_service_blink",
+     "//gin",
+@@ -1849,7 +1729,6 @@
+     "//third_party/libyuv",
+     "//third_party/one_euro_filter",
+     "//third_party/snappy",
+-    "//third_party/webrtc_overrides:webrtc_component",
+     "//third_party/zlib/google:compression_utils",
+     "//ui/base/cursor/mojom:cursor_type_blink",
+     "//ui/base/prediction",
+@@ -1975,8 +1854,181 @@
+     deps += [ "//third_party/pffft" ]
+   }
+ 
+-  if (rtc_use_h265) {
++  # miniblink (patch 0030): the WebRTC platform layer (p2p sockets,
++  # peerconnection codec factories/handlers, webrtc glue, APM service proxy)
++  # is compile-time optional — build-lib.sh --webrtc. webrtc_logging.cc stays
++  # (its WebRtcLogMessage sink is used by kept mediastream/webaudio code).
++  if (mb_enable_webrtc) {
+     sources += [
++    "mediastream/aec_dump_agent_impl.cc",
++    "mediastream/aec_dump_agent_impl.h",
++    "mediastream/audio_service_audio_processor_proxy.cc",
++    "mediastream/audio_service_audio_processor_proxy.h",
++    "p2p/empty_network_manager.cc",
++    "p2p/empty_network_manager.h",
++    "p2p/filtering_network_manager.cc",
++    "p2p/filtering_network_manager.h",
++    "p2p/host_address_request.cc",
++    "p2p/host_address_request.h",
++    "p2p/ipc_network_manager.cc",
++    "p2p/ipc_network_manager.h",
++    "p2p/ipc_socket_factory.cc",
++    "p2p/ipc_socket_factory.h",
++    "p2p/mdns_responder_adapter.cc",
++    "p2p/mdns_responder_adapter.h",
++    "p2p/network_list_manager.h",
++    "p2p/network_list_observer.h",
++    "p2p/network_manager_uma.h",
++    "p2p/port_allocator.cc",
++    "p2p/port_allocator.h",
++    "p2p/socket_client.h",
++    "p2p/socket_client_delegate.h",
++    "p2p/socket_client_impl.cc",
++    "p2p/socket_client_impl.h",
++    "p2p/socket_dispatcher.cc",
++    "p2p/socket_dispatcher.h",
++    "peerconnection/audio_codec_factory.cc",
++    "peerconnection/audio_codec_factory.h",
++    "peerconnection/gpu_codec_support_waiter.cc",
++    "peerconnection/gpu_codec_support_waiter.h",
++    "peerconnection/instrumented_simulcast_adapter.cc",
++    "peerconnection/instrumented_simulcast_adapter.h",
++    "peerconnection/instrumented_video_encoder_wrapper.cc",
++    "peerconnection/instrumented_video_encoder_wrapper.h",
++    "peerconnection/linear_histogram.cc",
++    "peerconnection/linear_histogram.h",
++    "peerconnection/resolution_monitor.cc",
++    "peerconnection/resolution_monitor.h",
++    "peerconnection/rtc_answer_options_platform.h",
++    "peerconnection/rtc_api_name.h",
++    "peerconnection/rtc_dtmf_sender_handler.cc",
++    "peerconnection/rtc_dtmf_sender_handler.h",
++    "peerconnection/rtc_encoded_audio_stream_transformer.cc",
++    "peerconnection/rtc_encoded_audio_stream_transformer.h",
++    "peerconnection/rtc_encoded_video_stream_transformer.cc",
++    "peerconnection/rtc_encoded_video_stream_transformer.h",
++    "peerconnection/rtc_event_log_output_sink.h",
++    "peerconnection/rtc_event_log_output_sink_proxy.cc",
++    "peerconnection/rtc_event_log_output_sink_proxy.h",
++    "peerconnection/rtc_ice_candidate_platform.cc",
++    "peerconnection/rtc_ice_candidate_platform.h",
++    "peerconnection/rtc_offer_options_platform.h",
++    "peerconnection/rtc_peer_connection_handler_client.cc",
++    "peerconnection/rtc_peer_connection_handler_client.h",
++    "peerconnection/rtc_rtp_receiver_platform.cc",
++    "peerconnection/rtc_rtp_receiver_platform.h",
++    "peerconnection/rtc_rtp_sender_platform.cc",
++    "peerconnection/rtc_rtp_sender_platform.h",
++    "peerconnection/rtc_rtp_source.cc",
++    "peerconnection/rtc_rtp_source.h",
++    "peerconnection/rtc_rtp_transceiver_platform.cc",
++    "peerconnection/rtc_rtp_transceiver_platform.h",
++    "peerconnection/rtc_scoped_refptr_cross_thread_copier.h",
++    "peerconnection/rtc_session_description_platform.cc",
++    "peerconnection/rtc_session_description_platform.h",
++    "peerconnection/rtc_session_description_request.h",
++    "peerconnection/rtc_stats.cc",
++    "peerconnection/rtc_stats.h",
++    "peerconnection/rtc_video_decoder_adapter.cc",
++    "peerconnection/rtc_video_decoder_adapter.h",
++    "peerconnection/rtc_video_decoder_factory.cc",
++    "peerconnection/rtc_video_decoder_factory.h",
++    "peerconnection/rtc_video_decoder_fallback_recorder.cc",
++    "peerconnection/rtc_video_decoder_fallback_recorder.h",
++    "peerconnection/rtc_video_encoder.cc",
++    "peerconnection/rtc_video_encoder.h",
++    "peerconnection/rtc_video_encoder_factory.cc",
++    "peerconnection/rtc_video_encoder_factory.h",
++    "peerconnection/rtc_video_encoder_media_log.cc",
++    "peerconnection/rtc_video_encoder_media_log.h",
++    "peerconnection/rtc_void_request.h",
++    "peerconnection/stats_collecting_decoder.cc",
++    "peerconnection/stats_collecting_decoder.h",
++    "peerconnection/stats_collecting_encoder.cc",
++    "peerconnection/stats_collecting_encoder.h",
++    "peerconnection/stats_collector.cc",
++    "peerconnection/stats_collector.h",
++    "peerconnection/two_keys_adapter_map.h",
++    "peerconnection/video_codec_factory.cc",
++    "peerconnection/video_codec_factory.h",
++    "peerconnection/video_encoder_state_observer.h",
++    "peerconnection/video_encoder_state_observer_impl.cc",
++    "peerconnection/video_encoder_state_observer_impl.h",
++    "peerconnection/vsync_provider.cc",
++    "peerconnection/vsync_provider.h",
++    "peerconnection/vsync_tick_provider.cc",
++    "peerconnection/vsync_tick_provider.h",
++    "peerconnection/webrtc_audio_sink.cc",
++    "peerconnection/webrtc_audio_sink.h",
++    "peerconnection/webrtc_decoding_info_handler.cc",
++    "peerconnection/webrtc_decoding_info_handler.h",
++    "peerconnection/webrtc_encoding_info_handler.cc",
++    "peerconnection/webrtc_encoding_info_handler.h",
++    "peerconnection/webrtc_util.cc",
++    "peerconnection/webrtc_util.h",
++    "peerconnection/webrtc_video_track_source.cc",
++    "peerconnection/webrtc_video_track_source.h",
++    "webrtc/convert_to_webrtc_video_frame_buffer.cc",
++    "webrtc/convert_to_webrtc_video_frame_buffer.h",
++    "webrtc/peer_connection_remote_audio_source.cc",
++    "webrtc/peer_connection_remote_audio_source.h",
++    "webrtc/track_observer.cc",
++    "webrtc/track_observer.h",
++    "webrtc/webrtc_source.h",
++    "webrtc/webrtc_video_frame_adapter.cc",
++    "webrtc/webrtc_video_frame_adapter.h",
++    "webrtc/webrtc_video_utils.cc",
++    "webrtc/webrtc_video_utils.h",
++    "webrtc/testing/mock_webrtc_video_frame_adapter_shared_resources.h",
++    "mediastream/audio_service_audio_processor_proxy_test.cc",
++    "p2p/filtering_network_manager_test.cc",
++    "p2p/ipc_network_manager_test.cc",
++    "p2p/ipc_socket_factory_test.cc",
++    "p2p/socket_client_impl_test.cc",
++    "peerconnection/coalesced_tasks_test.cc",
++    "peerconnection/instrumented_simulcast_adapter_test.cc",
++    "peerconnection/instrumented_video_encoder_wrapper_test.cc",
++    "peerconnection/linear_histogram_test.cc",
++    "peerconnection/low_precision_timer_test.cc",
++    "peerconnection/metronome_source_test.cc",
++    "peerconnection/resolution_monitor_unittest.cc",
++    "peerconnection/rtc_encoded_audio_stream_transformer_test.cc",
++    "peerconnection/rtc_encoded_video_stream_transformer_test.cc",
++    "peerconnection/rtc_ice_candidate_platform_test.cc",
++    "peerconnection/rtc_rtp_source_test.cc",
++    "peerconnection/rtc_video_decoder_adapter_test.cc",
++    "peerconnection/rtc_video_decoder_factory_test.cc",
++    "peerconnection/rtc_video_encoder_factory_test.cc",
++    "peerconnection/rtc_video_encoder_test.cc",
++    "peerconnection/stats_collecting_decoder_test.cc",
++    "peerconnection/stats_collecting_encoder_test.cc",
++    "peerconnection/stats_collector_test.cc",
++    "peerconnection/task_queue_factory_test.cc",
++    "peerconnection/timer_based_tick_provider_test.cc",
++    "peerconnection/two_keys_adapter_map_unittest.cc",
++    "peerconnection/video_codec_factory_test.cc",
++    "peerconnection/video_encoder_state_observer_impl_test.cc",
++    "peerconnection/vsync_tick_provider_test.cc",
++    "peerconnection/webrtc_audio_sink_test.cc",
++    "peerconnection/webrtc_decoding_info_handler_test.cc",
++    "peerconnection/webrtc_encoding_info_handler_test.cc",
++    "peerconnection/webrtc_video_track_source_test.cc",
++    "webrtc/convert_to_webrtc_video_frame_buffer_test.cc",
++    "webrtc/webrtc_video_frame_adapter_test.cc",
++    "peerconnection/bridge_ice_controller_test.cc",
++    "peerconnection/fake_connection_factory_test.cc",
++    "peerconnection/fake_connection_test_base.h",
++    "peerconnection/ice_proposal_test.cc",
++    "peerconnection/webrtc_connection_matchers.h",
++    ]
++    deps += [
++      "//components/webrtc:net_address_utils",
++      "//third_party/webrtc_overrides:webrtc_component",
++    ]
++  }
++
++  if (rtc_use_h265 && mb_enable_webrtc) {
++    sources += [
+       "peerconnection/h265_parameter_sets_tracker.cc",
+       "peerconnection/h265_parameter_sets_tracker.h",
+     ]
+@@ -2074,7 +2126,6 @@
+     "testing/url_test_helpers.h",
+     "testing/video_frame_utils.cc",
+     "testing/video_frame_utils.h",
+-    "webrtc/testing/mock_webrtc_video_frame_adapter_shared_resources.h",
+     "widget/compositing/test/stub_widget_base_client.h",
+   ]
+ 
+@@ -2325,7 +2376,6 @@
+     "json/json_parser_test.cc",
+     "json/json_values_test.cc",
+     "media/web_audio_source_provider_impl_test.cc",
+-    "mediastream/audio_service_audio_processor_proxy_test.cc",
+     "mediastream/media_stream_audio_level_calculator_unittest.cc",
+     "mediastream/media_stream_audio_test.cc",
+     "mediastream/transferred_media_stream_component_test.cc",
+@@ -2343,38 +2393,6 @@
+     "mojo/heap_mojo_unique_receiver_set_test.cc",
+     "mojo/kurl_security_origin_test.cc",
+     "mojo/string16_mojom_traits_test.cc",
+-    "p2p/filtering_network_manager_test.cc",
+-    "p2p/ipc_network_manager_test.cc",
+-    "p2p/ipc_socket_factory_test.cc",
+-    "p2p/socket_client_impl_test.cc",
+-    "peerconnection/coalesced_tasks_test.cc",
+-    "peerconnection/instrumented_simulcast_adapter_test.cc",
+-    "peerconnection/instrumented_video_encoder_wrapper_test.cc",
+-    "peerconnection/linear_histogram_test.cc",
+-    "peerconnection/low_precision_timer_test.cc",
+-    "peerconnection/metronome_source_test.cc",
+-    "peerconnection/resolution_monitor_unittest.cc",
+-    "peerconnection/rtc_encoded_audio_stream_transformer_test.cc",
+-    "peerconnection/rtc_encoded_video_stream_transformer_test.cc",
+-    "peerconnection/rtc_ice_candidate_platform_test.cc",
+-    "peerconnection/rtc_rtp_source_test.cc",
+-    "peerconnection/rtc_video_decoder_adapter_test.cc",
+-    "peerconnection/rtc_video_decoder_factory_test.cc",
+-    "peerconnection/rtc_video_encoder_factory_test.cc",
+-    "peerconnection/rtc_video_encoder_test.cc",
+-    "peerconnection/stats_collecting_decoder_test.cc",
+-    "peerconnection/stats_collecting_encoder_test.cc",
+-    "peerconnection/stats_collector_test.cc",
+-    "peerconnection/task_queue_factory_test.cc",
+-    "peerconnection/timer_based_tick_provider_test.cc",
+-    "peerconnection/two_keys_adapter_map_unittest.cc",
+-    "peerconnection/video_codec_factory_test.cc",
+-    "peerconnection/video_encoder_state_observer_impl_test.cc",
+-    "peerconnection/vsync_tick_provider_test.cc",
+-    "peerconnection/webrtc_audio_sink_test.cc",
+-    "peerconnection/webrtc_decoding_info_handler_test.cc",
+-    "peerconnection/webrtc_encoding_info_handler_test.cc",
+-    "peerconnection/webrtc_video_track_source_test.cc",
+     "region_capture_crop_id_test.cc",
+     "runtime_enabled_features_test.cc",
+     "sparse_vector_test.cc",
+@@ -2407,8 +2425,6 @@
+     "weborigin/scheme_registry_test.cc",
+     "weborigin/security_origin_test.cc",
+     "weborigin/security_policy_test.cc",
+-    "webrtc/convert_to_webrtc_video_frame_buffer_test.cc",
+-    "webrtc/webrtc_video_frame_adapter_test.cc",
+     "widget/compositing/layer_tree_settings_unittest.cc",
+     "widget/compositing/layer_tree_view_unittest.cc",
+     "widget/compositing/render_frame_metadata_observer_impl_unittest.cc",
+@@ -2536,11 +2552,6 @@
+   testonly = true
+ 
+   sources = [
+-    "peerconnection/bridge_ice_controller_test.cc",
+-    "peerconnection/fake_connection_factory_test.cc",
+-    "peerconnection/fake_connection_test_base.h",
+-    "peerconnection/ice_proposal_test.cc",
+-    "peerconnection/webrtc_connection_matchers.h",
+   ]
+ 
+   deps = [
+--- a/third_party/blink/renderer/platform/mediastream/media_stream_descriptor.cc
++++ b/third_party/blink/renderer/platform/mediastream/media_stream_descriptor.cc
+@@ -131,8 +131,13 @@
+ 
+ void MediaStreamDescriptor::NotifyEnabledStateChangeForWebRtcAudio(
+     bool enabled) {
++// miniblink (patch 0030): the propagate-enabled-to-webrtc feature lives in the
++// compiled-out peer_connection_remote_audio_source; without WebRTC the check is
++// constant-false and these paths are unreachable.
++#if defined(MB_ENABLE_WEBRTC)
+   CHECK(
+       base::FeatureList::IsEnabled(kPropagateEnabledEventForWebRtcAudioTrack));
++#endif
+   // We don't store the enabled state here, instead only the 'WebMediaPlayerMS'
+   // will have the state.
+   // Iterate over a copy of the observers to avoid re-entrancy issues.
+--- a/third_party/blink/renderer/platform/webrtc/webrtc_logging.cc
++++ b/third_party/blink/renderer/platform/webrtc/webrtc_logging.cc
+@@ -27,8 +27,10 @@
+ }
+ 
+ void InitWebRtcLogging() {
++#if defined(MB_ENABLE_WEBRTC)
+   // Log messages from Libjingle should not have timestamps.
+   webrtc::InitDiagnosticLoggingDelegateFunction(&WebRtcLogMessage);
++#endif
+ }
+ 
+ void WebRtcLogMessage(const std::string& message) {
