@@ -225,7 +225,7 @@ a fresh machine / fresh tarball:
    `vs2022_install=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools`
    (the detector only scans non-x86 `Program Files` for 2022).
 5. **args.gn extras vs mac**: `use_external_popup_menu = true` (host `<select>`
-   popups via patch 0032; patches 0031/0033 cover WebGPU-on-SwiftShader and the
+   popups via patch 0033; patches 0032/0034 cover WebGPU-on-SwiftShader and the
    Windows font-fallback hook). `mb_enable_webrtc = false` (the dev-default ON
    trips gmock-include errors in blink platform test files on win; OFF is the
    ship default anyway).

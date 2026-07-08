@@ -140,9 +140,11 @@ if (-not $NoStage) {
   $skip = @('0028-fonts-mac-keep-color-emoji-in-substitution-path.patch')
   Get-ChildItem (Join-Path $Here 'patches\*.patch') | Sort-Object Name | ForEach-Object {
     if ($skip -contains $_.Name) { Write-Host "  (skipped mac-only: $($_.Name))"; return }
-    git -C $Chromium apply --reverse --check $_.FullName 2>$null
+    # cmd /c so git's stderr can't become a PS terminating error; reverse-check
+    # failing is the NORMAL "not applied yet" case.
+    cmd /c "git -C `"$Chromium`" apply --reverse --check `"$($_.FullName)`" 2>nul" | Out-Null
     if ($LASTEXITCODE -eq 0) { return }   # already applied
-    git -C $Chromium apply $_.FullName 2>$null
+    cmd /c "git -C `"$Chromium`" apply `"$($_.FullName)`" 2>nul" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "could not apply $($_.Name) — do NOT build without it" }
     Write-Host "  applied $($_.Name)"
   }
@@ -204,7 +206,7 @@ blink_symbol_level = $bsym
 clang_use_chrome_plugins = false
 use_clang_modules = false
 enable_precompiled_headers = false
-# Windows: <select> popups surface to the HOST (mbOnSelectPopup) — patch 0032.
+# Windows: <select> popups surface to the HOST (mbOnSelectPopup) — patch 0033.
 use_external_popup_menu = true
 "@ | Set-Content -Encoding ascii (Join-Path $dir 'args.gn')
 }
