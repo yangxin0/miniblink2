@@ -54,7 +54,7 @@ gpu::InProcessGpuThreadHolder* GetSharedGpuThreadHolder() {
     p->disabled_dawn_features_list = {"adapter_blocklist"};
 #if BUILDFLAG(IS_WIN)
     // Match the SwiftShader ANGLE default above: Dawn's default D3D12 path
-    // pins to ANGLE's D3D11 LUID (absent under SwiftShader; patch 0031 skips
+    // pins to ANGLE's D3D11 LUID (absent under SwiftShader; patch 0032 skips
     // the query for this adapter). Vulkan/SwiftShader is always available.
     p->use_webgpu_adapter = gpu::WebGPUAdapterName::kSwiftShader;
 #endif
