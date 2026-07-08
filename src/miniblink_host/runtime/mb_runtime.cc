@@ -19,8 +19,13 @@
 #include "base/debug/stack_trace.h"
 #include "base/feature_list.h"
 #include "base/i18n/icu_util.h"
+#include "third_party/blink/renderer/platform/fonts/font_cache.h"
+#include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "base/run_loop.h"
+#include "build/build_config.h"
+#if BUILDFLAG(IS_MAC)
 #include <malloc/malloc.h>
+#endif
 
 #include "base/memory/memory_pressure_listener.h"
 #include "base/task/single_thread_task_runner.h"
@@ -30,7 +35,12 @@
 #include "base/files/file_path.h"
 #include "base/memory/discardable_memory_allocator.h"
 #include "base/message_loop/message_pump.h"
+#if BUILDFLAG(IS_MAC)
 #include "base/message_loop/message_pump_apple.h"
+#else
+#include "base/message_loop/message_pump.h"
+#include "base/message_loop/message_pump_type.h"
+#endif
 #include "base/message_loop/message_pump_type.h"
 #include "base/memory/discardable_memory.h"
 #include "base/path_service.h"
@@ -204,6 +214,7 @@ MbRuntime::MbRuntime() {
   MB_STEP("8 Platform::InitializeBlink");
   blink::Platform::InitializeBlink(/*stack_start_marker=*/std::nullopt);
 
+
   // The REAL main-thread scheduler (owns the message pump). The simple
   // CreateMainThreadAndInitialize path yields a degenerate scheduler whose
   // CreateAgentGroupScheduler() returns null -> WebViewImpl ctor DCHECKs.
@@ -220,8 +231,17 @@ MbRuntime::MbRuntime() {
   // signalable quit source also ends the old "nested pump only quits
   // reliably inside a running NSApp" constraint.
   MB_STEP("9 CreateMainThreadScheduler");
+#if BUILDFLAG(IS_MAC)
   main_thread_scheduler_ = blink::scheduler::WebThreadScheduler::
       CreateMainThreadScheduler(std::make_unique<base::MessagePumpNSRunLoop>());
+#else
+  // Windows: the default UI pump services Chromium tasks via its message
+  // window; it does not drain the host's queue re-entrantly the way the mac
+  // NSApplication pump did, so the NSRunLoop workaround is mac-only.
+  main_thread_scheduler_ =
+      blink::scheduler::WebThreadScheduler::CreateMainThreadScheduler(
+          base::MessagePump::Create(base::MessagePumpType::UI));
+#endif
 
   // Full init with our platform + real scheduler. Empty BinderMap (no browser ifaces).
   // CRITICAL: blink::Initialize() CREATES the main-thread isolate internally
@@ -233,6 +253,20 @@ MbRuntime::MbRuntime() {
   platform_ = std::make_unique<MbPlatform>();
   mojo::BinderMap binder_map;
   blink::Initialize(platform_.get(), &binder_map, main_thread_scheduler_.get());
+
+#if BUILDFLAG(IS_WIN)
+  // AFTER blink::Initialize: AtomicString needs the static string tables.
+  // Chrome's browser flips these renderer prefs; with no browser, text
+  // rasterizes bi-level and FontCache::SystemFontPlatformData dereferences a
+  // null system family (crash on any system-ui use). Grayscale AA (no LCD
+  // subpixel) keeps screenshots deterministic across monitors.
+  blink::FontCache::SetAntialiasedTextEnabled(true);
+  blink::FontCache::SetLCDTextEnabled(false);
+  blink::FontCache::SetMenuFontMetrics(blink::AtomicString("Segoe UI"), 12);
+  blink::FontCache::SetSmallCaptionFontMetrics(blink::AtomicString("Segoe UI"),
+                                               12);
+  blink::FontCache::SetStatusFontMetrics(blink::AtomicString("Segoe UI"), 12);
+#endif
   isolate_ = v8::Isolate::GetCurrent();
 
   // Disable casting / second-screen APIs we have no backend for. A page's JS call
@@ -312,10 +346,12 @@ void MbRuntime::LogMemoryUsage() {
                  hs.used_heap_size() / 1024, hs.total_heap_size() / 1024,
                  hs.external_memory() / 1024);
   }
+#if BUILDFLAG(IS_MAC)
   malloc_statistics_t st{};
   malloc_zone_statistics(nullptr, &st);
   std::fprintf(stderr, "[mb] malloc: in use %zu KB, allocated %zu KB\n",
                st.size_in_use / 1024, st.size_allocated / 1024);
+#endif
 }
 
 void MbRuntime::SetScriptTimeoutMs(int ms) {

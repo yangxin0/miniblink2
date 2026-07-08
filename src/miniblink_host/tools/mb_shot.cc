@@ -429,9 +429,16 @@ int main(int argc, char** argv) {
       // bare-path branch below — a missing file must fail, not blank-PNG-succeed.
       // Only the file:///abs form (path starts with '/') and only when there's no
       // percent-encoding (we don't decode here, so skip to avoid a false failure).
-      const std::string path = input.substr(7);  // strip "file://"
-      if (!path.empty() && path[0] == '/' &&
-          path.find('%') == std::string::npos) {
+      std::string path = input.substr(7);  // strip "file://"
+#ifdef _WIN32
+      // "file:///C:/x" -> path "/C:/x"; drop the leading '/' before a drive.
+      if (path.size() >= 3 && path[0] == '/' && path[2] == ':')
+        path.erase(0, 1);
+      const bool looks_abs = path.size() >= 2 && path[1] == ':';
+#else
+      const bool looks_abs = !path.empty() && path[0] == '/';
+#endif
+      if (looks_abs && path.find('%') == std::string::npos) {
         std::ifstream probe(path, std::ios::binary);
         if (!probe.is_open()) {
           std::fprintf(stderr, "mb_shot: cannot open input file '%s'\n",

@@ -45,21 +45,21 @@ MbSession* MbSession::Create(const std::string& name,
 void MbSession::FlushToDisk() {
   if (!persistent())
     return;
-  const base::FilePath dir(persist_dir_);
+  const base::FilePath dir = base::FilePath::FromUTF8Unsafe(persist_dir_);
   base::CreateDirectory(dir);
-  MbSaveCookies(dir.Append("cookies.dat").value(), id_);
-  MbSaveIndexedDBScoped(dir.Append("idb.dat").value(), scope_prefix());
-  MbSaveOPFSScoped(dir.Append("opfs.dat").value(), scope_prefix());
+  MbSaveCookies(dir.AppendASCII("cookies.dat").AsUTF8Unsafe(), id_);
+  MbSaveIndexedDBScoped(dir.AppendASCII("idb.dat").AsUTF8Unsafe(), scope_prefix());
+  MbSaveOPFSScoped(dir.AppendASCII("opfs.dat").AsUTF8Unsafe(), scope_prefix());
 }
 
 void MbSession::RestoreFromDisk() {
   if (!persistent())
     return;
-  const base::FilePath dir(persist_dir_);
+  const base::FilePath dir = base::FilePath::FromUTF8Unsafe(persist_dir_);
   // Best-effort per file: a first run has none of them.
-  MbLoadCookies(dir.Append("cookies.dat").value(), id_);
-  MbLoadIndexedDBMerge(dir.Append("idb.dat").value());
-  MbLoadOPFS(dir.Append("opfs.dat").value());  // MbLoadOPFS merges per scope
+  MbLoadCookies(dir.AppendASCII("cookies.dat").AsUTF8Unsafe(), id_);
+  MbLoadIndexedDBMerge(dir.AppendASCII("idb.dat").AsUTF8Unsafe());
+  MbLoadOPFS(dir.AppendASCII("opfs.dat").AsUTF8Unsafe());  // MbLoadOPFS merges per scope
 }
 
 void MbSession::ClearStorage() {

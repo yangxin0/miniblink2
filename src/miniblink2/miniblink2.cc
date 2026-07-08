@@ -18,6 +18,7 @@
 #include "miniblink_host/frame/mb_indexeddb.h"
 #include "miniblink_host/frame/mb_local_frame_host.h"
 #include "miniblink_host/frame/mb_opfs.h"
+#include "build/build_config.h"
 #include "miniblink_host/frame/mb_notification_service.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/platform/mb_platform.h"
@@ -35,6 +36,9 @@
 // the allocator from it forces LTO to keep the real definitions live — the static .a is then
 // self-sufficient with NO consumer -Wl,-u. This is NOT a trap stub (cf. mb_dawn_stubs.cc): these
 // run on every Rust allocation and must resolve to the real PartitionAlloc-backed functions.
+// Mac-only: the Windows component build resolves the Rust allocator inside the
+// base DLL and these internal symbols are not importable (lld: undefined).
+#if BUILDFLAG(IS_MAC)
 namespace rust_allocator_internal {
 unsigned char* alloc(size_t size, size_t align);
 void dealloc(unsigned char* p, size_t size, size_t align);
@@ -49,6 +53,7 @@ extern "C" __attribute__((used, retain)) void* const mb_rust_alloc_keep[] = {
     reinterpret_cast<void*>(&rust_allocator_internal::alloc_zeroed),
     reinterpret_cast<void*>(&rust_allocator_internal::alloc_error_handler_impl),
 };
+#endif
 
 // Opaque handle: wraps the C++ view.
 struct mbView {

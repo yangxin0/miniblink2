@@ -3,6 +3,8 @@
 // has real behavior (routes page-driven history traversal to the main thread).
 #include "miniblink_host/frame/mb_local_frame_host.h"
 
+#include "third_party/blink/public/mojom/page/draggable_region.mojom-blink.h"
+
 #include <cstdint>
 #include <map>
 #include <memory>

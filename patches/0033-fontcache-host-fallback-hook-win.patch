@@ -1,0 +1,32 @@
+fonts: consult the host fallback hook on Windows too.
+
+Patch 0029 added FontCache::ConsultHostFallbackFontHook (the backend of
+mbSetFontFallbackCallback) but only wired it into the mac
+PlatformFallbackFontForCharacter. Wire the identical guarded consult into
+the Windows (Skia/DirectWrite) implementation.
+
+--- a/third_party/blink/renderer/platform/fonts/win/font_cache_skia_win.cc	2026-07-08 08:22:34
++++ b/third_party/blink/renderer/platform/fonts/win/font_cache_skia_win.cc	2026-07-08 08:22:34
+@@ -282,6 +282,22 @@
+     const SimpleFontData* original_font_data,
+     FontFallbackPriority fallback_priority) {
+   TRACE_EVENT0("ui", "FontCache::PlatformFallbackFontForCharacter");
++
++  // miniblink2: the host's per-character fallback answer trumps the platform
++  // cascade — but only when the named family really covers the character, so
++  // a wrong answer falls through instead of rendering tofu. (Windows peer of
++  // the font_cache_mac.mm hunk in patch 0029.)
++  const String host_family =
++      ConsultHostFallbackFontHook(character, font_description);
++  if (!host_family.empty()) {
++    if (const SimpleFontData* host_font =
++            GetFontData(font_description, AtomicString(host_family))) {
++      if (host_font->PlatformData().TypefaceSp() &&
++          host_font->PlatformData().TypefaceSp()->unicharToGlyph(character)) {
++        return host_font;
++      }
++    }
++  }
+ 
+   // First try the specified font with standard style & weight.
+   if (!IsEmojiPresentationEmoji(fallback_priority) &&

@@ -18,6 +18,10 @@ BIN="$OUT_DIR/mb_shot"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+# Git Bash (Windows): mb_shot.exe is a Windows process and cannot see the
+# MSYS virtual /tmp; hand it (and take back) mixed-form C:/ paths instead.
+# Git Bash resolves C:/ paths natively, so the rest of the script is unchanged.
+if command -v cygpath >/dev/null 2>&1; then TMP="$(cygpath -m "$TMP")"; fi
 PNG="$TMP/shot.png"
 FIX="$TMP/fixture.html"
 cat > "$FIX" <<'HTML'
@@ -95,7 +99,11 @@ d=open(sys.argv[1],"rb").read(26)
 print(d[25] if d[:8]==b"\x89PNG\r\n\x1a\n" else -1)' "$1" 2>/dev/null
 }
 
-URL="file://$FIX"
+# file URL: unix path "/x" -> file:///x ; Windows mixed "C:/x" -> file:///C:/x
+case "$FIX" in
+  /*) URL="file://$FIX" ;;
+  *)  URL="file:///$FIX" ;;
+esac
 
 run 40 "$URL" "$PNG" --title;                 check "--title" "Shot Smoke" "$(cat "$TMP/out")"
 run 40 "$URL" "$PNG" --count "li.row";        check "--count" "3" "$(cat "$TMP/out")"

@@ -190,6 +190,58 @@ Without this, ninja reports `unknown target
 - V8 snapshots are build-flag-dependent; dist data always comes from the same
   out dir as the library, so don't mix artifacts across profiles.
 
+## Windows (x64)
+
+The engine, all smoke suites (mb_smoke 207, platform 46, render 141, mb_shot 66),
+the GPU/compositor probes and real-site HTTPS mb_shot runs work on Windows
+(first ported 2026-07-08 on Windows 11 + VS 2022 Build Tools). One-time setup on
+a fresh machine / fresh tarball:
+
+1. **Tools**: VS 2022 Build Tools with MSVC x64 + Windows 11 SDK + **ATL**
+   (`Microsoft.VisualStudio.Component.VC.ATL`) + the SDK's **Debugging Tools**
+   feature (build needs `dbghelp.dll`; the port used
+   `winsdksetup.exe /features OptionId.WindowsDesktopDebuggers`), Git for
+   Windows (its bash runs `build`/smoke scripts), CMake, ninja, Python 3.12
+   (copy `python.exe` to `python3.exe` in the install dir — gn invokes
+   `python3`).
+2. **Toolchain pins** (the tarball ships mac/linux binaries only):
+   - gn: `cipd ensure -root buildtools\win` with `gn/gn/windows-amd64` at the
+     DEPS `gn_version`.
+   - clang: `python3 tools\clang\scripts\update.py`; rust:
+     `python3 tools\rust\update_rust.py`.
+   - node.exe (GCS pin in DEPS `src/third_party/node/win`), esbuild
+     (`infra/3pp/tools/esbuild/windows-amd64`, then copy `esbuild.exe` over the
+     extensionless `esbuild` the scripts exec), rollup native binding
+     (`@rollup/rollup-win32-x64-msvc` at the vendored rollup version into
+     devtools-frontend `node_modules/@rollup/`), `rc.exe` (GCS
+     `chromium-browser-clang/rc/<sha1 from build/toolchain/win/rc/win/rc.exe.sha1>`).
+   - `checkout_win` git DEPS: gperf, microsoft_dxheaders, microsoft_webauthn,
+     perl (clone at the DEPS revisions).
+3. **Vendored curl**: build curl 8.21 with cmake
+   (`-DBUILD_SHARED_LIBS=ON -DCURL_USE_SCHANNEL=ON -DCURL_USE_LIBPSL=OFF`
+   `-DCURL_ZLIB=OFF -DCURL_BROTLI=OFF -DCURL_ZSTD=OFF`), stage `include/` +
+   `libcurl_imp.lib` + `libcurl.dll` into `miniblink2_curl/{include,lib}`.
+4. **Environment for gn/ninja**: `DEPOT_TOOLS_WIN_TOOLCHAIN=0` and
+   `vs2022_install=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools`
+   (the detector only scans non-x86 `Program Files` for 2022).
+5. **args.gn extras vs mac**: `use_external_popup_menu = true` (host `<select>`
+   popups via patch 0032; patches 0031/0033 cover WebGPU-on-SwiftShader and the
+   Windows font-fallback hook). `mb_enable_webrtc = false` (the dev-default ON
+   trips gmock-include errors in blink platform test files on win; OFF is the
+   ship default anyway).
+6. **Runtime files** next to the binaries: `blink_resources.pak`,
+   `media_controls_resources_100_percent.pak`, `icudtl.dat`,
+   `snapshot_blob.bin`, `v8_context_snapshot.bin` (ninja target
+   `tools/v8_context_snapshot`), `libcurl.dll`.
+7. Defender materially slows the build; consider
+   `Add-MpPreference -ExclusionPath <checkout>` (elevated PowerShell).
+
+Windows behavior notes: audio output is the silent sink (decode+clock, no
+speaker); ANGLE defaults to SwiftShader (`--use-angle=d3d11` opts into
+hardware); WebGPU runs on Vulkan/SwiftShader; system-font metrics + text AA are
+seeded at init in `mb_runtime.cc` (no browser process to deliver renderer
+prefs).
+
 ## Other build scripts
 
 - `build.sh /path/to/chromium` — the component (dev) build: stages sources,

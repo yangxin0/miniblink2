@@ -1,6 +1,7 @@
 #include "miniblink_host/platform/mb_gpu_thread.h"
 
 #include "base/command_line.h"
+#include "build/build_config.h"
 #include "gpu/config/gpu_preferences.h"
 #include "gpu/ipc/in_process_gpu_thread_holder.h"
 #include "ui/gl/gl_switches.h"
@@ -18,8 +19,15 @@ gpu::InProcessGpuThreadHolder* GetSharedGpuThreadHolder() {
     // (angle_enable_metal=true, which needs full Xcode's `metal` shader compiler). Overridable
     // with --use-angle=swiftshader for headless/CI/no-GPU contexts (deterministic software).
     if (!cmd->HasSwitch(switches::kUseANGLE)) {
+#if BUILDFLAG(IS_MAC)
       cmd->AppendSwitchASCII(switches::kUseANGLE,
                              gl::kANGLEImplementationMetalName);
+#else
+      // Windows: Metal doesn't exist; SwiftShader is the deterministic default
+      // (works headless/RDP/CI). Override with --use-angle=d3d11 for hardware.
+      cmd->AppendSwitchASCII(switches::kUseANGLE,
+                             gl::kANGLEImplementationSwiftShaderName);
+#endif
     }
     // Still allow SwiftShader if it's the one selected (the --use-angle override above).
     if (!cmd->HasSwitch(switches::kEnableUnsafeSwiftShader))
@@ -44,6 +52,12 @@ gpu::InProcessGpuThreadHolder* GetSharedGpuThreadHolder() {
     p->enable_webgpu = true;
     p->enable_unsafe_webgpu = true;
     p->disabled_dawn_features_list = {"adapter_blocklist"};
+#if BUILDFLAG(IS_WIN)
+    // Match the SwiftShader ANGLE default above: Dawn's default D3D12 path
+    // pins to ANGLE's D3D11 LUID (absent under SwiftShader; patch 0031 skips
+    // the query for this adapter). Vulkan/SwiftShader is always available.
+    p->use_webgpu_adapter = gpu::WebGPUAdapterName::kSwiftShader;
+#endif
 #endif
     return h;
   }();

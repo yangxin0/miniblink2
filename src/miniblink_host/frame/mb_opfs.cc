@@ -645,7 +645,7 @@ bool MbSaveOPFSScoped(const std::string& path,
     WBlob(&o, scope);
     WNode(&o, root.get());
   }
-  return base::WriteFile(base::FilePath(path), o);
+  return base::WriteFile(base::FilePath::FromUTF8Unsafe(path), o);
 }
 
 void MbClearOPFSScoped(const std::string& scope_prefix) {
@@ -667,12 +667,12 @@ bool MbSaveOPFS(const std::string& path) {
     WBlob(&o, scope);
     WNode(&o, root.get());
   }
-  return base::WriteFile(base::FilePath(path), o);
+  return base::WriteFile(base::FilePath::FromUTF8Unsafe(path), o);
 }
 
 bool MbLoadOPFS(const std::string& path) {
   std::string buf;
-  if (!base::ReadFileToString(base::FilePath(path), &buf))
+  if (!base::ReadFileToString(base::FilePath::FromUTF8Unsafe(path), &buf))
     return false;
   if (buf.size() < 8 || buf.compare(0, 8, kOpfsMagic, 8) != 0)
     return false;

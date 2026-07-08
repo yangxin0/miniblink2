@@ -180,8 +180,13 @@ component("miniblink_host") {
     # Networking (libcurl factory implements these mojom).
     "//services/network/public/cpp",
     "//services/network/public/mojom",
-    "//services/network/public/mojom:mojom_blink",
   ]
+  if (!is_win) {
+    # On Windows the blink DLLs already export the *-blink mojom variants; a
+    # direct static dep duplicates every symbol at link (lld-link hard-errors,
+    # unlike the mac two-level namespace). Elsewhere keep the explicit dep.
+    deps += [ "//services/network/public/mojom:mojom_blink" ]
+  }
 
   # libcurl for mb_url_loader. TODO(mb): point at the donor's bundled curl or a
   # vendored static lib; for now assume a system/third_party curl target.
@@ -199,14 +204,22 @@ component("miniblink_host") {
   # how linked binaries find it at runtime without an rpath. package.sh rewrites
   # that to @loader_path for distribution.
   lib_dirs = [ "../miniblink2_curl/lib" ]
-  libs = [ "curl" ]  # -> third_party/curl/lib/libcurl.dylib (HTTP(S) + ws/wss)
-  # Real audio output (media/mb_media_player.cc MbCoreAudioSink): a DefaultOutput
-  # AudioUnit pulls decoded samples to the system audio device.
-  frameworks = [
-    "AudioToolbox.framework",
-    "AudioUnit.framework",
-    "CoreAudio.framework",
-  ]
+  if (is_win) {
+    # Windows vendored curl is a Schannel DLL (scripts/build-curl-macos.sh's
+    # Windows counterpart); link its import library, ship libcurl.dll at runtime.
+    libs = [ "libcurl_imp.lib" ]
+  } else {
+    libs = [ "curl" ]  # -> third_party/curl/lib/libcurl.dylib (HTTP(S) + ws/wss)
+  }
+  if (is_mac) {
+    # Real audio output (media/mb_media_player.cc MbCoreAudioSink): a DefaultOutput
+    # AudioUnit pulls decoded samples to the system audio device.
+    frameworks = [
+      "AudioToolbox.framework",
+      "AudioUnit.framework",
+      "CoreAudio.framework",
+    ]
+  }
 
   # Optional WebGPU (Dawn). Gated on the standard //ui/gl:use_dawn arg. It's OFF in the
   # libminiblink2 SDK build by default (scripts/build-lib.sh, to save size — Dawn native
