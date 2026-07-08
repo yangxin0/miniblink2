@@ -221,7 +221,7 @@ function Merge-Static([string]$OutDir) {
   $inputs = $m.Groups['in'].Value -split ' ' | Where-Object { $_ -match '\.(lib|obj|o)$' }
   $rl = [regex]::Match($txt, '(?m)^  rlibs = (?<r>.*)$')
   if ($rl.Success) { $inputs += ($rl.Groups['r'].Value -split ' ' | Where-Object { $_ -match '\.rlib$' }) }
-  $inputs += "obj/$GnPath/libminiblink_host.a"          # force_loaded host archive
+  $inputs += "obj/$GnPath/miniblink_host.lib"          # /WHOLEARCHIVE'd host archive
   $inputs = $inputs | Where-Object { $_ } | Sort-Object -Unique |
             Where-Object { Test-Path (Join-Path $Chromium "$OutDir\$_") }
   Write-Host "  merging $($inputs.Count) inputs"
