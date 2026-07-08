@@ -1,0 +1,27 @@
+Gate the GraphiteDawn swap-chain check on SKIA_USE_DAWN.
+
+With use_dawn=false/skia_use_dawn=false (the miniblink2 SDK default) the
+dawn_context_provider.h include is compiled out but this member access was
+not, so the Windows mono build fails on the incomplete DawnContextProvider.
+kGraphiteDawn cannot be selected at runtime in that configuration.
+
+--- a/gpu/command_buffer/service/shared_image/d3d_image_backing_factory.cc	2026-07-08 14:17:03
++++ b/gpu/command_buffer/service/shared_image/d3d_image_backing_factory.cc	2026-07-08 14:17:03
+@@ -467,6 +467,9 @@
+ bool D3DImageBackingFactory::IsSwapChainSupported(
+     const GpuPreferences& gpu_preferences,
+     DawnContextProvider* dawn_context_provider /*=nullptr*/) {
++#if BUILDFLAG(SKIA_USE_DAWN)
++  // DawnContextProvider is only a complete type when Skia's Dawn backend is
++  // built; without it GrContextType::kGraphiteDawn is unreachable at runtime.
+   if (gpu_preferences.gr_context_type == GrContextType::kGraphiteDawn) {
+     // This is only supported if graphite and ANGLE share the same D3D11 device.
+     CHECK(dawn_context_provider);
+@@ -476,6 +479,7 @@
+       return false;
+     }
+   }
++#endif
+ 
+   return gl::DirectCompositionSupported() &&
+          gl::DXGISwapChainTearingSupported();
