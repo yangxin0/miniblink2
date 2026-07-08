@@ -1,0 +1,20 @@
+webnn/ort: annotate Environment::Create with its real lock requirement.
+
+Create() calls GetDependentEpPackages(), which is
+EXCLUSIVE_LOCKS_REQUIRED(GetLock()), and is only invoked from
+GetOrCreateInstance() under an AutoLock — but Create() itself carried no
+annotation, so -Wthread-safety-analysis (an error in the Windows mono
+build, where this ORT backend actually compiles) rejects it. Annotating
+the declaration states the existing contract; no behavior change.
+
+--- a/services/webnn/ort/environment.h	2026-07-08 22:52:57
++++ b/services/webnn/ort/environment.h	2026-07-08 22:52:57
+@@ -112,7 +112,7 @@
+  private:
+   static base::expected<scoped_refptr<Environment>, std::string> Create(
+       const base::flat_map<std::string, mojom::EpPackageInfoPtr>&
+-          ep_package_info_map);
++          ep_package_info_map) EXCLUSIVE_LOCKS_REQUIRED(GetLock());
+ 
+   ~Environment();
+ 
