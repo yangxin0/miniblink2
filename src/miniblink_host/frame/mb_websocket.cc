@@ -1,6 +1,11 @@
 #include "miniblink_host/frame/mb_websocket.h"
 
+#include "build/build_config.h"
+#if BUILDFLAG(IS_WIN)
+#include <winsock2.h>
+#else
 #include <fcntl.h>
+#endif
 #include <stdint.h>
 
 #include <atomic>
@@ -215,9 +220,14 @@ class CurlWsTransport : public std::enable_shared_from_this<CurlWsTransport> {
     curl_socket_t sock = CURL_SOCKET_BAD;
     if (curl_easy_getinfo(c, CURLINFO_ACTIVESOCKET, &sock) == CURLE_OK &&
         sock != CURL_SOCKET_BAD) {
+#if BUILDFLAG(IS_WIN)
+      u_long nonblock = 1;
+      ::ioctlsocket(sock, FIONBIO, &nonblock);
+#else
       int fl = ::fcntl(sock, F_GETFL, 0);
       if (fl != -1)
         ::fcntl(sock, F_SETFL, fl | O_NONBLOCK);
+#endif
     }
     // -> establish + onopen on service thread, with the negotiated subprotocol.
     std::move(connected_).Run(true, selected_protocol_);

@@ -34,6 +34,7 @@
 #include "net/base/data_url.h"
 #include "net/cookies/cookie_util.h"
 #include "net/cookies/site_for_cookies.h"
+#include "base/strings/escape.h"
 #include "net/base/filename_util.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
@@ -597,6 +598,22 @@ class MbCurlReactor {
   std::vector<std::unique_ptr<Lane>> lanes_;
   std::atomic<unsigned> next_lane_{0};
 };
+}  // namespace
+
+
+namespace {
+// file:// URL -> readable FilePath. net::FileURLToFilePath (percent-decodes,
+// handles drive letters) first; on Windows it rejects the drive-less unix-style
+// paths ("file:///tmp/x") the test fixtures use, so fall back to the decoded
+// URL path, which the CRT resolves against the current drive.
+bool MbReadFileURL(const GURL& url, std::string* body) {
+  base::FilePath fp;
+  if (net::FileURLToFilePath(url, &fp) && base::ReadFileToString(fp, body))
+    return true;
+  const std::string decoded = base::UnescapeBinaryURLComponent(url.path());
+  return !decoded.empty() &&
+         base::ReadFileToString(base::FilePath::FromUTF8Unsafe(decoded), body);
+}
 }  // namespace
 
 namespace mb {
@@ -1272,9 +1289,7 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
   if (url.SchemeIsFile()) {
     // Convert via net (percent-decodes the path; "Andale%20Mono.ttf" -> a space)
     // — a raw url.path() leaves it encoded and ReadFileToString fails.
-    base::FilePath fp;
-    const bool ok =
-        net::FileURLToFilePath(url, &fp) && base::ReadFileToString(fp, body);
+    const bool ok = MbReadFileURL(url, body);
     if (!ok && out_error)
       *out_error = "file not found or unreadable";
     return ok;
@@ -1547,9 +1562,7 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
     http_status = mock_status > 0 ? mock_status : 200;
     ok = true;
   } else if (fetch_url.SchemeIsFile()) {
-    base::FilePath fp;  // net path conversion percent-decodes (spaces etc.)
-    ok = net::FileURLToFilePath(fetch_url, &fp) &&
-         base::ReadFileToString(fp, &contents);
+    ok = MbReadFileURL(fetch_url, &contents);
   } else if (fetch_url.SchemeIsHTTPOrHTTPS()) {
     // Carry the request method + body so fetch()/XHR POST/PUT/etc. send their
     // payload (the dominant API pattern), not a bodyless GET. The body's bytes

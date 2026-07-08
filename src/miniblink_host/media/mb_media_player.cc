@@ -20,9 +20,12 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/thread.h"
+#include "build/build_config.h"
+#if BUILDFLAG(IS_MAC)
 #include <AudioToolbox/AudioToolbox.h>
 #include <AudioUnit/AudioUnit.h>
 #include <CoreAudio/CoreAudio.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -127,6 +130,7 @@ class MbSilentAudioSink : public media::SwitchableAudioRendererSink {
   bool playing_ = false;
 };
 
+#if BUILDFLAG(IS_MAC)
 // A REAL audio output sink (Step 2): pulls decoded samples from the media renderer and
 // plays them through a macOS DefaultOutput AudioUnit. media's AudioRendererImpl matches
 // its buffer size to our GetOutputDeviceInfo() params, so the AudioUnit's per-slice frame
@@ -321,6 +325,7 @@ class MbCoreAudioSink : public media::SwitchableAudioRendererSink {
   std::atomic<bool> playing_{false};
   std::atomic<float> volume_{1.0f};
 };
+#endif  // BUILDFLAG(IS_MAC)
 
 // Minimal WebMediaPlayerDelegate: we don't track page/frame visibility or media-session
 // state (single view, always "visible"). AddObserver hands back a unique id WMPI keys its
@@ -414,8 +419,14 @@ std::unique_ptr<blink::WebMediaPlayer> MbCreateWebMediaPlayer(
 
   // Real audio output via a macOS DefaultOutput AudioUnit; degrades to a silent clock
   // driver (FakeAudioWorker) when there's no usable output device (headless).
+  // Non-mac platforms use the silent sink (decode + clock, no speaker output).
+#if BUILDFLAG(IS_MAC)
   auto audio_sink =
       base::MakeRefCounted<MbCoreAudioSink>(support.media_task_runner());
+#else
+  auto audio_sink =
+      base::MakeRefCounted<MbSilentAudioSink>(support.media_task_runner());
+#endif
 
   // MbEmptyBroker has no MediaMetricsProvider, so leave the remote disconnected (its
   // receiver end is dropped) — WMPI binds it and metric calls are silently discarded.

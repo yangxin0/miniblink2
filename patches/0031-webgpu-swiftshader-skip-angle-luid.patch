@@ -1,0 +1,29 @@
+Skip the ANGLE D3D11 LUID query for the SwiftShader WebGPU adapter.
+
+With --use-angle=swiftshader (the miniblink2 Windows default) ANGLE has no
+D3D11 device, so QueryD3D11DeviceObjectFromANGLE() fails and WebGPU adapter
+creation returns null. The LUID only pins Dawn to the same hardware GPU as
+ANGLE, which is meaningless for the Vulkan/SwiftShader fallback adapter.
+
+--- a/gpu/command_buffer/service/webgpu_decoder_impl.cc	2026-07-08 08:11:26
++++ b/gpu/command_buffer/service/webgpu_decoder_impl.cc	2026-07-08 08:11:26
+@@ -1718,7 +1718,10 @@
+   ChainStruct(adapter_options, &dawn_adapter_toggles);
+ 
+ #if BUILDFLAG(IS_WIN)
+-  // On Windows, query the LUID of ANGLE's adapter.
++  // On Windows, query the LUID of ANGLE's adapter. Skipped for the SwiftShader
++  // (Vulkan fallback) adapter: ANGLE may itself be SwiftShader (no D3D device),
++  // and the LUID is only needed to pin Dawn to the same hardware GPU.
++  if (use_webgpu_adapter_ != WebGPUAdapterName::kSwiftShader) {
+   Microsoft::WRL::ComPtr<ID3D11Device> d3d11_device =
+       gl::QueryD3D11DeviceObjectFromANGLE();
+   if (!d3d11_device) {
+@@ -1743,6 +1746,7 @@
+   dawn::native::d3d::RequestAdapterOptionsLUID adapter_options_luid = {};
+   adapter_options_luid.adapterLUID = adapter_desc.AdapterLuid;
+   ChainStruct(adapter_options, &adapter_options_luid);
++  }
+ #endif
+ 
+ #if BUILDFLAG(USE_DAWN) && BUILDFLAG(DAWN_ENABLE_BACKEND_OPENGLES)

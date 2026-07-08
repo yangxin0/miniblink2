@@ -1,0 +1,35 @@
+Honor use_external_popup_menu on every platform, not just mac.
+
+miniblink2 surfaces <select> popups to the HOST via ExternalPopupMenu ->
+LocalFrameHost::ShowPopupMenu (mbOnSelectPopup). The class builds on all
+platforms and the gn arg use_external_popup_menu opts in; only this prefs
+gate was mac-only. The should_disable_external_popups pref field is itself
+mac-only, so non-mac means unconditionally external when the flag is set.
+
+--- a/third_party/blink/renderer/core/exported/web_view_impl.cc	2026-07-08 08:29:43
++++ b/third_party/blink/renderer/core/exported/web_view_impl.cc	2026-07-08 08:29:43
+@@ -1905,8 +1905,14 @@
+     RuntimeEnabledFeatures::SetAIWriterAPIEnabled(true);
+   }
+ 
+-#if BUILDFLAG(IS_MAC) && BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
++#if BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
++#if BUILDFLAG(IS_MAC)
+   const bool use_external_popups = !prefs.should_disable_external_popups;
++#else
++  // The disable pref only exists on mac; opting into the buildflag elsewhere
++  // (miniblink2 Windows) means external popups unconditionally.
++  const bool use_external_popups = true;
++#endif
+   if (web_view_impl->GetChromeClient().UseExternalPopupMenus() !=
+       use_external_popups) {
+     // Switching between internal and external popups -- first, cancel any
+@@ -1915,7 +1921,7 @@
+   }
+   web_view_impl->GetChromeClient().SetUseExternalPopupMenus(
+       use_external_popups);
+-#endif  // BUILDFLAG(IS_MAC) && BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
++#endif  // BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
+ }
+ 
+ void WebViewImpl::ThemeChanged() {

@@ -40,7 +40,9 @@
 #include "services/device/public/mojom/battery_status.mojom-blink.h"
 #include "services/device/public/mojom/geolocation.mojom-blink.h"
 #include "base/files/file.h"
+#include "build/build_config.h"
 #include "third_party/blink/public/mojom/clipboard/clipboard.mojom-blink.h"
+#include "third_party/blink/public/mojom/media/capture_handle_config.mojom-blink.h"
 #include "third_party/blink/public/mojom/credentialmanagement/credential_manager.mojom-blink.h"
 #include "third_party/blink/public/mojom/installedapp/installed_app_provider.mojom-blink.h"
 #include "media/mojo/mojom/video_decode_perf_history.mojom-blink.h"
@@ -630,12 +632,14 @@ class MbClipboardHost : public blink::mojom::blink::ClipboardHost {
   void WriteUnsanitizedCustomFormat(const blink::String&,
                                     mojo_base::BigBuffer) override {}
   void CommitWrite() override {}
+#if BUILDFLAG(IS_MAC)
   void WriteStringToFindPboard(const blink::String&) override {}
   void GetPlatformPermissionState(
       GetPlatformPermissionStateCallback cb) override {
     std::move(cb).Run(
         blink::mojom::blink::PlatformClipboardPermissionState::kAllow);
   }
+#endif
   void RegisterClipboardListener(
       mojo::PendingRemote<blink::mojom::blink::ClipboardListener>) override {}
 };

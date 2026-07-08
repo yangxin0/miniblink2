@@ -109,6 +109,7 @@
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
+#include "net/base/filename_util.h"
 #include "url/gurl.h"
 #include "ui/gfx/geometry/size_f.h"
 #include "v8/include/v8-context.h"
@@ -496,9 +497,20 @@ void MbWebView::LoadURL(const char* utf8_url) {
   if (url.rfind(kFile, 0) == 0) {
     // Top-level file load: read it and commit. (Self-contained docs + data: URIs
     // need no URLLoader; external subresources await the libcurl factory in P2-net.)
+    // net::FileURLToFilePath handles %-decoding and Windows drive letters
+    // ("file:///C:/x" -> "C:\x"); a raw substr broke both.
     std::string contents;
-    if (base::ReadFileToString(base::FilePath(url.substr(sizeof(kFile) - 1)),
-                               &contents)) {
+    base::FilePath file_path;
+    bool read_ok = net::FileURLToFilePath(GURL(url), &file_path) &&
+                   base::ReadFileToString(file_path, &contents);
+    if (!read_ok) {
+      // Fallback: raw path after the scheme (covers unix-style "/tmp/x" paths
+      // on Windows, where net:: rejects drive-less paths).
+      read_ok = base::ReadFileToString(
+          base::FilePath::FromUTF8Unsafe(url.substr(sizeof(kFile) - 1)),
+          &contents);
+    }
+    if (read_ok) {
       CommitHtml(contents.data(), contents.size(), url.c_str());
     } else {
       last_error_ = "file not found or unreadable";
@@ -611,7 +623,7 @@ bool MbWebView::DownloadURL(const char* url_in, const char* dest_path) {
   std::string body, content_type;
   if (!FetchDownloadBody(url_in, &body, &content_type))
     return false;
-  return base::WriteFile(base::FilePath(dest_path), body);
+  return base::WriteFile(base::FilePath::FromUTF8Unsafe(dest_path), body);
 }
 
 void MbWebView::PostURL(const char* utf8_url, const char* utf8_body,
@@ -1034,7 +1046,7 @@ bool MbWebView::SetFileForSelector(const char* css_selector,
       one.pop_back();
     if (!one.empty()) {
       std::string bytes;
-      if (base::ReadFileToString(base::FilePath(one), &bytes)) {
+      if (base::ReadFileToString(base::FilePath::FromUTF8Unsafe(one), &bytes)) {
         const std::string::size_type slash = one.find_last_of('/');
         const std::string base_name =
             slash == std::string::npos ? one : one.substr(slash + 1);
@@ -3486,7 +3498,7 @@ bool EncodeBitmapToPath(const SkBitmap& bitmap, const char* path) {
     data = gfx::JPEGCodec::Encode(bitmap, /*quality=*/90);
   else
     data = gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, /*discard_transparency=*/false);
-  return data && base::WriteFile(base::FilePath(path), *data);
+  return data && base::WriteFile(base::FilePath::FromUTF8Unsafe(path), *data);
 }
 // Encode `bitmap` to PNG bytes in memory (lossless, alpha kept).
 bool EncodeBitmapToPng(const SkBitmap& bitmap, std::vector<uint8_t>* out) {
@@ -3525,7 +3537,7 @@ bool MbWebView::SavePdf(const char* path) {
 
 bool MbWebView::SavePdfEx(const char* path, double width_pt, double height_pt,
                           bool landscape, double scale, double margin_pt) {
-  // !path: defense-in-depth — base::FilePath(nullptr) would be UB. The C-ABI rejects
+  // !path: defense-in-depth — base::FilePath::FromUTF8Unsafe(nullptr) would be UB. The C-ABI rejects
   // null too; this guards direct host-side callers (matching EncodeBitmapToPath).
   if (!path || !main_frame_ || !widget_ || !widget_->widget())
     return false;
@@ -3594,7 +3606,7 @@ bool MbWebView::SavePdfEx(const char* path, double width_pt, double height_pt,
 
   std::vector<uint8_t> buf(stream.bytesWritten());
   stream.copyToAndReset(buf.data());
-  return base::WriteFile(base::FilePath(path), buf);
+  return base::WriteFile(base::FilePath::FromUTF8Unsafe(path), buf);
 }
 
 bool MbWebView::SaveElementPng(const char* css_selector, const char* path) {

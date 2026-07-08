@@ -1653,12 +1653,12 @@ bool MbSaveIndexedDBScoped(const std::string& path,
                                     scope_prefix));
     done.Wait();
   }
-  return base::WriteFile(base::FilePath(path), blob);
+  return base::WriteFile(base::FilePath::FromUTF8Unsafe(path), blob);
 }
 
 bool MbLoadIndexedDBMerge(const std::string& path) {
   std::string blob;
-  if (!base::ReadFileToString(base::FilePath(path), &blob))
+  if (!base::ReadFileToString(base::FilePath::FromUTF8Unsafe(path), &blob))
     return false;
   bool ok = false;
   RunOnServiceSync(base::BindOnce(
@@ -1698,12 +1698,12 @@ bool MbSaveIndexedDB(const std::string& path) {
                                   std::string()));
     done.Wait();
   }
-  return base::WriteFile(base::FilePath(path), blob);
+  return base::WriteFile(base::FilePath::FromUTF8Unsafe(path), blob);
 }
 
 bool MbLoadIndexedDB(const std::string& path) {
   std::string blob;
-  if (!base::ReadFileToString(base::FilePath(path), &blob))
+  if (!base::ReadFileToString(base::FilePath::FromUTF8Unsafe(path), &blob))
     return false;
   bool ok = false;
   RunOnServiceSync(base::BindOnce(
