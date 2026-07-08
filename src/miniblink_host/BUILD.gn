@@ -271,10 +271,18 @@ shared_library("miniblink2") {
   # miniblink2.exports) — everything else becomes local, which both trims the
   # export trie and gives -Wl,-dead_strip more to strip.
   inputs = [ "miniblink2.exports" ]
-  ldflags = [ "-Wl,-force_load," +
-              rebase_path("$target_out_dir/libminiblink_host.a", root_build_dir),
-              "-Wl,-exported_symbols_list," +
-              rebase_path("miniblink2.exports", root_build_dir) ]
+  if (is_win) {
+    # lld-link: /WHOLEARCHIVE is the -force_load peer (pulls in ALL host objects
+    # even though nothing references them). No exports file needed — MB_EXPORT is
+    # __declspec(dllexport) on Windows, which pins the export surface by itself.
+    ldflags = [ "/WHOLEARCHIVE:" +
+                rebase_path("$target_out_dir/miniblink_host.lib", root_build_dir) ]
+  } else {
+    ldflags = [ "-Wl,-force_load," +
+                rebase_path("$target_out_dir/libminiblink_host.a", root_build_dir),
+                "-Wl,-exported_symbols_list," +
+                rebase_path("miniblink2.exports", root_build_dir) ]
+  }
   # No -Wl,-U and no stubs: Dawn references are gated out at COMPILE time when !use_dawn
   # (patches/0017), media_use_libvpx stays ON, and wasm-off is safe because V8 compiles
   # its external Wasm API as UNREACHABLE()/no-op stubs when v8_enable_webassembly=false
