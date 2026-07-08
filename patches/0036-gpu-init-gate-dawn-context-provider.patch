@@ -1,0 +1,42 @@
+Gate gpu_init.cc's Windows DawnContextProvider uses on SKIA_USE_DAWN.
+
+Peer of patch 0035: with skia_use_dawn=false the type/member are compiled
+out (gpu_init.h gates the field), but two Windows-only blocks still
+referenced them — the vk_swiftshader preload condition and the
+DirectComposition device selection. Both fall back to the ANGLE device /
+flag-only checks, which is exactly the runtime behavior when Dawn is off.
+
+--- a/gpu/ipc/service/gpu_init.cc	2026-07-08 14:24:24
++++ b/gpu/ipc/service/gpu_init.cc	2026-07-08 14:24:24
+@@ -698,8 +698,12 @@
+       //   SwiftShader via --skia-graphite-dawn-backend=swiftshader.
+       if (features::IsSwiftShaderAllowed(command_line) ||
+           gpu_preferences_.use_webgpu_adapter ==
+-              WebGPUAdapterName::kSwiftShader ||
+-          DawnContextProvider::DefaultForceFallbackAdapter()) {
++              WebGPUAdapterName::kSwiftShader
++#if BUILDFLAG(SKIA_USE_DAWN)
++          // DawnContextProvider only exists when Skia's Dawn backend is built.
++          || DawnContextProvider::DefaultForceFallbackAdapter()
++#endif
++      ) {
+         TRACE_EVENT("gpu,startup", "Load vk_swiftshader.dll");
+         base::LoadNativeLibrary(module_path.Append(L"vk_swiftshader.dll"),
+                                 nullptr);
+@@ -970,12 +974,16 @@
+   {
+     Microsoft::WRL::ComPtr<ID3D11Device> d3d11_device;
+     Microsoft::WRL::ComPtr<ID3D12CommandQueue> d3d12_command_queue;
++#if BUILDFLAG(SKIA_USE_DAWN)
+     if (dawn_context_provider_) {
+       d3d11_device = dawn_context_provider_->GetD3D11Device();
+       d3d12_command_queue = dawn_context_provider_->GetD3D12CommandQueue();
+     } else {
+       d3d11_device = gl::QueryD3D11DeviceObjectFromANGLE();
+     }
++#else
++    d3d11_device = gl::QueryD3D11DeviceObjectFromANGLE();
++#endif
+     gl::InitializeDirectComposition(std::move(d3d11_device),
+                                     std::move(d3d12_command_queue));
+   }
