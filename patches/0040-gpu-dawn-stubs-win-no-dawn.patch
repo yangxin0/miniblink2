@@ -1,0 +1,26 @@
+gpu: link the miniblink2 Dawn stubs when skia_use_dawn=false on Windows.
+
+d3d_image_backing.cc references dawn::native helpers and the Dawn-only
+gpu classes unconditionally; with Dawn compiled out (the miniblink2 SDK
+default) every binary linking the gpu service — the engine DLL and
+v8_context_snapshot_generator — fails with undefined symbols. The stub
+TU (staged with the miniblink_host sources; see its header comment for
+the trap-vs-benign split) satisfies them; the mac equivalent is patch
+0017's compile-time gating, which the far more Dawn-woven D3D backing
+does not admit as a reviewable patch.
+
+--- a/gpu/command_buffer/service/BUILD.gn	2026-07-08 23:49:09
++++ b/gpu/command_buffer/service/BUILD.gn	2026-07-08 23:49:09
+@@ -624,6 +624,12 @@
+   }
+ 
+   if (is_win) {
++    if (!skia_use_dawn) {
++      # miniblink2: d3d_image_backing.cc references Dawn helpers that only
++      # exist when Skia's Dawn backend is built; every gpu-linking binary
++      # (the engine DLL, v8_context_snapshot_generator) needs the stubs.
++      sources += [ "//third_party/blink/renderer/miniblink_host/platform/mb_dawn_stubs_win.cc" ]
++    }
+     sources += [
+       "dxgi_shared_handle_manager.cc",
+       "dxgi_shared_handle_manager.h",

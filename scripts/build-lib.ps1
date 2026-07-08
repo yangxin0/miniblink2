@@ -10,8 +10,8 @@
 #
 # Profiles (one out dir per profile, exactly like the bash script):
 #   --release        dev release: /O2, DCHECKs ON  -> dist\release\miniblink2.dll
-#                    + miniblink2.dll.lib + merged miniblink2_static.lib
-#                    (out\mono-release)
+#                    + miniblink2.dll.lib   (out\mono-release; no static merge —
+#                    dev objects exceed the 4 GB COFF archive limit, use --ship)
 #   --release --ship publishable: size-optimized, DCHECKs OUT
 #                    dll pass (ThinLTO): out\mono-release-dynamic
 #                    static pass (native): out\mono-release-static
@@ -225,20 +225,22 @@ function Merge-Static([string]$OutDir) {
   $inputs = $inputs | Where-Object { $_ } | Sort-Object -Unique |
             Where-Object { Test-Path (Join-Path $Chromium "$OutDir\$_") }
   Write-Host "  merging $($inputs.Count) inputs"
-  $llvmAr = Join-Path $Chromium 'third_party\llvm-build\Release+Asserts\bin\llvm-ar.exe'
-  if (-not (Test-Path $llvmAr)) { throw "llvm-ar not found at $llvmAr" }
+  # The Windows clang package ships no llvm-ar, and MSVC lib.exe cannot read
+  # the THIN archives GN's alink emits (LNK1107). lld-link in /lib mode is
+  # llvm-lib: reads thin archives + rust rlibs, flattens members, and writes
+  # a regular archive any consumer toolchain can use.
+  $libExe = Join-Path $Chromium 'third_party\llvm-build\Release+Asserts\bin\lld-link.exe'
+  if (-not (Test-Path $libExe)) { throw "lld-link not found at $libExe" }
   $out = Join-Path $Dist 'miniblink2_static.lib'
   Remove-Item $out -Force -ErrorAction SilentlyContinue
-  $mri = New-TemporaryFile
-  $lines = @("create $($out -replace '\\','/')")
-  foreach ($i in $inputs) {
-    if ($i -match '\.(lib|a|rlib)$') { $lines += "addlib $i" } else { $lines += "addmod $i" }
-  }
-  $lines += 'save'; $lines += 'end'
-  $lines | Set-Content -Encoding ascii $mri
+  $rsp = New-TemporaryFile
+  $inputs | Set-Content -Encoding ascii $rsp
   Push-Location (Join-Path $Chromium $OutDir)
-  try { Get-Content $mri | & $llvmAr -M; if ($LASTEXITCODE) { throw "llvm-ar merge failed" } }
-  finally { Pop-Location; Remove-Item $mri -Force }
+  try {
+    & $libExe /lib /NOLOGO "/OUT:$out" "@$rsp"
+    if ($LASTEXITCODE) { throw 'static merge failed' }
+  }
+  finally { Pop-Location; Remove-Item $rsp -Force }
 }
 
 # --- one provision+build pass -----------------------------------------------------
@@ -284,7 +286,12 @@ if ($Mode -eq 'debug') {
   Build-Pass 'out/mono-release-static'  $false $false $true  $false
   $DataOut = 'out/mono-release-dynamic'
 } else {
-  Build-Pass 'out/mono-release' $false $true $true $true
+  # Dev release: DLL + import lib only. The dev-profile objects total ~4 GB
+  # (debug info, DCHECKs), which exceeds the COFF archive format's 32-bit
+  # symbol-table offsets — a merged static lib is only produced by --ship,
+  # whose -Oz/no-DCHECK/symbol_level=0 objects fit.
+  Build-Pass 'out/mono-release' $false $true $false $true
+  Write-Host '  (dev release: static merge skipped on Windows — use --ship for miniblink2_static.lib)'
   $DataOut = 'out/mono-release'
 }
 if ($PrintOnly) { exit 0 }
