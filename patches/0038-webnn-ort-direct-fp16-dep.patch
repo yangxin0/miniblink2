@@ -3,19 +3,20 @@ webnn: give the Windows ORT backend its own fp16 dep.
 graph_builder_ort.cc / tensor_impl_ort.cc include the fp16 shim, whose
 include dir upstream arrives only transitively through the TFLite deps.
 With webnn_use_tflite=false (the miniblink2 SDK trim) the path vanishes
-and the Windows-only ort/ sources fail to find <fp16/fp16.h>. Direct dep
-states the real dependency; no change when TFLite is on.
+and the Windows-only ort/ sources in component("webnn_service") fail to
+find <fp16/fp16.h>. Direct dep states the real dependency; no change
+when TFLite is on.
 
---- a/services/webnn/BUILD.gn	2026-07-08 22:59:18
-+++ b/services/webnn/BUILD.gn	2026-07-08 22:59:18
-@@ -285,6 +285,10 @@
- 
-   if (is_win) {
+--- a/services/webnn/BUILD.gn	2026-07-08 23:04:28
++++ b/services/webnn/BUILD.gn	2026-07-08 23:04:28
+@@ -242,6 +242,10 @@
+       "webnn_compiler_service_impl.h",
+     ]
      deps += [
 +      # The ort/ backend uses the fp16 conversion helpers directly; upstream
 +      # only gets the include dir transitively via the TFLite deps, which the
 +      # miniblink2 SDK build compiles out (webnn_use_tflite=false).
 +      "//third_party/fp16",
-       "//services/webnn/host",
-       "//ui/gfx/mojom",
+       "//services/webnn/public/cpp:win",
+       "//third_party/windows_app_sdk_headers",
      ]
