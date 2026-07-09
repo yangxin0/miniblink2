@@ -5,6 +5,58 @@ Release notes for miniblink2. Each release is an annotated git tag
 
 ---
 
+## v0.4 — 2026-07-09 (`v0.4`)
+
+**The Windows release.** miniblink2 now fully supports **Windows x64** — the
+same sources, the same donor patches, the same test battery, on both
+platforms. Ported and verified on Windows 11 with VS 2022 Build Tools +
+Chromium's pinned clang-cl.
+
+**Everything green on Windows.**
+
+- The full test battery passes natively: `mb_smoke` 207, `mb_smoke_platform`
+  46, `mb_smoke_render` 141, `mb_shot_smoke` 66 — 0 failures — plus all 8
+  GPU/compositor probes, and real-site end-to-end `mb_shot` runs (live HTTPS
+  → layout → PNG).
+- **SDK build**: new `scripts/build-lib.ps1`, a native PowerShell peer of
+  `build-lib.sh` with the *same flags and profiles*. `--release` produces a
+  verified `dist\release\`: `miniblink2.dll` (the whole engine as ONE DLL) +
+  `miniblink2.dll.lib` + headers + runtime data; a plain MSVC consumer
+  linked only against the dist boots the engine, renders, and scrapes.
+  Static merge is `--ship`-only on Windows (dev objects exceed the 4 GB
+  COFF-archive format); merging uses `lld-link /lib` (thin-archive-aware).
+- **GPU**: WebGL 1+2 on SwiftShader-ANGLE by default — deterministic,
+  headless/RDP/CI-safe — with `--use-angle=d3d11` opting into hardware;
+  WebGPU (`--webgpu`) runs on Dawn's Vulkan/SwiftShader adapter.
+- `<select>` popups surface to the host (`mbOnSelectPopup`) on Windows too
+  (patch 0033 + `use_external_popup_menu`); the per-character host font
+  fallback hook works through DirectWrite (patch 0034); text renders
+  antialiased with Segoe UI system-font metrics seeded at init (no browser
+  process delivers renderer prefs).
+
+**Port highlights** (all platform-gated; mac behavior unchanged).
+
+- `FilePath` UTF-8 handling across opfs/indexeddb/webview/session;
+  `file://` → path via `net::FileURLToFilePath` (drive letters,
+  percent-decoding) with a unix-style fallback; `ioctlsocket` for the
+  WebSocket non-blocking socket; the Windows UI message pump (the
+  NSRunLoop workaround is mac-only); CoreAudio sink gated to mac (silent
+  sink elsewhere — decode + clock, no speaker output yet).
+- **Vendored curl for Windows**: Schannel-TLS `libcurl.dll` + import lib
+  (`third_party/curl/win/`), WebSocket-enabled like the mac dylib.
+- Donor patches 0032–0040: WebGPU-on-SwiftShader adapter (skip the ANGLE
+  D3D11-LUID pin), external popup menus on every platform, the Windows font
+  fallback hook, `use_dawn=false` compile gaps in the D3D/GPU-init paths,
+  webnn/ORT thread-safety annotations + fp16 dep, and `mb_dawn_stubs_win.cc`
+  (trap/benign stubs for the Dawn symbols the D3D shared-image backing
+  references unconditionally).
+- `BUILD.md` § "Windows (x64)": the full one-time bootstrap — VS ATL + SDK
+  Debugging Tools, cipd gn, pinned clang-cl/rust, node/esbuild/rollup/rc.exe
+  /gperf/dxheaders pins, `DEPOT_TOOLS_WIN_TOOLCHAIN=0` + `vs2022_install`,
+  and the Defender exclusion tip.
+
+---
+
 ## v0.3 — 2026-07-06 (`v0.3`)
 
 **The embedder-API release.** Both rounds of the Ultralight-informed API
