@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# build-samples.sh — build the mb-API sample app (minibrowser) against a dist/ SDK.
+# build-samples.sh — build the mb-API samples against a dist/ SDK (macOS).
 #
 #   scripts/build-samples.sh [--release|--debug] [--dyn|--static|--both] [--chromium DIR]
 #
-# Rebuilds dist/<mode>/minibrowser_{dyn,static} from samples/minibrowser_main.mm against the
-# libraries in dist/<mode>/ (build them first with scripts/build-lib.sh):
-#   --dyn     -> minibrowser_dyn     links libminiblink2.dylib (rpath @loader_path)
-#   --static  -> minibrowser_static  links libminiblink2.a (the complete archive)
+# Builds the whole sample set from samples/ against the libraries in
+# dist/<mode>/ (build them first with scripts/build-lib.sh):
+#   --dyn     -> every sample, linked against libminiblink2.dylib (@loader_path)
+#   --static  -> minibrowser_static only, linked against libminiblink2.a
+# Windowed samples are OS-INDEPENDENT: they share the scaffold interface in
+# samples/compat/mb_window.h; this script links the Cocoa backend
+# (compat/mac/), samples/build.ps1 links the Win32 one (compat/win/).
 #
 # Run a built sample FROM dist/<mode>/ — it loads icudtl.dat / the paks / the V8 snapshot
 # from beside the binary:  (cd dist/release && ./minibrowser_dyn https://example.com)
@@ -38,7 +41,8 @@ while [ $# -gt 0 ]; do
 done
 
 DIST="$HERE/dist/$MODE"
-SRC="$HERE/samples/minibrowser_main.mm"
+SAMPLES="$HERE/samples"
+SRC="$SAMPLES/minibrowser_main.mm"
 [ -f "$SRC" ] || { echo "error: missing $SRC" >&2; exit 1; }
 
 # samples #include "miniblink2/automation.h"; -I src resolves it (the same header the
@@ -51,18 +55,44 @@ CXXFLAGS=(-ObjC++ -std=c++20 -fobjc-arc
           -isysroot "$SDKROOT"
           -I "$HERE/src")
 
-# --- dynamic: the dylib already resolves the whole engine + curl, so the sample only needs
+# --- dynamic: the dylib already resolves the whole engine + curl, so a sample only needs
 # --- itself + Cocoa; @loader_path lets it find libminiblink2.dylib sitting beside it.
 if [ "$FORM" = dyn ] || [ "$FORM" = both ]; then
   [ -f "$DIST/libminiblink2.dylib" ] || {
     echo "error: no $DIST/libminiblink2.dylib — build it first: scripts/build-lib.sh --shared ${MODE:+--$MODE}" >&2; exit 1; }
+  LDDYN=(-L "$DIST" -lminiblink2 -Wl,-rpath,@loader_path)
+
   echo "==> minibrowser_dyn   (links libminiblink2.dylib)"
-  clang++ "${CXXFLAGS[@]}" "$SRC" \
-    -L "$DIST" -lminiblink2 -Wl,-rpath,@loader_path \
-    -framework Cocoa \
+  clang++ "${CXXFLAGS[@]}" "$SRC" "${LDDYN[@]}" -framework Cocoa \
     -o "$DIST/minibrowser_dyn"
   [ "$MODE" != debug ] && strip -x "$DIST/minibrowser_dyn"   # drop local symbols (release)
   echo "    -> $DIST/minibrowser_dyn ($(du -h "$DIST/minibrowser_dyn" | cut -f1))"
+
+  # The Ultralight-parity sample set (see samples/README.md). Headless ones are
+  # plain C/C++; windowed ones add the shared Cocoa scaffold from samples/compat/.
+  SCAFFOLD="$SAMPLES/compat/mac/mb_window.mm"
+  build_one() {  # name, extra sources...
+    local name="$1"; shift
+    echo "==> $name"
+    clang++ "${CXXFLAGS[@]}" -I "$SAMPLES" "$@" "${LDDYN[@]}" \
+      -framework Cocoa -framework QuartzCore \
+      -o "$DIST/$name"
+    [ "$MODE" != debug ] && strip -x "$DIST/$name"
+    echo "    -> $DIST/$name"
+  }
+  build_one sample1_render_to_png "$SAMPLES/sample1_render_to_png.cc"
+  build_one sample2_basic_app     "$SAMPLES/sample2_basic_app.cc"    "$SCAFFOLD"
+  build_one sample3_resizable_app "$SAMPLES/sample3_resizable_app.cc" "$SCAFFOLD"
+  build_one sample4_javascript    "$SAMPLES/sample4_javascript.cc"   "$SCAFFOLD"
+  build_one sample5_file_loading  "$SAMPLES/sample5_file_loading.cc" "$SCAFFOLD"
+  build_one sample9_multi_window  "$SAMPLES/sample9_multi_window.cc" "$SCAFFOLD"
+  # Sample 6 is PLAIN C — proving the mb headers are C-clean end to end.
+  echo "==> sample6_intro_c_api (compiled as C99)"
+  clang -std=c99 -isysroot "$SDKROOT" -I "$HERE/src" \
+    "$SAMPLES/sample6_intro_c_api.c" "${LDDYN[@]}" \
+    -o "$DIST/sample6_intro_c_api"
+  [ "$MODE" != debug ] && strip -x "$DIST/sample6_intro_c_api"
+  echo "    -> $DIST/sample6_intro_c_api"
 fi
 
 # --- static: libminiblink2.a is the COMPLETE engine archive, so the consumer must supply

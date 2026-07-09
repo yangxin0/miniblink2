@@ -1,0 +1,20 @@
+/* Sample 5 asset: loaded as a file:// subresource of page.html. */
+html, body { height: 100%; margin: 0; }
+body {
+  display: grid;
+  place-items: center;
+  background: #f4f1ea;
+  font-family: system-ui, sans-serif;
+  color: #333;
+}
+.card {
+  text-align: center;
+  background: #fff;
+  padding: 2.5em 3.5em;
+  border-radius: 14px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, .08);
+}
+h1 { font-weight: 650; margin: .6em 0 .2em; }
+p  { color: #777; margin: .4em 0; }
+code { background: #eee; padding: .1em .35em; border-radius: 4px; }
+#virtual { color: #2b7a3f; font-weight: 500; }

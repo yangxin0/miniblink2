@@ -1,0 +1,31 @@
+<!doctype html>
+<!-- Sample 5 asset: a file:// document whose subresources (the stylesheet and
+     the SVG logo) also load from disk, plus a fetch() answered from memory by
+     mbMockResponse (see sample5_file_loading.cc). -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="style.css">
+  <title>File loading</title>
+</head>
+<body>
+  <div class="card">
+    <img src="logo.svg" alt="logo" width="96" height="96">
+    <h1>Loaded from disk</h1>
+    <p>This document, its stylesheet, and the logo are plain <code>file://</code>
+       resources.</p>
+    <p id="virtual">fetching the virtual file…</p>
+  </div>
+  <script>
+    fetch('https://virtual.example/info.json')
+        .then(r => r.json())
+        .then(j => {
+          document.getElementById('virtual').textContent =
+              'virtual file says: served ' + j.served + ' by ' + j.by;
+        })
+        .catch(e => {
+          document.getElementById('virtual').textContent = 'fetch failed: ' + e;
+        });
+  </script>
+</body>
+</html>

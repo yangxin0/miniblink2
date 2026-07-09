@@ -25,12 +25,29 @@ CXXFLAGS=(-ObjC++ -std=c++20 -fobjc-arc
           -Wno-deprecated-anon-enum-enum-conversion -I "$PROJ/src")
 LDFLAGS=(-L "$OUT" -lminiblink_host -framework Cocoa -Wl,-rpath,"$OUT")
 
-# Output the binary INTO out/Release so it sits next to the engine's runtime
+# Output the binaries INTO out/Release so they sit next to the engine's runtime
 # data (icudtl.dat, the resource paks, the v8 snapshot) and libminiblink_host.dylib
 # — the engine loads ICU/resources relative to the executable, so a sample built
 # elsewhere aborts with "icudtl.dat not found". This mirrors mb_shot / mb_demo.
 echo "==> building minibrowser -> $OUT/minibrowser"
 clang++ "${CXXFLAGS[@]}" "$HERE/minibrowser_main.mm" "${LDFLAGS[@]}" -o "$OUT/minibrowser"
 
-echo "==> built: $OUT/minibrowser"
+# The OS-independent Ultralight-parity set (see README.md): headless samples are
+# plain C/C++; windowed ones add the Cocoa backend of the shared scaffold
+# (compat/mac; compat/win is the Win32 peer built by samples/build.ps1).
+SCAFFOLD="$HERE/compat/mac/mb_window.mm"
+for s in sample2_basic_app sample3_resizable_app sample4_javascript \
+         sample5_file_loading sample9_multi_window; do
+  echo "==> building $s -> $OUT/$s"
+  clang++ "${CXXFLAGS[@]}" -I "$HERE" "$HERE/$s.cc" "$SCAFFOLD" "${LDFLAGS[@]}" \
+    -framework QuartzCore -o "$OUT/$s"
+done
+echo "==> building sample1_render_to_png -> $OUT/sample1_render_to_png"
+clang++ "${CXXFLAGS[@]}" "$HERE/sample1_render_to_png.cc" "${LDFLAGS[@]}" \
+  -o "$OUT/sample1_render_to_png"
+echo "==> building sample6_intro_c_api (plain C99) -> $OUT/sample6_intro_c_api"
+clang -std=c99 -I "$PROJ/src" "$HERE/sample6_intro_c_api.c" \
+  -L "$OUT" -lminiblink_host -Wl,-rpath,"$OUT" -o "$OUT/sample6_intro_c_api"
+
+echo "==> built: $OUT/minibrowser + the sample set"
 echo "    run:  (cd $OUT && ./minibrowser https://example.com)"

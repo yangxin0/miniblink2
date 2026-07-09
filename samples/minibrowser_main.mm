@@ -19,6 +19,7 @@ static CGFloat g_scale = 1.0;             // Retina backing scale: render at thi
 static NSTextField* g_addressBar = nil;   // URL entry
 static NSButton* g_backButton = nil;      // ◀
 static NSButton* g_forwardButton = nil;   // ▶
+static int g_cursor = MB_CURSOR_POINTER;  // latest engine-pushed cursor
 static const CGFloat kToolbarHeight = 40.0;
 
 // mb modifier bitmask: 1=ctrl 2=shift 4=alt 8=meta.
@@ -137,6 +138,13 @@ static void mbUpdateChrome() {
     int x, y; [self mbPoint:e x:&x y:&y];
     // mbSendMouseDown/Up track the held button, so moves in between are a drag.
     mbSendMouseMove(g_view, x, y);
+    // Pointer UI: the engine pushes cursor changes (mbOnCursorChanged) — show
+    // an I-beam over selectable text and a hand over links, like a browser.
+    switch (g_cursor) {
+        case MB_CURSOR_HAND:  [[NSCursor pointingHandCursor] set]; break;
+        case MB_CURSOR_IBEAM: [[NSCursor IBeamCursor] set]; break;
+        default:              [[NSCursor arrowCursor] set]; break;
+    }
     [self setNeedsDisplay:YES];
 }
 // Right/middle: the mb API models these as complete clicks (down+up), which also
@@ -216,6 +224,18 @@ static void onUrlChanged(mbView*, void*, const char* /*url*/) {
 static void onLoadFinish(mbView*, void*) {
     dispatch_async(dispatch_get_main_queue(), ^{ mbUpdateChrome(); });
 }
+// The engine wants a different pointer (I-beam over text, hand over links).
+static void onCursorChanged(mbView*, void*, int cursor) {
+    g_cursor = cursor;
+}
+
+// window.open / target=_blank: a single-window browser NAVIGATES to the popup
+// URL instead of spawning a window (mbOnCreateChildView is the multi-window
+// answer — it hands the host a live, opener-wired child view).
+static void onNewWindow(mbView* v, void*, const char* url, const char* /*name*/) {
+    if (url && *url) mbLoadURL(v, url);
+}
+
 // Title changed -> window title.
 static void onTitleChanged(mbView*, void*, const char* title) {
     NSString* s = title ? [NSString stringWithUTF8String:title] : @"";
@@ -353,6 +373,8 @@ int main(int argc, const char** argv) {
         mbOnUrlChanged(g_view, onUrlChanged, nullptr);
         mbOnLoadFinish(g_view, onLoadFinish, nullptr);
         mbOnTitleChanged(g_view, onTitleChanged, nullptr);
+        mbOnCursorChanged(g_view, onCursorChanged, nullptr);
+        mbOnNewWindow(g_view, onNewWindow, nullptr);
         mbLoadURL(g_view, url);
 
         NSLog(@"[minibrowser] loading %s", url);
