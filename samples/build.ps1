@@ -46,15 +46,24 @@ function Build-Sample([string]$Name, [string[]]$Sources, [string[]]$ExtraFlags) 
 }
 
 # Headless (no scaffold).
-Build-Sample 'sample1_render_to_png' @("$Samples\sample1_render_to_png.cc") @('/std:c++20')
+Build-Sample 'sample1_render_to_png' @("$Samples\sample1_render_to_png\main.cc") @('/std:c++20')
 # Sample 6 is PLAIN C — cl compiles .c as C; proves the mb headers are C-clean.
-Build-Sample 'sample6_intro_c_api'   @("$Samples\sample6_intro_c_api.c")    @()
+Build-Sample 'sample6_intro_c_api'   @("$Samples\sample6_intro_c_api\main.c")    @()
 
 # Windowed (OS-independent sample + the Win32 scaffold backend).
 foreach ($s in 'sample2_basic_app', 'sample3_resizable_app', 'sample4_javascript',
                'sample5_file_loading', 'sample9_multi_window') {
-  Build-Sample $s @("$Samples\$s.cc", $Scaffold) @('/std:c++20')
+  Build-Sample $s @("$Samples\$s\main.cc", $Scaffold) @('/std:c++20')
 }
+
+# Sample 8 — minibrowser: OS-independent app + Win32 scaffold + CDP bridge
+# (winsock + common controls for the tracking tooltip).
+$OldLibs = $Libs
+$Libs = $OldLibs + @('ws2_32.lib', 'comctl32.lib')
+Build-Sample 'minibrowser' @("$Samples\sample8_minibrowser\main.cc",
+                             "$Samples\sample8_minibrowser\cdp_bridge.cc",
+                             $Scaffold) @('/std:c++20')
+$Libs = $OldLibs
 
 Write-Host "==> done. run FROM the dist dir so runtime data is found:"
 Write-Host "    cd $Dist; .\sample2_basic_app.exe"

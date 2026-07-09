@@ -3,6 +3,9 @@
 #import <Cocoa/Cocoa.h>
 
 #include <stdlib.h>
+
+#include <mutex>
+#include <utility>
 #include <vector>
 
 #include "../mb_window.h"
@@ -71,6 +74,7 @@ static int MbMods(NSEvent* e) {
 }
 - (void)mouseDown:(NSEvent*)e {
     if (!self.mb) return;
+    [[self window] makeFirstResponder:self];   // keys follow the clicked pane
     mbSetFocus(self.mb, 1);
     int x, y; [self mbPoint:e x:&x y:&y];
     mbSendMouseDown(self.mb, x, y);
@@ -164,8 +168,150 @@ static NSMutableArray<MbHostWindow*>* g_hosts;  // keeps hosts (and views) alive
 }
 @end
 
+// ---- Main-thread post queue (MbPostToMain) --------------------------------------
+static std::mutex g_post_lock;
+static std::vector<std::pair<void (*)(void*), void*>>* g_post_queue;
+
+static void DrainPosted() {
+    std::vector<std::pair<void (*)(void*), void*>> work;
+    {
+        std::lock_guard<std::mutex> al(g_post_lock);
+        if (g_post_queue) work.swap(*g_post_queue);
+    }
+    for (auto& [fn, ud] : work) fn(ud);
+}
+
+// ---- Browser window (chrome strip + page area) -----------------------------------
+@interface MbBrowserHost : NSObject <NSWindowDelegate>
+@property(nonatomic, strong) NSWindow* window;
+@property(nonatomic, strong) MbContentView* chromePane;
+@property(nonatomic, strong) MbContentView* pagePane;
+@property(nonatomic, assign) mbView* chrome;
+@property(nonatomic, assign) int chromeHeight;
+@property(nonatomic, assign) MbBrowserResizeFn resizeFn;
+@property(nonatomic, assign) void* resizeUd;
+@end
+
+static NSMutableArray<MbBrowserHost*>* g_browsers;
+
+@implementation MbBrowserHost
+- (void)windowDidResize:(NSNotification*)note {
+    NSRect cr = [[self.window contentView] bounds];
+    int w = (int)cr.size.width;
+    int page_h = (int)cr.size.height - self.chromeHeight;
+    if (w <= 0) return;
+    if (self.chrome) mbResize(self.chrome, w, self.chromeHeight);
+    if (self.pagePane.mb && page_h > 0) mbResize(self.pagePane.mb, w, page_h);
+    if (self.resizeFn && page_h > 0)
+        self.resizeFn((MbBrowserWindow*)(__bridge void*)self, w, page_h,
+                      self.resizeUd);
+}
+- (void)windowWillClose:(NSNotification*)note {
+    [g_browsers removeObject:self];
+    if (g_browsers.count == 0 && (!g_hosts || g_hosts.count == 0))
+        [NSApp terminate:nil];   // the sample quits with its browser window
+}
+@end
+
 // ---- The C interface (mb_window.h) --------------------------------------------
 extern "C" {
+
+void MbPostToMain(void (*fn)(void*), void* ud) {
+    std::lock_guard<std::mutex> al(g_post_lock);
+    if (!g_post_queue)
+        g_post_queue = new std::vector<std::pair<void (*)(void*), void*>>();
+    g_post_queue->emplace_back(fn, ud);
+}
+
+MbBrowserWindow* MbBrowserWindowCreate(const char* title, int width,
+                                       int height, int chrome_height) {
+    if (NSApp == nil) [NSApplication sharedApplication];
+    if (!g_browsers) g_browsers = [NSMutableArray array];
+
+    NSRect frame = NSMakeRect(0, 0, width, height + chrome_height);
+    NSWindow* win = [[NSWindow alloc]
+        initWithContentRect:frame
+                  styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+                             NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable)
+                    backing:NSBackingStoreBuffered defer:NO];
+    [win setTitle:(title ? [NSString stringWithUTF8String:title] : @"miniblink2")];
+    [win setAcceptsMouseMovedEvents:YES];
+
+    NSView* root = [[NSView alloc] initWithFrame:frame];
+    [win setContentView:root];
+
+    MbContentView* chromePane = [[MbContentView alloc]
+        initWithFrame:NSMakeRect(0, height, width, chrome_height)];
+    [chromePane setAutoresizingMask:(NSViewWidthSizable | NSViewMinYMargin)];
+    [root addSubview:chromePane];
+
+    MbContentView* pagePane =
+        [[MbContentView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
+    [pagePane setAutoresizingMask:(NSViewWidthSizable | NSViewHeightSizable)];
+    [root addSubview:pagePane];
+
+    CGFloat sc = [win backingScaleFactor] ?: 1.0;
+    mbView* chrome = mbCreateView(width, chrome_height);
+    if (!chrome) return nullptr;
+    mbSetDeviceScaleFactor(chrome, (float)sc);
+    chromePane.mb = chrome;
+    chromePane.cursor = MB_CURSOR_POINTER;
+
+    MbBrowserHost* h = [[MbBrowserHost alloc] init];
+    h.window = win;
+    h.chromePane = chromePane;
+    h.pagePane = pagePane;
+    h.chrome = chrome;
+    h.chromeHeight = chrome_height;
+    [win setDelegate:h];
+    [win center];
+    [win makeKeyAndOrderFront:nil];
+    [win makeFirstResponder:pagePane];
+    [g_browsers addObject:h];
+    return (MbBrowserWindow*)(__bridge void*)h;
+}
+
+mbView* MbBrowserWindowChrome(MbBrowserWindow* w) {
+    return w ? ((__bridge MbBrowserHost*)(void*)w).chrome : nullptr;
+}
+
+void MbBrowserWindowSetPage(MbBrowserWindow* w, mbView* page) {
+    if (!w) return;
+    MbBrowserHost* h = (__bridge MbBrowserHost*)(void*)w;
+    h.pagePane.mb = page;
+    if (page) {
+        NSRect b = [h.pagePane bounds];
+        CGFloat sc = [h.window backingScaleFactor] ?: 1.0;
+        mbSetDeviceScaleFactor(page, (float)sc);
+        mbResize(page, (int)b.size.width, (int)b.size.height);
+        mbViewSetDirty(page);   // the pane lost its pixels: force the blit
+        mbOnCursorChanged(page, [](mbView*, void* ud, int cursor) {
+            ((__bridge MbContentView*)ud).cursor = cursor;
+        }, (__bridge void*)h.pagePane);
+    }
+    [h.pagePane setNeedsDisplay:YES];
+}
+
+void MbBrowserWindowPageSize(MbBrowserWindow* w, int* out_w, int* out_h) {
+    if (!w) return;
+    NSRect b = [((__bridge MbBrowserHost*)(void*)w).pagePane bounds];
+    if (out_w) *out_w = (int)b.size.width;
+    if (out_h) *out_h = (int)b.size.height;
+}
+
+void MbBrowserWindowSetTooltip(MbBrowserWindow* w, const char* text) {
+    if (!w) return;
+    MbBrowserHost* h = (__bridge MbBrowserHost*)(void*)w;
+    [h.pagePane setToolTip:(text && *text) ? @(text) : nil];
+}
+
+void MbBrowserWindowOnResize(MbBrowserWindow* w, MbBrowserResizeFn fn,
+                             void* userdata) {
+    if (!w) return;
+    MbBrowserHost* h = (__bridge MbBrowserHost*)(void*)w;
+    h.resizeFn = fn;
+    h.resizeUd = userdata;
+}
 
 MbWindow* MbWindowCreate(const char* title, int width, int height) {
     if (NSApp == nil) [NSApplication sharedApplication];
@@ -231,10 +377,17 @@ void MbRunApp(void) {
     // The canonical interactive tick (webview.h header): advance the world with
     // the frame timestamp, then blit only views that are actually dirty.
     [NSTimer scheduledTimerWithTimeInterval:1.0 / 60.0 repeats:YES block:^(NSTimer*) {
+        DrainPosted();               // MbPostToMain work (engine off the stack)
         mbUpdateAt(CACurrentMediaTime());
         for (MbHostWindow* h in g_hosts)
             if (h.view && mbViewIsDirty(h.view))
                 [h.window.contentView setNeedsDisplay:YES];
+        for (MbBrowserHost* b in g_browsers) {
+            if (b.chrome && mbViewIsDirty(b.chrome))
+                [b.chromePane setNeedsDisplay:YES];
+            if (b.pagePane.mb && mbViewIsDirty(b.pagePane.mb))
+                [b.pagePane setNeedsDisplay:YES];
+        }
     }];
 
     // Smoke-run support: MB_SAMPLE_AUTOEXIT_MS=1500 exits cleanly after 1.5 s.

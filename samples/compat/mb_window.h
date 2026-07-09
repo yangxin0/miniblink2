@@ -46,6 +46,37 @@ void MbWindowSetTitle(MbWindow* w, const char* title);
 // N ms) so samples can smoke-run unattended.
 void MbRunApp(void);
 
+// ---- Browser-shaped window (sample 8) -----------------------------------------
+// A window split into a fixed-height CHROME strip (its own mbView, created by
+// the scaffold - render your toolbar/tab-bar HTML into it) above a swappable
+// PAGE area. Input routes by position; the page area's pointer follows the
+// page view's engine-pushed cursor; window resizes flow into both views'
+// mbResize (and the optional resize callback, so a host can resize hidden
+// tabs lazily).
+typedef struct MbBrowserWindow MbBrowserWindow;
+MbBrowserWindow* MbBrowserWindowCreate(const char* title, int width,
+                                       int height, int chrome_height);
+// The chrome strip's engine view (bind your UI callbacks, load your UI HTML).
+mbView* MbBrowserWindowChrome(MbBrowserWindow* w);
+// Show `page` in the page area (NULL = blank). The scaffold resizes it to the
+// current page area and registers its cursor push. The host keeps ownership.
+void MbBrowserWindowSetPage(MbBrowserWindow* w, mbView* page);
+// Current page-area size in logical CSS px (size new tab views with this).
+void MbBrowserWindowPageSize(MbBrowserWindow* w, int* out_w, int* out_h);
+// Native tooltip over the page area ("" or NULL hides) - wire it to
+// mbOnTooltipChanged.
+void MbBrowserWindowSetTooltip(MbBrowserWindow* w, const char* utf8_text);
+// Fires after a window resize with the new page-area size.
+typedef void (*MbBrowserResizeFn)(MbBrowserWindow*, int page_w, int page_h,
+                                  void* userdata);
+void MbBrowserWindowOnResize(MbBrowserWindow* w, MbBrowserResizeFn fn,
+                             void* userdata);
+
+// Post fn(userdata) to the MAIN thread's frame tick (thread-safe; at most one
+// frame of latency). For backends like sample 8's CDP socket threads, which
+// must enter the engine but may not do so off-thread.
+void MbPostToMain(void (*fn)(void* userdata), void* userdata);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

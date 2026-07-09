@@ -51,8 +51,9 @@ int main(int argc, const char** argv) {
   // the usual run locations (dist/<mode>/ and the repo root).
   std::string dir = argc > 1 ? argv[1] : "";
   if (dir.empty()) {
-    for (const char* cand : { "../../samples/assets", "samples/assets",
-                              "../samples/assets" }) {
+    for (const char* cand : { "../../samples/sample5_file_loading/assets",
+                              "samples/sample5_file_loading/assets",
+                              "../samples/sample5_file_loading/assets" }) {
       if (Exists(std::string(cand) + "/page.html")) {
         dir = cand;
         break;

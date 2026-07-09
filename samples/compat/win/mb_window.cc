@@ -10,10 +10,13 @@
 
 #include <windows.h>
 #include <windowsx.h>
+#include <commctrl.h>
 
 #include <stdlib.h>
 
+#include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "../mb_window.h"
@@ -215,6 +218,224 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
+// ---- Main-thread post queue (MbPostToMain) --------------------------------------
+std::mutex g_post_lock;
+std::vector<std::pair<void (*)(void*), void*>>* g_post_queue;
+
+void DrainPosted() {
+    std::vector<std::pair<void (*)(void*), void*>> work;
+    {
+        std::lock_guard<std::mutex> al(g_post_lock);
+        if (g_post_queue) work.swap(*g_post_queue);
+    }
+    for (auto& [fn, ud] : work) fn(ud);
+}
+
+// ---- Browser window (chrome strip + page area) -----------------------------------
+struct MbBrowserWindow_ {
+    HWND hwnd = nullptr;
+    HWND tooltip = nullptr;
+    mbView* chrome = nullptr;
+    mbView* page = nullptr;      // host-owned; swapped per tab
+    float scale = 1.0f;
+    int chrome_h = 0;            // logical CSS px
+    int logical_w = 0, page_h = 0;
+    int cursor = MB_CURSOR_POINTER;   // page view's engine-pushed cursor
+    bool keys_to_chrome = false;      // keyboard follows the last-clicked pane
+    MbBrowserResizeFn resize_fn = nullptr;
+    void* resize_ud = nullptr;
+    std::vector<unsigned char> pixels;
+    wchar_t pending_high_surrogate = 0;
+};
+
+std::vector<MbBrowserWindow_*>& Browsers() {
+    static auto* v = new std::vector<MbBrowserWindow_*>();
+    return *v;
+}
+
+void BrowserBlit(MbBrowserWindow_* b, HDC dc) {
+    RECT rc;
+    GetClientRect(b->hwnd, &rc);
+    auto paint = [&](mbView* v, int px_y, int lw, int lh) {
+        if (!v || lw <= 0 || lh <= 0) return;
+        int pw = (int)(lw * b->scale), ph = (int)(lh * b->scale);
+        int pitch = pw * 4;
+        b->pixels.assign((size_t)pitch * ph, 0);
+        if (!mbRepaintToBitmap(v, b->pixels.data(), pw, ph, pitch)) return;
+        BITMAPINFO bi = {};
+        bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+        bi.bmiHeader.biWidth = pw;
+        bi.bmiHeader.biHeight = -ph;
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        StretchDIBits(dc, 0, px_y, rc.right, ph * rc.right / (pw > 0 ? pw : 1),
+                      0, 0, pw, ph, b->pixels.data(), &bi, DIB_RGB_COLORS,
+                      SRCCOPY);
+    };
+    const int chrome_px = (int)(b->chrome_h * b->scale);
+    paint(b->chrome, 0, b->logical_w, b->chrome_h);
+    paint(b->page, chrome_px, b->logical_w, b->page_h);
+}
+
+// Route a client-space point to (view, logical x/y). NULL view = none.
+mbView* BrowserHit(MbBrowserWindow_* b, int px, int py, int* lx, int* ly) {
+    const float sc = b->scale > 0 ? b->scale : 1.0f;
+    const int chrome_px = (int)(b->chrome_h * sc);
+    *lx = (int)(px / sc);
+    if (py < chrome_px) {
+        *ly = (int)(py / sc);
+        return b->chrome;
+    }
+    *ly = (int)((py - chrome_px) / sc);
+    return b->page;
+}
+
+LRESULT CALLBACK BrowserWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    auto* b = reinterpret_cast<MbBrowserWindow_*>(
+        GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (!b) return DefWindowProcW(hwnd, msg, wp, lp);
+    const float sc = b->scale > 0 ? b->scale : 1.0f;
+
+    switch (msg) {
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC dc = BeginPaint(hwnd, &ps);
+            BrowserBlit(b, dc);
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_SIZE: {
+            b->logical_w = (int)(LOWORD(lp) / sc);
+            b->page_h = (int)(HIWORD(lp) / sc) - b->chrome_h;
+            if (b->logical_w <= 0) return 0;
+            if (b->chrome) mbResize(b->chrome, b->logical_w, b->chrome_h);
+            if (b->page && b->page_h > 0)
+                mbResize(b->page, b->logical_w, b->page_h);
+            if (b->resize_fn && b->page_h > 0)
+                b->resize_fn(reinterpret_cast<MbBrowserWindow*>(b),
+                             b->logical_w, b->page_h, b->resize_ud);
+            return 0;
+        }
+        case WM_DPICHANGED: {
+            b->scale = HIWORD(wp) / 96.0f;
+            if (b->chrome) mbSetDeviceScaleFactor(b->chrome, b->scale);
+            if (b->page) mbSetDeviceScaleFactor(b->page, b->scale);
+            const RECT* r = reinterpret_cast<const RECT*>(lp);
+            SetWindowPos(hwnd, nullptr, r->left, r->top, r->right - r->left,
+                         r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
+            return 0;
+        }
+        case WM_MOUSEMOVE: {
+            int lx, ly;
+            if (mbView* v = BrowserHit(b, GET_X_LPARAM(lp), GET_Y_LPARAM(lp),
+                                       &lx, &ly))
+                mbSendMouseMove(v, lx, ly);
+            return 0;
+        }
+        case WM_LBUTTONDOWN: {
+            SetFocus(hwnd);
+            int lx, ly;
+            mbView* v =
+                BrowserHit(b, GET_X_LPARAM(lp), GET_Y_LPARAM(lp), &lx, &ly);
+            if (v) {
+                b->keys_to_chrome = (v == b->chrome);
+                mbSetFocus(v, 1);
+                mbSendMouseDown(v, lx, ly);
+            }
+            return 0;
+        }
+        case WM_LBUTTONUP: {
+            int lx, ly;
+            if (mbView* v = BrowserHit(b, GET_X_LPARAM(lp), GET_Y_LPARAM(lp),
+                                       &lx, &ly))
+                mbSendMouseUp(v, lx, ly);
+            return 0;
+        }
+        case WM_RBUTTONDOWN: {
+            int lx, ly;
+            if (mbView* v = BrowserHit(b, GET_X_LPARAM(lp), GET_Y_LPARAM(lp),
+                                       &lx, &ly))
+                mbSendMouseClickEx(v, lx, ly, 2, MbMods());
+            return 0;
+        }
+        case WM_MOUSEWHEEL: {
+            POINT pt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+            ScreenToClient(hwnd, &pt);
+            int lx, ly;
+            mbView* v = BrowserHit(b, pt.x, pt.y, &lx, &ly);
+            if (v) {
+                int dy = -GET_WHEEL_DELTA_WPARAM(wp) * 40 / WHEEL_DELTA;
+                mbSendWheel(v, lx, ly, 0, dy, MbMods());
+            }
+            return 0;
+        }
+        case WM_KEYDOWN: {
+            mbView* v = b->keys_to_chrome ? b->chrome : b->page;
+            if (!v) return 0;
+            int mods = MbMods();
+            if (const char* name = MbKeyName(wp)) {
+                mbSendKeyEx(v, name, mods);
+            } else if (wp == VK_F2) {
+                // F2 = DevTools, matching the chrome page's own handler; send
+                // it THERE so one code path (the page's OnToggleTools) fires.
+                if (b->chrome) mbRunJS(b->chrome, "OnToggleTools()");
+            } else if ((mods & 1) && wp >= 'A' && wp <= 'Z') {
+                char key[2] = { (char)('a' + (wp - 'A')), 0 };
+                mbSendKeyEx(v, key, mods);
+            }
+            return 0;
+        }
+        case WM_CHAR: {
+            mbView* v = b->keys_to_chrome ? b->chrome : b->page;
+            if (!v) return 0;
+            wchar_t c = (wchar_t)wp;
+            if (c < 0x20 || c == 0x7f) return 0;
+            if (GetKeyState(VK_CONTROL) & 0x8000) return 0;
+            wchar_t units[2];
+            int n = 0;
+            if (c >= 0xD800 && c <= 0xDBFF) {
+                b->pending_high_surrogate = c;
+                return 0;
+            }
+            if (c >= 0xDC00 && c <= 0xDFFF && b->pending_high_surrogate) {
+                units[n++] = b->pending_high_surrogate;
+                b->pending_high_surrogate = 0;
+            }
+            units[n++] = c;
+            std::string utf8 = Utf16ToUtf8(units, n);
+            if (!utf8.empty()) mbSendText(v, utf8.c_str());
+            return 0;
+        }
+        case WM_SETCURSOR:
+            if (LOWORD(lp) == HTCLIENT) {
+                POINT pt;
+                GetCursorPos(&pt);
+                ScreenToClient(hwnd, &pt);
+                LPCWSTR id = IDC_ARROW;
+                if (pt.y >= (int)(b->chrome_h * sc)) {  // page area only
+                    if (b->cursor == MB_CURSOR_HAND) id = IDC_HAND;
+                    else if (b->cursor == MB_CURSOR_IBEAM) id = IDC_IBEAM;
+                }
+                SetCursor(LoadCursorW(nullptr, id));
+                return TRUE;
+            }
+            break;
+        case WM_DESTROY: {
+            auto& all = Browsers();
+            for (size_t i = 0; i < all.size(); ++i)
+                if (all[i] == b) { all.erase(all.begin() + i); break; }
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            delete b;   // views are host-owned; the app tears them down
+            if (all.empty() && Windows().empty()) PostQuitMessage(0);
+            return 0;
+        }
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
 void EnsureWindowClass() {
     static bool done = false;
     if (done) return;
@@ -233,6 +454,9 @@ void EnsureWindowClass() {
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.hCursor = nullptr;  // WM_SETCURSOR drives the cursor
     wc.lpszClassName = L"MbSampleWindow";
+    RegisterClassExW(&wc);
+    wc.lpfnWndProc = BrowserWndProc;
+    wc.lpszClassName = L"MbBrowserWindow";
     RegisterClassExW(&wc);
 }
 
@@ -290,6 +514,125 @@ void MbWindowSetTitle(MbWindow* w, const char* title) {
                    Utf8ToUtf16(title).c_str());
 }
 
+void MbPostToMain(void (*fn)(void*), void* ud) {
+    std::lock_guard<std::mutex> al(g_post_lock);
+    if (!g_post_queue)
+        g_post_queue = new std::vector<std::pair<void (*)(void*), void*>>();
+    g_post_queue->emplace_back(fn, ud);
+}
+
+MbBrowserWindow* MbBrowserWindowCreate(const char* title, int width,
+                                       int height, int chrome_height) {
+    EnsureWindowClass();
+    auto* b = new MbBrowserWindow_();
+    b->chrome_h = chrome_height;
+    std::wstring wtitle = Utf8ToUtf16(title ? title : "miniblink2");
+    b->hwnd = CreateWindowExW(0, L"MbBrowserWindow", wtitle.c_str(),
+                              WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+                              width, height + chrome_height, nullptr, nullptr,
+                              GetModuleHandleW(nullptr), nullptr);
+    if (!b->hwnd) {
+        delete b;
+        return nullptr;
+    }
+    b->scale = WindowScale(b->hwnd);
+    b->logical_w = width;
+    b->page_h = height;
+    RECT rc = { 0, 0, (LONG)(width * b->scale),
+                (LONG)((height + chrome_height) * b->scale) };
+    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+    SetWindowPos(b->hwnd, nullptr, 0, 0, rc.right - rc.left, rc.bottom - rc.top,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+
+    b->chrome = mbCreateView(width, chrome_height);
+    if (!b->chrome) {
+        DestroyWindow(b->hwnd);
+        return nullptr;
+    }
+    mbSetDeviceScaleFactor(b->chrome, b->scale);
+
+    // Tracking tooltip for the page area (MbBrowserWindowSetTooltip).
+    INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_BAR_CLASSES };
+    InitCommonControlsEx(&icc);
+    b->tooltip = CreateWindowExW(0, TOOLTIPS_CLASSW, nullptr,
+                                 WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
+                                 CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                                 CW_USEDEFAULT, b->hwnd, nullptr,
+                                 GetModuleHandleW(nullptr), nullptr);
+    if (b->tooltip) {
+        TOOLINFOW ti = {};
+        ti.cbSize = sizeof(ti);
+        ti.uFlags = TTF_TRACK | TTF_ABSOLUTE;
+        ti.hwnd = b->hwnd;
+        ti.uId = 1;
+        ti.lpszText = const_cast<LPWSTR>(L"");
+        SendMessageW(b->tooltip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
+    }
+
+    SetWindowLongPtrW(b->hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(b));
+    Browsers().push_back(b);
+    ShowWindow(b->hwnd, SW_SHOWNORMAL);
+    UpdateWindow(b->hwnd);
+    return reinterpret_cast<MbBrowserWindow*>(b);
+}
+
+mbView* MbBrowserWindowChrome(MbBrowserWindow* w) {
+    return w ? reinterpret_cast<MbBrowserWindow_*>(w)->chrome : nullptr;
+}
+
+void MbBrowserWindowSetPage(MbBrowserWindow* w, mbView* page) {
+    if (!w) return;
+    auto* b = reinterpret_cast<MbBrowserWindow_*>(w);
+    b->page = page;
+    if (page) {
+        mbSetDeviceScaleFactor(page, b->scale);
+        if (b->logical_w > 0 && b->page_h > 0)
+            mbResize(page, b->logical_w, b->page_h);
+        mbViewSetDirty(page);   // the pane lost its pixels: force the blit
+        mbOnCursorChanged(page, [](mbView*, void* ud, int cursor) {
+            static_cast<MbBrowserWindow_*>(ud)->cursor = cursor;
+        }, b);
+    }
+    InvalidateRect(b->hwnd, nullptr, FALSE);
+}
+
+void MbBrowserWindowPageSize(MbBrowserWindow* w, int* out_w, int* out_h) {
+    if (!w) return;
+    auto* b = reinterpret_cast<MbBrowserWindow_*>(w);
+    if (out_w) *out_w = b->logical_w;
+    if (out_h) *out_h = b->page_h;
+}
+
+void MbBrowserWindowSetTooltip(MbBrowserWindow* w, const char* text) {
+    if (!w) return;
+    auto* b = reinterpret_cast<MbBrowserWindow_*>(w);
+    if (!b->tooltip) return;
+    TOOLINFOW ti = {};
+    ti.cbSize = sizeof(ti);
+    ti.hwnd = b->hwnd;
+    ti.uId = 1;
+    if (text && *text) {
+        std::wstring wtext = Utf8ToUtf16(text);
+        ti.lpszText = const_cast<LPWSTR>(wtext.c_str());
+        SendMessageW(b->tooltip, TTM_UPDATETIPTEXTW, 0, (LPARAM)&ti);
+        POINT pt;
+        GetCursorPos(&pt);
+        SendMessageW(b->tooltip, TTM_TRACKPOSITION, 0,
+                     MAKELPARAM(pt.x + 12, pt.y + 18));
+        SendMessageW(b->tooltip, TTM_TRACKACTIVATE, TRUE, (LPARAM)&ti);
+    } else {
+        SendMessageW(b->tooltip, TTM_TRACKACTIVATE, FALSE, (LPARAM)&ti);
+    }
+}
+
+void MbBrowserWindowOnResize(MbBrowserWindow* w, MbBrowserResizeFn fn,
+                             void* userdata) {
+    if (!w) return;
+    auto* b = reinterpret_cast<MbBrowserWindow_*>(w);
+    b->resize_fn = fn;
+    b->resize_ud = userdata;
+}
+
 void MbRunApp(void) {
     ULONGLONG deadline = 0;
     if (const char* ms = getenv("MB_SAMPLE_AUTOEXIT_MS")) {  // smoke-run support
@@ -306,10 +649,15 @@ void MbRunApp(void) {
             DispatchMessageW(&msg);
         }
         if (deadline && GetTickCount64() >= deadline) exit(0);
+        DrainPosted();   // MbPostToMain work (engine off the stack)
         mbUpdate();  // re-entrancy-safe engine slice (bounded by mbSetMaxUpdateTime)
         for (MbWindow_* w : Windows())
             if (w->view && mbViewIsDirty(w->view))
                 InvalidateRect(w->hwnd, nullptr, FALSE);
+        for (MbBrowserWindow_* b : Browsers())
+            if ((b->chrome && mbViewIsDirty(b->chrome)) ||
+                (b->page && mbViewIsDirty(b->page)))
+                InvalidateRect(b->hwnd, nullptr, FALSE);
         MsgWaitForMultipleObjectsEx(0, nullptr, 16, QS_ALLINPUT, 0);  // ~60 fps
     }
 }

@@ -42,8 +42,12 @@ done
 
 DIST="$HERE/dist/$MODE"
 SAMPLES="$HERE/samples"
-SRC="$SAMPLES/minibrowser_main.mm"
-[ -f "$SRC" ] || { echo "error: missing $SRC" >&2; exit 1; }
+# minibrowser (sample 8) is OS-independent app code + the compat scaffold +
+# the CDP bridge; the same trio builds on Windows via samples/build.ps1.
+SRC=("$SAMPLES/sample8_minibrowser/main.cc"
+     "$SAMPLES/sample8_minibrowser/cdp_bridge.cc"
+     "$SAMPLES/compat/mac/mb_window.mm")
+[ -f "${SRC[0]}" ] || { echo "error: missing ${SRC[0]}" >&2; exit 1; }
 
 # samples #include "miniblink2/automation.h"; -I src resolves it (the same header the
 # SDK ships as dist/include/miniblink2/automation.h).
@@ -63,7 +67,8 @@ if [ "$FORM" = dyn ] || [ "$FORM" = both ]; then
   LDDYN=(-L "$DIST" -lminiblink2 -Wl,-rpath,@loader_path)
 
   echo "==> minibrowser_dyn   (links libminiblink2.dylib)"
-  clang++ "${CXXFLAGS[@]}" "$SRC" "${LDDYN[@]}" -framework Cocoa \
+  clang++ "${CXXFLAGS[@]}" -I "$SAMPLES" "${SRC[@]}" "${LDDYN[@]}" \
+    -framework Cocoa -framework QuartzCore \
     -o "$DIST/minibrowser_dyn"
   [ "$MODE" != debug ] && strip -x "$DIST/minibrowser_dyn"   # drop local symbols (release)
   echo "    -> $DIST/minibrowser_dyn ($(du -h "$DIST/minibrowser_dyn" | cut -f1))"
@@ -80,16 +85,16 @@ if [ "$FORM" = dyn ] || [ "$FORM" = both ]; then
     [ "$MODE" != debug ] && strip -x "$DIST/$name"
     echo "    -> $DIST/$name"
   }
-  build_one sample1_render_to_png "$SAMPLES/sample1_render_to_png.cc"
-  build_one sample2_basic_app     "$SAMPLES/sample2_basic_app.cc"    "$SCAFFOLD"
-  build_one sample3_resizable_app "$SAMPLES/sample3_resizable_app.cc" "$SCAFFOLD"
-  build_one sample4_javascript    "$SAMPLES/sample4_javascript.cc"   "$SCAFFOLD"
-  build_one sample5_file_loading  "$SAMPLES/sample5_file_loading.cc" "$SCAFFOLD"
-  build_one sample9_multi_window  "$SAMPLES/sample9_multi_window.cc" "$SCAFFOLD"
+  build_one sample1_render_to_png "$SAMPLES/sample1_render_to_png/main.cc"
+  build_one sample2_basic_app     "$SAMPLES/sample2_basic_app/main.cc"    "$SCAFFOLD"
+  build_one sample3_resizable_app "$SAMPLES/sample3_resizable_app/main.cc" "$SCAFFOLD"
+  build_one sample4_javascript    "$SAMPLES/sample4_javascript/main.cc"   "$SCAFFOLD"
+  build_one sample5_file_loading  "$SAMPLES/sample5_file_loading/main.cc" "$SCAFFOLD"
+  build_one sample9_multi_window  "$SAMPLES/sample9_multi_window/main.cc" "$SCAFFOLD"
   # Sample 6 is PLAIN C — proving the mb headers are C-clean end to end.
   echo "==> sample6_intro_c_api (compiled as C99)"
   clang -std=c99 -isysroot "$SDKROOT" -I "$HERE/src" \
-    "$SAMPLES/sample6_intro_c_api.c" "${LDDYN[@]}" \
+    "$SAMPLES/sample6_intro_c_api/main.c" "${LDDYN[@]}" \
     -o "$DIST/sample6_intro_c_api"
   [ "$MODE" != debug ] && strip -x "$DIST/sample6_intro_c_api"
   echo "    -> $DIST/sample6_intro_c_api"
@@ -141,7 +146,7 @@ if [ "$FORM" = static ] || [ "$FORM" = both ]; then
 
   echo "==> minibrowser_static  (links libminiblink2.a; ${#FW[@]} frameworks; $(basename "$CLANGXX") + lld)"
   echo "    (a native .a links in ~a minute; a legacy bitcode .a re-runs LTO — several min)"
-  "$CLANGXX" "${CXXFLAGS[@]}" "$SRC" \
+  "$CLANGXX" "${CXXFLAGS[@]}" -I "$SAMPLES" "${SRC[@]}" \
     "$DIST/libminiblink2.a" \
     -fuse-ld=lld -Wl,-ObjC -Wl,-dead_strip \
     "${FW[@]}" \
