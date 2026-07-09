@@ -5276,6 +5276,14 @@ int main() {
       const int ok = mbAddFontData(font_bytes.data(),
                                    static_cast<int>(font_bytes.size()), family,
                                    sizeof(family));
+#if defined(_WIN32)
+      // Documented platform gap: blink's Windows font stack is DirectWrite-
+      // backed and cannot see memory-registered fonts, so the export returns
+      // 0 honestly (webview.h) — assert THAT, not silent misbehavior.
+      Expect(ok == 0,
+             "mbAddFontData: returns 0 on Windows (DirectWrite gap, documented)",
+             std::string("ok=") + std::to_string(ok));
+#else
       mbLoadHTML(v,
                  "<body><span id=a style=\"font-family:Ahem;font-size:20px\">"
                  "XXXXX</span></body>",
@@ -5286,6 +5294,7 @@ int main() {
              "mbAddFontData: in-memory font registers and its family resolves",
              std::string("ok=") + std::to_string(ok) + " family=[" + family +
                  "] width=[" + w + "]");
+#endif
     }
   }
 

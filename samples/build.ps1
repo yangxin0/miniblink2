@@ -31,7 +31,9 @@ if (-not (Test-Path $ImpLib)) {
 $Obj = Join-Path $Dist 'sample-obj'
 New-Item -ItemType Directory -Force $Obj | Out-Null
 
-$Common = @('/nologo', '/O2', '/EHsc', '/DUNICODE', '/D_UNICODE',
+# /utf-8: the sources carry UTF-8 comments/strings; without it cl decodes them
+# in the system codepage (C4819 warning spam on CJK-locale machines).
+$Common = @('/nologo', '/O2', '/EHsc', '/utf-8', '/DUNICODE', '/D_UNICODE',
             "/I$Root\src", "/I$Samples", "/Fo$Obj\")
 $Libs = @($ImpLib, 'user32.lib', 'gdi32.lib', 'shell32.lib')
 $Scaffold = Join-Path $Samples 'compat\win\mb_window.cc'
