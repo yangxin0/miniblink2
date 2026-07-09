@@ -16,6 +16,12 @@ that satisfies modern Blink so it runs without the full browser.
 gets the whole modern web platform — GPU-accelerated WebGL on Metal included
 (`map.baidu.com` and MapLibre GL render their full vector maps).
 
+**Runs on macOS arm64 and Windows x64.** The same sources, patches, and test battery
+build and pass on both: on Windows the SDK is one `miniblink2.dll` + import lib
+(`scripts/build-lib.ps1`, same flags as the mac script), with WebGL on
+SwiftShader-ANGLE by default (`--use-angle=d3d11` for hardware) and WebGPU on
+Vulkan/SwiftShader. See `BUILD.md` § "Windows (x64)" for the one-time bootstrap.
+
 > New here? `include/miniblink2/miniblink2.h` (the `mb*` C API) is the single
 > public header. Quick start below; `PROGRESS.md` has the development journal.
 
@@ -75,6 +81,12 @@ scripts/build-lib.sh [--release|--debug] [--ship]
                      [--tracing] [--swiftshader] [--icu-full]
                      [--chromium DIR] [--depot DIR] [--no-stage] [--print-only]
 ```
+
+On **Windows**, `scripts\build-lib.ps1` takes the *same flags* and produces
+`dist\release\miniblink2.dll` + `miniblink2.dll.lib` + the runtime data
+(SwiftShader GL DLLs and `libcurl.dll` included). The dev-release profile skips
+the merged static lib on Windows — its ~4 GB of DCHECK/debug objects exceed the
+COFF archive format — use `--ship` for `miniblink2_static.lib`.
 
 Profiles (each in its own out dir, so switching stays incremental):
 
@@ -136,13 +148,14 @@ is rewritten from the build machine's absolute path to `@loader_path`, install
 ids become `@rpath`, and everything is ad-hoc re-signed. Verified by compiling
 and booting the sample browser from an unpacked zip in a clean directory.
 
-## GPU architecture (macOS)
+## GPU architecture
 
 ```
-2D  (Skia Ganesh)  ─┐
-3D  (WebGL 1+2)    ─┼──► GL ES ──► ANGLE ──► Metal (GPU)
-                    │                └─ or SwiftShader (CPU) via --use-angle=swiftshader
-WebGPU (--webgpu)  ────► Dawn ──► Metal
+                     macOS                          Windows
+2D  (Skia Ganesh)  ─┐                             ─┐
+3D  (WebGL 1+2)    ─┼─► GL ES ─► ANGLE ─► Metal    ┼─► GL ES ─► ANGLE ─► SwiftShader (default)
+                    │   └ or SwiftShader (CPU)     │   └ or D3D11 via --use-angle=d3d11
+WebGPU (--webgpu)  ───► Dawn ─► Metal             ───► Dawn ─► Vulkan/SwiftShader
 ```
 
 - WebGL runs on the **real GPU** through ANGLE's Metal backend
@@ -155,7 +168,7 @@ WebGPU (--webgpu)  ────► Dawn ──► Metal
   into the software page paint (`patches/0008` + `0018`), which is what makes WebGL
   content appear in `mbPaintToBitmap`/`mb_shot` screenshots.
 
-## What works (verified by a 400+ case automated battery)
+## What works (verified by a 400+ case automated battery, on macOS **and** Windows)
 
 | Subsystem | Status |
 |---|---|
@@ -277,10 +290,12 @@ More demos — modern CSS, JS mutating the DOM, `file://` + SVG, `<canvas>` 2D:
 The **C ABI** dissolves the GN↔consumer build mismatch: GN builds everything that
 touches Blink/base/mojo C++ types; an app links only against the pure-C headers.
 
-**Donor patches** (`patches/`, 18): small, documented Chromium patches the build
+**Donor patches** (`patches/`, 40): small, documented Chromium patches the build
 applies automatically — offscreen-widget compat, in-process GPU de-testonly, the
-non-composited canvas paint path (`0008`/`0018`), gating Dawn out of the mac GPU path
-when WebGPU is off (`0017`), and similar. Each patch header explains the exact reason.
+non-composited canvas paint path (`0008`/`0018`), gating Dawn out of the GPU path
+when WebGPU is off (`0017` mac, `0035`/`0036`/`0040` Windows), host `<select>`
+popups on every platform (`0033`), and similar. Each patch header explains the
+exact reason.
 
 ## Public C ABI (`include/miniblink2/mb_capi.h`)
 
@@ -363,7 +378,10 @@ message loop; push-model callbacks (`mbOnLoadFinish`, `mbOnUrlChanged`,
 
 ## Requirements
 
-- **macOS arm64** (Apple Silicon).
+- **macOS arm64** (Apple Silicon) **or Windows x64** (Windows 10/11 — VS 2022
+  Build Tools + ATL, Windows 11 SDK with Debugging Tools, Git for Windows, CMake,
+  ninja, Python 3.12; the full one-time bootstrap incl. toolchain pins and the
+  Schannel libcurl is `BUILD.md` § "Windows (x64)").
 - A **Chromium M150 checkout** (`chromium-150.0.7871.24`) and **depot_tools**, as
   siblings of this repo (override with `CHROMIUM=`/`DEPOT=` env or
   `--chromium`/`--depot`):

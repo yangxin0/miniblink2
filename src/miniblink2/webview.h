@@ -44,10 +44,10 @@ typedef struct mbView mbView;
 // Callable BEFORE mbInitialize — a dlopen-ing host verifies what it bound at
 // load time instead of failing at the first missing symbol (or worse, silently
 // running a mismatched pair). Returned strings are static; do not free.
-// Engine (this library) version, e.g. "0.4.0-dev".
+// Engine (this library) version, e.g. "0.4.0".
 // MB_VERSION is the compile-time string this header shipped with — log both
 // (compiled-against vs loaded) when diagnosing a dlopen'd engine.
-#define MB_VERSION "0.4.0-dev"
+#define MB_VERSION "0.4.0"
 MB_EXPORT const char* mbVersion(void);
 // Header/ABI compatibility number; bumped on any breaking change to this API.
 // A host built against MB_API_VERSION N should refuse an engine reporting < N.
