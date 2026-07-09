@@ -4943,6 +4943,147 @@ int main() {
                " unforced=" + std::to_string(unforced));
   }
 
+  // (j2) Dirty RECTS (item 2 tail): mbViewGetDirtyRect reports the damaged
+  // region of the last repaint. A clean repaint is empty damage; recoloring a
+  // small absolutely-positioned div damages (at least) the div but far less
+  // than the view; mbViewSetDirty restores full-view damage.
+  {
+    mbView* rv = mbCreateView(400, 300);
+    mbLoadHTML(rv,
+               "<body style='margin:0'><div id=b style='position:absolute;"
+               "left:40px;top:30px;width:50px;height:20px;background:#00f'>"
+               "</div></body>",
+               "about:blank");
+    std::vector<unsigned char> rpx(400 * 300 * 4);
+    // Settle: repaint until the damage flag stays clean (straggler frames).
+    for (int i = 0; i < 10 && (i < 2 || mbViewIsDirty(rv)); ++i)
+      mbRepaintToBitmap(rv, rpx.data(), 400, 300, 400 * 4);
+    // Clean repaint: nothing invalidated -> empty rect ("skip the blit").
+    mbRepaintToBitmap(rv, rpx.data(), 400, 300, 400 * 4);
+    int cx = -1, cy = -1, cw = -1, ch = -1;
+    mbViewGetDirtyRect(rv, &cx, &cy, &cw, &ch);
+    const bool clean_empty = (cw == 0 && ch == 0);
+    // Recolor the 50x20 div and repaint: the damage must cover the div's box
+    // yet stay far smaller than the 400x300 view — and the pixels must really
+    // have changed to red inside the reported rect.
+    mbRunJS(rv, "document.getElementById('b').style.background='#f00'");
+    mbRepaintToBitmap(rv, rpx.data(), 400, 300, 400 * 4);
+    int dx = -1, dy = -1, dw = -1, dh = -1;
+    mbViewGetDirtyRect(rv, &dx, &dy, &dw, &dh);
+    const bool covers =
+        dx <= 40 && dy <= 30 && dx + dw >= 90 && dy + dh >= 50;
+    const bool partial = dw > 0 && dh > 0 && dw <= 200 && dh <= 150;
+    const size_t off = (static_cast<size_t>(40) * 400 + 60) * 4;  // (60,40) BGRA
+    const bool red_px = rpx[off] == 0x00 && rpx[off + 1] == 0x00 &&
+                        rpx[off + 2] == 0xFF;
+    // Host-forced dirty (lost buffer): the next frame is full-view damage.
+    mbViewSetDirty(rv);
+    mbRepaintToBitmap(rv, rpx.data(), 400, 300, 400 * 4);
+    int fx = -1, fy = -1, fw = -1, fh = -1;
+    mbViewGetDirtyRect(rv, &fx, &fy, &fw, &fh);
+    const bool full = fx == 0 && fy == 0 && fw == 400 && fh == 300;
+    mbDestroyView(rv);
+    Expect(clean_empty && covers && partial && red_px && full,
+           "mbViewGetDirtyRect: empty when clean, element-sized on a small "
+           "change, full after mbViewSetDirty",
+           "clean=" + std::to_string(cw) + "x" + std::to_string(ch) +
+               " change=" + std::to_string(dx) + "," + std::to_string(dy) +
+               " " + std::to_string(dw) + "x" + std::to_string(dh) +
+               " red=" + std::to_string(red_px) + " forced=" +
+               std::to_string(fx) + "," + std::to_string(fy) + " " +
+               std::to_string(fw) + "x" + std::to_string(fh));
+  }
+
+  // (j3) Streaming download lifecycle: mbDownloadURLStream delivers
+  // begin -> data -> finish through the mbOnDownloadStream sink (a mocked URL
+  // exercises the full plumbing without a network), with id/bytes/progress
+  // consistent; mbCancelDownload flips finish to success=0 and suppresses the
+  // body.
+  {
+    struct DlState {
+      unsigned begin_id = 0, data_id = 0, finish_id = 0;
+      std::string url, mime, filename, bytes;
+      long long expected = -2, received = -2;
+      int finishes = 0, success = -1;
+    } st;
+    mbView* dv = mbCreateView(200, 150);
+    mbLoadHTML(dv, "<body>dl</body>", "about:blank");
+    mbMockResponse("dl.test/report.bin", "0123456789ABCDEF",
+                   "application/octet-stream", 200);
+    mbOnDownloadStream(
+        dv,
+        [](mbView*, void* ud, unsigned id, const char* url, const char* mime,
+           const char* filename, long long expected) {
+          auto* s = static_cast<DlState*>(ud);
+          s->begin_id = id;
+          s->url = url;
+          s->mime = mime;
+          s->filename = filename;
+          s->expected = expected;
+        },
+        [](mbView*, void* ud, unsigned id, const char* bytes, int len,
+           long long received, long long) {
+          auto* s = static_cast<DlState*>(ud);
+          s->data_id = id;
+          s->bytes.append(bytes, static_cast<size_t>(len));
+          s->received = received;
+        },
+        [](mbView*, void* ud, unsigned id, int success) {
+          auto* s = static_cast<DlState*>(ud);
+          s->finish_id = id;
+          s->finishes++;
+          s->success = success;
+        },
+        &st);
+    const unsigned id = mbDownloadURLStream(dv, "https://dl.test/report.bin");
+    const bool async_start = id > 0 && st.finishes == 0;  // nothing inline
+    for (int i = 0; i < 50 && st.finishes == 0; ++i)
+      mbWait(dv, 20);
+    const bool lifecycle_ok =
+        st.begin_id == id && st.data_id == id && st.finish_id == id &&
+        st.finishes == 1 && st.success == 1 && st.bytes == "0123456789ABCDEF" &&
+        st.expected == 16 && st.received == 16 &&
+        st.mime == "application/octet-stream" && st.filename == "report.bin" &&
+        st.url == "https://dl.test/report.bin";
+    // Cancel before the posted delivery runs: finish reports success=0 and no
+    // body arrives.
+    DlState st2;
+    mbOnDownloadStream(
+        dv, nullptr,
+        [](mbView*, void* ud, unsigned id, const char* bytes, int len,
+           long long, long long) {
+          auto* s = static_cast<DlState*>(ud);
+          s->data_id = id;
+          s->bytes.append(bytes, static_cast<size_t>(len));
+        },
+        [](mbView*, void* ud, unsigned id, int success) {
+          auto* s = static_cast<DlState*>(ud);
+          s->finish_id = id;
+          s->finishes++;
+          s->success = success;
+        },
+        &st2);
+    const unsigned id2 = mbDownloadURLStream(dv, "https://dl.test/report.bin");
+    mbCancelDownload(dv, id2);
+    for (int i = 0; i < 50 && st2.finishes == 0; ++i)
+      mbWait(dv, 20);
+    const bool cancel_ok = id2 > 0 && st2.finish_id == id2 &&
+                           st2.finishes == 1 && st2.success == 0 &&
+                           st2.bytes.empty();
+    mbClearMocks();
+    mbOnDownloadStream(dv, nullptr, nullptr, nullptr, nullptr);
+    mbDestroyView(dv);
+    Expect(async_start && lifecycle_ok && cancel_ok,
+           "streaming download: begin/data/finish with progress; cancel "
+           "reports success=0",
+           "id=" + std::to_string(id) + " begin=" + std::to_string(st.begin_id) +
+               " bytes=[" + st.bytes + "] expected=" +
+               std::to_string(st.expected) + " success=" +
+               std::to_string(st.success) + " cancel_success=" +
+               std::to_string(st2.success) + " cancel_bytes=" +
+               std::to_string(st2.bytes.size()));
+  }
+
   // (k) mbSendKeyEvent: a typed KeyDown with text inserts into the focused
   // input (implicit kChar) and carries the auto-repeat flag to KeyboardEvent.
   {

@@ -376,6 +376,53 @@ typedef void (*mbDownloadCallback)(mbView*, void* userdata, const char* url,
                                    const char* data, int len);
 MB_EXPORT void mbOnDownload(mbView*, mbDownloadCallback, void* userdata);
 
+// Streaming download lifecycle — the large-body alternative to mbOnDownload's
+// complete-buffer callback. One download runs begin -> data... -> finish:
+//   begin(id, url, mime, filename, expected_bytes)   response started;
+//       expected_bytes is the body total from Content-Length, -1 if unknown
+//       (chunked). filename: the page's suggested name, else the server's
+//       Content-Disposition, else the URL's last segment.
+//   data(id, bytes, len, received, expected_bytes)   one chunk, in order;
+//       `received` accumulates. NOT NUL-safe — use len. The engine buffers
+//       nothing: write chunks to disk yourself.
+//   finish(id, success)                              exactly once; success=0
+//       on HTTP >= 400, transport failure, or mbCancelDownload.
+// `id` identifies one download (unique per view). Callbacks arrive as engine
+// tasks — an mbUpdate tick delivers them (never from inside mbOnDownloadStream
+// / mbDownloadURLStream themselves).
+//
+// While registered, this sink TAKES OVER all page-initiated downloads from
+// mbOnDownload (which stops firing): navigation downloads and blob:/data:
+// bodies (already materialized in memory) deliver as begin + one data +
+// finish; an http(s) <a download> link genuinely streams. Passing all-NULL
+// callbacks clears the sink and restores mbOnDownload routing.
+typedef void (*mbDownloadBeginCallback)(mbView*, void* userdata,
+                                        unsigned int id, const char* url,
+                                        const char* mime, const char* filename,
+                                        long long expected_bytes);
+typedef void (*mbDownloadDataCallback)(mbView*, void* userdata,
+                                       unsigned int id, const char* bytes,
+                                       int len, long long received,
+                                       long long expected_bytes);
+typedef void (*mbDownloadFinishCallback)(mbView*, void* userdata,
+                                         unsigned int id, int success);
+MB_EXPORT void mbOnDownloadStream(mbView*, mbDownloadBeginCallback,
+                                  mbDownloadDataCallback,
+                                  mbDownloadFinishCallback, void* userdata);
+
+// Host-initiated streaming download of `url` through the engine network stack
+// (interception layer, session cookies, UA, extra headers, proxy). Returns the
+// download id (> 0) whose lifecycle arrives on the mbOnDownloadStream sink, or
+// 0 when refused (no sink registered, blocked/vetoed URL, unfetchable scheme).
+// Unlike mbDownloadURL the engine never buffers the whole body — suitable for
+// files larger than memory.
+MB_EXPORT unsigned int mbDownloadURLStream(mbView*, const char* url);
+
+// Abort a running download promptly (mid-transfer, or from inside its own
+// begin/data callbacks); its finish callback then reports success=0. Unknown
+// ids are ignored.
+MB_EXPORT void mbCancelDownload(mbView*, unsigned int id);
+
 // New-window notification: the callback fires when the page requests a new window
 // (window.open() or a target=_blank activation), with the requested `url` and window
 // `name`. It is a notification only — the popup is not auto-created (window.open returns
@@ -1254,6 +1301,18 @@ MB_EXPORT int mbViewIsDirty(mbView*);
 // CALayer on hide/show, a buffer dropped on resize) — without this a
 // damage-gated blit loop would skip forever.
 MB_EXPORT void mbViewSetDirty(mbView*);
+
+// The damaged region of the frame delivered by the LAST successful
+// mbRepaintToBitmap / mbPaintToBitmap: the rect (logical px, clamped to the
+// view; multiply by the device scale factor for buffer coordinates) that can
+// differ from the previous painted frame. Everything outside it is
+// bit-identical, so after a successful repaint a damage-gated host uploads
+// only this subrect; w==h==0 means the frame was identical — skip the blit
+// entirely. Reports the full view when fine-grained damage is unknown (first
+// paint, resize, mbViewSetDirty, mbSetForceRepaint, composited views).
+// Single-buffer hosts only as-is: with several buffers in flight, union the
+// rects since each buffer's last paint yourself. Returns 1 (0 = bad view).
+MB_EXPORT int mbViewGetDirtyRect(mbView*, int* x, int* y, int* w, int* h);
 
 // Diagnostic: while enabled (1), mbViewIsDirty always reports 1 for this view,
 // so a damage-gated host repaints every tick. The escape hatch for "the dirty

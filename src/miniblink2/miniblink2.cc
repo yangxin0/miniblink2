@@ -778,6 +778,49 @@ void mbOnDownload(mbView* v, mbDownloadCallback cb, void* userdata) {
     v->impl->SetDownloadCallback({});
 }
 
+void mbOnDownloadStream(mbView* v, mbDownloadBeginCallback begin_cb,
+                        mbDownloadDataCallback data_cb,
+                        mbDownloadFinishCallback finish_cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (!begin_cb && !data_cb && !finish_cb) {
+    v->impl->SetDownloadStreamCallbacks({}, {}, {});
+    return;
+  }
+  v->impl->SetDownloadStreamCallbacks(
+      [v, begin_cb, userdata](unsigned id, const std::string& url,
+                              const std::string& mime,
+                              const std::string& filename,
+                              long long expected) {
+        if (begin_cb)
+          begin_cb(v, userdata, id, url.c_str(), mime.c_str(),
+                   filename.c_str(), expected);
+      },
+      [v, data_cb, userdata](unsigned id, const char* data, size_t len,
+                             long long received, long long expected) {
+        if (data_cb)
+          data_cb(v, userdata, id, data,
+                  static_cast<int>(std::min<size_t>(len, INT_MAX)), received,
+                  expected);
+      },
+      [v, finish_cb, userdata](unsigned id, bool success) {
+        if (finish_cb)
+          finish_cb(v, userdata, id, success ? 1 : 0);
+      });
+}
+
+unsigned int mbDownloadURLStream(mbView* v, const char* url) {
+  EngineScope engine_scope;
+  if (!v || !v->impl)
+    return 0;
+  return v->impl->DownloadURLStream(url);
+}
+
+void mbCancelDownload(mbView* v, unsigned int id) {
+  if (v && v->impl)
+    v->impl->CancelDownload(id);
+}
+
 void mbOnCursorChanged(mbView* v, mbCursorChangedCallback cb, void* userdata) {
   if (!v || !v->impl)
     return;
@@ -2138,6 +2181,13 @@ int mbViewIsDirty(mbView* v) {
 void mbViewSetDirty(mbView* v) {
   if (v && v->impl)
     v->impl->SetDirty();
+}
+
+int mbViewGetDirtyRect(mbView* v, int* x, int* y, int* w, int* h) {
+  if (!v || !v->impl)
+    return 0;
+  v->impl->GetLastPaintDamage(x, y, w, h);
+  return 1;
 }
 
 void mbSetForceRepaint(mbView* v, int enabled) {

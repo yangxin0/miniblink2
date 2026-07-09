@@ -101,6 +101,8 @@ component("miniblink_host") {
     "runtime/mb_runtime.h",
     "runtime/mb_script_watchdog.cc",
     "runtime/mb_script_watchdog.h",
+    "view/mb_damage_tracker.cc",
+    "view/mb_damage_tracker.h",
     "view/mb_webview.cc",
     "devtools/mb_devtools.cc",
     "devtools/mb_devtools.h",

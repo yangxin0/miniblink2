@@ -64,8 +64,16 @@ skips clean frames entirely.
 
 **Shipped, flag-level** (01805da): `mbViewIsDirty` via
 ScheduleNonCompositedAnimation, snapshot semantics; `mbRepaintToBitmap`'s
-0-return strictly means "buffer untouched". Dirty RECTS and an engine-owned
-lockable surface remain open.
+0-return strictly means "buffer untouched".
+
+**Shipped, rect-level**: `mbViewGetDirtyRect` — the damaged region of the last
+successful repaint (empty = bit-identical frame, skip the blit; full view when
+unknown: first paint / resize / SetDirty / force-repaint / composited). Blink's
+own `RasterInvalidator` diffs the persistent PaintArtifact across paint cycles
+(whole document as one layer in Root space — the space the software paint
+replays in); the diff runs inside the paint cycle via the non-composited paint
+hook (patch 0041), the only window where the previous artifact's backing store
+is still alive. An engine-owned lockable surface remains open.
 
 **Related paint-purity rule:** the interactive paint used to end its drive tick
 with `RunUntilIdle` *after* the lifecycle update — drained tasks (queued input)
@@ -410,8 +418,13 @@ family used; bogus family tofu-guarded).
   for it; the per-request allow/deny half already exists (mbOnNavigation +
   request callbacks). Deferred until a host pins.
 - **Streaming download lifecycle** (chunked OnReceiveDataForDownload +
-  CancelDownload): mbOnDownload delivers complete bodies; fine until a host
-  downloads large media. Deferred with item 9 (same "large bodies" trigger).
+  CancelDownload): ~~deferred~~ **shipped** — `mbOnDownloadStream` (begin →
+  data chunks with received/expected progress → finish) + `mbDownloadURLStream`
+  + `mbCancelDownload`, on an MbSseStream-pattern curl worker. While the sink
+  is registered it takes over all page-initiated downloads from mbOnDownload;
+  blob/data:/mocked/navigation bodies (already materialized) deliver the same
+  lifecycle from memory. The whole-body response hook does not apply to
+  streamed bodies (documented); item 9's zero-copy remains separate.
 - **ImageSource** (host-registered decoded/GPU images referenced by URL):
   elegant inverse of the mock hook, heavy to build in blink. Noted only.
 - **ThreadFactory / Allocator override**: QoS-tagging engine threads is
@@ -787,11 +800,11 @@ stylesheet caveat).
 
 | Item | What's left | Status |
 |---|---|---|
-| 2 | Dirty rects + engine-owned lockable surface (flag+setter level shipped) | Open — the one real performance feature remaining |
+| 2 | Engine-owned lockable surface (dirty RECTS shipped: `mbViewGetDirtyRect` diffs the persistent paint artifact via blink's RasterInvalidator — patch 0041 + mb_damage_tracker) | Surface still open; rect level shipped |
 | 9 | Zero-copy resource bodies (`mbResponseSetBodyOwned`) | Deferred by cost — revisit if a host serves large media |
 | 10 | Memory budget knobs (cache sizes) | Only if `mbPurgeMemory` proves insufficient |
 | 13c | Child worker/iframe DevTools targets (multi-session bridge) | Open, unscheduled |
-| 21 | TLS pinning / streaming downloads / ImageSource | Deferred by trigger (no host needs them yet) |
+| 21 | TLS pinning / ImageSource (streaming downloads shipped: `mbOnDownloadStream` + `mbDownloadURLStream` + `mbCancelDownload`, chunked with progress) | Deferred by trigger (no host needs them yet) |
 | 35 | `mbAddFontData` on Windows (DirectWrite private collection) | Open — mac shipped; the export returns 0 on Windows |
 
 ---

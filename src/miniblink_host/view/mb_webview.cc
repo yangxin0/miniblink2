@@ -6,8 +6,11 @@
 
 #include "miniblink_host/view/mb_webview.h"
 
+#include <set>
+
 #include "miniblink_host/devtools/mb_devtools.h"
 #include "miniblink_host/session/mb_session.h"
+#include "miniblink_host/view/mb_damage_tracker.h"
 
 #include "third_party/blink/public/web/web_css_origin.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
@@ -37,6 +40,7 @@
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/run_loop.h"
+#include "base/task/bind_post_task.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
@@ -208,6 +212,8 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height,
                                              MbWebView* opener,
                                              int compositing_override) {
   auto v = std::unique_ptr<MbWebView>(new MbWebView());
+  v->view_width_ = width;
+  v->view_height_ = height;
   v->view_client_ = std::make_unique<MbViewClient>();
   v->frame_client_ = std::make_unique<MbFrameClient>(v.get());
 
@@ -340,7 +346,36 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height,
   return v;
 }
 
+namespace {
+
+// All live views, for routing the non-composited paint hook (which fires with
+// the local root's LocalFrameView) back to the owning MbWebView. Main-thread
+// only, like everything else here.
+std::set<MbWebView*>& AllViews() {
+  static std::set<MbWebView*>* views = new std::set<MbWebView*>();
+  return *views;
+}
+
+// Non-composited paint hook (patch 0041): runs INSIDE the paint cycle, the
+// only window where the previous PaintArtifact's backing store is still
+// intact for the damage diff.
+void DispatchNonCompositedPaint(blink::LocalFrameView& root_view,
+                                bool repainted) {
+  for (MbWebView* view : AllViews()) {
+    if (view->NotifyNonCompositedPaint(root_view, repainted))
+      return;
+  }
+}
+
+}  // namespace
+
 MbWebView::MbWebView() {
+  // Route blink's non-composited paint cycles to the damage tracker (dirty
+  // rects, item 2 tail). Installing per-construction is idempotent; the hook
+  // stays installed for the process (dispatch over an empty set no-ops).
+  blink::LocalFrameView::SetMbNonCompositedPaintHookForHost(
+      &DispatchNonCompositedPaint);
+  AllViews().insert(this);
   // Every view starts in the implicit default session — session_ is "never
   // null after construction" (SetCookie/ClearCookies/session-scope lookups
   // rely on it); CreateViewInSession swaps it later via SetSession. These
@@ -354,6 +389,18 @@ MbWebView::MbWebView() {
 }
 
 MbWebView::~MbWebView() {
+  // Leave the paint-hook registry first: teardown below can still drive paint
+  // cycles, and they must not dispatch into a half-dead view. The tracker (and
+  // its RasterInvalidator) dies with this object; the artifacts it references
+  // are GC-managed.
+  AllViews().erase(this);
+  // Abort in-flight streaming downloads. Their detached workers unwind on
+  // their own; the posted callbacks no-op once alive_token_ (a member) dies.
+  for (auto& entry : downloads_) {
+    if (entry.second.stream)
+      MbStopDownloadStream(entry.second.stream);
+  }
+  downloads_.clear();
   // Erase this view's per-context mock hook before anything else — a fetch
   // fired during teardown must not consult a hook whose captures are dying.
   MbSetRequestMockHookForContext(this, {});
@@ -384,6 +431,12 @@ MbWebView::~MbWebView() {
 }
 
 void MbWebView::Resize(int width, int height) {
+  view_width_ = width;
+  view_height_ = height;
+  // The host's buffer is reallocated on resize, so everything in it is stale —
+  // full damage, regardless of how little blink ends up re-laying-out.
+  if (damage_tracker_)
+    damage_tracker_->AddDamage(gfx::Rect(width, height));
   if (widget_)
     widget_->set_needs_frame(true);
   if (widget_)
@@ -556,9 +609,20 @@ void MbWebView::LoadURL(const char* utf8_url) {
     while (!mime.empty() && mime.back() == ' ')
       mime.pop_back();
     std::string dl_name;
-    if (ok && on_download_ &&
+    if (ok && (on_download_ || HasDownloadStreamSink()) &&
         IsDownloadResponse(doc_url, mime, response_headers_, &dl_name)) {
-      on_download_(doc_url, mime, dl_name, body);
+      if (HasDownloadStreamSink()) {
+        // Streaming sink takes precedence. The navigation fetch is inherently
+        // buffered (it had to be read to decide document-vs-download), so
+        // deliver the bytes through the lifecycle rather than re-fetching.
+        const unsigned id = ++next_download_id_;
+        StreamingDownload& dl = downloads_[id];
+        dl.url = doc_url;
+        dl.suggested_name = dl_name;
+        PostSynthesizedDownload(id, mime, std::move(body));
+      } else {
+        on_download_(doc_url, mime, dl_name, body);
+      }
       return;
     }
     if (ok) {
@@ -2249,6 +2313,201 @@ void MbWebView::SetDownloadCallback(DownloadFn cb) {
   on_download_ = std::move(cb);
 }
 
+void MbWebView::SetDownloadStreamCallbacks(DownloadBeginFn begin,
+                                           DownloadDataFn data,
+                                           DownloadFinishFn finish) {
+  on_download_begin_ = std::move(begin);
+  on_download_data_ = std::move(data);
+  on_download_finish_ = std::move(finish);
+}
+
+namespace {
+// Main-thread landing for a stream callback that may outlive the view: the
+// worker's BindPostTask hop carries a weak token; expired -> the view is gone,
+// drop the event (the detached stream unwinds by itself).
+template <typename Method, typename... Args>
+void RunIfViewAlive(std::weak_ptr<int> token, MbWebView* view, Method method,
+                    Args... args) {
+  if (token.lock())
+    (view->*method)(std::move(args)...);
+}
+}  // namespace
+
+unsigned MbWebView::StartDownloadStream(const std::string& url,
+                                        const std::string& suggested_name) {
+  if (!HasDownloadStreamSink() || url.empty())
+    return 0;
+  // Interception parity with FetchDownloadBody/MbFetchUrl: apply URL rewrites,
+  // let a block rule or the request hooks veto, honor mocks, and let the
+  // MUTATE hook redirect the fetch / add headers. (The whole-body response
+  // hook cannot apply to a stream and is intentionally skipped — a host that
+  // rewrites bodies keeps using the buffered path.)
+  std::string fetch_url = MbApplyUrlRewrites(url);
+  std::string headers = frame_client_ ? frame_client_->extra_headers()
+                                      : std::string();
+  if (MbIsUrlBlocked(fetch_url) ||
+      MbRequestHookBlocks(url, "GET", std::string(), std::string()))
+    return 0;
+  {
+    MbRequestMutation mutation;
+    if (MbRunRequestMutateHook(fetch_url, "GET", headers, std::string(),
+                               &mutation)) {
+      if (mutation.block)
+        return 0;
+      if (!mutation.set_url.empty() && GURL(mutation.set_url).is_valid())
+        fetch_url = mutation.set_url;
+      if (!mutation.add_headers.empty()) {
+        if (!headers.empty() && headers.back() != '\n')
+          headers.push_back('\n');
+        headers += mutation.add_headers;
+      }
+    }
+  }
+
+  const unsigned id = ++next_download_id_;
+  StreamingDownload& dl = downloads_[id];
+  dl.url = url;
+  dl.suggested_name = suggested_name;
+
+  // Mocks and non-http(s) schemes (data:, file:) have no network stream —
+  // materialize the body now and deliver the same lifecycle as posted tasks.
+  std::string mock_body, mock_ct;
+  int mock_status = 0;
+  if (MbFindMock(fetch_url, &mock_body, &mock_ct, &mock_status, this)) {
+    PostSynthesizedDownload(id, std::move(mock_ct), std::move(mock_body));
+    return id;
+  }
+  if (!GURL(fetch_url).SchemeIsHTTPOrHTTPS()) {
+    std::string body, content_type;
+    if (!FetchDownloadBody(fetch_url, &body, &content_type)) {
+      downloads_.erase(id);
+      return 0;
+    }
+    PostSynthesizedDownload(id, std::move(content_type), std::move(body));
+    return id;
+  }
+
+  auto runner = base::SingleThreadTaskRunner::GetCurrentDefault();
+  std::weak_ptr<int> token(alive_token_);
+  dl.stream = MbStartDownloadStream(
+      fetch_url, MbLoaderSessionKeyFor(this), headers,
+      frame_client_ ? frame_client_->user_agent() : std::string(),
+      base::BindPostTask(
+          runner,
+          base::BindOnce(
+              [](std::weak_ptr<int> token, MbWebView* view, unsigned id,
+                 std::string mime, std::string disp_name, int64_t expected) {
+                RunIfViewAlive(std::move(token), view,
+                               &MbWebView::OnDownloadStreamBegin, id,
+                               std::move(mime), std::move(disp_name),
+                               static_cast<long long>(expected));
+              },
+              token, this, id)),
+      base::BindPostTask(
+          runner, base::BindRepeating(
+                      [](std::weak_ptr<int> token, MbWebView* view,
+                         unsigned id, std::string chunk) {
+                        RunIfViewAlive(token, view,
+                                       &MbWebView::OnDownloadStreamChunk, id,
+                                       std::move(chunk));
+                      },
+                      token, this, id)),
+      base::BindPostTask(
+          runner, base::BindOnce(
+                      [](std::weak_ptr<int> token, MbWebView* view,
+                         unsigned id, bool success) {
+                        RunIfViewAlive(std::move(token), view,
+                                       &MbWebView::OnDownloadStreamDone, id,
+                                       success);
+                      },
+                      token, this, id)));
+  return id;
+}
+
+void MbWebView::PostSynthesizedDownload(unsigned id, std::string mime,
+                                        std::string body) {
+  // Posted (not inline) so every download — streamed or materialized — delivers
+  // asynchronously after its Start call returns, one uniform contract.
+  std::weak_ptr<int> token(alive_token_);
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          [](std::weak_ptr<int> token, MbWebView* view, unsigned id,
+             std::string mime, std::string body) {
+            if (!token.lock())
+              return;
+            view->OnDownloadStreamBegin(id, std::move(mime), std::string(),
+                                        static_cast<long long>(body.size()));
+            // Begin may have canceled (host called CancelDownload inside the
+            // callback) — re-check before delivering the body.
+            auto it = view->downloads_.find(id);
+            if (it == view->downloads_.end())
+              return;
+            if (!it->second.canceled)
+              view->OnDownloadStreamChunk(id, std::move(body));
+            view->OnDownloadStreamDone(id, /*success=*/true);
+          },
+          token, this, id, std::move(mime), std::move(body)));
+}
+
+void MbWebView::OnDownloadStreamBegin(unsigned id, std::string mime,
+                                      std::string disposition_filename,
+                                      long long expected_bytes) {
+  auto it = downloads_.find(id);
+  if (it == downloads_.end() || it->second.canceled)
+    return;
+  it->second.expected = expected_bytes;
+  // Filename precedence: the page's suggested name, then the server's
+  // Content-Disposition, then the URL's last segment (DownloadFilenameFor).
+  std::string filename =
+      !it->second.suggested_name.empty()
+          ? DownloadFilenameFor(it->second.url, it->second.suggested_name)
+          : (!disposition_filename.empty()
+                 ? disposition_filename
+                 : DownloadFilenameFor(it->second.url, std::string()));
+  if (on_download_begin_)
+    on_download_begin_(id, it->second.url, mime, filename, expected_bytes);
+}
+
+void MbWebView::OnDownloadStreamChunk(unsigned id, std::string chunk) {
+  auto it = downloads_.find(id);
+  if (it == downloads_.end() || it->second.canceled)
+    return;
+  it->second.received += static_cast<long long>(chunk.size());
+  if (on_download_data_) {
+    on_download_data_(id, chunk.data(), chunk.size(), it->second.received,
+                      it->second.expected);
+  }
+}
+
+void MbWebView::OnDownloadStreamDone(unsigned id, bool success) {
+  auto it = downloads_.find(id);
+  if (it == downloads_.end())
+    return;
+  const bool canceled = it->second.canceled;
+  downloads_.erase(it);
+  if (on_download_finish_)
+    on_download_finish_(id, success && !canceled);
+}
+
+unsigned MbWebView::DownloadURLStream(const char* url) {
+  return StartDownloadStream(url ? url : std::string(), std::string());
+}
+
+void MbWebView::CancelDownload(unsigned id) {
+  auto it = downloads_.find(id);
+  if (it == downloads_.end() || it->second.canceled)
+    return;
+  it->second.canceled = true;
+  if (it->second.stream) {
+    // Aborts the worker promptly; its done(false) lands OnDownloadStreamDone,
+    // which erases the entry and reports finish(success=false).
+    MbStopDownloadStream(it->second.stream);
+  }
+  // Synthesized downloads have no worker: their posted task observes
+  // `canceled` and routes through OnDownloadStreamDone the same way.
+}
+
 void MbWebView::OnPageDownload(const std::string& url,
                                const std::string& suggested_name,
                                const std::string& body) {
@@ -2256,6 +2515,16 @@ void MbWebView::OnPageDownload(const std::string& url,
   // MbLocalFrameHost. Surface it through the same callback as a server-driven
   // download. We don't carry the blob's MIME (DownloadURLParams omits it), so
   // report a generic type — the suggested filename's extension is the real hint.
+  if (HasDownloadStreamSink()) {
+    // The streaming sink takes over: the blob's bytes are already in memory,
+    // so deliver them through the same begin -> data -> finish lifecycle.
+    const unsigned id = ++next_download_id_;
+    StreamingDownload& dl = downloads_[id];
+    dl.url = url;
+    dl.suggested_name = suggested_name;
+    PostSynthesizedDownload(id, "application/octet-stream", body);
+    return;
+  }
   if (on_download_)
     on_download_(url, "application/octet-stream",
                  DownloadFilenameFor(url, suggested_name), body);
@@ -2268,6 +2537,13 @@ void MbWebView::OnPageDownloadFetch(const std::string& url,
   // the bytes aren't in the in-process blob store — fetch them through the engine
   // (which decodes data: and fetches http(s), honoring the interception layer and
   // the view's cookies/headers) and surface them through the same callback.
+  if (HasDownloadStreamSink()) {
+    // The streaming sink takes over: http(s) streams chunk-by-chunk with
+    // progress + cancel; data: delivers its decoded bytes through the same
+    // lifecycle.
+    StartDownloadStream(url, suggested_name);
+    return;
+  }
   if (!on_download_)
     return;
   std::string body, content_type;
@@ -2403,6 +2679,10 @@ void MbWebView::SetExtraHeaders(const char* utf8_headers) {
 }
 
 void MbWebView::SetTransparentBackground(bool transparent) {
+  // The canvas base clear changes, which repaints pixels blink never
+  // invalidates — full damage for the dirty-rect path.
+  if (transparent != transparent_bg_ && damage_tracker_)
+    damage_tracker_->AddDamage(gfx::Rect(view_width_, view_height_));
   transparent_bg_ = transparent;
   if (!web_view_)
     return;
@@ -2473,7 +2753,13 @@ void MbWebView::SetZoomFactor(float factor) {
 }
 
 void MbWebView::SetDeviceScaleFactor(float scale) {
-  dsf_ = scale > 0.0f ? scale : 1.0f;
+  const float new_dsf = scale > 0.0f ? scale : 1.0f;
+  // The replay canvas scale changes, so every buffer pixel changes — damage
+  // blink's invalidation cannot see (it tracks logical-px content, not the
+  // host's raster scale).
+  if (new_dsf != dsf_ && damage_tracker_)
+    damage_tracker_->AddDamage(gfx::Rect(view_width_, view_height_));
+  dsf_ = new_dsf;
   if (!web_view_ || !web_view_->GetPage())
     return;
   // DevicePixelRatio = InspectorDeviceScaleFactorOverride * LayoutZoomFactor, so
@@ -3451,8 +3737,10 @@ bool MbWebView::PaintToBitmap(void* out_bgra, int w, int h, int stride, bool set
           SkImageInfo::Make(w, h, kBGRA_8888_SkColorType, kPremul_SkAlphaType);
       if (src.width() == w && src.height() == h) {
         // Exact viewport match (the common case): a direct, format-converting copy.
-        if (src.readPixels(dst_info, out_bgra, stride, 0, 0))
+        if (src.readPixels(dst_info, out_bgra, stride, 0, 0)) {
+          RecordPaintDamage(/*full=*/true);  // no per-frame diff on the cc path
           return true;
+        }
       } else {
         // Size mismatch (e.g. a clip/scale request): scale the captured frame in.
         SkBitmap out;
@@ -3464,6 +3752,7 @@ bool MbWebView::PaintToBitmap(void* out_bgra, int w, int h, int stride, bool set
                           SkRect::MakeIWH(w, h),
                           SkSamplingOptions(SkFilterMode::kLinear), nullptr,
                           SkCanvas::kStrict_SrcRectConstraint);
+          RecordPaintDamage(/*full=*/true);  // no per-frame diff on the cc path
           return true;
         }
       }
@@ -3479,8 +3768,16 @@ bool MbWebView::PaintToBitmap(void* out_bgra, int w, int h, int stride, bool set
   }
   SkCanvas canvas(bitmap);
   const bool ok = PaintInto(canvas, 0, 0, /*apply_device_scale=*/true, settle);
-  if (!ok && widget_ && was_dirty)
+  if (ok) {
+    // The lifecycle updates inside PaintInto ran the paint hook, so the
+    // tracker's pending damage is exactly what this frame changed vs the
+    // previous painted one. Consume it AFTER the replay: the replay runs no
+    // script, so nothing can slip in between. A paint requested mid-cycle
+    // (needs_frame re-armed above) contributes to the NEXT frame's damage.
+    RecordPaintDamage(/*full=*/false);
+  } else if (widget_ && was_dirty) {
     widget_->set_needs_frame(true);  // nothing painted; the request stands
+  }
   return ok;
 }
 
@@ -3496,9 +3793,53 @@ void MbWebView::SetSession(MbSession* session) {
 
 void MbWebView::SetDirty() {
   // The host lost its copy of the last frame (purged layer, dropped buffer):
-  // re-arm the damage flag so the next damage-gated blit repaints.
+  // re-arm the damage flag so the next damage-gated blit repaints — and since
+  // the host's copy is gone wholesale, the next frame's damage is the full view.
   if (widget_)
     widget_->set_needs_frame(true);
+  if (damage_tracker_)
+    damage_tracker_->AddDamage(gfx::Rect(view_width_, view_height_));
+}
+
+bool MbWebView::NotifyNonCompositedPaint(blink::LocalFrameView& root_view,
+                                         bool repainted) {
+  if (!main_frame_)
+    return false;
+  auto* impl = blink::To<blink::WebLocalFrameImpl>(main_frame_);
+  if (!impl->GetFrame() || impl->GetFrame()->View() != &root_view)
+    return false;
+  if (!damage_tracker_)
+    damage_tracker_ = std::make_unique<MbDamageTracker>();
+  // Runs unconditionally (even when repainted=false): Generate() both derives
+  // damage from in-place property mutations (scroll) and keeps the
+  // invalidator's old-artifact reference in step with the paint cycle.
+  damage_tracker_->OnNonCompositedPaint(root_view);
+  return true;
+}
+
+void MbWebView::RecordPaintDamage(bool full) {
+  const gfx::Rect view_rect(view_width_, view_height_);
+  if (full || force_repaint_ || !damage_tracker_) {
+    // Fine-grained damage is unknown (composited frame, no tracker yet) or
+    // deliberately bypassed (force-repaint diagnostics): report the full view.
+    last_paint_damage_ = view_rect;
+    if (damage_tracker_)
+      damage_tracker_->TakeDamage();  // consumed by this full-frame report
+    return;
+  }
+  last_paint_damage_ = damage_tracker_->TakeDamage();
+  last_paint_damage_.Intersect(view_rect);
+}
+
+void MbWebView::GetLastPaintDamage(int* x, int* y, int* w, int* h) const {
+  if (x)
+    *x = last_paint_damage_.x();
+  if (y)
+    *y = last_paint_damage_.y();
+  if (w)
+    *w = last_paint_damage_.width();
+  if (h)
+    *h = last_paint_damage_.height();
 }
 
 bool MbWebView::IsDirty() const {

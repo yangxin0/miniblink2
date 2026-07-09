@@ -17,15 +17,18 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "base/functional/callback.h"
+#include "ui/gfx/geometry/rect.h"
 
 class SkCanvas;  // global scope (skia is not namespaced)
 
 namespace blink {
+class LocalFrameView;
 class WebView;
 class WebViewImpl;
 class WebLocalFrame;
@@ -39,7 +42,9 @@ namespace mb {
 // Item 7b: host display-refresh timestamp for rAF (see mbUpdateAt).
 void MbSetHostFrameTime(double seconds);
 
+class MbDamageTracker;   // dirty-rect diffing (mb_damage_tracker.h)
 class MbDevToolsBridge;
+class MbDownloadStream;  // streaming download transport (mb_url_loader.h)
 class MbSession;
 class MbSelectPopupClient;   // reply channel for a surfaced <select> popup
 struct MbSelectPopupData;    // items/bounds of one popup (mb_local_frame_host.h)
@@ -602,6 +607,36 @@ class MbWebView {
                                         const std::string& filename,
                                         const std::string& body)>;
   void SetDownloadCallback(DownloadFn cb);
+  // ---- Streaming download lifecycle (large bodies; progress + cancel) ------
+  // begin(id, url, mime, filename, expected_bytes[-1 unknown]) fires once when
+  // the response starts; data(id, chunk, len, received, expected) per chunk in
+  // order; finish(id, success) exactly once (false: HTTP >= 400, transport
+  // error, or CancelDownload). While the sink is registered it takes over ALL
+  // page-initiated downloads from the buffered DownloadFn above (which stops
+  // firing) and enables DownloadURLStream. Callbacks arrive on the host thread
+  // as posted tasks (an mbUpdate tick delivers them). Empty fns clear.
+  using DownloadBeginFn =
+      std::function<void(unsigned id, const std::string& url,
+                         const std::string& mime, const std::string& filename,
+                         long long expected_bytes)>;
+  using DownloadDataFn =
+      std::function<void(unsigned id, const char* data, size_t len,
+                         long long received, long long expected_bytes)>;
+  using DownloadFinishFn = std::function<void(unsigned id, bool success)>;
+  void SetDownloadStreamCallbacks(DownloadBeginFn begin, DownloadDataFn data,
+                                  DownloadFinishFn finish);
+  bool HasDownloadStreamSink() const {
+    return static_cast<bool>(on_download_data_);
+  }
+  // Host-initiated streaming download through the engine network stack
+  // (interception layer, session cookies, UA, proxy). Returns the download id
+  // (> 0), or 0 when refused (no sink registered / blocked or vetoed URL).
+  // http(s) streams from the network; other schemes the engine can fetch
+  // (data:, file:, mocks) deliver the same lifecycle from the buffered bytes.
+  unsigned DownloadURLStream(const char* url);
+  // Abort a running download promptly; its finish reports success=false.
+  // Unknown ids are ignored.
+  void CancelDownload(unsigned id);
   // Called by MbFrameClient when the page initiates a blob download (a
   // <a download href="blob:..."> click / createObjectURL). Fires on_download_
   // with the resolved bytes as the body (generic MIME — see impl).
@@ -714,6 +749,20 @@ class MbWebView {
   // Host-forced repaint (item 26): mark the view dirty so a damage-gated blit
   // repaints even though blink considers the last frame current.
   void SetDirty();
+  // Dirty RECT (item 2 tail): the damaged region of the frame delivered by the
+  // last successful full-frame paint (PaintToBitmap), logical px clamped to the
+  // view. Empty (w==h==0) means that frame was bit-identical to the one before
+  // it, so the host can skip its blit. Damage accumulates across lifecycle
+  // updates (via the non-composited paint hook, patch 0041) and is consumed by
+  // the next successful paint — mirroring IsDirty's snapshot semantics. Falls
+  // back to the full view when fine-grained damage is unknown (first paint,
+  // resize, SetDirty, force-repaint, composited views).
+  void GetLastPaintDamage(int* x, int* y, int* w, int* h) const;
+  // Non-composited paint hook dispatch: if `root_view` is this view's main
+  // frame's LocalFrameView, run the damage diff (inside the paint cycle) and
+  // return true; false means "not mine, try the next view".
+  bool NotifyNonCompositedPaint(blink::LocalFrameView& root_view,
+                                bool repainted);
   // Diagnostic (item 28): while on, IsDirty always reports true.
   void SetForceRepaint(bool on) { force_repaint_ = on; }
   // The session (storage profile) this view lives in; Default() unless
@@ -812,6 +861,17 @@ class MbWebView {
   void InstallJsBindings();  // install all bindings into the current main world
   bool transparent_bg_ = false;  // omitBackground: clear to alpha 0
   bool force_repaint_ = false;   // SetForceRepaint: IsDirty always true
+  // Dirty-rect state (item 2 tail). The tracker is created by the first paint
+  // hook dispatch that matches this view (non-composited views only — the hook
+  // fires from PushPaintArtifactToCompositor's non-composited early return).
+  std::unique_ptr<MbDamageTracker> damage_tracker_;
+  gfx::Rect last_paint_damage_;      // damage of the last painted frame
+  int view_width_ = 0;               // logical px, tracked for full-damage
+  int view_height_ = 0;              // rects (Create/Resize keep it current)
+  // Consume the tracker's pending damage after a successful full-frame paint.
+  // full=true (composited frame, no tracker, force-repaint) reports the whole
+  // view instead.
+  void RecordPaintDamage(bool full);
   // Set by LoadHTMLEx(add_to_history=false): the next standard commit REPLACES
   // the current history entry instead of appending.
   bool pending_replace_history_ = false;
@@ -879,6 +939,39 @@ class MbWebView {
   void NotifyHistoryChanged();
   FaviconChangedFn on_favicon_changed_;  // optional favicon-changed notification
   DownloadFn on_download_;  // optional top-level-download diversion callback
+  // Streaming download lifecycle (see SetDownloadStreamCallbacks).
+  DownloadBeginFn on_download_begin_;
+  DownloadDataFn on_download_data_;
+  DownloadFinishFn on_download_finish_;
+  struct StreamingDownload {
+    std::shared_ptr<MbDownloadStream> stream;  // null for a synthesized body
+    std::string url;             // as the page/host referenced it
+    std::string suggested_name;  // page-provided filename hint (may be empty)
+    long long expected = -1;
+    long long received = 0;
+    bool canceled = false;
+  };
+  std::map<unsigned, StreamingDownload> downloads_;
+  unsigned next_download_id_ = 0;
+  // Expiry guard for cross-thread/posted download callbacks: they hold a weak_ptr
+  // and no-op once the view is gone (the streams' worker threads can outlive us).
+  std::shared_ptr<int> alive_token_ = std::make_shared<int>(0);
+  // Start the streaming lifecycle for `url` (returns the id, 0 = refused):
+  // http(s) streams over the network; anything else falls back to a buffered
+  // fetch delivered through the same callbacks. The shared core of
+  // DownloadURLStream (host) and the page-initiated routing.
+  unsigned StartDownloadStream(const std::string& url,
+                               const std::string& suggested_name);
+  // Deliver an already-materialized body (blob downloads, mocks, non-http
+  // schemes, navigation downloads) through the streaming lifecycle, as a
+  // posted task (id already allocated in downloads_).
+  void PostSynthesizedDownload(unsigned id, std::string mime, std::string body);
+  // Stream callback landings (main thread; guarded by alive_token_).
+  void OnDownloadStreamBegin(unsigned id, std::string mime,
+                             std::string disposition_filename,
+                             long long expected_bytes);
+  void OnDownloadStreamChunk(unsigned id, std::string chunk);
+  void OnDownloadStreamDone(unsigned id, bool success);
   NewWindowFn on_new_window_;   // optional window.open / target=_blank notification
   CreateChildViewFn create_child_view_;  // optional child-view factory (item 22)
 

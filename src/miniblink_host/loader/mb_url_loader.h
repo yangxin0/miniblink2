@@ -18,6 +18,7 @@
 #include <memory>
 #include <string>
 
+#include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
@@ -244,6 +245,34 @@ bool MbIgnoreCertErrors();
 // Process-wide. MbFollowRedirects() is read on the fetch path.
 void MbSetFollowRedirects(bool follow);
 bool MbFollowRedirects();
+
+// ---- Streaming download transport (the mb download lifecycle) --------------
+// A chunk-streaming HTTP(S) GET on a detached worker thread — the MbSseStream
+// pattern plus response metadata, for downloads too large to buffer whole.
+// `begin` fires once when the final (post-redirect) 2xx response starts
+// arriving: MIME (";charset" stripped, may be empty), the Content-Disposition
+// filename (may be empty), and the expected body size in bytes (-1 unknown).
+// `data` fires per chunk in order; `done` fires exactly once — false on an
+// HTTP >= 400 status, transport error, or MbStopDownloadStream. ALL callbacks
+// run on the WORKER thread: bind them to the host thread (base::BindPostTask)
+// before calling. Honors the session cookie jar, proxy, cert-ignore and
+// redirect settings like MbFetchUrl; interception (rewrite/block/mock/request
+// hook) is the CALLER's job before starting the stream — the whole-body
+// response hook cannot apply to a stream and is intentionally skipped.
+class MbDownloadStream;  // defined in the .cc; opaque to callers
+std::shared_ptr<MbDownloadStream> MbStartDownloadStream(
+    std::string url,
+    std::string cookie_session_key,
+    std::string req_headers,
+    std::string user_agent,
+    base::OnceCallback<void(std::string mime,
+                            std::string disposition_filename,
+                            int64_t expected_bytes)> begin,
+    base::RepeatingCallback<void(std::string chunk)> data,
+    base::OnceCallback<void(bool success)> done);
+// Abort promptly (idle streams too); the stream's done(false) follows. The
+// handle can then be dropped — the worker keeps itself alive to unwind.
+void MbStopDownloadStream(const std::shared_ptr<MbDownloadStream>& stream);
 
 // The fetch-retry decision lives in mb_retry_policy.h (a dependency-free header so
 // the smoke tests can include it without the loader's heavy base/blink deps).

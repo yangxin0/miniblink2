@@ -1517,6 +1517,215 @@ class MbSseStream : public std::enable_shared_from_this<MbSseStream> {
   std::atomic<bool> stop_{false};
 };
 
+// The streaming download transport (mb download lifecycle; see the header).
+// MbSseStream's shape — detached worker, self-owning via shared_ptr, prompt
+// abort through the progress callback — plus response metadata: `begin` fires
+// at the FIRST body byte of the final hop (FOLLOWLOCATION never hands 3xx
+// bodies to the write callback, so "first write" IS the post-redirect
+// response), when curl can report the effective status / Content-Type /
+// Content-Length. A >= 400 status aborts before `begin` and fails the stream:
+// an error page's body is not the requested download. Unlike SSE this stream
+// EXPECTS EOF, so the normal 30s-idle protection stays off but completion is
+// success only when curl reports CURLE_OK (or the abort was ours).
+class MbDownloadStream : public std::enable_shared_from_this<MbDownloadStream> {
+ public:
+  using BeginCb = base::OnceCallback<
+      void(std::string mime, std::string disposition_filename, int64_t expected)>;
+  using DataCb = base::RepeatingCallback<void(std::string chunk)>;
+  using DoneCb = base::OnceCallback<void(bool success)>;
+  MbDownloadStream(std::string url,
+                   std::string cookie_session_key,
+                   std::string req_headers,
+                   std::string user_agent,
+                   BeginCb begin,
+                   DataCb data,
+                   DoneCb done)
+      : url_(std::move(url)),
+        cookie_session_key_(std::move(cookie_session_key)),
+        req_headers_(std::move(req_headers)),
+        user_agent_(std::move(user_agent)),
+        begin_(std::move(begin)),
+        data_(std::move(data)),
+        done_(std::move(done)) {}
+
+  void Start() {
+    auto self = shared_from_this();  // keep alive across the worker's life
+    std::thread([self] { self->Run(); }).detach();
+  }
+  void Stop() { stop_.store(true); }
+
+ private:
+  static size_t HeaderThunk(char* p, size_t s, size_t n, void* ud) {
+    auto* self = static_cast<MbDownloadStream*>(ud);
+    // Track the LAST hop's Content-Disposition (each redirect hop delivers its
+    // own header block; later hops overwrite earlier ones).
+    std::string line(p, s * n);
+    constexpr char kName[] = "content-disposition:";
+    if (line.size() > sizeof(kName) - 1) {
+      std::string lower = line;
+      for (char& ch : lower)
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+      if (lower.rfind(kName, 0) == 0) {
+        std::string v = line.substr(sizeof(kName) - 1);
+        while (!v.empty() && (v.front() == ' ' || v.front() == '\t'))
+          v.erase(v.begin());
+        while (!v.empty() && (v.back() == '\r' || v.back() == '\n'))
+          v.pop_back();
+        self->content_disposition_ = v;
+      }
+    }
+    return s * n;
+  }
+
+  static size_t WriteThunk(char* p, size_t s, size_t n, void* ud) {
+    auto* self = static_cast<MbDownloadStream*>(ud);
+    if (self->stop_.load())
+      return 0;  // returning <bytes aborts curl_easy_perform
+    if (!self->began_) {
+      long status = 0;
+      curl_easy_getinfo(self->curl_, CURLINFO_RESPONSE_CODE, &status);
+      if (status >= 400) {
+        self->http_error_ = true;
+        return 0;  // fail the stream; the error body is not the download
+      }
+      char* ct = nullptr;
+      curl_easy_getinfo(self->curl_, CURLINFO_CONTENT_TYPE, &ct);
+      std::string mime = ct ? ct : "";
+      mime = mime.substr(0, mime.find(';'));
+      while (!mime.empty() && mime.back() == ' ')
+        mime.pop_back();
+      curl_off_t len = -1;
+      curl_easy_getinfo(self->curl_, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &len);
+      self->began_ = true;
+      std::move(self->begin_)
+          .Run(std::move(mime), ParseDispositionFilename(self->content_disposition_),
+               len >= 0 ? static_cast<int64_t>(len) : -1);
+    }
+    self->data_.Run(std::string(p, s * n));
+    return s * n;
+  }
+
+  static int XferThunk(void* ud, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+    // Called periodically even while idle -> prompt cancellation.
+    return static_cast<MbDownloadStream*>(ud)->stop_.load() ? 1 : 0;
+  }
+
+  // "attachment; filename=\"report.pdf\"" -> "report.pdf" (quoted or token
+  // form; the RFC 5987 filename*= form is rare on downloads and skipped).
+  static std::string ParseDispositionFilename(const std::string& disposition) {
+    std::string lower = disposition;
+    for (char& ch : lower)
+      ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    std::string::size_type p = lower.find("filename=");
+    if (p == std::string::npos)
+      return std::string();
+    p += sizeof("filename=") - 1;
+    if (p < disposition.size() && disposition[p] == '"') {
+      std::string::size_type end = disposition.find('"', p + 1);
+      return end == std::string::npos ? std::string()
+                                      : disposition.substr(p + 1, end - p - 1);
+    }
+    std::string::size_type end = disposition.find_first_of("; \t\r\n", p);
+    return disposition.substr(p, end == std::string::npos ? end : end - p);
+  }
+
+  void Run() {
+    CURL* c = curl_easy_init();
+    if (!c) {
+      std::move(done_).Run(false);
+      return;
+    }
+    curl_ = c;
+    curl_easy_setopt(c, CURLOPT_URL, url_.c_str());
+    std::string proxy;
+    if (MbProxyConfigured(&proxy))
+      curl_easy_setopt(c, CURLOPT_PROXY, proxy.c_str());
+    if (MbIgnoreCertErrors()) {
+      curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
+      curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
+    curl_easy_setopt(
+        c, CURLOPT_USERAGENT,
+        (user_agent_.empty() ? MbDefaultUserAgent() : user_agent_).c_str());
+    curl_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");
+    curl_easy_setopt(c, CURLOPT_COOKIEFILE, "");  // in-memory cookie engine
+    if (CURLSH* share = CookieShareForKey(cookie_session_key_))
+      curl_easy_setopt(c, CURLOPT_SHARE, share);
+    if (MbFollowRedirects()) {
+      curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+      curl_easy_setopt(c, CURLOPT_MAXREDIRS, 20L);
+    }
+    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 15L);
+    // NO CURLOPT_TIMEOUT — a large download legitimately runs for minutes;
+    // cancellation comes through XferThunk.
+    curl_slist* headers = nullptr;
+    std::string line, lines = req_headers_;
+    lines.push_back('\n');
+    for (char ch : lines) {
+      if (ch == '\n' || ch == '\r') {
+        if (!line.empty()) {
+          headers = curl_slist_append(headers, line.c_str());
+          line.clear();
+        }
+      } else {
+        line.push_back(ch);
+      }
+    }
+    if (headers)
+      curl_easy_setopt(c, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, &HeaderThunk);
+    curl_easy_setopt(c, CURLOPT_HEADERDATA, this);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, &WriteThunk);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, this);
+    curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, &XferThunk);
+    curl_easy_setopt(c, CURLOPT_XFERINFODATA, this);
+    const CURLcode rc = curl_easy_perform(c);
+    if (headers)
+      curl_slist_free_all(headers);
+    curl_easy_cleanup(c);
+    curl_ = nullptr;
+    // Success = clean EOF after a non-error response began. A cancel
+    // (stop_/http_error_ abort through the write/progress callbacks) surfaces
+    // as CURLE_WRITE_ERROR / CURLE_ABORTED_BY_CALLBACK -> false.
+    std::move(done_).Run(rc == CURLE_OK && began_ && !http_error_ &&
+                         !stop_.load());
+  }
+
+  std::string url_;
+  std::string cookie_session_key_;
+  std::string req_headers_;
+  std::string user_agent_;
+  BeginCb begin_;
+  DataCb data_;
+  DoneCb done_;
+  CURL* curl_ = nullptr;             // valid only inside Run()
+  std::string content_disposition_;  // last hop's header value
+  bool began_ = false;               // begin_ fired (worker thread only)
+  bool http_error_ = false;          // aborted on a >= 400 status
+  std::atomic<bool> stop_{false};
+};
+
+std::shared_ptr<MbDownloadStream> MbStartDownloadStream(
+    std::string url,
+    std::string cookie_session_key,
+    std::string req_headers,
+    std::string user_agent,
+    base::OnceCallback<void(std::string, std::string, int64_t)> begin,
+    base::RepeatingCallback<void(std::string)> data,
+    base::OnceCallback<void(bool)> done) {
+  auto stream = std::make_shared<MbDownloadStream>(
+      std::move(url), std::move(cookie_session_key), std::move(req_headers),
+      std::move(user_agent), std::move(begin), std::move(data), std::move(done));
+  stream->Start();
+  return stream;
+}
+
+void MbStopDownloadStream(const std::shared_ptr<MbDownloadStream>& stream) {
+  if (stream)
+    stream->Stop();
+}
+
 MbURLLoader::MbURLLoader(std::string user_agent, std::string extra_headers,
                          const void* host_ctx)
     : user_agent_(std::move(user_agent)),

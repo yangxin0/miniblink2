@@ -1,0 +1,56 @@
+diff --git a/third_party/blink/renderer/core/frame/local_frame_view.cc b/third_party/blink/renderer/core/frame/local_frame_view.cc
+index e4a8586..6dba616 100644
+--- a/third_party/blink/renderer/core/frame/local_frame_view.cc
++++ b/third_party/blink/renderer/core/frame/local_frame_view.cc
+@@ -3201,6 +3201,18 @@ const cc::Layer* LocalFrameView::RootCcLayer() const {
+   return const_cast<LocalFrameView*>(this)->RootCcLayer();
+ }
+ 
++namespace {
++// miniblink host hook (see LocalFrameView::SetMbNonCompositedPaintHookForHost).
++LocalFrameView::MbNonCompositedPaintHook g_mb_non_composited_paint_hook =
++    nullptr;
++}  // namespace
++
++// static
++void LocalFrameView::SetMbNonCompositedPaintHookForHost(
++    MbNonCompositedPaintHook hook) {
++  g_mb_non_composited_paint_hook = hook;
++}
++
+ void LocalFrameView::PushPaintArtifactToCompositor(bool repainted) {
+   TRACE_EVENT0("blink", "LocalFrameView::pushPaintArtifactToCompositor");
+   if (!frame_->GetSettings()->GetAcceleratedCompositingEnabled()) {
+@@ -3208,6 +3220,11 @@ void LocalFrameView::PushPaintArtifactToCompositor(bool repainted) {
+       paint_artifact_compositor_->WillBeRemovedFromFrame();
+       paint_artifact_compositor_ = nullptr;
+     }
++    // miniblink host hook: give the host its damage-diff window while the
++    // previous artifact (freed when this cycle's PaintController dies) is
++    // still intact.
++    if (g_mb_non_composited_paint_hook)
++      g_mb_non_composited_paint_hook(*this, repainted);
+     return;
+   }
+ 
+diff --git a/third_party/blink/renderer/core/frame/local_frame_view.h b/third_party/blink/renderer/core/frame/local_frame_view.h
+index d990fa3..f434806 100644
+--- a/third_party/blink/renderer/core/frame/local_frame_view.h
++++ b/third_party/blink/renderer/core/frame/local_frame_view.h
+@@ -654,6 +654,16 @@ class CORE_EXPORT LocalFrameView final
+   // update.
+   const PaintArtifact& GetPaintArtifact() const;
+ 
++  // miniblink host hook: observes the local root's persistent PaintArtifact at
++  // the end of a NON-COMPOSITED paint lifecycle (the early return in
++  // PushPaintArtifactToCompositor), INSIDE the paint cycle -- the previous
++  // artifact's backing store is freed when the cycle's PaintController is
++  // destroyed, and the host's RasterInvalidator diffs against it to derive
++  // damage rects for the software-paint path. `repainted` mirrors the
++  // PushPaintArtifactToCompositor argument. Pass nullptr to clear.
++  using MbNonCompositedPaintHook = void (*)(LocalFrameView&, bool repainted);
++  static void SetMbNonCompositedPaintHookForHost(MbNonCompositedPaintHook);
++
+   void Show() override;
+   void Hide() override;
+ 
