@@ -626,6 +626,12 @@ unsigned int mbViewCompositorPixel(mbView* v, int x, int y) {
   return v->impl->CompositorPixel(x, y);
 }
 
+void* mbViewGetIOSurface(mbView* v) {
+  if (!v || !v->impl)
+    return nullptr;
+  return v->impl->CompositorIOSurface();
+}
+
 void mbResize(mbView* v, int width, int height) {
   EngineScope engine_scope;
   if (v && v->impl)
@@ -1659,6 +1665,20 @@ void mbMockResponse(const char* url_substring, const char* body,
 
 void mbClearMocks(void) {
   mb::MbClearMocks();
+}
+
+void mbRegisterImageSource(const char* id, const void* bgra, int width,
+                           int height, int stride) {
+  EngineScope engine_scope;  // the update broadcast runs page JS
+  if (!id || !bgra)
+    return;
+  if (mb::MbSetImageSource(id, bgra, width, height, stride))
+    mb::MbBroadcastImageSourceUpdate(id);
+}
+
+void mbUnregisterImageSource(const char* id) {
+  if (id)
+    mb::MbRemoveImageSource(id);
 }
 
 // Dynamic request mock: a callback decides per-URL whether to serve a COMPUTED response

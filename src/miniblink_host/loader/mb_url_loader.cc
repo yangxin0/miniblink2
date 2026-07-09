@@ -24,6 +24,9 @@
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/no_destructor.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkImageInfo.h"
+#include "ui/gfx/codec/png_codec.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/task/bind_post_task.h"
@@ -1202,9 +1205,80 @@ void MbSetRequestMockHookForContext(const void* ctx, MbRequestMockHook hook) {
     ContextMockHooks().erase(ctx);
 }
 
+namespace {
+// Host image sources: id -> PNG bytes (see MbSetImageSource). Main thread.
+std::map<std::string, std::string>& ImageSources() {
+  static std::map<std::string, std::string>* sources =
+      new std::map<std::string, std::string>();
+  return *sources;
+}
+constexpr char kImageSourcePrefix[] = "https://mb-image.internal/";
+}  // namespace
+
+bool MbSetImageSource(const std::string& id, const void* bgra, int width,
+                      int height, int stride) {
+  if (id.empty() || !bgra || width <= 0 || height <= 0)
+    return false;
+  for (char c : id) {
+    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                    (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+    if (!ok)
+      return false;  // the id embeds in URLs and page-visible events verbatim
+  }
+  if (stride <= 0)
+    stride = width * 4;
+  SkBitmap bitmap;
+  if (!bitmap.installPixels(
+          SkImageInfo::Make(width, height, kBGRA_8888_SkColorType,
+                            kPremul_SkAlphaType),
+          const_cast<void*>(bgra), static_cast<size_t>(stride))) {
+    return false;
+  }
+  // Encode ONCE at registration (blink needs a decodable image format; PNG is
+  // lossless and keeps alpha). Serving is then a string copy per fetch.
+  std::optional<std::vector<uint8_t>> png =
+      gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, /*discard_transparency=*/false);
+  if (!png)
+    return false;
+  ImageSources()[id] = std::string(png->begin(), png->end());
+  return true;
+}
+
+void MbRemoveImageSource(const std::string& id) {
+  ImageSources().erase(id);
+}
+
+bool MbFindImageSource(const std::string& url, std::string* out_png) {
+  if (url.rfind(kImageSourcePrefix, 0) != 0)
+    return false;
+  std::string id = url.substr(sizeof(kImageSourcePrefix) - 1);
+  id = id.substr(0, id.find_first_of("?#"));  // ?v=N cache-buster is ignored
+  auto it = ImageSources().find(id);
+  if (it == ImageSources().end())
+    return false;
+  if (out_png)
+    *out_png = it->second;
+  return true;
+}
+
 bool MbFindMock(const std::string& url, std::string* body,
                 std::string* content_type, int* status,
                 const void* host_ctx) {
+  // Host image sources own their reserved host — answered before the mock
+  // layer so a broad mock substring can't shadow them. Every fetch path
+  // (subresource, top-level, downloads, workers) funnels through here.
+  {
+    std::string png;
+    if (MbFindImageSource(url, &png)) {
+      if (body)
+        *body = std::move(png);
+      if (content_type)
+        *content_type = "image/png";
+      if (status)
+        *status = 200;
+      return true;
+    }
+  }
   // Static mocks first. Last matching entry wins, so a later mbMockResponse overrides an
   // earlier overlapping one (intuitive "re-mock to replace").
   const MockEntry* hit = nullptr;

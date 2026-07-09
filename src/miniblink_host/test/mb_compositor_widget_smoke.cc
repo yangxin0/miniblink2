@@ -18,6 +18,10 @@
 #include <cstring>
 #include <vector>
 
+#ifdef __APPLE__
+#include <IOSurface/IOSurface.h>
+#endif
+
 #include "miniblink2/automation.h"
 
 int main() {
@@ -79,11 +83,38 @@ int main() {
   unsigned int sb = px[0], sg = px[1], sr = px[2], sa = px[3];  // BGRA
   bool shot_yellow = painted && sr > 200 && sg > 200 && sb < 80;
 
+  // Shared-texture output (macOS): the Display renders into an IOSurface the
+  // host can bind as CALayer.contents with no CPU readback. Verify the handle
+  // exists, matches the view's pixel size, and the raw surface memory holds
+  // the composited yellow — reading the actual bytes, not the bitmap-capture
+  // path checked above.
+  bool iosurface_ok = true;
+#ifdef __APPLE__
+  {
+    IOSurfaceRef surf = (IOSurfaceRef)mbViewGetIOSurface(v);
+    iosurface_ok = surf != nullptr && IOSurfaceGetWidth(surf) == 400 &&
+                   IOSurfaceGetHeight(surf) == 300;
+    if (iosurface_ok) {
+      IOSurfaceLock(surf, kIOSurfaceLockReadOnly, nullptr);
+      const unsigned char* base =
+          (const unsigned char*)IOSurfaceGetBaseAddress(surf);
+      const size_t row = IOSurfaceGetBytesPerRow(surf);
+      const unsigned char* ip = base + 150 * row + 200 * 4;  // BGRA
+      iosurface_ok = ip[2] > 200 && ip[1] > 200 && ip[0] < 80;
+      IOSurfaceUnlock(surf, kIOSurfaceLockReadOnly, nullptr);
+    }
+    printf("mb_compositor_widget_smoke: iosurface=%p ok=%d\n", (void*)surf,
+           iosurface_ok ? 1 : 0);
+  }
+#endif
+
   // PASS gate: the FULL live cc compositing path works — a non-compositing view reports -1, the
   // compositing view pulls our in-process frame sink (sinks>=1), the page is DOM-live, AND the page
   // RASTERS through cc -> viz::Display -> the captured bitmap so the center pixel is the page's
-  // yellow (#ffff00).
-  bool ok = (plain_sinks == -1) && (sinks >= 1) && live && yellow && shot_yellow;
+  // yellow (#ffff00). On macOS the same frame must be readable straight from the
+  // IOSurface the Display renders into (mbViewGetIOSurface).
+  bool ok = (plain_sinks == -1) && (sinks >= 1) && live && yellow &&
+            shot_yellow && iosurface_ok;
   printf("mb_compositor_widget_smoke: plain=%d sinks=%d body=[%s] live=%d pixel=%08X "
          "(a%d r%d g%d b%d) yellow=%d shot=(r%d g%d b%d a%d) shot_yellow=%d\n",
          plain_sinks, sinks, body, live ? 1 : 0, c, a, r, g, b, yellow ? 1 : 0,

@@ -42,6 +42,11 @@ namespace mb {
 // Item 7b: host display-refresh timestamp for rAF (see mbUpdateAt).
 void MbSetHostFrameTime(double seconds);
 
+// Image-source update broadcast (mbRegisterImageSource): dispatches the
+// document CustomEvent 'mbimagesourceupdate' (detail = the image id) in every
+// live view, so a page displaying the image re-fetches it with a cache-buster.
+void MbBroadcastImageSourceUpdate(const std::string& id);
+
 class MbDamageTracker;   // dirty-rect diffing (mb_damage_tracker.h)
 class MbDevToolsBridge;
 class MbDownloadStream;  // streaming download transport (mb_url_loader.h)
@@ -78,6 +83,12 @@ class MbWebView {
   // The SkColor (0xAARRGGBB) at (x,y) in the compositor's last captured frame, or 0 if this view
   // is not compositing / nothing composited yet. For verifying the live cc->viz->bitmap path.
   unsigned int CompositorPixel(int x, int y) const;
+  // macOS, compositing views: the IOSurfaceRef the in-process Display renders
+  // into — the shared-texture output path (bind as CALayer.contents; no CPU
+  // readback). Null: non-compositing view, no composited frame yet, non-mac,
+  // or IOSurface allocation fell back to heap. Valid until the next resize or
+  // the view's destruction; CFRetain to hold longer.
+  void* CompositorIOSurface() const;
 
   void Resize(int width, int height);
   void LoadHTML(const char* utf8_html, const char* base_url);  // no network

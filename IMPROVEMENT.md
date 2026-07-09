@@ -427,7 +427,13 @@ family used; bogus family tofu-guarded).
   lifecycle from memory. The whole-body response hook does not apply to
   streamed bodies (documented); item 9's zero-copy remains separate.
 - **ImageSource** (host-registered decoded/GPU images referenced by URL):
-  elegant inverse of the mock hook, heavy to build in blink. Noted only.
+  ~~noted only~~ **shipped, v1** — `mbRegisterImageSource(id, bgra, w, h,
+  stride)` serves `https://mb-image.internal/<id>` in-process (PNG-encoded
+  once, answered ahead of mocks/network in MbFindMock); re-registering swaps
+  the pixels and fires the `mbimagesourceupdate` CustomEvent in every view so
+  pages re-fetch with a cache-buster. The "heavy in blink" part (invalidation
+  without page cooperation, GPU-texture backing) remains out of scope — v1 is
+  icons/charts/moderate-rate frames, not 60fps video.
 - **ThreadFactory / Allocator override**: QoS-tagging engine threads is
   attractive for a menu-bar host, but blink's thread bring-up is not
   pluggable at reasonable cost. (Prior art keeping its Allocator flat C even
@@ -807,7 +813,7 @@ stylesheet caveat).
 | 9 | Zero-copy resource bodies (`mbResponseSetBodyOwned`) | Deferred by cost — revisit if a host serves large media |
 | 10 | Memory budget knobs (cache sizes) | Only if `mbPurgeMemory` proves insufficient |
 | 13c | Child worker/iframe DevTools targets (multi-session bridge) | Open, unscheduled |
-| 21 | TLS pinning / ImageSource (streaming downloads shipped: `mbOnDownloadStream` + `mbDownloadURLStream` + `mbCancelDownload`, chunked with progress) | Deferred by trigger (no host needs them yet) |
+| 21 | TLS pinning (streaming downloads shipped: `mbOnDownloadStream` + `mbDownloadURLStream` + `mbCancelDownload`; ImageSource shipped v1: `mbRegisterImageSource` at `https://mb-image.internal/<id>` + `mbimagesourceupdate` events; composited shared-texture output shipped: `mbViewGetIOSurface` — the viz Display renders into an IOSurface on macOS) | TLS pinning still deferred by trigger |
 | 35 | `mbAddFontData` on Windows (DirectWrite private collection) | Open — mac shipped; the export returns 0 on Windows |
 
 ---

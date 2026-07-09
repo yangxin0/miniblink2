@@ -285,6 +285,26 @@ MB_EXPORT void    mbViewComposite(mbView*);
 // The SkColor (0xAARRGGBB) at (x,y) in the compositor's last captured frame, or 0 if not
 // compositing / nothing composited. For verifying the cc -> viz -> bitmap path.
 MB_EXPORT unsigned int mbViewCompositorPixel(mbView*, int x, int y);
+// Shared-texture output (macOS, compositing views): the IOSurfaceRef the
+// in-process display renders composited frames into. Bind it as a CALayer's
+// `contents` and the host displays the frame with ZERO CPU readback — the
+// composited replacement for the mbRepaintToBitmap copy path:
+//
+//   mbViewComposite(v);
+//   layer.contents = nil;                       // poke CA to re-sample
+//   layer.contents = (__bridge id)mbViewGetIOSurface(v);
+//
+// Returns NULL when the view is not compositing, nothing composited yet, not
+// macOS, or IOSurface allocation fell back to heap memory (then use
+// mbRepaintToBitmap). The surface stays valid until the next mbResize or
+// mbDestroyView — CFRetain it to hold on longer. The engine writes the surface
+// during mbViewComposite only (frames are host-pulled), so a host that
+// composites-then-assigns on its own tick never races the writer.
+//
+// (The NON-composited software path already achieves zero extra copies without
+// this: mbRepaintToBitmap paints straight into caller-owned memory — point it
+// at your own IOSurface's base address and blit only mbViewGetDirtyRect.)
+MB_EXPORT void* mbViewGetIOSurface(mbView*);
 
 // Content entry points.
 //   mbLoadHTML  — render an in-memory document (no network). First render proof.
@@ -1101,6 +1121,33 @@ MB_EXPORT void mbOnNotificationShown(mbNotificationCallback cb, void* userdata);
 MB_EXPORT void mbMockResponse(const char* url_substring, const char* body,
                               const char* content_type, int status);
 MB_EXPORT void mbClearMocks(void);
+
+// Host image sources — embed live host-generated images in pages (the
+// ImageSource pattern: charts, camera frames, app-rendered icons) without
+// data: URLs or a local HTTP server. Registers (or replaces) image `id`
+// backed by width x height premultiplied BGRA pixels (stride bytes per row;
+// 0 = width*4; the pixels are copied and PNG-encoded once). Pages display it
+// like any image:
+//
+//   <img src="https://mb-image.internal/myimage">
+//
+// The reserved mb-image.internal host is answered in-process by the engine
+// (200, image/png) ahead of the network and the mock layer; any ?query is
+// ignored. Re-registering an id swaps the backing image and dispatches the
+// document CustomEvent 'mbimagesourceupdate' (detail = id) in every live
+// view, so a page showing live frames re-fetches with a cache-buster:
+//
+//   document.addEventListener('mbimagesourceupdate', e => {
+//     if (e.detail === 'cam') img.src =
+//         'https://mb-image.internal/cam?v=' + performance.now();
+//   });
+//
+// `id` is [A-Za-z0-9._-] (anything else is ignored). Process-wide, like
+// mbMockResponse. One PNG encode per registration: right for icons, charts
+// and moderate-rate frames — not a 60 fps video path.
+MB_EXPORT void mbRegisterImageSource(const char* id, const void* bgra,
+                                     int width, int height, int stride);
+MB_EXPORT void mbUnregisterImageSource(const char* id);
 
 // Dynamic request mock — like mbMockResponse but DECIDED per-request by a callback, for
 // URLs you cannot pre-register as a fixed substring (e.g. compute a JSON body from the

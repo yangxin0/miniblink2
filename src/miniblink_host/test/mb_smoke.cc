@@ -5117,6 +5117,52 @@ int main() {
            "delta=[" + delta + "]");
   }
 
+  // (j5) Host image sources: a registered BGRA image renders through
+  // <img src="https://mb-image.internal/<id>">; re-registering swaps the
+  // pixels and fires 'mbimagesourceupdate' so the page's cache-busting
+  // re-fetch shows the new frame — the ImageSource live-update loop.
+  {
+    // 8x8 solid red, premultiplied BGRA.
+    std::vector<unsigned char> img(8 * 8 * 4);
+    for (size_t i = 0; i < img.size(); i += 4) {
+      img[i] = 0x00; img[i + 1] = 0x00; img[i + 2] = 0xFF; img[i + 3] = 0xFF;
+    }
+    mbRegisterImageSource("smoketick", img.data(), 8, 8, 0);
+    mbView* iv = mbCreateView(200, 150);
+    mbLoadHTML(iv,
+               "<body style='margin:0'>"
+               "<img id=i src='https://mb-image.internal/smoketick' width=32 "
+               "height=32 style='position:absolute;left:0;top:0'>"
+               "<script>window.n=0;document.addEventListener("
+               "'mbimagesourceupdate',e=>{if(e.detail==='smoketick')"
+               "document.getElementById('i').src="
+               "'https://mb-image.internal/smoketick?v='+(++window.n);});"
+               "</script></body>",
+               "about:blank");
+    std::vector<unsigned char> ipx(200 * 150 * 4);
+    mbPaintToBitmap(iv, ipx.data(), 200, 150, 200 * 4);  // settles: decodes img
+    const size_t off = (static_cast<size_t>(8) * 200 + 8) * 4;  // (8,8) BGRA
+    const bool red = ipx[off] < 0x40 && ipx[off + 1] < 0x40 &&
+                     ipx[off + 2] > 0xC0;
+    // Swap the backing image to blue: the broadcast event re-points the <img>
+    // at ?v=1 and the next settled paint shows the new pixels.
+    for (size_t i = 0; i < img.size(); i += 4) {
+      img[i] = 0xFF; img[i + 1] = 0x00; img[i + 2] = 0x00; img[i + 3] = 0xFF;
+    }
+    mbRegisterImageSource("smoketick", img.data(), 8, 8, 0);
+    const std::string bumped = Eval(iv, "String(window.n)");
+    mbPaintToBitmap(iv, ipx.data(), 200, 150, 200 * 4);
+    const bool blue = ipx[off] > 0xC0 && ipx[off + 1] < 0x40 &&
+                      ipx[off + 2] < 0x40;
+    mbUnregisterImageSource("smoketick");
+    mbDestroyView(iv);
+    Expect(red && bumped == "1" && blue,
+           "image source: <img> renders registered BGRA; re-register fires "
+           "mbimagesourceupdate and the re-fetch shows the new pixels",
+           "red=" + std::to_string(red) + " bumped=[" + bumped + "] blue=" +
+               std::to_string(blue));
+  }
+
   // (k) mbSendKeyEvent: a typed KeyDown with text inserts into the focused
   // input (implicit kChar) and carries the auto-repeat flag to KeyboardEvent.
   {

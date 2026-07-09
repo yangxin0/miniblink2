@@ -246,6 +246,24 @@ bool MbIgnoreCertErrors();
 void MbSetFollowRedirects(bool follow);
 bool MbFollowRedirects();
 
+// ---- Host image sources (served at https://mb-image.internal/<id>) ---------
+// The ImageSource pattern: a host-registered image pages reference by URL,
+// with host-driven updates — live charts, camera frames, app-rendered icons —
+// without data: URLs or host HTTP servers. `bgra` is width x height
+// premultiplied BGRA (stride bytes per row; 0 = width*4), copied and
+// PNG-encoded ONCE here; pages load it like any image:
+//   <img src="https://mb-image.internal/<id>">
+// The reserved host is answered in-process ahead of the mock layer and the
+// network (MbFindMock's fast path), status 200, image/png. Any ?query is
+// ignored, so `?v=N` cache-busts after an update. `id` is restricted to
+// [A-Za-z0-9._-]; Set with an invalid id or null/empty pixels is a no-op
+// (returns false). Process-wide, like the mock registry.
+bool MbSetImageSource(const std::string& id, const void* bgra, int width,
+                      int height, int stride);
+void MbRemoveImageSource(const std::string& id);
+// True + the stored PNG when `url` names a registered image source.
+bool MbFindImageSource(const std::string& url, std::string* out_png);
+
 // ---- Streaming download transport (the mb download lifecycle) --------------
 // A chunk-streaming HTTP(S) GET on a detached worker thread — the MbSseStream
 // pattern plus response metadata, for downloads too large to buffer whole.

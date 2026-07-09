@@ -216,10 +216,13 @@ component("miniblink_host") {
   if (is_mac) {
     # Real audio output (media/mb_media_player.cc MbCoreAudioSink): a DefaultOutput
     # AudioUnit pulls decoded samples to the system audio device.
+    # IOSurface: the compositor's shared-texture output (mb_compositor.cc
+    # renders the Display into an IOSurface; mbViewGetIOSurface exposes it).
     frameworks = [
       "AudioToolbox.framework",
       "AudioUnit.framework",
       "CoreAudio.framework",
+      "IOSurface.framework",
     ]
   }
 
@@ -337,6 +340,11 @@ executable("mb_compositor_widget_smoke") {
   sources = [ "test/mb_compositor_widget_smoke.cc" ]
   include_dirs = [ "//third_party/blink/renderer" ]
   deps = [ ":miniblink_host" ]
+  if (is_mac) {
+    # The smoke reads the composited frame straight from the IOSurface
+    # (mbViewGetIOSurface) to verify the shared-texture output path.
+    frameworks = [ "IOSurface.framework" ]
+  }
 }
 
 # mb_shot: headless HTML -> PNG renderer CLI (the deliverable tool).

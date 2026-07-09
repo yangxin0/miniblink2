@@ -167,6 +167,12 @@ class SoftwareCompositor {
   // SoftwareOutputDevice. Empty if nothing has composited yet.
   const SkBitmap& DrawAndCapture();
   const SkBitmap& captured_bitmap() const;
+  // macOS: the IOSurfaceRef the Display renders into (the shared-texture
+  // output path — bind as CALayer.contents, zero CPU readback). Null on other
+  // platforms, before the first composited frame, or if IOSurface allocation
+  // fell back to heap memory. Owned by the output device: valid until the
+  // next Resize or teardown.
+  void* io_surface() const;
 
  private:
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;

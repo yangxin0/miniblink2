@@ -12,6 +12,15 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/notreached.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
+#include "components/viz/common/resources/shared_image_format.h"
+#include "skia/ext/legacy_display_globals.h"
+
+#if BUILDFLAG(IS_MAC)
+#include <IOSurface/IOSurfaceRef.h>
+
+#include "ui/gfx/mac/io_surface.h"
+#endif
 #include "cc/trees/layer_tree_frame_sink_client.h"
 #include "components/viz/common/display/renderer_settings.h"
 #include "components/viz/common/features.h"
@@ -38,18 +47,116 @@
 
 namespace mb {
 
-// ---- A SoftwareOutputDevice that snapshots the composited surface each EndPaint ----
+// ---- The Display's software output device ----------------------------------
+//
+// macOS: the device renders into an IOSurface (skia draws straight into the
+// surface's mapped memory), so a host can bind the composited frame as
+// CALayer.contents with ZERO CPU readback — the shared-texture output path.
+// CPU coherency is scoped per frame (IOSurfaceLock in BeginPaint, Unlock in
+// EndPaint), which is also what makes the WindowServer/GPU see each frame's
+// writes. Other platforms (and an IOSurface-allocation failure) keep the
+// plain heap surface.
+//
+// The pixel CAPTURE (captured()) is now LAZY: pre-IOSurface this device copied
+// the full frame into an SkBitmap on every EndPaint, which is exactly the
+// readback the IOSurface path exists to eliminate. Only the bitmap consumers
+// (PaintToBitmap's composited branch, CompositorPixel) pay it, on demand.
 class MbCapturingSoftwareOutputDevice : public viz::SoftwareOutputDevice {
  public:
+  void Resize(const gfx::Size& pixel_size, float scale_factor) override {
+#if BUILDFLAG(IS_MAC)
+    if (viewport_pixel_size_ == pixel_size)
+      return;
+    viewport_pixel_size_ = pixel_size;
+    surface_.reset();
+    io_surface_.reset();
+    have_frame_ = false;
+    captured_dirty_ = false;
+    captured_.reset();
+    if (pixel_size.IsEmpty())
+      return;
+    io_surface_ = gfx::CreateIOSurface(pixel_size,
+                                       viz::SinglePlaneFormat::kBGRA_8888);
+    if (io_surface_) {
+      // MakeN32 is BGRA on mac — matches the IOSurface's pixel format, so the
+      // canvas draws directly into the surface's memory.
+      SkImageInfo info = SkImageInfo::MakeN32(
+          pixel_size.width(), pixel_size.height(), kOpaque_SkAlphaType);
+      SkSurfaceProps props = skia::LegacyDisplayGlobals::GetSkSurfaceProps();
+      surface_ = SkSurfaces::WrapPixels(
+          info, IOSurfaceGetBaseAddress(io_surface_.get()),
+          IOSurfaceGetBytesPerRow(io_surface_.get()), &props);
+    }
+    if (!surface_) {
+      // IOSurface unavailable: fall back to the base heap surface. The base
+      // early-returns on an unchanged size, so reset it first.
+      io_surface_.reset();
+      viewport_pixel_size_ = gfx::Size();
+      viz::SoftwareOutputDevice::Resize(pixel_size, scale_factor);
+    }
+#else
+    viz::SoftwareOutputDevice::Resize(pixel_size, scale_factor);
+#endif
+  }
+
+  SkCanvas* BeginPaint(const gfx::Rect& damage_rect) override {
+#if BUILDFLAG(IS_MAC)
+    if (io_surface_)
+      IOSurfaceLock(io_surface_.get(), 0, nullptr);
+#endif
+    return viz::SoftwareOutputDevice::BeginPaint(damage_rect);
+  }
+
   void EndPaint() override {
     viz::SoftwareOutputDevice::EndPaint();
-    if (surface_)
-      surface_->makeImageSnapshot()->asLegacyBitmap(&captured_);
+#if BUILDFLAG(IS_MAC)
+    if (io_surface_)
+      IOSurfaceUnlock(io_surface_.get(), 0, nullptr);
+#endif
+    if (surface_) {
+      have_frame_ = true;
+      captured_dirty_ = true;
+    }
   }
-  const SkBitmap& captured() const { return captured_; }
+
+  // The composited pixels as a bitmap, copied on demand (empty until the
+  // first frame). Cached until the next EndPaint.
+  const SkBitmap& captured() const {
+    if (captured_dirty_ && surface_) {
+#if BUILDFLAG(IS_MAC)
+      if (io_surface_)
+        IOSurfaceLock(io_surface_.get(), kIOSurfaceLockReadOnly, nullptr);
+#endif
+      if (captured_.dimensions() != surface_->imageInfo().dimensions())
+        captured_.allocPixels(surface_->imageInfo());
+      surface_->readPixels(captured_, 0, 0);
+#if BUILDFLAG(IS_MAC)
+      if (io_surface_)
+        IOSurfaceUnlock(io_surface_.get(), kIOSurfaceLockReadOnly, nullptr);
+#endif
+      captured_dirty_ = false;
+    }
+    return captured_;
+  }
+
+  // The IOSurface holding the last composited frame (macOS; null elsewhere,
+  // before the first frame, or on allocation fallback). Owned by this device:
+  // valid until the next Resize or teardown.
+  void* io_surface() const {
+#if BUILDFLAG(IS_MAC)
+    return have_frame_ ? io_surface_.get() : nullptr;
+#else
+    return nullptr;
+#endif
+  }
 
  private:
-  SkBitmap captured_;
+  mutable SkBitmap captured_;
+  mutable bool captured_dirty_ = false;
+  bool have_frame_ = false;
+#if BUILDFLAG(IS_MAC)
+  gfx::ScopedIOSurface io_surface_;
+#endif
 };
 
 // ===================== MbDirectLayerTreeFrameSink =====================
@@ -285,6 +392,10 @@ const SkBitmap& SoftwareCompositor::DrawAndCapture() {
 
 const SkBitmap& SoftwareCompositor::captured_bitmap() const {
   return output_device_->captured();
+}
+
+void* SoftwareCompositor::io_surface() const {
+  return output_device_ ? output_device_->io_surface() : nullptr;
 }
 
 }  // namespace mb

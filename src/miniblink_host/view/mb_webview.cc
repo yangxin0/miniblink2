@@ -208,6 +208,12 @@ unsigned int MbWebView::CompositorPixel(int x, int y) const {
   return b.getColor(x, y);
 }
 
+void* MbWebView::CompositorIOSurface() const {
+  if (!widget_ || !widget_->compositor())
+    return nullptr;
+  return widget_->compositor()->io_surface();
+}
+
 std::unique_ptr<MbWebView> MbWebView::Create(int width, int height,
                                              MbWebView* opener,
                                              int compositing_override) {
@@ -3618,6 +3624,16 @@ double g_host_frame_time = 0;
 
 void MbSetHostFrameTime(double seconds) {
   g_host_frame_time = seconds > 0 ? seconds : 0;
+}
+
+void MbBroadcastImageSourceUpdate(const std::string& id) {
+  // The id charset is validated at registration ([A-Za-z0-9._-] —
+  // MbSetImageSource), so embedding it in the script verbatim is safe.
+  const std::string js =
+      "document.dispatchEvent(new CustomEvent('mbimagesourceupdate',{detail:'" +
+      id + "'}))";
+  for (MbWebView* view : AllViews())
+    view->EvalToString(js.c_str());
 }
 
 void MbWebView::ServiceAnimations() {
