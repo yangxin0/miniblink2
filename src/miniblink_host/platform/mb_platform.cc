@@ -10,7 +10,20 @@
 #include "miniblink_host/platform/mb_platform.h"
 
 #include "base/run_loop.h"
+#include "build/build_config.h"
 #include "miniblink_host/runtime/mb_runtime.h"
+#include "skia/ext/font_utils.h"
+#include "third_party/skia/include/core/SkData.h"
+#include "third_party/skia/include/core/SkFontMgr.h"
+#include "third_party/skia/include/core/SkString.h"
+#include "third_party/skia/include/core/SkTypeface.h"
+
+#if BUILDFLAG(IS_MAC)
+#include <CoreGraphics/CoreGraphics.h>
+#include <CoreText/CoreText.h>
+
+#include "base/apple/scoped_cftyperef.h"
+#endif
 
 #include <memory>
 #include <vector>
@@ -389,6 +402,57 @@ void MbSetFontFallbackHook(
   FontFallbackFn() = std::move(hook);
   blink::FontCache::SetHostFallbackFontHook(
       FontFallbackFn() ? &FontFallbackBridge : nullptr);
+}
+
+bool MbAddFontData(const void* data, size_t len, std::string* out_family) {
+  if (!data || len == 0)
+    return false;
+  // Family name via skia (cross-platform, also validates the bytes parse as a
+  // real font before touching the platform registry).
+  sk_sp<SkData> sk_data = SkData::MakeWithCopy(data, len);
+  sk_sp<SkTypeface> typeface =
+      skia::DefaultFontMgr()->makeFromData(sk_data);
+  if (!typeface)
+    return false;
+  SkString family;
+  typeface->getFamilyName(&family);
+#if BUILDFLAG(IS_MAC)
+  // Process-scope CoreText registration: blink's mac FontCache resolves
+  // families through CoreText, so the face becomes nameable everywhere.
+  base::apple::ScopedCFTypeRef<CFDataRef> cf_data(CFDataCreate(
+      kCFAllocatorDefault, static_cast<const UInt8*>(data), len));
+  if (!cf_data)
+    return false;
+  base::apple::ScopedCFTypeRef<CGDataProviderRef> provider(
+      CGDataProviderCreateWithCFData(cf_data.get()));
+  if (!provider)
+    return false;
+  base::apple::ScopedCFTypeRef<CGFontRef> cg_font(
+      CGFontCreateWithDataProvider(provider.get()));
+  if (!cg_font)
+    return false;
+  CFErrorRef error = nullptr;
+  // Registration retains the font; a duplicate registration of the same face
+  // fails — treat that as success (the family already resolves).
+  if (!CTFontManagerRegisterGraphicsFont(cg_font.get(), &error)) {
+    bool already = false;
+    if (error) {
+      already = CFErrorGetCode(error) == kCTFontManagerErrorAlreadyRegistered ||
+                CFErrorGetCode(error) == kCTFontManagerErrorDuplicatedName;
+      CFRelease(error);
+    }
+    if (!already)
+      return false;
+  }
+  if (out_family)
+    *out_family = family.c_str();
+  return true;
+#else
+  // Windows/other: blink's font stack is DirectWrite-backed; a GDI memory font
+  // (AddFontMemResourceEx) is invisible to it. Pending a private DWrite
+  // collection — report failure honestly instead of registering into the void.
+  return false;
+#endif
 }
 
 }  // namespace mb

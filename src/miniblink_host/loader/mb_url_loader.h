@@ -124,6 +124,32 @@ void MbSetRequestHook(MbRequestHook hook);
 bool MbRequestHookBlocks(const std::string& url, const std::string& method,
                          const std::string& headers, const std::string& body);
 
+// MUTABLE per-request hook (mbSetRequestHook / IMPROVEMENT.md item 37): like the
+// inspect hook above but the callback fills an MbRequestMutation — block the
+// request, transparently redirect the fetch (set_url; the page still sees its
+// original URL, like the rewrite table), and/or add/override outgoing request
+// headers (newline-joined "Name: Value" lines; a same-name header already on
+// the request is replaced). Dispatched on the main thread at the two request
+// entries: the subresource loader (Deliver) and the top-level fetch
+// (MbFetchUrl). One process-wide slot, separate from the inspect hook — the C
+// ABI keeps the three request callbacks mutually exclusive.
+struct MbRequestMutation {
+  std::string set_url;      // empty = leave the fetch URL alone
+  std::string add_headers;  // "Name: Value" lines to add/override (may be "")
+  bool block = false;       // true = fail with ERR_BLOCKED_BY_CLIENT
+};
+using MbRequestMutateHook = std::function<void(
+    const std::string& url, const std::string& method,
+    const std::string& headers, const std::string& body, MbRequestMutation*)>;
+void MbSetRequestMutateHook(MbRequestMutateHook hook);
+// Runs the hook if installed (filling *out) and returns true; false = no hook.
+bool MbRunRequestMutateHook(const std::string& url, const std::string& method,
+                            const std::string& headers, const std::string& body,
+                            MbRequestMutation* out);
+// The out_error MbFetchUrl reports when the mutate hook blocks a top-level
+// fetch — MbWebView matches it to report error_domain "blocked".
+extern const char kMbBlockedByHookError[];
+
 // Response hook: a process-wide callback invoked after a successful fetch/mock/file/data
 // load with the request URL, HTTP status, the raw response HEADER block (final response's
 // header lines, empty for non-http), and a MUTABLE body pointer — so an embedder can
@@ -234,6 +260,9 @@ bool MbFollowRedirects();
 // `out_final_url` (optional) receives the URL after any server redirects curl
 // followed (http only) — use it as the committed document's base so location and
 // relative subresources reflect where we actually landed.
+// `out_error_code` (optional) receives the numeric failure code alongside
+// `out_error`'s prose: the CURLcode for transport failures, 0 otherwise
+// (structured load errors — IMPROVEMENT.md item 33).
 bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* content_type, const std::string& user_agent = "",
                 const std::string& extra_headers = "",
@@ -244,6 +273,7 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 int* out_status = nullptr,
                 std::string* out_headers = nullptr,
                 std::string* out_error = nullptr,
+                int* out_error_code = nullptr,
                 const void* host_ctx = nullptr);
 
 class MbURLLoader : public blink::URLLoader {

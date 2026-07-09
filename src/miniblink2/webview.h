@@ -20,7 +20,45 @@
 // stated otherwise; physical px = logical px * device scale factor
 // (mbSetDeviceScaleFactor). Pixel buffers are BGRA8888, PREMULTIPLIED alpha,
 // sRGB — with mbSetTransparentBackground, composite them as premultiplied
-// (do not treat the channels as straight alpha).
+// (do not treat the channels as straight alpha). PNG exports (mbSavePng /
+// mbEncodePng and friends) are the exception: the encoder converts to
+// straight alpha, as the PNG format requires — those files are correct as-is.
+//
+// WHAT TO WIRE, BY HOST TYPE (everything else is optional; all rows are
+// per-view unless marked process-wide):
+//
+//   |                          | screenshot/scrape host | interactive host |
+//   |--------------------------|------------------------|------------------|
+//   | mbInitialize             | required               | required         |
+//   | mbPumpMessages / waits   | required               | avoid (use ↓)    |
+//   | mbUpdate / mbUpdateAt    | not needed             | required         |
+//   | mbSetMaxUpdateTime       | not needed             | recommended      |
+//   | mbRepaintToBitmap+IsDirty| not needed             | required         |
+//   | mbPaintToBitmap / SavePng| required               | avoid (settles)  |
+//   | input (mbSend*)          | optional (selectors)   | required         |
+//   | mbOnCursor/TooltipChanged| not needed             | recommended      |
+//   | mbOnSelectPopup          | not needed             | required         |
+//   | mbSetJsDialogCallback    | recommended            | recommended      |
+//   | mbOnLoadFinish etc.      | recommended            | recommended      |
+//
+// INTERACTIVE FRAME TICK — the canonical host loop (a display-link/vsync
+// callback; error handling elided):
+//
+//   // once, at startup:
+//   mbInitialize();
+//   mbSetMaxUpdateTime(0.008);              // 8 ms engine budget per tick
+//   mbView* v = mbCreateView(w, h);
+//   mbLoadURL(v, "https://example.org");
+//
+//   // every vsync tick (timestamp in the CADisplayLink/mach domain):
+//   mbUpdateAt(frame_time);                 // advance the world (never nests)
+//   if (mbViewIsDirty(v)) {                 // damage-gated: skip clean frames
+//     if (mbRepaintToBitmap(v, buf, w*dsf, h*dsf, w*dsf*4))
+//       blit(buf);                          // premultiplied BGRA, sRGB
+//   }
+//
+// Keep "advance the world" (mbUpdate*) and "snapshot pixels" (repaint)
+// separate; never call the settling one-shot capture calls from this loop.
 
 #ifndef MINIBLINK2_WEBVIEW_H_
 #define MINIBLINK2_WEBVIEW_H_
@@ -46,7 +84,11 @@ typedef struct mbView mbView;
 // running a mismatched pair). Returned strings are static; do not free.
 // Engine (this library) version, e.g. "0.4.0".
 // MB_VERSION is the compile-time string this header shipped with — log both
-// (compiled-against vs loaded) when diagnosing a dlopen'd engine.
+// (compiled-against vs loaded) when diagnosing a dlopen'd engine. The numeric
+// components exist for preprocessor checks (#if MB_VERSION_MINOR >= 4).
+#define MB_VERSION_MAJOR 0
+#define MB_VERSION_MINOR 4
+#define MB_VERSION_PATCH 0
 #define MB_VERSION "0.4.0"
 MB_EXPORT const char* mbVersion(void);
 // Header/ABI compatibility number; bumped on any breaking change to this API.
@@ -87,6 +129,9 @@ MB_EXPORT void mbUpdate(void);
 // remaining work runs on the NEXT update, so one busy page cannot hold the
 // host's frame tick. 0 (the default) drains to idle. Applies to mbUpdate
 // only — mbPumpMessages and the automation waits intentionally run to idle.
+// RECOMMENDED for interactive hosts: set a budget of roughly half your frame
+// period (0.008 at 60 fps — what the Glyph host runs); the drain-to-idle
+// default is right only for hosts that tick outside a latency-sensitive loop.
 MB_EXPORT void mbSetMaxUpdateTime(double seconds);
 
 // mbUpdate with the host's display-refresh timestamp (seconds, in the
@@ -172,12 +217,48 @@ MB_EXPORT mbView* mbCreateView(int width, int height);
 MB_EXPORT void    mbDestroyView(mbView*);
 MB_EXPORT void    mbResize(mbView*, int width, int height);
 
+// ---- Creation-time view config ------------------------------------------------
+// The one-call answer to the "call this before the first load" / "affects the
+// NEXT mbCreateView" timing footguns: collect creation-time choices in an
+// opaque config object, then create the view with all of them applied before
+// any document exists. An OPAQUE BUILDER (create → set fields → create view →
+// destroy), not a struct: new setters can be added without touching any
+// signature or ABI. Unset fields keep the engine defaults. The config is
+// reusable (create several views from one) and is yours to destroy; destroying
+// it does not affect views created from it. The per-field runtime setters keep
+// working after creation — this is the primary path, not the only one.
+typedef struct mbViewConfig mbViewConfig;
+MB_EXPORT mbViewConfig* mbCreateViewConfig(void);
+MB_EXPORT void mbDestroyViewConfig(mbViewConfig*);
+// The session (browsing profile) the view is created into (NULL = default) —
+// same effect as mbCreateViewInSession.
+MB_EXPORT void mbViewConfigSetSession(mbViewConfig*, mbSession*);
+// Per-view compositing at creation (the widget attach is creation-fixed).
+// Replaces the process-global mbSetCompositingEnabled latch for this path.
+MB_EXPORT void mbViewConfigSetCompositing(mbViewConfig*, int on);
+// The rest mirror the runtime setters, applied before the first document:
+MB_EXPORT void mbViewConfigSetTransparentBackground(mbViewConfig*, int transparent);
+MB_EXPORT void mbViewConfigSetDeviceScaleFactor(mbViewConfig*, float scale);
+MB_EXPORT void mbViewConfigSetEnableJavascript(mbViewConfig*, int enabled);
+MB_EXPORT void mbViewConfigSetLoadImages(mbViewConfig*, int enabled);
+MB_EXPORT void mbViewConfigSetDarkMode(mbViewConfig*, int dark);
+MB_EXPORT void mbViewConfigSetUserAgent(mbViewConfig*, const char* utf8_ua);
+MB_EXPORT void mbViewConfigSetLocale(mbViewConfig*, const char* utf8_languages);
+MB_EXPORT void mbViewConfigSetFontFamilies(mbViewConfig*, const char* standard,
+                                           const char* fixed, const char* serif,
+                                           const char* sans_serif);
+// Create a view with `config` applied (NULL config == plain mbCreateView).
+MB_EXPORT mbView* mbCreateViewWithConfig(int width, int height,
+                                         const mbViewConfig*);
+
 // Compositing (experimental). When enabled, the NEXT mbCreateView attaches its widget
 // COMPOSITING — blink drives cc into an in-process software viz::Display — instead of the
 // default non-compositing software-paint path. Process-global; default OFF (screenshots
-// are unchanged). mbViewFrameSinkRequested returns how many frame sinks blink's compositor
-// has pulled (>0 once the view is shown + the message loop pumped), or -1 if the view is
-// not compositing.
+// are unchanged). LEGACY LATCH: prefer mbViewConfigSetCompositing +
+// mbCreateViewWithConfig, which makes the choice per-view at the call site
+// instead of via process state. mbViewFrameSinkRequested returns how many frame sinks
+// blink's compositor has pulled (>0 once the view is shown + the message loop pumped),
+// or -1 if the view is not compositing.
 MB_EXPORT void    mbSetCompositingEnabled(int on);
 MB_EXPORT int     mbViewFrameSinkRequested(mbView*);
 // Drive one synchronous compositor frame (compositing views only; no-op otherwise) — a headless
@@ -226,12 +307,37 @@ typedef void (*mbFailLoadingCallback)(mbView*, void* userdata, const char* url,
 MB_EXPORT void mbOnFailLoading(mbView*, mbFailLoadingCallback, void* userdata);
 MB_EXPORT int  mbIsLoadFinished(mbView*);
 
+// Structured fail-loading variant: like mbOnFailLoading but machine-checkable —
+// `error_domain` is "curl" (transport failure; `error_code` is the CURLcode,
+// e.g. 6 couldn't-resolve-host, 7 couldn't-connect, 28 timeout), "file"
+// (file:// unreadable), "network" (no response at all), or "blocked" (the
+// mbSetRequestHook callback vetoed the load); `error_code` is 0 outside the
+// curl domain. `description` is the prose mbOnFailLoading carries.
+// Branch on domain+code (retry timeouts, report DNS) instead of matching
+// English. ONE SLOT with mbOnFailLoading: setting either replaces the other.
+// NULL clears. HTTP 4xx/5xx are NOT failures (they commit; see mbGetHttpStatus).
+typedef void (*mbFailLoadingCallbackEx)(mbView*, void* userdata, const char* url,
+                                        const char* error_domain, int error_code,
+                                        const char* description);
+MB_EXPORT void mbOnFailLoadingEx(mbView*, mbFailLoadingCallbackEx, void* userdata);
+
 // Fires when the main document's DOMContentLoaded event dispatches — the DOM is parsed and
 // deferred scripts have run, but subresources/images may still be loading. This is the
 // "page interactive" signal and is EARLIER than mbOnLoadFinish (which waits for `load` /
 // all subresources), matching Puppeteer/Playwright's 'domcontentloaded' wait. NULL clears.
 typedef void (*mbDOMContentLoadedCallback)(mbView*, void* userdata);
 MB_EXPORT void mbOnDOMContentLoaded(mbView*, mbDOMContentLoadedCallback, void* userdata);
+
+// Fires for each new MAIN-FRAME document at the earliest scriptable moment: the
+// window object exists, the init script (mbSetInitScript) has run, and NO page
+// script has executed yet — earlier than mbOnDOMContentLoaded (DOM parsed) and
+// the sanctioned point for host-COMPUTED per-document setup (fresh tokens,
+// state not known until now): mbRunJS/mbEvalJS from inside the callback run
+// before the page sees the world. For static setup prefer mbSetInitScript.
+// Keep it cheap; it fires from inside document initialization. NULL clears.
+typedef void (*mbWindowObjectReadyCallback)(mbView*, void* userdata);
+MB_EXPORT void mbOnWindowObjectReady(mbView*, mbWindowObjectReadyCallback,
+                                     void* userdata);
 
 // Navigation policy/notification: the callback fires for each PAGE-initiated main-frame
 // navigation (link click, location= assignment, form submit, JS redirect) with its
@@ -294,7 +400,9 @@ MB_EXPORT void mbOnNewWindow(mbView*, mbNewWindowCallback, void* userdata);
 //   `x,y,width,height` the window.open features geometry; 0 when unspecified
 //                (the child defaults to the parent's size — mbResize it).
 // The callback fires from INSIDE the page's JS (window.open is synchronous):
-// keep it cheap, don't pump, defer heavy host work (mbDefer). Registering
+// keep it cheap, don't pump, defer heavy host work (mbDefer). The OPENER's
+// URL is mbGetURL(parent) — the parent is the view whose page called
+// window.open, so no separate opener_url parameter is needed. Registering
 // this takes precedence over mbOnNewWindow for the views it adopts; declined
 // requests still fire mbOnNewWindow. NULL clears (window.open returns null
 // again). LIFETIME: the child shares the opener's JS agent cluster — destroy
@@ -421,6 +529,22 @@ typedef int (*mbFontFallbackCallback)(void* userdata, unsigned int codepoint,
                                       char* out, int out_cap);
 MB_EXPORT void mbSetFontFallbackCallback(mbFontFallbackCallback, void* userdata);
 
+// Register an in-memory font (TTF/OTF bytes) with the platform font system at
+// PROCESS scope — the third piece of the font story: mbSetFontFamilies names
+// families, the fallback callback answers per character, and this SERVES the
+// bytes, so a host can bundle a font (a guaranteed CJK face for a dictionary)
+// instead of depending on the user's installed library. On success returns 1
+// and writes the face's family name (UTF-8, NUL-terminated, truncated to
+// family_cap; out_family may be NULL) — use that exact name in
+// mbSetFontFamilies / the fallback callback / CSS. The bytes are COPIED; free
+// yours after the call. Register before loading content (a committed document
+// re-resolves on the next style recalc, but do not rely on it). Registering
+// the same face twice is a success no-op. PLATFORMS: macOS today; on Windows
+// this returns 0 (blink's DirectWrite stack cannot see memory-registered GDI
+// fonts; a private DirectWrite collection is planned).
+MB_EXPORT int mbAddFontData(const void* data, int len, char* out_family,
+                            int family_cap);
+
 // ---- DevTools (CDP) --------------------------------------------------------
 // One Chrome-DevTools-Protocol session per view (stage A of the inspector
 // plan in IMPROVEMENT.md). Attach starts the session; Send dispatches ONE
@@ -544,7 +668,12 @@ MB_EXPORT int mbSendWheelEvent(mbView*, const mbWheelEvent*);
 //   is_keypad       modifierFlags contains numericPad
 //   is_auto_repeat  NSEvent.isARepeat
 #define MB_KEY_RAW_DOWN 0  /* key press, no char yet (WebKit RawKeyDown) */
-#define MB_KEY_DOWN     1  /* press + implicit char (single-event style)  */
+#define MB_KEY_DOWN     1  /* press + implicit char (single-event style).
+                              WARNING: prefer RAW_DOWN + CHAR when forwarding
+                              real host key events — DOWN exists for callers
+                              synthesizing a whole press in one call and can't
+                              represent a key that produces no text correctly
+                              alongside one that does. */
 #define MB_KEY_UP       2
 #define MB_KEY_CHAR     3  /* the produced text (send after RAW_DOWN)     */
 typedef struct mbKeyEvent {
@@ -712,9 +841,13 @@ MB_EXPORT int mbHasInputFocus(mbView*);
 // 7=function). The function returns a UTF-8 string and may set *out_type to
 // choose the JS return type (0=string default, 1=number, 2=boolean, 3=null,
 // 4=undefined, 5=json — the string is JSON.parse'd into an object/array/value).
-// Synchronous — JS receives the return value inline. The binding is installed
-// into each new document's main world (call before navigating). `userdata` is
-// passed back to every invocation.
+// Synchronous — JS receives the return value inline. RETURN-STRING LIFETIME:
+// the engine copies the returned string before the call returns, so a static
+// buffer, a per-binding buffer overwritten on the next call, or a std::string's
+// c_str() held by userdata are all fine. NULL is safe: undefined for
+// string/json returns, 0/false for number/boolean. The binding is
+// installed into each new document's main world (call before navigating).
+// `userdata` is passed back to every invocation.
 typedef const char* (*mbJsNativeFn)(void* userdata, int argc, const char** argv,
                                     const int* argtypes, int* out_type);
 MB_EXPORT void mbJsBindFunction(mbView*, const char* name, mbJsNativeFn fn,
@@ -820,6 +953,38 @@ typedef int (*mbRequestCallbackEx)(const char* url, const char* method,
                                    int body_len, void* userdata);
 MB_EXPORT void mbSetRequestCallbackEx(mbRequestCallbackEx cb, void* userdata);
 
+// MUTABLE request hook — the request-side twin of the mbResponse* handle: the
+// callback receives an opaque mbRequest it can inspect AND change, so per-
+// request decisions that the static tables can't express become possible —
+// compute an Authorization header for one host only, redirect a fetch to a
+// local server, veto by full request context. Fires on the main thread for
+// every request (subresources AND top-level loads), after the static
+// block/rewrite/header tables. The handle is valid only during the callback.
+//   mbRequestURL/Method/Headers   what's about to be fetched (headers are the
+//                                 request's own, "\n"-joined "Name: Value").
+//   mbRequestBody                 request body bytes (POST/PUT; *out_len gets
+//                                 the length, NOT NUL-safe); "" for GET.
+//   mbRequestSetUrl               TRANSPARENTLY redirect the fetch (the page
+//                                 still sees the original URL, like
+//                                 mbRewriteUrl). Invalid URLs are ignored.
+//   mbRequestSetHeader            add an outgoing header; an existing
+//                                 same-name header is REPLACED.
+//   mbRequestBlock                fail the request (ERR_BLOCKED_BY_CLIENT); a
+//                                 blocked TOP-LEVEL load reports error_domain
+//                                 "blocked" via mbOnFailLoadingEx.
+// ONE SLOT with mbSetRequestCallback/Ex: setting any of the three replaces the
+// others. NULL clears. Process-wide.
+typedef struct mbRequest mbRequest;
+MB_EXPORT const char* mbRequestURL(mbRequest*);
+MB_EXPORT const char* mbRequestMethod(mbRequest*);
+MB_EXPORT const char* mbRequestHeaders(mbRequest*);
+MB_EXPORT const char* mbRequestBody(mbRequest*, int* out_len);
+MB_EXPORT void mbRequestSetUrl(mbRequest*, const char* url);
+MB_EXPORT void mbRequestSetHeader(mbRequest*, const char* name, const char* value);
+MB_EXPORT void mbRequestBlock(mbRequest*);
+typedef void (*mbRequestHookCallback)(mbRequest*, void* userdata);
+MB_EXPORT void mbSetRequestHook(mbRequestHookCallback cb, void* userdata);
+
 // Response hook: a process-wide callback invoked after a successful load (fetch / mock /
 // file / data) with an opaque mbResponse handle, BEFORE the body reaches the page — so
 // you can inspect the headers / status or REPLACE the response bytes (inject a script,
@@ -922,6 +1087,28 @@ MB_EXPORT void mbClearRequestHeaders(void);
 // Process-wide. clipboard-read/write permission is granted so navigator.clipboard works.
 MB_EXPORT void mbSetClipboard(const char* utf8_text);
 MB_EXPORT int  mbGetClipboard(char* out, int out_cap);
+
+// OS-clipboard bridge: route the PAGE's clipboard through the HOST so paste
+// sees the real pasteboard and copy lands on it — without this, an interactive
+// host must sync mbSet/GetClipboard around every copy/paste by hand.
+//   read_cb   consulted on page READS (paste, navigator.clipboard.readText):
+//             write the current host-clipboard text (UTF-8, NUL-terminated,
+//             truncated to out_cap) into `out` and return the FULL length in
+//             bytes (the engine retries with a bigger buffer if it exceeds
+//             out_cap-1). While installed it is authoritative — page reads
+//             bypass the in-process jar (and mbSetClipboard).
+//   write_cb  fired on page WRITES (copy/cut, writeText) with the text. The
+//             in-process jar still keeps a copy, so mbGetClipboard works.
+// Either may be NULL — that direction keeps the in-process jar. Process-wide.
+// THREADING: both callbacks fire on an engine SERVICE thread (not the main
+// thread, like mbOnLogMessage) — keep them thread-safe and cheap; marshal to
+// your UI thread yourself if your pasteboard API needs it. NULL/NULL restores
+// the pure in-process clipboard.
+typedef int (*mbClipboardReadCallback)(void* userdata, char* out, int out_cap);
+typedef void (*mbClipboardWriteCallback)(void* userdata, const char* utf8_text);
+MB_EXPORT void mbSetClipboardHandler(mbClipboardReadCallback read_cb,
+                                     mbClipboardWriteCallback write_cb,
+                                     void* userdata);
 
 // Write the committed main document's URL (the final URL after any redirects)
 // into `out` (NUL-terminated, up to out_cap). Returns the full length in bytes.

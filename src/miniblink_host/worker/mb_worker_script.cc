@@ -115,7 +115,7 @@ std::unique_ptr<blink::WorkerMainScriptLoadParameters> MakeWorkerMainScriptParam
                          /*post_content_type=*/"", /*http_method=*/"",
                          /*out_final_url=*/nullptr, /*out_status=*/nullptr,
                          /*out_headers=*/nullptr, /*out_error=*/nullptr,
-                         host_ctx)) {
+                         /*out_error_code=*/nullptr, host_ctx)) {
     return nullptr;
   }
   std::string mime = content_type.substr(0, content_type.find(';'));

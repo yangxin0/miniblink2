@@ -60,6 +60,25 @@ struct mbView {
   std::unique_ptr<mb::MbWebView> impl;
 };
 
+// Creation-time view config (mbCreateViewConfig / item 36): a plain collector.
+// Tri-state ints (-1 = unset -> engine default); strings carry a *_set flag so
+// an explicit "" (e.g. clear the UA override) is distinguishable from unset.
+struct mbViewConfig {
+  mbSession* session = nullptr;
+  int compositing = -1;
+  int transparent = -1;
+  float device_scale = 0;  // 0 = unset
+  int enable_js = -1;
+  int load_images = -1;
+  int dark_mode = -1;
+  std::string ua;
+  bool ua_set = false;
+  std::string locale;
+  bool locale_set = false;
+  std::string ff_standard, ff_fixed, ff_serif, ff_sans;
+  bool ff_set = false;
+};
+
 namespace {
 // Copy `result` into out[out_cap] (NUL-terminated). When the buffer is too small,
 // truncate at a UTF-8 character boundary so the output never ends mid-multibyte
@@ -313,6 +332,16 @@ void mbSetFontFamilies(mbView* v, const char* standard, const char* fixed,
     v->impl->SetFontFamilies(standard, fixed, serif, sans_serif);
 }
 
+int mbAddFontData(const void* data, int len, char* out_family, int family_cap) {
+  if (!data || len <= 0)
+    return 0;
+  std::string family;
+  if (!mb::MbAddFontData(data, static_cast<size_t>(len), &family))
+    return 0;
+  CopyToBuffer(family, out_family, family_cap);
+  return 1;
+}
+
 int mbInEngineCall(void) {
   return g_engine_depth > 0 ? 1 : 0;
 }
@@ -456,6 +485,110 @@ mbView* mbCreateView(int width, int height) {
   return view.release();
 }
 
+mbViewConfig* mbCreateViewConfig(void) {
+  return new mbViewConfig();
+}
+
+void mbDestroyViewConfig(mbViewConfig* c) {
+  delete c;
+}
+
+void mbViewConfigSetSession(mbViewConfig* c, mbSession* session) {
+  if (c)
+    c->session = session;
+}
+
+void mbViewConfigSetCompositing(mbViewConfig* c, int on) {
+  if (c)
+    c->compositing = on ? 1 : 0;
+}
+
+void mbViewConfigSetTransparentBackground(mbViewConfig* c, int transparent) {
+  if (c)
+    c->transparent = transparent ? 1 : 0;
+}
+
+void mbViewConfigSetDeviceScaleFactor(mbViewConfig* c, float scale) {
+  if (c)
+    c->device_scale = scale;
+}
+
+void mbViewConfigSetEnableJavascript(mbViewConfig* c, int enabled) {
+  if (c)
+    c->enable_js = enabled ? 1 : 0;
+}
+
+void mbViewConfigSetLoadImages(mbViewConfig* c, int enabled) {
+  if (c)
+    c->load_images = enabled ? 1 : 0;
+}
+
+void mbViewConfigSetDarkMode(mbViewConfig* c, int dark) {
+  if (c)
+    c->dark_mode = dark ? 1 : 0;
+}
+
+void mbViewConfigSetUserAgent(mbViewConfig* c, const char* utf8_ua) {
+  if (!c)
+    return;
+  c->ua = utf8_ua ? utf8_ua : "";
+  c->ua_set = true;
+}
+
+void mbViewConfigSetLocale(mbViewConfig* c, const char* utf8_languages) {
+  if (!c)
+    return;
+  c->locale = utf8_languages ? utf8_languages : "";
+  c->locale_set = true;
+}
+
+void mbViewConfigSetFontFamilies(mbViewConfig* c, const char* standard,
+                                 const char* fixed, const char* serif,
+                                 const char* sans_serif) {
+  if (!c)
+    return;
+  c->ff_standard = standard ? standard : "";
+  c->ff_fixed = fixed ? fixed : "";
+  c->ff_serif = serif ? serif : "";
+  c->ff_sans = sans_serif ? sans_serif : "";
+  c->ff_set = true;
+}
+
+mbView* mbCreateViewWithConfig(int width, int height, const mbViewConfig* c) {
+  EngineScope engine_scope;
+  if (!mb::MbRuntime::Get())
+    return nullptr;  // must mbInitialize() first
+  auto view = std::make_unique<mbView>();
+  view->impl = mb::MbWebView::Create(width, height, /*opener=*/nullptr,
+                                     c ? c->compositing : -1);
+  if (!view->impl)
+    return nullptr;
+  if (c) {
+    // Apply the collected choices before any document exists — the whole point
+    // of the config path (no "call before first load" ordering to get wrong).
+    if (c->session && c->session->impl)
+      view->impl->SetSession(c->session->impl);
+    if (c->transparent >= 0)
+      view->impl->SetTransparentBackground(c->transparent != 0);
+    if (c->device_scale > 0)
+      view->impl->SetDeviceScaleFactor(c->device_scale);
+    if (c->enable_js >= 0)
+      view->impl->SetEnableJavascript(c->enable_js != 0);
+    if (c->load_images >= 0)
+      view->impl->SetLoadImages(c->load_images != 0);
+    if (c->dark_mode >= 0)
+      view->impl->SetDarkMode(c->dark_mode != 0);
+    if (c->ua_set)
+      view->impl->SetUserAgent(c->ua.c_str());
+    if (c->locale_set)
+      view->impl->SetLocale(c->locale.c_str());
+    if (c->ff_set)
+      view->impl->SetFontFamilies(c->ff_standard.c_str(), c->ff_fixed.c_str(),
+                                  c->ff_serif.c_str(), c->ff_sans.c_str());
+  }
+  return view.release();
+}
+
 void mbDestroyView(mbView* v) {
   EngineScope engine_scope;
   delete v;  // unique_ptr<MbWebView> dtor closes the WebView
@@ -551,6 +684,20 @@ void mbOnFailLoading(mbView* v, mbFailLoadingCallback cb, void* userdata) {
     v->impl->SetFailLoadingCallback({});
 }
 
+void mbOnFailLoadingEx(mbView* v, mbFailLoadingCallbackEx cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetFailLoadingCallbackEx(
+        [v, cb, userdata](const std::string& url, const std::string& domain,
+                          int code, const std::string& description) {
+          cb(v, userdata, url.c_str(), domain.c_str(), code,
+             description.c_str());
+        });
+  else
+    v->impl->SetFailLoadingCallbackEx({});
+}
+
 void mbOnDOMContentLoaded(mbView* v, mbDOMContentLoadedCallback cb, void* userdata) {
   if (!v || !v->impl)
     return;
@@ -558,6 +705,16 @@ void mbOnDOMContentLoaded(mbView* v, mbDOMContentLoadedCallback cb, void* userda
     v->impl->SetDOMContentLoadedCallback([v, cb, userdata]() { cb(v, userdata); });
   else
     v->impl->SetDOMContentLoadedCallback({});
+}
+
+void mbOnWindowObjectReady(mbView* v, mbWindowObjectReadyCallback cb,
+                           void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetWindowObjectReadyCallback([v, cb, userdata]() { cb(v, userdata); });
+  else
+    v->impl->SetWindowObjectReadyCallback({});
 }
 
 int mbIsLoadFinished(mbView* v) {
@@ -1242,6 +1399,7 @@ void mbBlockResourceType(const char* type, int blocked) {
 }
 
 void mbSetRequestCallback(mbRequestCallback cb, void* userdata) {
+  mb::MbSetRequestMutateHook({});  // one slot across the three request hooks
   if (cb) {
     mb::MbSetRequestHook([cb, userdata](const std::string& url, const std::string&,
                                         const std::string&, const std::string&) {
@@ -1253,6 +1411,7 @@ void mbSetRequestCallback(mbRequestCallback cb, void* userdata) {
 }
 
 void mbSetRequestCallbackEx(mbRequestCallbackEx cb, void* userdata) {
+  mb::MbSetRequestMutateHook({});  // one slot across the three request hooks
   if (cb) {
     mb::MbSetRequestHook(
         [cb, userdata](const std::string& url, const std::string& method,
@@ -1262,6 +1421,67 @@ void mbSetRequestCallbackEx(mbRequestCallbackEx cb, void* userdata) {
         });
   } else {
     mb::MbSetRequestHook({});
+  }
+}
+
+// The opaque mbRequest handle: a transient view of one request plus its
+// mutation record, valid only for the duration of the callback.
+struct mbRequest {
+  const std::string& url;
+  const std::string& method;
+  const std::string& headers;
+  const std::string& body;
+  mb::MbRequestMutation* mutation;
+};
+
+const char* mbRequestURL(mbRequest* r) {
+  return r ? r->url.c_str() : "";
+}
+
+const char* mbRequestMethod(mbRequest* r) {
+  return r ? r->method.c_str() : "";
+}
+
+const char* mbRequestHeaders(mbRequest* r) {
+  return r ? r->headers.c_str() : "";
+}
+
+const char* mbRequestBody(mbRequest* r, int* out_len) {
+  if (out_len)
+    *out_len = r ? static_cast<int>(r->body.size()) : 0;
+  return r ? r->body.data() : "";
+}
+
+void mbRequestSetUrl(mbRequest* r, const char* url) {
+  if (r && r->mutation && url)
+    r->mutation->set_url = url;
+}
+
+void mbRequestSetHeader(mbRequest* r, const char* name, const char* value) {
+  if (!r || !r->mutation || !name || !*name)
+    return;
+  if (!r->mutation->add_headers.empty())
+    r->mutation->add_headers += "\n";
+  r->mutation->add_headers += std::string(name) + ": " + (value ? value : "");
+}
+
+void mbRequestBlock(mbRequest* r) {
+  if (r && r->mutation)
+    r->mutation->block = true;
+}
+
+void mbSetRequestHook(mbRequestHookCallback cb, void* userdata) {
+  mb::MbSetRequestHook({});  // one slot across the three request hooks
+  if (cb) {
+    mb::MbSetRequestMutateHook(
+        [cb, userdata](const std::string& url, const std::string& method,
+                       const std::string& headers, const std::string& body,
+                       mb::MbRequestMutation* mutation) {
+          mbRequest handle{url, method, headers, body, mutation};
+          cb(&handle, userdata);
+        });
+  } else {
+    mb::MbSetRequestMutateHook({});
   }
 }
 
@@ -1525,6 +1745,34 @@ int mbGetClipboard(char* out, int out_cap) {
   std::string text = mb::MbGetClipboardText();
   CopyToBuffer(text, out, out_cap);
   return static_cast<int>(std::min<size_t>(text.size(), INT_MAX));
+}
+
+void mbSetClipboardHandler(mbClipboardReadCallback read_cb,
+                           mbClipboardWriteCallback write_cb, void* userdata) {
+  std::function<std::string()> read;
+  std::function<void(const std::string&)> write;
+  if (read_cb) {
+    read = [read_cb, userdata]() -> std::string {
+      char buf[4096];
+      int n = read_cb(userdata, buf, static_cast<int>(sizeof(buf)));
+      if (n <= 0)
+        return std::string();
+      if (n < static_cast<int>(sizeof(buf)))
+        return std::string(buf, static_cast<size_t>(n));
+      // Truncated: retry with a buffer sized to the reported full length.
+      std::vector<char> big(static_cast<size_t>(n) + 1);
+      int m = read_cb(userdata, big.data(), n + 1);
+      if (m <= 0)
+        return std::string();
+      return std::string(big.data(), static_cast<size_t>(std::min(m, n)));
+    };
+  }
+  if (write_cb) {
+    write = [write_cb, userdata](const std::string& text) {
+      write_cb(userdata, text.c_str());
+    };
+  }
+  mb::MbSetClipboardHandler(std::move(read), std::move(write));
 }
 
 int mbSaveLocalStorage(mbView* v, char* out, int out_cap) {

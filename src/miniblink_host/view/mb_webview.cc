@@ -205,7 +205,8 @@ unsigned int MbWebView::CompositorPixel(int x, int y) const {
 }
 
 std::unique_ptr<MbWebView> MbWebView::Create(int width, int height,
-                                             MbWebView* opener) {
+                                             MbWebView* opener,
+                                             int compositing_override) {
   auto v = std::unique_ptr<MbWebView>(new MbWebView());
   v->view_client_ = std::make_unique<MbViewClient>();
   v->frame_client_ = std::make_unique<MbFrameClient>(v.get());
@@ -234,7 +235,8 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height,
   // compositing_enabled=false / widgets_never_composited=true); pixels come from the
   // paint record. When the compositor opt-in is on, the WebView must report
   // does_composite()=true (InitializeCompositing DCHECKs it) and allow composited widgets.
-  const bool composite = g_compositing_enabled;
+  const bool composite = compositing_override >= 0 ? compositing_override != 0
+                                                   : g_compositing_enabled;
   v->web_view_ = blink::To<blink::WebViewImpl>(blink::WebView::Create(
       v->view_client_.get(),
       /*is_hidden=*/false,
@@ -299,7 +301,7 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height,
   // 3. Frame widget (non-compositing), attach, size, then inform the WebView.
   v->widget_ = std::make_unique<MbWidget>();
   v->widget_->Attach(v->main_frame_, width, height,
-                     /*composited=*/g_compositing_enabled);
+                     /*composited=*/composite);
   v->web_view_->DidAttachLocalMainFrame();
 
   // Mark the page active + focused so focus-dependent behavior works headlessly:
@@ -427,6 +429,8 @@ void MbWebView::LoadHTML(const char* utf8_html, const char* base_url) {
   http_status_ = 0;  // in-memory doc; no HTTP status
   response_headers_.clear();
   last_error_.clear();  // an in-memory document always loads successfully
+  last_error_domain_.clear();
+  last_error_code_ = 0;
   const char* html = utf8_html ? utf8_html : "";
   // Cache the source into the history entry recorded by this commit, so a later
   // back/forward can re-render this in-memory doc (its committed URL is about:blank).
@@ -492,6 +496,8 @@ void MbWebView::LoadURL(const char* utf8_url) {
   http_status_ = 0;  // reset; only an http(s) load sets a real status
   response_headers_.clear();
   last_error_.clear();  // cleared up front; set only if this load fails
+  last_error_domain_.clear();
+  last_error_code_ = 0;
   pending_is_html_ = false;  // a URL nav: the history entry re-fetches, no cached source
   constexpr char kFile[] = "file://";
   if (url.rfind(kFile, 0) == 0) {
@@ -514,6 +520,7 @@ void MbWebView::LoadURL(const char* utf8_url) {
       CommitHtml(contents.data(), contents.size(), url.c_str());
     } else {
       last_error_ = "file not found or unreadable";
+      last_error_domain_ = "file";
       NotifyLoadFailed();  // a failed load still "finishes" (signal waiters)
     }
     return;
@@ -528,7 +535,13 @@ void MbWebView::LoadURL(const char* utf8_url) {
         frame_client_ ? frame_client_->extra_headers() : std::string(),
         /*post_body=*/std::string(), /*post_content_type=*/std::string(),
         /*http_method=*/std::string(), &final_url, &http_status_,
-        &response_headers_, &last_error_);
+        &response_headers_, &last_error_, &last_error_code_);
+    if (!ok) {  // "curl" carries the CURLcode; "network" = no response at all
+      if (last_error_ == kMbBlockedByHookError)
+        last_error_domain_ = "blocked";  // the mutate hook vetoed the load
+      else
+        last_error_domain_ = last_error_code_ != 0 ? "curl" : "network";
+    }
     // If the server redirected us, commit with the FINAL URL as the document's
     // base so location.href and relative subresources reflect where we landed.
     const std::string& doc_url = final_url.empty() ? url : final_url;
@@ -571,7 +584,10 @@ void MbWebView::NotifyLoadFailed() {
   // it finished and fire the load-finish callback, so mbIsLoadFinished is true and a
   // caller awaiting completion isn't stuck. (Success runs through DidFinishLoad instead.)
   load_finished_ = true;
-  if (on_fail_loading_)
+  if (on_fail_loading_ex_)
+    on_fail_loading_ex_(GetURL(), last_error_domain_, last_error_code_,
+                        last_error_);
+  else if (on_fail_loading_)
     on_fail_loading_(GetURL(), last_error_);
   if (on_load_finish_)
     on_load_finish_();
@@ -608,7 +624,7 @@ bool MbWebView::FetchDownloadBody(const std::string& orig,
                     frame_client_ ? frame_client_->extra_headers() : std::string(),
                     /*post_body=*/std::string(), /*post_content_type=*/std::string(),
                     /*http_method=*/std::string(), &final_url, &status, &headers,
-                    /*out_error=*/nullptr, this);
+                    /*out_error=*/nullptr, /*out_error_code=*/nullptr, this);
   }
   if (!ok)
     return false;
@@ -2110,6 +2126,16 @@ void MbWebView::SetBeginLoadingCallback(
 void MbWebView::SetFailLoadingCallback(
     std::function<void(const std::string&, const std::string&)> cb) {
   on_fail_loading_ = std::move(cb);
+  if (on_fail_loading_)
+    on_fail_loading_ex_ = {};  // one slot: plain replaces Ex
+}
+
+void MbWebView::SetFailLoadingCallbackEx(
+    std::function<void(const std::string&, const std::string&, int,
+                       const std::string&)> cb) {
+  on_fail_loading_ex_ = std::move(cb);
+  if (on_fail_loading_ex_)
+    on_fail_loading_ = {};  // one slot: Ex replaces plain
 }
 
 void MbWebView::SetRequestMockCallback(
@@ -2125,6 +2151,10 @@ void MbWebView::OnDOMContentLoaded() {
 
 void MbWebView::SetDOMContentLoadedCallback(std::function<void()> cb) {
   on_dom_content_loaded_ = std::move(cb);
+}
+
+void MbWebView::SetWindowObjectReadyCallback(std::function<void()> cb) {
+  on_window_object_ready_ = std::move(cb);
 }
 
 void MbWebView::OnConsoleMessage(const std::string& level,
@@ -2577,6 +2607,14 @@ int MbWebView::ScrollToBottom(int max_steps) {
 }
 
 void MbWebView::RunInFrameTask(base::OnceClosure body, bool settle) {
+  // Inside RunDocumentStartScript (the window-object-ready callback), run the
+  // body INLINE: we are already within the commit's task (the init script
+  // executes bare here too), and pumping the nested loop below would drain
+  // load-machinery tasks mid-commit.
+  if (in_document_start_) {
+    std::move(body).Run();
+    return;
+  }
   // Host-driven JS must execute within a scheduler task. Page scripts always do
   // (bracketed by WillProcessTask/DidProcessTask), and engine subsystems rely on
   // that bracketing: a canvas draw (CanvasRenderingContext::DidDraw) made outside
@@ -2884,6 +2922,15 @@ void MbWebView::RunDocumentStartScript() {
   if (!init_script_.empty()) {
     main_frame_->ExecuteScript(
         blink::WebScriptSource(blink::WebString::FromUtf8(init_script_)));
+  }
+  // Window-object-ready (mbOnWindowObjectReady): the document's world exists,
+  // shims + init script ran, no page script has. Host JS run from the callback
+  // executes before the page sees the world — inline (see RunInFrameTask's
+  // in_document_start_ path), never via a nested pump.
+  if (on_window_object_ready_) {
+    in_document_start_ = true;
+    on_window_object_ready_();
+    in_document_start_ = false;
   }
 }
 

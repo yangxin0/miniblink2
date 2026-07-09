@@ -53,8 +53,12 @@ class MbWebView {
   // `opener` non-null creates the view as a window.open child of that view:
   // blink wires the opener relationship (window.opener / postMessage back)
   // and window.close() is allowed (SetOpenedByDOM).
+  // `compositing_override`: -1 uses the SetCompositingEnabled process latch
+  // (legacy); 0/1 forces this view's widget non-compositing/compositing — the
+  // per-view creation-config path (mbCreateViewWithConfig, item 36).
   static std::unique_ptr<MbWebView> Create(int width, int height,
-                                           MbWebView* opener = nullptr);
+                                           MbWebView* opener = nullptr,
+                                           int compositing_override = -1);
   ~MbWebView();
 
   // Opt-in: when enabled, the NEXT Create() attaches its widget COMPOSITING (blink
@@ -517,6 +521,12 @@ class MbWebView {
   void SetBeginLoadingCallback(std::function<void(const std::string&)> cb);
   void SetFailLoadingCallback(
       std::function<void(const std::string&, const std::string&)> cb);
+  // Structured variant (mbOnFailLoadingEx): (url, error_domain, error_code,
+  // description). One slot with the plain callback — setting either clears the
+  // other, mirroring the C API contract.
+  void SetFailLoadingCallbackEx(
+      std::function<void(const std::string&, const std::string&, int,
+                         const std::string&)> cb);
   // Per-view dynamic request mock (see MbSetRequestMockHookForContext); this
   // view is the context. Pass {} to remove. Cleared automatically on destroy.
   void SetRequestMockCallback(
@@ -527,6 +537,10 @@ class MbWebView {
   // earlier than load-finish/onload). Fires the registered callback.
   void OnDOMContentLoaded();
   void SetDOMContentLoadedCallback(std::function<void()> cb);  // {} clears
+  // Fired at the end of RunDocumentStartScript — the new main-frame document's
+  // window object exists, the built-in shims + init script ran, no page script
+  // has (mbOnWindowObjectReady). {} clears.
+  void SetWindowObjectReadyCallback(std::function<void()> cb);
   // Called by MbFrameClient for each page console message (console.log/warn/error, AND
   // uncaught exceptions / unhandled promise rejections, which blink reports as console
   // errors). A live push (vs. polling DrainConsole). `source`/`line` locate the message
@@ -832,6 +846,11 @@ class MbWebView {
   std::string pending_charset_;
 
   bool load_finished_ = false;        // main-frame load event has fired (DidFinishLoad)
+  // True while RunDocumentStartScript runs host code (the window-object-ready
+  // callback): RunInFrameTask then executes bodies INLINE — we are already
+  // inside script execution at document start, and pumping a nested loop here
+  // would drain load-machinery tasks mid-commit.
+  bool in_document_start_ = false;
   std::function<void()> on_load_finish_;  // optional embedder finish callback
   // Fired on main-frame commit (url) / top-level load failure (url, error).
   std::unique_ptr<MbDevToolsBridge> devtools_;  // live while attached
@@ -842,7 +861,11 @@ class MbWebView {
   std::string user_stylesheet_;  // injected per commit; empty = none
   std::function<void(const std::string&)> on_begin_loading_;
   std::function<void(const std::string&, const std::string&)> on_fail_loading_;
+  std::function<void(const std::string&, const std::string&, int,
+                     const std::string&)>
+      on_fail_loading_ex_;  // structured variant; one slot with the plain one
   std::function<void()> on_dom_content_loaded_;  // optional DOMContentLoaded callback
+  std::function<void()> on_window_object_ready_;  // optional pre-page-script callback
   ConsoleFn on_console_;  // optional live console-message callback
   NavigationFn on_navigation_;  // optional page-initiated navigation policy callback
   UrlChangedFn on_url_changed_;  // optional per-commit URL-changed notification
@@ -863,6 +886,8 @@ class MbWebView {
   int http_status_ = 0;  // HTTP status of the last http(s) load; 0 if none/failed
   std::string response_headers_;  // raw response headers of the last http(s) load
   std::string last_error_;  // network/transport failure reason of the last load ("" if ok)
+  std::string last_error_domain_;  // "curl" / "file" / "network" ("" if ok)
+  int last_error_code_ = 0;        // CURLcode for "curl"; 0 otherwise
 };
 
 // Set the process-wide network connectivity state: navigator.onLine and the

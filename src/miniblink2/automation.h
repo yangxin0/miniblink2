@@ -430,6 +430,9 @@ MB_EXPORT int mbPaintToBitmap(mbView*,
 
 // Render the current frame and encode it to `path`. The image format follows the
 // extension: .jpg/.jpeg -> JPEG (quality 90), anything else -> PNG. Returns 1 on success.
+// ALPHA: unlike the raw paint buffers (premultiplied — see the header-top pixel
+// contract), encoded PNGs carry STRAIGHT alpha as the format requires; the encoder
+// unpremultiplies. Files from mbSavePng/mbEncodePng are correct as-is.
 MB_EXPORT int mbSavePng(mbView*, const char* path, int width, int height);
 
 // Render the current frame to a width×height PNG held in memory (no temp file) —

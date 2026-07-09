@@ -141,6 +141,17 @@ class MbPlatform : public blink::Platform {
 void MbSetFontFallbackHook(
     std::function<std::string(uint32_t, int, bool)> hook);
 
+// Register in-memory font bytes (TTF/OTF) with the PLATFORM font system at
+// process scope, so the face's family name resolves everywhere families are
+// named — CSS, mbSetFontFamilies, the fallback hook (item 35: hosts bundle a
+// font instead of depending on the user's installed library). The bytes are
+// copied. Writes the family name to *out_family (may be null). macOS:
+// CTFontManagerRegisterGraphicsFont, which blink's CoreText-backed FontCache
+// sees. Windows: NOT yet implemented (returns false) — blink's font stack is
+// DirectWrite-backed there and AddFontMemResourceEx fonts are invisible to it;
+// a private DWrite collection is the eventual answer.
+bool MbAddFontData(const void* data, size_t len, std::string* out_family);
+
 }  // namespace mb
 
 #endif  // MINIBLINK_HOST_PLATFORM_MB_PLATFORM_H_

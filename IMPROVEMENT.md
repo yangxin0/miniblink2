@@ -12,7 +12,11 @@ zero-copy bodies (item 9, deferred by cost); the inspector's host-side bridge
 (items 14–21, the page → host UI-state channel and the platform-service
 corners) is fully shipped. Round 4 (items 22–31, the corners rounds 1–3
 skipped: child views/window.open, per-view JS, typed keys, paint-contract
-hardening) is fully shipped. Per-item status is inline under each item.
+hardening) is fully shipped. Round 5 (items 32–39, the from-scratch fifth
+re-read: window-object-ready, structured load errors, the OS-clipboard bridge,
+host font bytes, the creation-time view config, the mutable request handle) is
+fully shipped except mbAddFontData on Windows (mac shipped; DWrite private
+collection pending). Per-item status is inline under each item.
 
 Verified in the Glyph host: engine smoke test + a 720-sample pointer-sweep
 harness with a damage-gated blit path and a liveness beacon (0 flicker,
@@ -557,6 +561,224 @@ can't ask which is which.
 
 ---
 
+## Round 5
+
+Fifth pass (2026-07-09): a from-scratch re-read of the full 1.4 SDK — core
+C++ API, platform layer, CAPI conventions, AppCore — de-duplicated against
+rounds 1–4, the open/deferred tables, and the anti-pattern lists. The pass
+also *validated* several standing decisions (see item 39) and confirmed one
+suspected bug is not one: PNG export already converts premultiplied →
+straight alpha (`gfx::PNGCodec::EncodeBGRASkBitmap` unpremultiplies), now
+stated in the docs (item 38).
+
+### 32. Window-object-ready hook
+
+**Then:** item 11 documented binding re-establishment as "re-establish from
+`mbOnBeginLoading` / `mbOnDOMContentLoaded`" — but BeginLoading fires before
+the new document's window object exists, and DOMContentLoaded fires *after*
+the page's own scripts ran. `mbSetInitScript` covers the declarative case;
+host-*computed* per-document setup (a fresh token, state that isn't known
+until the callback) had no sanctioned moment.
+
+**Ultralight:** `OnWindowObjectReady` — "called before any scripts are
+executed on the page and is the earliest time to setup any initial
+JavaScript state or bindings."
+
+**Shipped**: `mbOnWindowObjectReady(view, cb, ud)` — fires per committed
+main-frame document from the engine's document-start point
+(`RunScriptsAtDocumentElementAvailable`), after the built-in shims and the
+init script, before any page script. `mbRunJS`/`mbEvalJS` from inside the
+callback execute INLINE (an `in_document_start_` flag routes RunInFrameTask
+around its nested pump — pumping mid-commit would drain load-machinery
+tasks). Fixed along the way: a subframe's document-element-available used to
+re-run the MAIN frame's shims + init script into its current document (once
+per iframe document — a double-run for non-idempotent init scripts); the
+call site is now main-frame-only. Smoke: mb_smoke R5a (order
+window-object-ready → DOMContentLoaded; callback-set global visible to the
+page's first script).
+
+### 33. Structured load-failure info
+
+**Then:** `mbOnFailLoading` delivers a prose string (`curl_easy_strerror`
+output); `mbGetLastError` the same. A host cannot branch on failure *type*
+(retry on timeout, report on DNS, ignore on blocked) without string-matching
+English.
+
+**Ultralight:** `OnFailLoading(..., const String& description,
+const String& error_domain, int error_code)`.
+
+**Shipped**: `mbOnFailLoadingEx(view, cb, ud)` delivering `(url,
+error_domain, error_code, description)` — domain `"curl"` with the CURLcode
+for transport failures, `"file"` for unreadable file: loads, `"network"` for
+no-response-at-all, `"blocked"` when the item-37 request hook vetoed the
+load. One slot with plain `mbOnFailLoading` (either replaces the other), per
+the console-callback precedent; `MbFetchUrl` gained an `out_error_code`
+out-param feeding the view's `last_error_domain_/code_`. Recorded design
+rule alongside: if per-frame load events ever land, they carry
+`(uint64_t frame_id, int is_main_frame)` from day one — Ultralight has it on
+every load event; retrofitting it breeds Ex variants. Smoke: mb_smoke R5b
+(file + curl domains, Ex-replaces-plain).
+
+### 34. OS-clipboard bridge
+
+**Then:** the clipboard is an in-process jar (`mbSetClipboard` /
+`mbGetClipboard`). An interactive host must manually sync the real
+pasteboard around every copy/paste — user copies in another app, pastes
+into the view, and sees stale text unless the host polled.
+
+**Ultralight:** the `Clipboard` platform interface — the engine *pulls*
+from the host on paste (`ReadPlainText`) and *pushes* on copy
+(`WritePlainText`); the OS clipboard is the host's to own.
+
+**Shipped**: `mbSetClipboardHandler(read_cb, write_cb, ud)` — process-wide
+(like the jar it wraps). Page reads (paste, `navigator.clipboard.readText`)
+consult `read_cb` (authoritative while installed); page writes (copy/cut,
+`writeText`) fire `write_cb` AND still land in the jar, so `mbGetClipboard`
+keeps working. Either may be NULL — that direction keeps the in-process
+jar. Documented contract: the callbacks fire on the broker's SERVICE thread
+(like mbOnLogMessage's) — thread-safe and cheap, marshal to a UI thread
+yourself. Smoke: mb_smoke R5c (host-read shadows the jar; page write reaches
+both; clearing restores the jar).
+
+### 35. Host font registration (font bytes, not just names)
+
+**Then:** the font story has two of three pieces — static family defaults
+(item 13, `mbSetFontFamilies`) and the per-character fallback hook
+(item 20) — but both can only *name* families the OS font library already
+has. A host that bundles a font (a dictionary app guaranteeing a specific
+CJK face regardless of the user's system) has no way to serve the bytes.
+
+**Ultralight:** `FontLoader::Load(family, weight, italic) →
+RefPtr<FontFile>`, where `FontFile::Create` accepts an in-memory buffer —
+the host serves font *data*.
+
+**Shipped (macOS)**: `mbAddFontData(const void* data, int len,
+char* out_family, int family_cap)` — skia validates the bytes and reports
+the family name; `CTFontManagerRegisterGraphicsFont` registers at process
+scope, so the family resolves in CSS, `mbSetFontFamilies`, and the fallback
+callback (re-registering the same face is a success no-op). Simpler than
+Ultralight's pull-model loader (no blink FontCache surgery) while covering
+the bundled-font case. WINDOWS GAP (open): blink's font stack there is
+DirectWrite-backed and `AddFontMemResourceEx` fonts are invisible to it —
+the export returns 0 honestly; a private DWrite collection is the eventual
+answer. Smoke: mb_smoke R5f (registers the tree's Ahem.ttf; a 5-char 20px
+run measures exactly 100px — only Ahem's 1em-square glyphs do that).
+
+### 36. Creation-time view config — the trigger fired
+
+**Then:** round 4 (item 30) deferred a creation config "until the creation
+surface grows again." It has: `mbSetCompositingEnabled` is a process-global
+latch consumed by the NEXT `mbCreateView` — exactly the
+action-at-a-distance a creation struct exists to kill — plus session
+binding and a family of "call before first load" setters whose timing
+contract is prose.
+
+**Ultralight (CAPI shape):** not a packed struct but an *opaque builder* —
+`ulCreateViewConfig()` + one setter per field + pass to create + destroy.
+New options never change any signature: strictly better ABI evolution than
+`struct_size` structs (which version reads, but not the "when does it
+apply" question).
+
+**Shipped**: `mbViewConfig* mbCreateViewConfig(void)` with
+`mbViewConfigSetSession / SetCompositing / SetTransparentBackground /
+SetDeviceScaleFactor / SetEnableJavascript / SetLoadImages /
+SetFontFamilies / SetUserAgent / SetDarkMode / SetLocale`, then
+`mbCreateViewWithConfig(int w, int h, const mbViewConfig*)` +
+`mbDestroyViewConfig`. Compositing is genuinely per-view at creation
+(`MbWebView::Create` gained a `compositing_override` that bypasses the
+process latch, and the widget attach now uses the same resolved value);
+`mbSetCompositingEnabled` stays as a documented legacy latch. Configs are
+reusable and destroyable independently of their views. Smoke: mb_smoke R5d
+(session/UA/dark/device-scale all applied before the first document).
+
+### 37. Mutable request handle
+
+**Then:** the *response* side already has the right pattern — opaque
+`mbResponse*` with Get/Set accessors — but the request side is flat strings
+that can only allow/block, plus a static process-wide substring header
+table (`mbSetRequestHeader`). Dynamic per-request header injection
+(compute an Authorization header per URL) or per-request redirection isn't
+expressible.
+
+**Ultralight:** `OnNetworkRequest(View*, NetworkRequest&)` — a mutable
+request object per fetch.
+
+**Shipped**: opaque `mbRequest*` + `mbSetRequestHook(cb, ud)`: accessors
+`mbRequestURL/Method/Headers/Body`; mutators `mbRequestSetUrl` (transparent
+rewrite, like `mbRewriteUrl`), `mbRequestSetHeader(name, value)` (replaces a
+same-name header rather than duplicating — curl would send both), and
+`mbRequestBlock()`. Dispatched on the main thread at BOTH request entries —
+the subresource loader (`Deliver`) and the top-level fetch (`MbFetchUrl`) —
+after the static block/rewrite/header tables; a blocked top-level load
+reports `error_domain "blocked"` through mbOnFailLoadingEx. One slot shared
+with `mbSetRequestCallback`/`Ex` (setting any of the three replaces the
+others), so the three generations can't fire inconsistently. Smoke:
+mb_smoke R5e (SetUrl redirect served by a mock while the page keeps its
+original URL; Block → domain "blocked").
+
+### 38. Documentation batch (round-5 convention wins) — **all shipped**
+
+- **Worked host-loop example** at the top of webview.h — Ultralight's
+  headers open with a compilable create → update → render loop; Glyph's
+  contract paragraphs are strong but there is no 15-line "interactive host
+  frame tick" (`mbUpdateAt` → `mbViewIsDirty` → `mbRepaintToBitmap` → blit)
+  to copy-paste.
+- **Per-host-type wiring matrix** — Ultralight's required/optional/provided
+  platform table is its single best doc artifact. Glyph analog: which
+  callbacks/setters matter for a screenshot/scrape host vs an interactive
+  embedder.
+- **Numeric version macros** — `MB_VERSION_MAJOR/MINOR/PATCH` beside the
+  string, so hosts can `#if` on them (Ultralight ships all three plus the
+  string).
+- **`mbJsNativeFn` return-string lifetime** — currently undocumented (the
+  one real ownership gap this pass found). The engine converts the returned
+  string before the call returns; a static or per-binding buffer the host
+  overwrites on the next call is fine. Say so.
+- **`MB_KEY_DOWN` footgun comment** — Ultralight annotates its equivalent
+  enum value with "you should probably use RawKeyDown instead"; the warning
+  belongs *on the value*.
+- **Recommended `mbSetMaxUpdateTime`** — Ultralight defaults to a bounded
+  slice (1/200 s); Glyph defaults to drain-to-idle. Document the
+  recommended interactive budget (Glyph runs 8 ms) at the declaration.
+- **`mbOnCreateChildView` opener URL** — Ultralight passes `opener_url`;
+  Glyph's callback already receives the parent view, so `mbGetURL(parent)`
+  *is* the opener URL. Document that instead of growing the signature.
+- **PNG alpha statement** — verified: `mbSavePng`/`mbEncodePng` write
+  straight-alpha PNGs (the encoder unpremultiplies). State it where the
+  paint exports warn about premultiplied buffers.
+
+### 39. Noted, not adopted (round 5)
+
+- **Per-display refresh routing** (`ViewConfig::display_id` +
+  `RefreshDisplay(id)`): the multi-monitor-correct generalization of
+  `mbUpdateAt` — a 60 Hz + 120 Hz host can't drive two views at their real
+  cadences today. Defer until a host actually runs mixed-refresh displays;
+  the shape is recorded (per-view display group + per-group refresh call).
+- **App convenience layer** (AppCore analog — App/Window/Overlay as a
+  separate optional library): the structural lesson is real (windowless
+  core, windowed sugar, distinct export macros per layer), but the
+  audience is served by `samples/`; if demand grows, it becomes a samples
+  template, not an SDK library.
+- **In-engine DevTools WebSocket server** (`StartRemoteInspectorServer`):
+  acknowledged as the ergonomic benchmark, but it contradicts the
+  deliberate Stage-B decision — sockets live in the embedder; the engine
+  stays socket-free. A documented sample bridge is the answer.
+- **Console column / source-category enum**: real but requires breaking
+  `mbConsoleCallbackEx`'s signature; queued for the next `MB_API_VERSION`
+  bump rather than a third console slot.
+- **JSHelpers' thread-ambient `SetJSContext`**: recorded as an
+  anti-pattern — every JSValue class in that header carries a lifetime
+  trap ("must set_context before escaping the callback") that explicit
+  context parameters would have avoided. If Glyph ever grows a richer JS
+  bridge, contexts stay explicit.
+- **FileSystem-style content provider**: re-validated the standing
+  decision — response mocking is the stronger interception primitive for
+  content-serving hosts. One detail absorbed: Ultralight makes *charset*
+  an explicit host output alongside MIME; Glyph's mock path already takes
+  a full content type (charset included).
+
+---
+
 ## What's left (summary)
 
 Everything not listed here is shipped or a documented decision (nested-worker
@@ -570,6 +792,7 @@ stylesheet caveat).
 | 10 | Memory budget knobs (cache sizes) | Only if `mbPurgeMemory` proves insufficient |
 | 13c | Child worker/iframe DevTools targets (multi-session bridge) | Open, unscheduled |
 | 21 | TLS pinning / streaming downloads / ImageSource | Deferred by trigger (no host needs them yet) |
+| 35 | `mbAddFontData` on Windows (DirectWrite private collection) | Open — mac shipped; the export returns 0 on Windows |
 
 ---
 

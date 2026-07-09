@@ -337,6 +337,7 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
                std::string* out_final_url = nullptr,
                bool follow_redirects = true,
                std::string* out_error = nullptr,
+               int* out_error_code = nullptr,
                const void* host_ctx = nullptr) {
   CURL* curl = curl_easy_init();
   if (!curl)
@@ -412,6 +413,8 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
     else
       *out_error = "no response from server";
   }
+  if (out_error_code)  // the CURLcode, for machine-checkable failure handling
+    *out_error_code = (!ok && rc != CURLE_OK) ? static_cast<int>(rc) : 0;
   return ok;
 }
 
@@ -1022,6 +1025,79 @@ bool MbRequestHookBlocks(const std::string& url, const std::string& method,
   return h && h(url, method, headers, body) != 0;
 }
 
+const char kMbBlockedByHookError[] = "blocked by request hook";
+
+namespace {
+MbRequestMutateHook& RequestMutateHook() {
+  static MbRequestMutateHook* h = new MbRequestMutateHook();
+  return *h;
+}
+
+// Merge "Name: Value" lines from `add` into the newline-joined `lines`,
+// replacing any existing same-name line (case-insensitive) so an added header
+// OVERRIDES rather than duplicates — curl would send both copies otherwise.
+void MergeHeaderLines(std::string* lines, const std::string& add) {
+  std::vector<std::string> kept;
+  auto split = [](const std::string& block, std::vector<std::string>* out) {
+    size_t start = 0;
+    while (start <= block.size()) {
+      size_t nl = block.find('\n', start);
+      std::string line = block.substr(
+          start, nl == std::string::npos ? std::string::npos : nl - start);
+      if (!line.empty())
+        out->push_back(std::move(line));
+      if (nl == std::string::npos)
+        break;
+      start = nl + 1;
+    }
+  };
+  std::vector<std::string> add_lines;
+  split(add, &add_lines);
+  if (add_lines.empty())
+    return;
+  auto name_of = [](const std::string& line) {
+    std::string n = line.substr(0, line.find(':'));
+    for (char& c : n)
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return n;
+  };
+  std::vector<std::string> existing;
+  split(*lines, &existing);
+  for (const std::string& line : existing) {
+    bool replaced = false;
+    for (const std::string& al : add_lines)
+      if (name_of(al) == name_of(line)) {
+        replaced = true;
+        break;
+      }
+    if (!replaced)
+      kept.push_back(line);
+  }
+  for (const std::string& al : add_lines)
+    kept.push_back(al);
+  lines->clear();
+  for (const std::string& line : kept) {
+    if (!lines->empty())
+      *lines += "\n";
+    *lines += line;
+  }
+}
+}  // namespace
+
+void MbSetRequestMutateHook(MbRequestMutateHook hook) {
+  RequestMutateHook() = std::move(hook);
+}
+
+bool MbRunRequestMutateHook(const std::string& url, const std::string& method,
+                            const std::string& headers, const std::string& body,
+                            MbRequestMutation* out) {
+  const MbRequestMutateHook& h = RequestMutateHook();
+  if (!h)
+    return false;
+  h(url, method, headers, body, out);
+  return true;
+}
+
 // --- Response hook -----------------------------------------------------------
 namespace {
 MbResponseHook& ResponseHook() {
@@ -1265,10 +1341,35 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 const std::string& post_content_type,
                 const std::string& http_method, std::string* out_final_url,
                 int* out_status, std::string* out_headers,
-                std::string* out_error, const void* host_ctx) {
+                std::string* out_error, int* out_error_code,
+                const void* host_ctx) {
   if (out_error)
     out_error->clear();
-  GURL url(url_spec);
+  if (out_error_code)
+    *out_error_code = 0;
+  // Mutable request hook (item 37) at the TOP-LEVEL entry, mirroring the
+  // subresource loader: may block, redirect the fetch, or add headers.
+  std::string fetch_spec = url_spec;
+  std::string merged_headers = extra_headers;
+  {
+    const std::string method = !http_method.empty()
+                                   ? http_method
+                                   : (post_body.empty() ? "GET" : "POST");
+    MbRequestMutation mutation;
+    if (MbRunRequestMutateHook(fetch_spec, method, extra_headers, post_body,
+                               &mutation)) {
+      if (mutation.block) {
+        if (out_error)
+          *out_error = kMbBlockedByHookError;
+        return false;
+      }
+      if (!mutation.set_url.empty() && GURL(mutation.set_url).is_valid())
+        fetch_spec = mutation.set_url;
+      if (!mutation.add_headers.empty())
+        MergeHeaderLines(&merged_headers, mutation.add_headers);
+    }
+  }
+  GURL url(fetch_spec);
   // Response mocking: a registered URL substring serves its canned body without a real fetch.
   // Checked before any scheme — matching the async loader (Deliver) — so worker scripts,
   // iframes, and top-level navigations (all of which fetch through here) can be mocked too.
@@ -1282,7 +1383,7 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
       if (out_status)
         *out_status = mock_status > 0 ? mock_status : 200;
       if (out_final_url)
-        *out_final_url = url_spec;
+        *out_final_url = url_spec;  // the page-visible URL, not the redirected fetch
       return true;
     }
   }
@@ -1295,10 +1396,10 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
     return ok;
   }
   if (url.SchemeIsHTTPOrHTTPS())
-    return FetchHttp(url_spec, body, content_type, user_agent, extra_headers,
+    return FetchHttp(fetch_spec, body, content_type, user_agent, merged_headers,
                      post_body, post_content_type, http_method, out_status,
                      out_headers, out_final_url, MbFollowRedirects(), out_error,
-                     host_ctx);
+                     out_error_code, host_ctx);
   if (url.SchemeIs("data")) {
     std::string mime, charset;
     if (!net::DataURL::Parse(url, &mime, &charset, body))
@@ -1485,7 +1586,7 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
   // page's original `url` (so fetch()'s url_list_ DCHECK holds; host swap, scheme
   // upgrade, CDN -> local mock).
   const std::string rewritten = MbApplyUrlRewrites(url.spec());
-  const GURL fetch_url = (rewritten == url.spec()) ? url : GURL(rewritten);
+  GURL fetch_url = (rewritten == url.spec()) ? url : GURL(rewritten);
 
   // Request blocking: fail a blocked URL up front (ERR_BLOCKED_BY_CLIENT), before
   // any fetch — the resource simply never loads (ad/tracker/image suppression).
@@ -1517,6 +1618,27 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
     return;
   }
 
+  // Mutable request hook (mbSetRequestHook, item 37): the embedder may BLOCK,
+  // transparently redirect the fetch (like a rewrite — the page still sees the
+  // original URL), and/or add/override outgoing headers. Runs after the static
+  // tables so it sees the post-rewrite fetch URL.
+  MbRequestMutation mutation;
+  if (MbRunRequestMutateHook(fetch_url.spec(), request->method, hook_headers,
+                             hook_body, &mutation)) {
+    if (mutation.block) {
+      client_->DidFail(
+          blink::WebURLError(net::ERR_BLOCKED_BY_CLIENT, ToWebURL(url)),
+          base::TimeTicks::Now(),
+          blink::URLLoaderClient::kUnknownEncodedDataLength, 0, 0);
+      return;
+    }
+    if (!mutation.set_url.empty()) {
+      GURL redirected(mutation.set_url);
+      if (redirected.is_valid())
+        fetch_url = std::move(redirected);
+    }
+  }
+
   // EventSource / SSE: a request with `Accept: text/event-stream` to http(s) is a
   // long-lived stream. The buffered path below would block forever (no EOF) and
   // freeze the engine. Stream it on a worker thread instead — UNLESS it's mocked
@@ -1539,6 +1661,8 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
         req_headers += kv.key + ": " + kv.value;
       }
       mb::MbApplyRequestHeaders(fetch_url.spec(), &req_headers);
+      if (!mutation.add_headers.empty())
+        MergeHeaderLines(&req_headers, mutation.add_headers);
       StartSse(fetch_url.spec(), req_headers, url.spec());
       return;
     }
@@ -1589,6 +1713,29 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
         continue;
       }
       hop_headers.SetHeader(kv.key, kv.value);
+    }
+    // Mutate-hook header additions: SetHeader replaces same-name entries, so
+    // an added Authorization/UA overrides the request's own copy.
+    if (!mutation.add_headers.empty()) {
+      size_t start = 0;
+      const std::string& add = mutation.add_headers;
+      while (start <= add.size()) {
+        size_t nl = add.find('\n', start);
+        std::string line = add.substr(
+            start, nl == std::string::npos ? std::string::npos : nl - start);
+        size_t colon = line.find(':');
+        if (colon != std::string::npos) {
+          std::string name = line.substr(0, colon);
+          std::string value = line.substr(colon + 1);
+          while (!value.empty() && value.front() == ' ')
+            value.erase(value.begin());
+          if (!name.empty())
+            hop_headers.SetHeader(name, value);
+        }
+        if (nl == std::string::npos)
+          break;
+        start = nl + 1;
+      }
     }
     // ASYNC: run the (blocking) curl transfer on the thread pool, NOT inline on the
     // main thread — this is the input-freeze fix and the architecture alignment with

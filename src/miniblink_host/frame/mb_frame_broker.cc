@@ -562,6 +562,40 @@ uint64_t ClipSeq() {
   return ClipSeqRef();
 }
 
+// Optional host OS-clipboard bridge (item 34). The handler pair is swapped
+// under ClipLock; the callbacks themselves run OUTSIDE the lock (host code —
+// it may take arbitrarily long or re-enter the C ABI).
+std::function<std::string()>& ClipReadHandlerRef() {
+  static auto* f = new std::function<std::string()>();
+  return *f;
+}
+std::function<void(const std::string&)>& ClipWriteHandlerRef() {
+  static auto* f = new std::function<void(const std::string&)>();
+  return *f;
+}
+// Page-facing read: pull from the host when a read handler is installed
+// (the OS clipboard is then authoritative), else the in-process jar.
+std::string ClipRead() {
+  std::function<std::string()> read;
+  {
+    base::AutoLock al(ClipLock());
+    read = ClipReadHandlerRef();
+  }
+  return read ? read() : ClipGet();
+}
+// Page-facing write: the jar always keeps a copy (mbGetClipboard reads it);
+// a write handler additionally pushes to the host.
+void ClipWrite(const std::string& text) {
+  ClipSet(text);
+  std::function<void(const std::string&)> write;
+  {
+    base::AutoLock al(ClipLock());
+    write = ClipWriteHandlerRef();
+  }
+  if (write)
+    write(text);
+}
+
 // blink.mojom.ClipboardHost: backs navigator.clipboard (read/write text) and
 // execCommand('copy'/'paste') with the in-memory store. Only plain text is kept; the
 // other formats read empty / write no-op. Reports the clipboard permission as allowed.
@@ -575,18 +609,18 @@ class MbClipboardHost : public blink::mojom::blink::ClipboardHost {
                          blink::mojom::blink::ClipboardBuffer,
                          IsFormatAvailableCallback cb) override {
     std::move(cb).Run(format == blink::mojom::blink::ClipboardFormat::kPlaintext &&
-                      !ClipGet().empty());
+                      !ClipRead().empty());
   }
   void ReadAvailableTypes(blink::mojom::blink::ClipboardBuffer,
                           ReadAvailableTypesCallback cb) override {
     blink::Vector<blink::String> types;
-    if (!ClipGet().empty())
+    if (!ClipRead().empty())
       types.push_back("text/plain");
     std::move(cb).Run(std::move(types));
   }
   void ReadText(blink::mojom::blink::ClipboardBuffer,
                 ReadTextCallback cb) override {
-    std::move(cb).Run(blink::String::FromUtf8(ClipGet()));
+    std::move(cb).Run(blink::String::FromUtf8(ClipRead()));
   }
   void ReadHtml(blink::mojom::blink::ClipboardBuffer,
                 ReadHtmlCallback cb) override {
@@ -621,7 +655,7 @@ class MbClipboardHost : public blink::mojom::blink::ClipboardHost {
       const blink::String&, ReadUnsanitizedCustomFormatCallback cb) override {
     std::move(cb).Run(mojo_base::BigBuffer());
   }
-  void WriteText(const blink::String& text) override { ClipSet(text.Utf8()); }
+  void WriteText(const blink::String& text) override { ClipWrite(text.Utf8()); }
   void WriteHtml(const blink::String&, const blink::KURL&) override {}
   void WriteSvg(const blink::String&) override {}
   void WriteSmartPasteMarker() override {}
@@ -1612,6 +1646,13 @@ void MbSetClipboardText(const std::string& text) {
 
 std::string MbGetClipboardText() {
   return ClipGet();
+}
+
+void MbSetClipboardHandler(std::function<std::string()> read,
+                           std::function<void(const std::string&)> write) {
+  base::AutoLock al(ClipLock());
+  ClipReadHandlerRef() = std::move(read);
+  ClipWriteHandlerRef() = std::move(write);
 }
 
 mojo::PendingRemote<blink::mojom::blink::BrowserInterfaceBroker>

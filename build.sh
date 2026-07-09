@@ -68,7 +68,9 @@ echo "==> gn gen"
 ( cd "$TREE" && gn gen "$OUT" >/dev/null )
 
 echo "==> ninja miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo mb_gl_probe mb_gpu_probe mb_dawn_probe mb_webgpu_probe mb_webgpu2_probe mb_compositor_probe mb_compositor2_probe mb_compositor3_probe mb_compositor4_probe mb_compositor5_probe mb_compositor_widget_smoke"
-( cd "$TREE" && ninja -C "$OUT" miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo mb_gl_probe mb_gpu_probe mb_dawn_probe mb_webgpu_probe mb_webgpu2_probe mb_compositor_probe mb_compositor2_probe mb_compositor3_probe mb_compositor4_probe mb_compositor5_probe mb_compositor_widget_smoke )
+# MB_JOBS caps ninja parallelism (like scripts/build-lib.sh) so a build never
+# takes the whole machine; unset = ninja's default.
+( cd "$TREE" && ninja -C "$OUT" ${MB_JOBS:+-j "$MB_JOBS"} miniblink_host mb_smoke mb_smoke_platform mb_smoke_render mb_shot mb_demo mb_gl_probe mb_gpu_probe mb_dawn_probe mb_webgpu_probe mb_webgpu2_probe mb_compositor_probe mb_compositor2_probe mb_compositor3_probe mb_compositor4_probe mb_compositor5_probe mb_compositor_widget_smoke )
 
 echo "==> vendor resource paks next to the binary"
 cp "$TREE/$OUT/gen/third_party/blink/public/resources/blink_resources.pak" \

@@ -342,7 +342,8 @@ void MbFrameClient::DoCommit(std::unique_ptr<blink::WebNavigationInfo> info) {
       MbFetchUrl(url.GetString().Utf8(), &body, &content_type, user_agent_,
                  extra_headers_, post_body, post_ct, /*http_method=*/"",
                  /*out_final_url=*/nullptr, /*out_status=*/nullptr,
-                 /*out_headers=*/nullptr, /*out_error=*/nullptr, owner_);
+                 /*out_headers=*/nullptr, /*out_error=*/nullptr,
+                 /*out_error_code=*/nullptr, owner_);
     }
     if (!content_type.empty()) {
       std::string m = content_type.substr(0, content_type.find(';'));
@@ -667,7 +668,11 @@ void MbFrameClient::FrameDetached(blink::DetachReason reason) {
 }
 
 void MbFrameClient::RunScriptsAtDocumentElementAvailable() {
-  if (owner_)
+  // Main frame only: a subframe's document-element-available used to re-run
+  // the MAIN frame's shims + init script into its current document (once per
+  // iframe document) — wrong context and a double-run for non-idempotent
+  // init scripts.
+  if (owner_ && !self_owned_)
     owner_->RunDocumentStartScript();
 }
 

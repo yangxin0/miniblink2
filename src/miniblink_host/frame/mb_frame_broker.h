@@ -10,6 +10,7 @@
 #ifndef MINIBLINK_HOST_FRAME_MB_FRAME_BROKER_H_
 #define MINIBLINK_HOST_FRAME_MB_FRAME_BROKER_H_
 
+#include <functional>
 #include <string>
 
 #include <cstdint>
@@ -36,6 +37,15 @@ void MbClearGeolocation();
 // MbGetClipboardText reads what the page (or host) last wrote. Thread-safe.
 void MbSetClipboardText(const std::string& text);
 std::string MbGetClipboardText();
+
+// Optional host OS-clipboard bridge (mbSetClipboardHandler / IMPROVEMENT.md
+// item 34): with `read` installed, page clipboard READS (paste, readText) pull
+// from it instead of the jar; with `write` installed, page WRITES (copy/cut,
+// writeText) push to it as well as the jar (so MbGetClipboardText keeps
+// working). Either may be null — that direction stays jar-only. The callbacks
+// run on the broker's SERVICE thread; keep them thread-safe and cheap.
+void MbSetClipboardHandler(std::function<std::string()> read,
+                           std::function<void(const std::string&)> write);
 
 }  // namespace mb
 

@@ -5069,6 +5069,226 @@ int main() {
                "x" + std::to_string(cs->h) + " declined=[" + declined + "]");
   }
 
+  // ---- Round 5 (IMPROVEMENT.md items 32–37) --------------------------------
+
+  // R5a. mbOnWindowObjectReady fires per main-frame document BEFORE any page
+  // script (after mbSetInitScript's slot), and host JS run from inside the
+  // callback is visible to the page's earliest script. Order: W(OR) precedes
+  // DOMContentLoaded.
+  {
+    static std::string* seq = new std::string();  // -Wexit-time-destructors
+    seq->clear();
+    mbOnWindowObjectReady(
+        v,
+        [](mbView* view, void*) {
+          *seq += "W";
+          mbRunJS(view, "window.__wor='early';");
+        },
+        nullptr);
+    mbOnDOMContentLoaded(v, [](mbView*, void*) { *seq += "D"; }, nullptr);
+    mbLoadHTML(v,
+               "<body><script>document.title=window.__wor||'missing';"
+               "</script>r5a</body>",
+               "about:blank");
+    const std::string title = Eval(v, "document.title");
+    mbOnWindowObjectReady(v, nullptr, nullptr);
+    mbOnDOMContentLoaded(v, nullptr, nullptr);
+    Expect(!seq->empty() && seq->front() == 'W' &&
+               seq->find('D') != std::string::npos && title == "early",
+           "mbOnWindowObjectReady: pre-page-script hook, host JS visible early",
+           "seq=[" + *seq + "] title=[" + title + "]");
+  }
+
+  // R5b. mbOnFailLoadingEx delivers a machine-checkable (domain, code) beside
+  // the prose: "file" for an unreadable file:// load, "curl" + a nonzero
+  // CURLcode for a transport failure (.invalid never resolves). One slot: the
+  // plain mbOnFailLoading registered first must NOT fire once Ex replaces it.
+  {
+    struct FailState {
+      std::string domain;
+      int code = -1;
+      std::string desc;
+      int ex_fired = 0;
+      int plain_fired = 0;
+    };
+    static FailState* fs = new FailState();
+    *fs = FailState();
+    mbOnFailLoading(
+        v, [](mbView*, void*, const char*, const char*) { ++fs->plain_fired; },
+        nullptr);
+    mbOnFailLoadingEx(
+        v,
+        [](mbView*, void*, const char*, const char* domain, int code,
+           const char* desc) {
+          ++fs->ex_fired;
+          fs->domain = domain ? domain : "";
+          fs->code = code;
+          fs->desc = desc ? desc : "";
+        },
+        nullptr);
+    mbLoadURL(v, "file:///nonexistent-mb-round5-nope.html");
+    const std::string file_domain = fs->domain;
+    const int file_code = fs->code;
+    mbLoadURL(v, "http://mb-round5-nonexistent.invalid/");
+    Expect(fs->ex_fired == 2 && fs->plain_fired == 0 &&
+               file_domain == "file" && file_code == 0 &&
+               fs->domain == "curl" && fs->code != 0 && !fs->desc.empty(),
+           "mbOnFailLoadingEx: file/curl domains + CURLcode; Ex replaces plain",
+           "file=[" + file_domain + "," + std::to_string(file_code) +
+               "] net=[" + fs->domain + "," + std::to_string(fs->code) + "," +
+               fs->desc + "] ex=" + std::to_string(fs->ex_fired) +
+               " plain=" + std::to_string(fs->plain_fired));
+    mbOnFailLoadingEx(v, nullptr, nullptr);
+  }
+
+  // R5c. OS-clipboard bridge: with a read handler installed the PAGE's paste
+  // path pulls from the host (bypassing the jar); page writes push to the
+  // write handler AND still land in the jar (mbGetClipboard). Clearing the
+  // handlers restores the pure in-process clipboard. (The handlers fire on a
+  // service thread; the strings here are only read after the page round-trip
+  // completes on this thread.)
+  {
+    static std::string* wrote = new std::string();
+    wrote->clear();
+    mbSetClipboardHandler(
+        [](void*, char* out, int out_cap) -> int {
+          const char kText[] = "host-clip";
+          std::snprintf(out, out_cap, "%s", kText);
+          return static_cast<int>(sizeof(kText) - 1);
+        },
+        [](void*, const char* text) { *wrote = text ? text : ""; }, nullptr);
+    mbSetClipboard("jar-text");  // must be SHADOWED by the read handler
+    mbLoadHTML(v, "<body>r5c</body>", "https://r5clip.test/");
+    mbRunJS(v,
+            "window.__ct='';navigator.clipboard.readText().then(function(t){"
+            "window.__ct=t;}).catch(function(e){window.__ct='ERR:'+e.name;});");
+    mbWaitForFunction(v, "window.__ct!==''", 2000);
+    const std::string read_via_host = Eval(v, "String(window.__ct)");
+    mbRunJS(v,
+            "navigator.clipboard.writeText('page-copy').then(function(){"
+            "window.__cw='done';}).catch(function(e){window.__cw='ERR';});");
+    mbWaitForFunction(v, "window.__cw==='done'||window.__cw==='ERR'", 2000);
+    char jar[64] = {0};
+    mbGetClipboard(jar, sizeof(jar));
+    mbSetClipboardHandler(nullptr, nullptr, nullptr);
+    mbSetClipboard("back-to-jar");
+    mbRunJS(v,
+            "window.__c2='';navigator.clipboard.readText().then(function(t){"
+            "window.__c2=t;}).catch(function(e){window.__c2='ERR:'+e.name;});");
+    mbWaitForFunction(v, "window.__c2!==''", 2000);
+    const std::string read_via_jar = Eval(v, "String(window.__c2)");
+    Expect(read_via_host == "host-clip" && *wrote == "page-copy" &&
+               std::string(jar) == "page-copy" && read_via_jar == "back-to-jar",
+           "mbSetClipboardHandler: page reads pull host, writes push host+jar",
+           "read=[" + read_via_host + "] wrote=[" + *wrote + "] jar=[" + jar +
+               "] after-clear=[" + read_via_jar + "]");
+  }
+
+  // R5d. mbViewConfig: creation-time choices (session, UA, dark mode, device
+  // scale) apply before the first document — no "call before load" ordering.
+  {
+    mbSession* s = mbCreateSession("r5cfg", nullptr);
+    mbViewConfig* cfg = mbCreateViewConfig();
+    mbViewConfigSetSession(cfg, s);
+    mbViewConfigSetUserAgent(cfg, "MbRound5UA/1.0");
+    mbViewConfigSetDarkMode(cfg, 1);
+    mbViewConfigSetDeviceScaleFactor(cfg, 2.0f);
+    mbView* cv = mbCreateViewWithConfig(320, 240, cfg);
+    mbDestroyViewConfig(cfg);  // views outlive their config
+    mbLoadHTML(cv, "<body>cfg</body>", "about:blank");
+    const std::string ua = Eval(cv, "navigator.userAgent");
+    const std::string dark =
+        Eval(cv, "String(matchMedia('(prefers-color-scheme: dark)').matches)");
+    const std::string dpr = Eval(cv, "String(window.devicePixelRatio)");
+    const bool session_ok = mbViewGetSession(cv) == s;
+    // Config-created views default to the non-compositing path.
+    const bool non_compositing = mbViewFrameSinkRequested(cv) == -1;
+    mbDestroyView(cv);
+    mbDestroySession(s);
+    Expect(ua == "MbRound5UA/1.0" && dark == "true" && dpr == "2" &&
+               session_ok && non_compositing,
+           "mbCreateViewWithConfig applies session/UA/dark/scale at creation",
+           "ua=[" + ua + "] dark=[" + dark + "] dpr=[" + dpr + "] session=" +
+               std::to_string(session_ok));
+  }
+
+  // R5e. Mutable request hook: mbRequestSetUrl transparently redirects a
+  // top-level fetch (the redirected URL hits a mock; the page still shows its
+  // ORIGINAL URL), and mbRequestBlock vetoes a load, which reports
+  // error_domain "blocked" through mbOnFailLoadingEx.
+  {
+    mbMockResponse("mbr5-target", "<body id=rt>redirected</body>",
+                   "text/html", 200);
+    static std::string* blocked_domain = new std::string();
+    blocked_domain->clear();
+    mbSetRequestHook(
+        [](mbRequest* r, void*) {
+          const std::string url = mbRequestURL(r);
+          if (url.find("mbr5-src") != std::string::npos)
+            mbRequestSetUrl(r, "https://mbr5-target.test/x");
+          if (url.find("mbr5-block") != std::string::npos)
+            mbRequestBlock(r);
+        },
+        nullptr);
+    mbLoadURL(v, "https://mbr5-src.test/page");
+    const std::string body_id = Eval(v, "document.body.id");
+    char cur[128] = {0};
+    mbGetURL(v, cur, sizeof(cur));
+    mbOnFailLoadingEx(
+        v,
+        [](mbView*, void*, const char*, const char* domain, int,
+           const char*) { *blocked_domain = domain ? domain : ""; },
+        nullptr);
+    mbLoadURL(v, "https://mbr5-block.test/");
+    mbOnFailLoadingEx(v, nullptr, nullptr);
+    mbSetRequestHook(nullptr, nullptr);
+    mbClearMocks();
+    Expect(body_id == "rt" &&
+               std::string(cur).find("mbr5-src.test/page") !=
+                   std::string::npos &&
+               *blocked_domain == "blocked",
+           "mbSetRequestHook: SetUrl redirects transparently; Block vetoes "
+           "with domain 'blocked'",
+           "body=[" + body_id + "] url=[" + cur + "] blocked-domain=[" +
+               *blocked_domain + "]");
+  }
+
+  // R5f. mbAddFontData: register in-memory font bytes so a NEW family name
+  // resolves. Ahem (not installed on any stock system) has exactly-1em square
+  // glyphs, so 5 chars at 20px measure exactly 100px iff the registered face
+  // (and not a platform fallback) rendered. Fixture: the donor tree's
+  // headless-test copy of Ahem, relative to the smoke's $TREE/$OUT cwd —
+  // SKIPPED, not failed, when unavailable (e.g. running outside the tree).
+  {
+    std::string font_bytes;
+    if (FILE* f = std::fopen("../../headless/test/data/Ahem.ttf", "rb")) {
+      char buf[4096];
+      size_t n;
+      while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0)
+        font_bytes.append(buf, n);
+      std::fclose(f);
+    }
+    if (font_bytes.empty()) {
+      std::fprintf(stderr,
+                   "  [SKIP] mbAddFontData (Ahem.ttf fixture not found)\n");
+    } else {
+      char family[64] = {0};
+      const int ok = mbAddFontData(font_bytes.data(),
+                                   static_cast<int>(font_bytes.size()), family,
+                                   sizeof(family));
+      mbLoadHTML(v,
+                 "<body><span id=a style=\"font-family:Ahem;font-size:20px\">"
+                 "XXXXX</span></body>",
+                 "about:blank");
+      const std::string w =
+          Eval(v, "String(document.getElementById('a').offsetWidth)");
+      Expect(ok == 1 && std::string(family) == "Ahem" && w == "100",
+             "mbAddFontData: in-memory font registers and its family resolves",
+             std::string("ok=") + std::to_string(ok) + " family=[" + family +
+                 "] width=[" + w + "]");
+    }
+  }
+
   mbDestroyView(v);
   mbShutdown();
 
