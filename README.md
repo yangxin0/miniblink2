@@ -26,7 +26,7 @@ Vulkan/SwiftShader. See `BUILD.md` § "Windows (x64)" for the one-time bootstrap
 > embedder core — lifecycle, loads, paint, input, callbacks) and
 > `include/miniblink2/automation.h` (the automation kit — waits, selectors,
 > screenshots, PDF; these calls pump). Quick start below; `samples/` is the
-> guided tour; `PROGRESS.md` has the development journal.
+> guided tour.
 
 ---
 

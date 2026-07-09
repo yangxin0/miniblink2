@@ -2,7 +2,7 @@
 
 > Consolidated reference for everything that is **missing, deferred, low-value/unfixable,
 > or accepted by-design**. The numbered gap list (#1–#18) and all high-value follow-ups are
-> DONE — see `PROGRESS.md`. This file is *only* the not-done set, with the rationale for each.
+> DONE. This file is *only* the not-done set, with the rationale for each.
 > Last reviewed: 2026-07-06. Since the 06-28 review the project grew an interactive-host
 > audience (Glyph; see IMPROVEMENT.md) alongside headless automation — rationales below were
 > re-checked against both.
