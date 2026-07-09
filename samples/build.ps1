@@ -35,7 +35,8 @@ New-Item -ItemType Directory -Force $Obj | Out-Null
 # in the system codepage (C4819 warning spam on CJK-locale machines).
 $Common = @('/nologo', '/O2', '/EHsc', '/utf-8', '/DUNICODE', '/D_UNICODE',
             "/I$Root\src", "/I$Samples", "/Fo$Obj\")
-$Libs = @($ImpLib, 'user32.lib', 'gdi32.lib', 'shell32.lib')
+# comctl32: the scaffold's browser-window tooltip (linked into every windowed sample).
+$Libs = @($ImpLib, 'user32.lib', 'gdi32.lib', 'shell32.lib', 'comctl32.lib')
 $Scaffold = Join-Path $Samples 'compat\win\mb_window.cc'
 
 function Build-Sample([string]$Name, [string[]]$Sources, [string[]]$ExtraFlags) {
@@ -57,9 +58,9 @@ foreach ($s in 'sample2_basic_app', 'sample3_resizable_app', 'sample4_javascript
 }
 
 # Sample 8 — minibrowser: OS-independent app + Win32 scaffold + CDP bridge
-# (winsock + common controls for the tracking tooltip).
+# (winsock for the bridge's sockets).
 $OldLibs = $Libs
-$Libs = $OldLibs + @('ws2_32.lib', 'comctl32.lib')
+$Libs = $OldLibs + @('ws2_32.lib')
 Build-Sample 'minibrowser' @("$Samples\sample8_minibrowser\main.cc",
                              "$Samples\sample8_minibrowser\cdp_bridge.cc",
                              $Scaffold) @('/std:c++20')
