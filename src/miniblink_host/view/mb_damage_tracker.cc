@@ -34,6 +34,11 @@ void MbDamageTracker::AddDamage(const gfx::Rect& rect) {
   pending_.Union(rect);
 }
 
+void MbDamageTracker::SkipCycle(const gfx::Rect& full_view) {
+  invalidator_->ClearOldStates();
+  pending_.Union(full_view);
+}
+
 gfx::Rect MbDamageTracker::TakeDamage() {
   gfx::Rect damage = pending_;
   pending_ = gfx::Rect();
