@@ -5084,6 +5084,39 @@ int main() {
                std::to_string(st2.bytes.size()));
   }
 
+  // (j4) mbViewSetFrameTime: per-view rAF timestamps follow the view's own
+  // clock. Two view-stamped ticks 0.5s apart yield a rAF delta of ~500ms even
+  // while the GLOBAL mbUpdateAt time is set to a value the animation clock
+  // would clamp (it refuses to run backwards) — proving the per-view override
+  // wins. Times use a far-future base (mach time restarts at boot, so 1e9s of
+  // uptime is unreachable) to stay monotonic vs the wall-clock ticks that ran
+  // during load.
+  {
+    mbView* tv = mbCreateView(200, 150);
+    mbLoadHTML(tv,
+               "<body><script>window.ts=[];"
+               "(function loop(t){window.ts.push(t);"
+               "requestAnimationFrame(loop);})(0);</script></body>",
+               "about:blank");
+    std::vector<unsigned char> tpx(200 * 150 * 4);
+    mbUpdateAt(9999.0);  // global time: stale/backwards — must NOT be used
+    mbViewSetFrameTime(tv, 1e9);
+    mbRepaintToBitmap(tv, tpx.data(), 200, 150, 200 * 4);  // rAF at t=1e9
+    mbViewSetFrameTime(tv, 1e9 + 0.5);
+    mbRepaintToBitmap(tv, tpx.data(), 200, 150, 200 * 4);  // rAF at +500ms
+    const std::string delta =
+        Eval(tv,
+             "(window.ts.length>=2?Math.round(window.ts[window.ts.length-1]-"
+             "window.ts[window.ts.length-2]):-1).toString()");
+    mbViewSetFrameTime(tv, 0);  // clear the override
+    mbUpdateAt(0);              // restore wall-clock rAF for later tests
+    mbDestroyView(tv);
+    Expect(delta == "500",
+           "mbViewSetFrameTime: per-view rAF clock beats the global "
+           "mbUpdateAt time (500ms delta)",
+           "delta=[" + delta + "]");
+  }
+
   // (k) mbSendKeyEvent: a typed KeyDown with text inserts into the focused
   // input (implicit kChar) and carries the auto-repeat flag to KeyboardEvent.
   {

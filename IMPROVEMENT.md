@@ -278,7 +278,8 @@ See "Sessions: the agreed design" below for the API contract.
   engine already needed, CJK-aware per-view fallback defaults are natural
   hardening for dictionary-style content. **Shipped**: `mbSetFontFamilies`.
 - **Per-display animation cadence**: a per-display `RefreshDisplay(display_id)`
-  ties rAF to a monitor's vsync. **Shipped**: `mbUpdateAt`.
+  ties rAF to a monitor's vsync. **Shipped**: `mbUpdateAt` (process-global), and
+  `mbViewSetFrameTime` for the mixed-refresh multi-monitor case (item 39).
 - **Inspector**: **Stage A shipped** (8bc330c) — in-process CDP pipe
   (`mbDevToolsAttach/Send/Detach`) driving blink's frame-owned DevToolsAgent
   over in-process mojo: JSON↔CBOR transcoding with crdtp validation
@@ -763,10 +764,12 @@ original URL; Block → domain "blocked").
 ### 39. Noted, not adopted (round 5)
 
 - **Per-display refresh routing** (`ViewConfig::display_id` +
-  `RefreshDisplay(id)`): the multi-monitor-correct generalization of
-  `mbUpdateAt` — a 60 Hz + 120 Hz host can't drive two views at their real
-  cadences today. Defer until a host actually runs mixed-refresh displays;
-  the shape is recorded (per-view display group + per-group refresh call).
+  `RefreshDisplay(id)`): ~~deferred~~ **shipped** as `mbViewSetFrameTime` —
+  the per-VIEW form fits this architecture better than display groups, since
+  rAF already runs inside each view's own paint drive tick: the host stamps
+  each view from its display's vsync callback and the view's rAF clock beats
+  the global `mbUpdateAt` time. A 60 Hz + 120 Hz host drives each view at its
+  real cadence with its display's timestamps.
 - **App convenience layer** (App/Window/Overlay as a
   separate optional library): the structural lesson is real (windowless
   core, windowed sugar, distinct export macros per layer), but the

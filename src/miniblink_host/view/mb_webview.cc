@@ -3636,9 +3636,17 @@ void MbWebView::ServiceAnimations() {
             // requestAnimationFrame fires (animation libs, framework schedulers, lazy
             // renderers all depend on it).
             if (self->web_view_ && self->web_view_->GetPage()) {
+              // Per-display ticking: this view's own frame time (set by
+              // mbViewSetFrameTime from the view's display's vsync callback)
+              // beats the process-global mbUpdateAt time, so views on a
+              // 120 Hz panel and a 60 Hz panel each see their OWN display's
+              // timestamps instead of whichever tick ran last.
+              const double frame_time = self->frame_time_ > 0
+                                            ? self->frame_time_
+                                            : g_host_frame_time;
               self->web_view_->GetPage()->Animator().ServiceScriptedAnimations(
-                  g_host_frame_time > 0
-                      ? base::TimeTicks() + base::Seconds(g_host_frame_time)
+                  frame_time > 0
+                      ? base::TimeTicks() + base::Seconds(frame_time)
                       : base::TimeTicks::Now());
             }
             // Force IntersectionObserver computation. The normal lifecycle step skips it

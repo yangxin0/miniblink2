@@ -142,6 +142,24 @@ MB_EXPORT void mbSetMaxUpdateTime(double seconds);
 // mbUpdate otherwise (re-entrancy-safe, budget-bounded).
 MB_EXPORT void mbUpdateAt(double frame_time_seconds);
 
+// Per-display ticking for multi-monitor hosts: rAF timestamps for THIS view
+// come from `frame_time_seconds` (same CACurrentMediaTime domain as
+// mbUpdateAt) instead of the process-global mbUpdateAt time. Stamp each view
+// from ITS display's vsync callback — a view on a 120 Hz panel and one on a
+// 60 Hz panel then advance their animations on their own display's cadence,
+// where the global time alone would stamp both with whichever callback ran
+// last. The timestamp applies to the view's following repaints (rAF runs
+// during the paint drive tick); <= 0 clears the override (back to
+// mbUpdateAt's time, then wall clock). Single-display hosts don't need this.
+//
+//   // per display D, in D's CADisplayLink callback:
+//   mbUpdateAt(ts_D);                        // run ready engine work once
+//   for (view on D) {
+//     mbViewSetFrameTime(view, ts_D);        // this view ticks in D's domain
+//     if (mbViewIsDirty(view)) { mbRepaintToBitmap(...); /* blit dirty rect */ }
+//   }
+MB_EXPORT void mbViewSetFrameTime(mbView*, double frame_time_seconds);
+
 // Release as much memory as possible: broadcasts critical memory pressure
 // (blink's caches, decoded images and fonts listen) and triggers a full V8
 // GC. Call when the host UI goes hidden/idle; content re-decodes lazily on

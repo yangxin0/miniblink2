@@ -765,6 +765,12 @@ class MbWebView {
                                 bool repainted);
   // Diagnostic (item 28): while on, IsDirty always reports true.
   void SetForceRepaint(bool on) { force_repaint_ = on; }
+  // Per-display ticking: rAF timestamps for THIS view come from `seconds`
+  // (CACurrentMediaTime domain) instead of the process-global mbUpdateAt time,
+  // so a multi-monitor host can stamp each view from its own display's vsync
+  // callback and views on different refresh rates advance on their own
+  // cadence. <= 0 clears the override (global time, then wall clock).
+  void SetFrameTime(double seconds) { frame_time_ = seconds > 0 ? seconds : 0; }
   // The session (storage profile) this view lives in; Default() unless
   // SetSession replaced it BEFORE the first navigation commits (storage keys
   // are computed at commit). The view holds a ref for its lifetime.
@@ -861,6 +867,7 @@ class MbWebView {
   void InstallJsBindings();  // install all bindings into the current main world
   bool transparent_bg_ = false;  // omitBackground: clear to alpha 0
   bool force_repaint_ = false;   // SetForceRepaint: IsDirty always true
+  double frame_time_ = 0;  // per-view rAF timestamp override (SetFrameTime)
   // Dirty-rect state (item 2 tail). The tracker is created by the first paint
   // hook dispatch that matches this view (non-composited views only — the hook
   // fires from PushPaintArtifactToCompositor's non-composited early return).

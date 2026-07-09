@@ -226,6 +226,11 @@ void mbUpdateAt(double frame_time_seconds) {
   mbUpdate();
 }
 
+void mbViewSetFrameTime(mbView* v, double frame_time_seconds) {
+  if (v && v->impl)
+    v->impl->SetFrameTime(frame_time_seconds);
+}
+
 int mbDevToolsAttach(mbView* v, mbDevToolsMessageCallback cb, void* userdata) {
   EngineScope engine_scope;
   if (!v || !v->impl || !cb)
