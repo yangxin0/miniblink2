@@ -1,16 +1,15 @@
-// Sample 8 — MiniBrowser (Ultralight tools/MiniBrowser parity; macOS + Windows).
+// Sample 8 — MiniBrowser (macOS + Windows).
 //
 // A tabbed browser where the CHROME (tab strip + toolbar + address bar) is
 // itself a WEB PAGE rendered by a dedicated mbView and wired to native code
-// with mbJsBindFunction — the same architecture as Ultralight's MiniBrowser,
-// whose chrome is an HTML overlay. The window is the compat scaffold's
-// browser shape: a chrome strip above a swappable page area (see
-// compat/mb_window.h); this file is entirely OS-independent.
+// with mbJsBindFunction — the engine dogfoods the browser's own UI. The
+// window is the compat scaffold's browser shape: a chrome strip above a
+// swappable page area (see compat/mb_window.h); this file is entirely
+// OS-independent.
 //
-// Feature parity (and then some):
+// Features:
 //   - back/forward/refresh/stop, address bar with search fallback, per-tab
-//     loading spinner, a real TAB STRIP (their UI.h declares the tab hooks;
-//     the free-SDK ui.html never wired them — ours are live).
+//     loading spinner, a real TAB STRIP.
 //   - per-tab wiring: title/URL push, event-driven history state, engine
 //     cursor + tooltip, console -> stdout, structured load failures
 //     (mbOnFailLoadingEx) rendered as an error page.
@@ -19,8 +18,7 @@
 //   - downloads divert to ~/Downloads (mbOnDownload).
 //   - DevTools: the 🔧 button (or F2 in the chrome) starts a loopback CDP
 //     endpoint (cdp_bridge) — ordinary Chrome attaches as the frontend via
-//     chrome://inspect. The engine-appropriate equivalent of Ultralight's
-//     bundled-WebKit inspector overlay.
+//     chrome://inspect, so no inspector UI ships in the binary.
 //
 // Run FROM the dist/out dir:  ./minibrowser [url]
 //   MB_MINIBROWSER_DEVTOOLS=1  start the CDP endpoint immediately (scripts)

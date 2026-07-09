@@ -35,7 +35,7 @@ clang++ "${CXXFLAGS[@]}" -I "$HERE" \
   "$HERE/compat/mac/mb_window.mm" \
   "${LDFLAGS[@]}" -framework QuartzCore -o "$OUT/minibrowser"
 
-# The OS-independent Ultralight-parity set (see README.md): headless samples are
+# The OS-independent numbered sample set (see README.md): headless samples are
 # plain C/C++; windowed ones add the Cocoa backend of the shared scaffold
 # (compat/mac; compat/win is the Win32 peer built by samples/build.ps1).
 SCAFFOLD="$HERE/compat/mac/mb_window.mm"

@@ -59,7 +59,7 @@ Chromium's pinned clang-cl.
 
 ## v0.3 — 2026-07-06 (`v0.3`)
 
-**The embedder-API release.** Both rounds of the Ultralight-informed API
+**The embedder-API release.** Both rounds of the embedder-focused API
 program (IMPROVEMENT.md, items 1–13, distilled from the Glyph host
 integration) are designed, shipped, and verified — a 720-sample pointer-sweep
 harness with a damage-gated blit path shows 0 flicker with frames staying

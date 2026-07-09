@@ -1,11 +1,11 @@
-// Sample 4 — JavaScript (Ultralight sample-set parity; macOS + Windows).
+// Sample 4 — JavaScript (macOS + Windows).
 //
 // The JS <-> native bridge, mb style:
 //   - mbJsBindFunction installs window.GetMessage / window.GetStats into every
 //     new document's main world — synchronous C calls from page JS. Strings
 //     and JSON cross the ABI (out_type 5 JSON.parses into a real object); no
-//     engine JS types leak (Ultralight exposes JavaScriptCore here; mb
-//     deliberately does not expose V8).
+//     engine JS types leak across the boundary (mb deliberately does not
+//     expose V8, for ABI stability).
 //   - mbOnWindowObjectReady is the sanctioned moment for host-COMPUTED setup:
 //     it fires before ANY page script, so the page's first line already sees
 //     what the host injected (a session token here).

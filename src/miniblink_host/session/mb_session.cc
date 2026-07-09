@@ -13,7 +13,7 @@ MbSession::MbSession(std::string name, std::string persist_dir)
   // The id doubles as the storage partition prefix. A persistent profile's id
   // must be stable across runs (same name + path reopens the same storage);
   // an ephemeral one only needs process-lifetime uniqueness, which name
-  // collisions could break - callers get what they name, like Ultralight.
+  // collisions could break - callers get exactly what they name.
   id_ = persist_dir_.empty() ? ("e:" + name_) : ("p:" + persist_dir_);
 }
 

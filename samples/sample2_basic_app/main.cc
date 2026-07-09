@@ -1,4 +1,4 @@
-// Sample 2 — Basic App (Ultralight sample-set parity; macOS + Windows).
+// Sample 2 — Basic App (macOS + Windows).
 //
 // A window showing an in-memory HTML page with hover/click interactivity.
 // Everything windowing lives in the shared samples scaffold (mb_window.h,

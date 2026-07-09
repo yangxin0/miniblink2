@@ -1,11 +1,10 @@
 // mb_window — the tiny cross-platform window host the mb samples build on.
 //
 // miniblink2 is deliberately WINDOWLESS: the engine renders offscreen and the
-// host owns the window, the run loop, and input. This helper is the samples-
-// level analog of Ultralight's AppCore layer — it lives HERE, in samples/, and
-// never in the SDK, because a couple hundred lines per platform is all a real
-// host needs (see IMPROVEMENT.md round 5, "App convenience layer: noted, not
-// adopted"). Backends: compat/mac/mb_window.mm (Cocoa) and
+// host owns the window, the run loop, and input. This helper is a samples-
+// level app layer — it lives HERE, in samples/, and never in the SDK, because
+// a couple hundred lines per platform is all a real host needs (see
+// IMPROVEMENT.md round 5, "App convenience layer: noted, not adopted"). Backends: compat/mac/mb_window.mm (Cocoa) and
 // compat/win/mb_window.cc (Win32); the samples themselves are OS-independent.
 //
 // What each window wires (one offscreen mbView per window):

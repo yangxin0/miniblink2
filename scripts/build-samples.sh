@@ -73,7 +73,7 @@ if [ "$FORM" = dyn ] || [ "$FORM" = both ]; then
   [ "$MODE" != debug ] && strip -x "$DIST/minibrowser_dyn"   # drop local symbols (release)
   echo "    -> $DIST/minibrowser_dyn ($(du -h "$DIST/minibrowser_dyn" | cut -f1))"
 
-  # The Ultralight-parity sample set (see samples/README.md). Headless ones are
+  # The numbered sample set (see samples/README.md). Headless ones are
   # plain C/C++; windowed ones add the shared Cocoa scaffold from samples/compat/.
   SCAFFOLD="$SAMPLES/compat/mac/mb_window.mm"
   build_one() {  # name, extra sources...

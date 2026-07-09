@@ -1,4 +1,4 @@
-// Sample 3 — Resizable App (Ultralight sample-set parity; macOS + Windows).
+// Sample 3 — Resizable App (macOS + Windows).
 //
 // Window resizes flow into mbResize (logical CSS px; the scaffold's resize
 // handler does it) and the page relays out live — the readout shows

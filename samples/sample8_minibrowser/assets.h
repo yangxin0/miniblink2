@@ -1,11 +1,9 @@
 // minibrowser_assets.h — the embedded UI pages of the minibrowser sample.
 //
-// Like Ultralight's MiniBrowser (whose chrome is assets/ui/ui.html rendered in
-// an overlay view), the browser chrome here — tab bar, toolbar, address bar,
-// loading spinner — is itself a WEB PAGE, rendered by a dedicated mbView and
-// wired to native code with mbJsBindFunction. Embedding the HTML as strings
-// (their embed_files.cmake, our raw literals) keeps the sample a single
-// self-contained binary.
+// The browser chrome — tab bar, toolbar, address bar, loading spinner — is
+// itself a WEB PAGE, rendered by a dedicated mbView and wired to native code
+// with mbJsBindFunction. Embedding the HTML as raw literals keeps the sample
+// a single self-contained binary.
 //
 // Chrome page contract:
 //   page -> native (bound fns): OnBack() OnForward() OnRefresh() OnStop()
@@ -146,9 +144,8 @@ static const char kChromeHTML[] = R"HTML(
     }
 
     // ---- chrome -> native ------------------------------------------------
-    // Address entry: URL-ish input navigates, anything else searches — the
-    // same normalization Ultralight's ui.html does with anchorme.js, in a
-    // dependency-free check.
+    // Address entry: URL-ish input navigates, anything else searches — a
+    // dependency-free normalization.
     document.getElementById('address').addEventListener('keydown', function(e) {
       if (e.key !== 'Enter') return;
       var url = this.value.trim();

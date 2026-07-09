@@ -1,7 +1,7 @@
-/* Sample 6 — Intro to the C API (Ultralight sample-set parity; macOS + Windows).
+/* Sample 6 — Intro to the C API (macOS + Windows).
  *
  * Compiled as PLAIN C (-std=c99): the whole mb* surface is a flat C ABI —
- * there is no separate CAPI layer to learn, unlike Ultralight's C++-first SDK.
+ * there is no separate C-binding layer to learn.
  * Headless: init, load an in-memory document, paint into a malloc'd BGRA
  * buffer, verify a pixel, tear down. No window, no run loop.
  *

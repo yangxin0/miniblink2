@@ -1,8 +1,8 @@
 # API improvements for embedders
 
 Lessons from integrating miniblink2 into a real interactive host (Glyph's
-dictionary popup), cross-checked against Ultralight 1.4's SDK — the closest
-comparable product (embeddable engine, offscreen surface, C API). Every item
+dictionary popup), cross-checked against comparable embedded-engine SDKs
+(offscreen surface, flat C API). Every item
 maps to a real integration incident, not a style preference; each round is
 ordered by leverage-per-effort for the Glyph host.
 
@@ -37,7 +37,7 @@ tick landing inside the engine's own pump (see §2). The nested pump also only
 quit reliably inside a running `NSApp`, forcing test harnesses into
 `NSApp.run()` wrappers.
 
-**Ultralight:** `Renderer::Update()` dispatches ready timers/tasks and
+**Prior art:** `Renderer::Update()` dispatches ready timers/tasks and
 *returns*; `RefreshDisplay()`/`Render()` produce frames. The host owns the
 loop; nothing re-enters it.
 
@@ -57,7 +57,7 @@ all-zero buffer whenever a paint was dropped mid-pump: a visible blank flash on
 every pointer move. A 420×360@2x view re-copied ~1.2 MB per tick at 60 fps even
 when nothing changed.
 
-**Ultralight:** views render into a `Surface` (host-pluggable via
+**Prior art:** views render into a `Surface` (host-pluggable via
 `SurfaceFactory`) with `LockPixels()/UnlockPixels()` and
 `dirty_bounds()/ClearDirtyBounds()`; the host blits only the damaged region and
 skips clean frames entirely.
@@ -82,7 +82,7 @@ to build a concurrent prefetch layer that downloads every referenced resource
 for unscanned URLs — all to keep the engine's thread off the network during the
 synchronous window.
 
-**Ultralight:** `LoadHTML/LoadURL` return immediately; the host receives
+**Prior art:** `LoadHTML/LoadURL` return immediately; the host receives
 `begin-loading` / `finish-loading` / `fail-loading` / `window-object-ready` /
 `DOM-ready`, each carrying `frame_id` + `is_main_frame`.
 
@@ -98,7 +98,7 @@ process-wide with no view parameter — `ctx` always null. A host with two views
 and different resource providers could only demultiplex by URL; Glyph routed
 via synthetic per-dictionary hosts baked into the base URL.
 
-**Ultralight:** platform services (FileSystem, FontLoader, Logger, Clipboard,
+**Prior art:** platform services (FileSystem, FontLoader, Logger, Clipboard,
 GPUDriver, SurfaceFactory) are injectable interfaces, and every view callback
 carries `user_data`.
 
@@ -124,7 +124,7 @@ deltas, faked `kPhaseNone`-style wheels (a phased wheel would route to the
 absent compositor gesture generator and silently not scroll), and scaled
 physical→CSS px by hand.
 
-**Ultralight:** `ulViewFireMouseEvent(view, ULMouseEvent)` /
+**Prior art:** `ulViewFireMouseEvent(view, ULMouseEvent)` /
 `ULScrollEvent{ScrollByPixel|ScrollByPage}` / `ULKeyEvent` — typed structs with
 explicit units.
 
@@ -139,8 +139,8 @@ with automation/testing tools (`mbWaitForSelector`, `mbSavePdf`,
 (`mbWait`, `mbWaitFor*`) — dangerous in an interactive host, and nothing in the
 header said so.
 
-**Ultralight:** small per-domain headers (mirrored in `CAPI_*`), `Config` vs
-`ViewConfig` split, AppCore as an optional convenience layer on top of the
+**Prior art:** small per-domain headers (mirrored in `CAPI_*`), `Config` vs
+`ViewConfig` split, an app layer as an optional convenience tier on top of the
 core.
 
 **Shipped**: `include/miniblink2/{webview.h,automation.h}` (117 embedder / 79
@@ -152,7 +152,7 @@ automation.h.
 
 ## Round 2
 
-Second pass over Ultralight 1.4's SDK, through the corners round 1 skipped:
+Second prior-art pass, through the corners round 1 skipped:
 Session, platform Config, Buffer ownership, the documented JS lifecycle,
 Renderer memory hooks.
 
@@ -163,7 +163,7 @@ busy page (JS timer storms, decode bursts) could hold the host's frame tick
 arbitrarily long. For a popup that lives on hover latency, one bad page means
 visible jank.
 
-**Ultralight:** `Config::max_update_time = 1/200s` — `Update()` stops
+**Prior art:** `Config::max_update_time = 1/200s` — `Update()` stops
 dispatching when the budget is spent; remaining work waits for the next tick.
 
 **Shipped** (871a40b): `mbSetMaxUpdateTime(double ms)` (0 = unbounded); delayed
@@ -178,7 +178,7 @@ prepended a `<style>` prelude (scrollbar styling, background) to every
 dictionary page and spliced `userCSS` into the HTML before load. The page's own
 JS could see the injected markup, and the splice had to be redone every load.
 
-**Ultralight:** `Config::user_stylesheet` — host CSS applied below every
+**Prior art:** `Config::user_stylesheet` — host CSS applied below every
 document, engine-side.
 
 **Shipped** (871a40b): `mbSetUserStylesheet(mbView*, const char* css)` via
@@ -193,7 +193,7 @@ the engine. A content-serving host pays double: Glyph's prefetch cache holds
 each dictionary font/image (MBs per page), then the engine copies the same
 bytes again on every serve.
 
-**Ultralight:** `Buffer::Create(data, size, user_data, DestroyBufferCallback)`
+**Prior art:** `Buffer::Create(data, size, user_data, DestroyBufferCallback)`
 — the host hands bytes over WITH an owner; the engine calls the destructor when
 done. No copy.
 
@@ -214,7 +214,7 @@ media.
 memory went. Pooled hidden views retained decoded images, JS heap, caches
 indefinitely — for a menu-bar app the resident-size expectation is small.
 
-**Ultralight:** `Renderer::PurgeMemory()`, `Renderer::LogMemoryUsage()`, and
+**Prior art:** `Renderer::PurgeMemory()`, `Renderer::LogMemoryUsage()`, and
 config budgets (`memory_cache_size`, `page_cache_size`, `override_ram_size`,
 `recycle_delay`).
 
@@ -230,7 +230,7 @@ Nothing documented when `mbJsBindFunction` bindings and other JS state die
 (they die with the context on navigation); item 3's `mbOnBeginLoading` is the
 re-establishment point but nobody said so.
 
-**Ultralight:** `EvaluateScript(script, String* exception)` returns the
+**Prior art:** `EvaluateScript(script, String* exception)` returns the
 exception text; the docs state the JSContext resets per navigation and name
 window-object-ready as the re-init hook.
 
@@ -245,7 +245,7 @@ services, and `mbSave/LoadCookies|LocalStorage|IndexedDB|OPFS` snapshot state
 manually — but there was no profile object: all views shared one storage world
 and persistence was a hand-rolled save/load dance per service.
 
-**Ultralight:** `Renderer::CreateSession(is_persistent, name)`; a view is
+**Prior art:** `Renderer::CreateSession(is_persistent, name)`; a view is
 created into a session; cookies/storage/IDB isolate per named profile,
 in-memory or disk-backed.
 
@@ -266,10 +266,10 @@ See "Sessions: the agreed design" below for the API contract.
 ### 13. Smaller notes: font defaults, update timestamp, inspector
 
 - **Per-view font-family defaults** (`font_family_standard/fixed/serif/
-  sans_serif`, `font_gamma` in Ultralight): given the last-resort-font fix this
+  sans_serif`, `font_gamma` in the prior art): given the last-resort-font fix this
   engine already needed, CJK-aware per-view fallback defaults are natural
   hardening for dictionary-style content. **Shipped**: `mbSetFontFamilies`.
-- **Per-display animation cadence**: Ultralight's `RefreshDisplay(display_id)`
+- **Per-display animation cadence**: a per-display `RefreshDisplay(display_id)`
   ties rAF to a monitor's vsync. **Shipped**: `mbUpdateAt`.
 - **Inspector**: **Stage A shipped** (8bc330c) — in-process CDP pipe
   (`mbDevToolsAttach/Send/Detach`) driving blink's frame-owned DevToolsAgent
@@ -306,7 +306,7 @@ See "Sessions: the agreed design" below for the API contract.
 Third pass (2026-07-07), through the corners rounds 1–2 skipped: Listener.h's
 ViewListener (the page → host UI-state channel), the platform/ services,
 ViewConfig, CAPI conventions. De-duplicated against the shipped header first —
-Ultralight's title/URL/console/new-window/download/clipboard/device-scale
+the prior art's title/URL/console/new-window/download/clipboard/device-scale
 equivalents already exist as mb* exports; what follows is only what's
 genuinely missing.
 
@@ -317,7 +317,7 @@ page wants an I-beam over selectable text, a hand over a link, or a hover
 tooltip. Glyph's popup shows a static arrow everywhere; title/URL changes are
 pushed (round 1 era) but pointer UI state is not.
 
-**Ultralight:** `ViewListener::OnChangeCursor(View*, Cursor)` (a 40+-value
+**Prior art:** `ViewListener::OnChangeCursor(View*, Cursor)` (a 40+-value
 cursor enum) and `OnChangeTooltip(View*, const String&)`.
 
 **Shipped**: `mbOnCursorChanged(view, cb, ud)` — fires with an MB_CURSOR_*
@@ -332,7 +332,7 @@ tooltip text, empty string = hide. Both NULL-clear, both snapshot per commit.
 popup can't honor "the page dismissed itself" (dictionary pages with a close
 button; OAuth flows that close their window).
 
-**Ultralight:** `ViewListener::OnRequestClose(View*)`.
+**Prior art:** `ViewListener::OnRequestClose(View*)`.
 
 **Shipped**: `mbOnRequestClose(view, cb, ud)` — notification only; the host
 decides whether to hide/destroy the view.
@@ -343,7 +343,7 @@ decides whether to hide/destroy the view.
 (menu-bar app) has no way to ask "does the page actually have a caret?" —
 so every keystroke either goes to the page or to the host by static policy.
 
-**Ultralight:** `View::HasInputFocus()` — "visible keyboard focus (blinking
+**Prior art:** `View::HasInputFocus()` — "visible keyboard focus (blinking
 caret); use this to decide whether the View should consume keyboard input."
 
 **Shipped**: `mbHasInputFocus(view)` — 1 when the focused element accepts
@@ -355,7 +355,7 @@ keystroke; the host routes keys to the page only then.
 **Then:** `mbCanGoBack/Forward` exist but are poll-only — a host enabling
 nav buttons re-queries every tick.
 
-**Ultralight:** `ViewListener::OnUpdateHistory(View*)`.
+**Prior art:** `ViewListener::OnUpdateHistory(View*)`.
 
 **Shipped**: `mbOnHistoryChanged(view, cb, ud)` — fires with
 (can_go_back, can_go_forward) whenever the session history changes; hosts
@@ -366,7 +366,7 @@ update buttons event-driven.
 **Then:** a dlopen-ing host had no way to verify at load time which engine
 it bound — mismatched dylib/header pairs fail at first symbol or silently.
 
-**Ultralight:** `UltralightVersionString/Major/Minor/Patch()` and
+**Prior art:** a version string plus numeric Major/Minor/Patch exports and
 `WebKitVersionString()` — engine AND upstream-engine versions, exported flat.
 
 **Shipped**: `mbVersion()` (engine version string), `mbApiVersion()`
@@ -378,7 +378,7 @@ it bound — mismatched dylib/header pairs fail at first symbol or silently.
 **Then:** engine diagnostics (base logging, mbLogMemoryUsage output) went to
 stderr unconditionally — invisible to a GUI host, unroutable to its logs.
 
-**Ultralight:** injectable `Logger::LogMessage(LogLevel, const String&)`.
+**Prior art:** injectable `Logger::LogMessage(LogLevel, const String&)`.
 
 **Shipped**: `mbOnLogMessage(cb, ud)` — process-wide sink receiving
 (level, message); NULL restores stderr. Installed via base logging's message
@@ -391,7 +391,7 @@ handler, so LOG(ERROR)-class engine output lands in the host's logs.
 (U+9F98 in a rare-CJK dictionary entry) still walks blink's platform list and
 can land on last-resort. The engine already needed a last-resort-font fix once.
 
-**Ultralight:** `FontLoader::fallback_font_for_characters(const String&
+**Prior art:** `FontLoader::fallback_font_for_characters(const String&
 characters, int weight, bool italic)` — the host answers "what font renders
 these characters?" at glyph-resolution time.
 
@@ -416,11 +416,11 @@ family used; bogus family tofu-guarded).
   elegant inverse of the mock hook, heavy to build in blink. Noted only.
 - **ThreadFactory / Allocator override**: QoS-tagging engine threads is
   attractive for a menu-bar host, but blink's thread bring-up is not
-  pluggable at reasonable cost. (Ultralight's Allocator being flat C even in
-  the C++ SDK re-validates the flat-ABI stance.)
+  pluggable at reasonable cost. (Prior art keeping its Allocator flat C even
+  inside a C++ SDK re-validates the flat-ABI stance.)
 - **RenderOnly(views[])**: pooled hidden views already skip work via
   mbViewIsDirty gating host-side.
-- **Ultralight's `CreateSession(is_persistent, name)`** hangs persistence off
+- **A `CreateSession(is_persistent, name)` shape** hangs persistence off
   a global cache_path — the shipped per-session persist_path (item 12) is
   strictly better. No revision needed.
 
@@ -430,7 +430,7 @@ family used; bogus family tofu-guarded).
 
 Fourth pass (2026-07-07), through the headers rounds 1–3 didn't dissect:
 Surface/GPUDriver/Bitmap/RenderTarget, View/Renderer corners, KeyEvent,
-Session getters, Config diagnostics, the AppCore layer. De-duplicated against
+Session getters, Config diagnostics, the app layer. De-duplicated against
 the shipped mb* surface and the open/deferred tables first.
 
 ### 22. Child views: window.open() that actually works
@@ -440,7 +440,7 @@ severing the opener/`postMessage` relationship. Any login-in-popup / OAuth
 flow that opens a child window and posts back to its opener is dead; the host
 loading the URL in a fresh view doesn't restore the link.
 
-**Ultralight:** `ViewListener::OnCreateChildView(caller, opener_url,
+**Prior art:** `ViewListener::OnCreateChildView(caller, opener_url,
 target_url, is_popup, popup_rect)` returns a `RefPtr<View>` — the host
 supplies the view, the engine wires it as the opener's child.
 
@@ -465,7 +465,7 @@ retire only replaced backends. Smoke: mb_smoke (adopt + postMessage-to-opener
 ViewConfig boolean with no mb counterpart. Script-off is hardening AND a perf
 switch for static dictionary HTML.
 
-**Ultralight:** `ViewConfig::enable_javascript`.
+**Prior art:** `ViewConfig::enable_javascript`.
 
 **Shipped**: `mbSetEnableJavascript(view, int)` via
 `WebSettings::SetJavaScriptEnabled`, call-before-load semantics like
@@ -479,7 +479,7 @@ string shorthands (`mbSendKey/Ex/Text/KeyUp`) — can't express auto-repeat,
 keypad distinction, down-without-up, or unmodified_text for shortcut
 resolution.
 
-**Ultralight:** `KeyEvent{type(RawKeyDown|KeyUp|Char), modifiers,
+**Prior art:** `KeyEvent{type(RawKeyDown|KeyUp|Char), modifiers,
 virtual_key_code, native_key_code, text, unmodified_text, is_keypad,
 is_auto_repeat, is_system_key}` plus an `NSEvent` constructor.
 
@@ -495,7 +495,7 @@ RawKeyDown+Char itself). Smoke: typed text + auto-repeat flag.
 alpha or color space — with `mbSetTransparentBackground` shipped, a
 compositing host MUST know.
 
-**Ultralight:** `BGRA8_UNORM_SRGB` ("sRGB gamma with premultiplied linear
+**Prior art:** `BGRA8_UNORM_SRGB` ("sRGB gamma with premultiplied linear
 alpha") stated on every pixel surface, plus straight↔premultiplied
 converters.
 
@@ -509,7 +509,7 @@ that loses its buffer (purged CALayer on hide/show, resize) can't say
 "repaint even though you think you're clean"; the damage-gated blit skips
 forever. Exactly the pooled-hidden-views scenario Glyph has.
 
-**Ultralight:** `View::set_needs_paint(bool)`.
+**Prior art:** `View::set_needs_paint(bool)`.
 
 **Shipped**: `mbViewSetDirty(view)`.
 
@@ -522,7 +522,7 @@ forever. Exactly the pooled-hidden-views scenario Glyph has.
 
 ### 28. Force-repaint diagnostic switch
 
-**Ultralight:** `Config::force_repaint` — "continuously repaint regardless
+**Prior art:** `Config::force_repaint` — "continuously repaint regardless
 of dirty; used to diagnose painting issues." Given the damage-gated blit was
 the source of a shipped flicker bug (item 2), an escape hatch for "the dirty
 flag is lying" is cheap insurance. **Shipped**: `mbSetForceRepaint(view,
@@ -533,14 +533,14 @@ int)` — while on, `mbViewIsDirty` reports 1.
 **Then:** `mbSession*` has zero read-back — a host holding several handles
 can't ask which is which.
 
-**Ultralight:** `Session::is_persistent()/name()/id()/disk_path()`.
+**Prior art:** `Session::is_persistent()/name()/id()/disk_path()`.
 
 **Shipped**: `mbSessionGetName`, `mbSessionIsPersistent`,
 `mbSessionGetPersistPath`.
 
 ### 30. Convention notes (round 4)
 
-- **One stated threading contract** at the top of webview.h (Ultralight puts
+- **One stated threading contract** at the top of webview.h (prior art puts
   it on the class); ours was restated ad hoc per function. Same for the
   logical-vs-physical px / DPR contract. **Shipped** (header-top paragraph).
 - **`MB_VERSION` string macro** beside runtime `mbVersion()` so hosts log
@@ -551,7 +551,7 @@ can't ask which is which.
 
 ### 31. Round-4 anti-patterns (what NOT to copy)
 
-- License-tier doc gating (`@pre Pro edition only` on functional-looking
+- License-tier doc gating (paid-tier `@pre` notes on functional-looking
   exports) — keep every exported symbol functional.
 - `#pragma pack(push,1)` on public ABI structs (RenderTarget.h) — the
   struct_size convention is strictly better.
@@ -564,7 +564,7 @@ can't ask which is which.
 ## Round 5
 
 Fifth pass (2026-07-09): a from-scratch re-read of the full 1.4 SDK — core
-C++ API, platform layer, CAPI conventions, AppCore — de-duplicated against
+C++ API, platform layer, C-API conventions, app layer — de-duplicated against
 rounds 1–4, the open/deferred tables, and the anti-pattern lists. The pass
 also *validated* several standing decisions (see item 39) and confirmed one
 suspected bug is not one: PNG export already converts premultiplied →
@@ -580,7 +580,7 @@ the page's own scripts ran. `mbSetInitScript` covers the declarative case;
 host-*computed* per-document setup (a fresh token, state that isn't known
 until the callback) had no sanctioned moment.
 
-**Ultralight:** `OnWindowObjectReady` — "called before any scripts are
+**Prior art:** `OnWindowObjectReady` — "called before any scripts are
 executed on the page and is the earliest time to setup any initial
 JavaScript state or bindings."
 
@@ -604,7 +604,7 @@ output); `mbGetLastError` the same. A host cannot branch on failure *type*
 (retry on timeout, report on DNS, ignore on blocked) without string-matching
 English.
 
-**Ultralight:** `OnFailLoading(..., const String& description,
+**Prior art:** `OnFailLoading(..., const String& description,
 const String& error_domain, int error_code)`.
 
 **Shipped**: `mbOnFailLoadingEx(view, cb, ud)` delivering `(url,
@@ -615,8 +615,8 @@ load. One slot with plain `mbOnFailLoading` (either replaces the other), per
 the console-callback precedent; `MbFetchUrl` gained an `out_error_code`
 out-param feeding the view's `last_error_domain_/code_`. Recorded design
 rule alongside: if per-frame load events ever land, they carry
-`(uint64_t frame_id, int is_main_frame)` from day one — Ultralight has it on
-every load event; retrofitting it breeds Ex variants. Smoke: mb_smoke R5b
+`(uint64_t frame_id, int is_main_frame)` from day one — the prior art carries
+it on every load event; retrofitting it breeds Ex variants. Smoke: mb_smoke R5b
 (file + curl domains, Ex-replaces-plain).
 
 ### 34. OS-clipboard bridge
@@ -626,7 +626,7 @@ every load event; retrofitting it breeds Ex variants. Smoke: mb_smoke R5b
 pasteboard around every copy/paste — user copies in another app, pastes
 into the view, and sees stale text unless the host polled.
 
-**Ultralight:** the `Clipboard` platform interface — the engine *pulls*
+**Prior art:** the `Clipboard` platform interface — the engine *pulls*
 from the host on paste (`ReadPlainText`) and *pushes* on copy
 (`WritePlainText`); the OS clipboard is the host's to own.
 
@@ -648,7 +648,7 @@ both; clearing restores the jar).
 has. A host that bundles a font (a dictionary app guaranteeing a specific
 CJK face regardless of the user's system) has no way to serve the bytes.
 
-**Ultralight:** `FontLoader::Load(family, weight, italic) →
+**Prior art:** `FontLoader::Load(family, weight, italic) →
 RefPtr<FontFile>`, where `FontFile::Create` accepts an in-memory buffer —
 the host serves font *data*.
 
@@ -657,7 +657,7 @@ char* out_family, int family_cap)` — skia validates the bytes and reports
 the family name; `CTFontManagerRegisterGraphicsFont` registers at process
 scope, so the family resolves in CSS, `mbSetFontFamilies`, and the fallback
 callback (re-registering the same face is a success no-op). Simpler than
-Ultralight's pull-model loader (no blink FontCache surgery) while covering
+a pull-model host font loader (no blink FontCache surgery) while covering
 the bundled-font case. WINDOWS GAP (open): blink's font stack there is
 DirectWrite-backed and `AddFontMemResourceEx` fonts are invisible to it —
 the export returns 0 honestly; a private DWrite collection is the eventual
@@ -673,8 +673,8 @@ action-at-a-distance a creation struct exists to kill — plus session
 binding and a family of "call before first load" setters whose timing
 contract is prose.
 
-**Ultralight (CAPI shape):** not a packed struct but an *opaque builder* —
-`ulCreateViewConfig()` + one setter per field + pass to create + destroy.
+**Prior art (C-API shape):** not a packed struct but an *opaque builder* —
+create-config + one setter per field + pass to create + destroy.
 New options never change any signature: strictly better ABI evolution than
 `struct_size` structs (which version reads, but not the "when does it
 apply" question).
@@ -700,7 +700,7 @@ table (`mbSetRequestHeader`). Dynamic per-request header injection
 (compute an Authorization header per URL) or per-request redirection isn't
 expressible.
 
-**Ultralight:** `OnNetworkRequest(View*, NetworkRequest&)` — a mutable
+**Prior art:** `OnNetworkRequest(View*, NetworkRequest&)` — a mutable
 request object per fetch.
 
 **Shipped**: opaque `mbRequest*` + `mbSetRequestHook(cb, ud)`: accessors
@@ -718,29 +718,29 @@ original URL; Block → domain "blocked").
 
 ### 38. Documentation batch (round-5 convention wins) — **all shipped**
 
-- **Worked host-loop example** at the top of webview.h — Ultralight's
+- **Worked host-loop example** at the top of webview.h — the prior art's
   headers open with a compilable create → update → render loop; Glyph's
   contract paragraphs are strong but there is no 15-line "interactive host
   frame tick" (`mbUpdateAt` → `mbViewIsDirty` → `mbRepaintToBitmap` → blit)
   to copy-paste.
-- **Per-host-type wiring matrix** — Ultralight's required/optional/provided
+- **Per-host-type wiring matrix** — a required/optional/provided
   platform table is its single best doc artifact. Glyph analog: which
   callbacks/setters matter for a screenshot/scrape host vs an interactive
   embedder.
 - **Numeric version macros** — `MB_VERSION_MAJOR/MINOR/PATCH` beside the
-  string, so hosts can `#if` on them (Ultralight ships all three plus the
+  string, so hosts can `#if` on them (prior art ships all three plus the
   string).
 - **`mbJsNativeFn` return-string lifetime** — currently undocumented (the
   one real ownership gap this pass found). The engine converts the returned
   string before the call returns; a static or per-binding buffer the host
   overwrites on the next call is fine. Say so.
-- **`MB_KEY_DOWN` footgun comment** — Ultralight annotates its equivalent
+- **`MB_KEY_DOWN` footgun comment** — the prior art annotates its equivalent
   enum value with "you should probably use RawKeyDown instead"; the warning
   belongs *on the value*.
-- **Recommended `mbSetMaxUpdateTime`** — Ultralight defaults to a bounded
+- **Recommended `mbSetMaxUpdateTime`** — the prior art defaults to a bounded
   slice (1/200 s); Glyph defaults to drain-to-idle. Document the
   recommended interactive budget (Glyph runs 8 ms) at the declaration.
-- **`mbOnCreateChildView` opener URL** — Ultralight passes `opener_url`;
+- **`mbOnCreateChildView` opener URL** — the prior art passes `opener_url`;
   Glyph's callback already receives the parent view, so `mbGetURL(parent)`
   *is* the opener URL. Document that instead of growing the signature.
 - **PNG alpha statement** — verified: `mbSavePng`/`mbEncodePng` write
@@ -754,7 +754,7 @@ original URL; Block → domain "blocked").
   `mbUpdateAt` — a 60 Hz + 120 Hz host can't drive two views at their real
   cadences today. Defer until a host actually runs mixed-refresh displays;
   the shape is recorded (per-view display group + per-group refresh call).
-- **App convenience layer** (AppCore analog — App/Window/Overlay as a
+- **App convenience layer** (App/Window/Overlay as a
   separate optional library): the structural lesson is real (windowless
   core, windowed sugar, distinct export macros per layer), but the
   audience is served by `samples/`; if demand grows, it becomes a samples
@@ -773,7 +773,7 @@ original URL; Block → domain "blocked").
   bridge, contexts stay explicit.
 - **FileSystem-style content provider**: re-validated the standing
   decision — response mocking is the stronger interception primitive for
-  content-serving hosts. One detail absorbed: Ultralight makes *charset*
+  content-serving hosts. One detail absorbed: the prior art makes *charset*
   an explicit host output alongside MIME; Glyph's mock path already takes
   a full content type (charset included).
 
@@ -796,13 +796,13 @@ stylesheet caveat).
 
 ---
 
-## What NOT to copy from Ultralight
+## What NOT to copy
 
 - The engine trade: single-dylib real Chromium (M150 Blink + V8) beats a
   trimmed WebKit fork on web compat by a mile; nothing here argues for a
   smaller engine.
 - Response mocking as the interception primitive is *stronger* than
-  Ultralight's FileSystem for content-serving hosts (dictionary/media apps);
+  a host FileSystem interface for content-serving hosts (dictionary/media apps);
   keep it — just per-view (§4, shipped).
 - The wait/shot automation helpers are a genuine differentiator for
   headless/testing users; the split in §6 keeps them first-class without

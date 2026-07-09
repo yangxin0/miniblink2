@@ -1,4 +1,4 @@
-// Sample 9 — Multi Window (Ultralight sample-set parity; macOS + Windows).
+// Sample 9 — Multi Window (macOS + Windows).
 //
 // Two windows, two views, one process: an EDITOR window whose <textarea>
 // pushes every keystroke to native code (mbJsBindFunction), and a PREVIEW

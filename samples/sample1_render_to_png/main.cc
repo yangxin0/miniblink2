@@ -1,4 +1,4 @@
-// Sample 1 — Render to PNG (Ultralight sample-set parity; no window, no Cocoa).
+// Sample 1 — Render to PNG (headless; no window toolkit).
 //
 // The whole pipeline in five calls: init the engine, create an offscreen view,
 // load a URL (the load pumps until the document's `load` event), let the

@@ -1,15 +1,14 @@
 # samples — the mb C API by example (macOS + Windows)
 
-The Ultralight-1.4 sample set, reimplemented on the **miniblink2 `mb` C API**
-— same numbering, so the two SDKs can be compared side by side. Each sample
-lives in its own directory; the sample code is **OS-independent**, and
-everything platform-specific lives in the shared scaffold under `compat/`
-(`compat/mb_window.h` is the interface; `compat/mac/mb_window.mm` is the
-Cocoa backend, `compat/win/mb_window.cc` the Win32 one — including the
-two-pane "browser window" shape sample 8 uses). The scaffold is the
-samples-level analog of Ultralight's AppCore — deliberately NOT part of the
-SDK, because the engine is windowless by design and a couple hundred lines
-per platform is all a real host needs.
+A numbered sample set covering the **miniblink2 `mb` C API** end to end, from
+headless capture to a tabbed browser. Each sample lives in its own directory;
+the sample code is **OS-independent**, and everything platform-specific lives
+in the shared scaffold under `compat/` (`compat/mb_window.h` is the interface;
+`compat/mac/mb_window.mm` is the Cocoa backend, `compat/win/mb_window.cc` the
+Win32 one — including the two-pane "browser window" shape sample 8 uses). The
+scaffold is a samples-level app layer — deliberately NOT part of the SDK,
+because the engine is windowless by design and a couple hundred lines per
+platform is all a real host needs.
 
 | # | Sample | What it shows |
 |---|--------|---------------|
@@ -19,8 +18,8 @@ per platform is all a real host needs.
 | 4 | `sample4_javascript` | The JS ⇄ native bridge: `mbJsBindFunction` (string + JSON returns), `mbOnWindowObjectReady` for host-computed setup before any page script. |
 | 5 | `sample5_file_loading` | `file://` documents with `file://` subresources, plus a "virtual file" served from memory by `mbMockResponse` (assets in `assets/`). |
 | 6 | `sample6_intro_c_api` | PLAIN C (`-std=c99`), headless: init → load → `mbPaintToBitmap` → pixel check → `mbEvalJS` read-back. Proves the headers are C-clean. |
-| 7 | — | *Not ported*: Ultralight's OpenGL sample needs its GPUDriver abstraction (views render into host GL textures). miniblink2 renders to pixels; upload the BGRA buffer as a texture instead. |
-| 8 | `minibrowser` | The Ultralight tools/MiniBrowser equivalent, macOS + Windows: the chrome (TAB STRIP + toolbar + address bar) is itself a web page bound to native code; per-tab title/URL/history/cursor/tooltip push; structured load errors as an error page; downloads to ~/Downloads; `window.open` adopts a REAL child view as a new tab; F2/🔧 starts a loopback CDP endpoint (`sample8_minibrowser/cdp_bridge.cc`) and ordinary Chrome attaches as the DevTools frontend via chrome://inspect. |
+| 7 | — | *Reserved*: direct-to-GPU-texture output needs a host render-target abstraction the engine doesn't expose (the open surface item); upload the BGRA buffer as a texture instead. |
+| 8 | `minibrowser` | A tabbed browser, macOS + Windows: the chrome (TAB STRIP + toolbar + address bar) is itself a web page bound to native code; per-tab title/URL/history/cursor/tooltip push; structured load errors as an error page; downloads to ~/Downloads; `window.open` adopts a REAL child view as a new tab; F2/🔧 starts a loopback CDP endpoint (`sample8_minibrowser/cdp_bridge.cc`) and ordinary Chrome attaches as the DevTools frontend via chrome://inspect. |
 | 9 | `sample9_multi_window` | Two windows, two views: an editor pushes text to native (`mbJsBindFunction`) and the host re-renders a preview — `mbDefer` (never re-enter the engine from a JS callback) + `mbLoadHTMLEx(add_to_history=0)`. |
 
 Windowed samples pull the engine's rendered BGRA pixels each frame via

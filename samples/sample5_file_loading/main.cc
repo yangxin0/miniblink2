@@ -1,13 +1,13 @@
-// Sample 5 — File Loading (Ultralight sample-set parity; macOS + Windows).
+// Sample 5 — File Loading (macOS + Windows).
 //
 // Two ways to serve app content without a web server:
 //   1. Real files: file:// documents load their own file:// subresources
 //     (CSS, images) directly — samples/assets/page.html here.
 //   2. Virtual files: the interception layer serves bytes for ANY url —
 //     mbMockResponse below answers a fetch() to https://virtual.example/
-//     from memory. This is mb's counterpart of Ultralight's FileSystem, and
-//     the stronger primitive for content-serving hosts (it also covers http
-//     URLs, per-view routing via mbOnRequestMock, and dynamic bodies).
+//     from memory — the interception layer doubles as a virtual filesystem,
+//     and is the stronger primitive for content-serving hosts (it also covers
+//     http URLs, per-view routing via mbOnRequestMock, and dynamic bodies).
 //
 // Run:  ./sample5_file_loading [assets-dir]
 #include <cstdio>
