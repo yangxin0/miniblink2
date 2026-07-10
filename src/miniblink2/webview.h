@@ -685,9 +685,9 @@ MB_EXPORT void mbDevToolsDetach(mbView*);
 // mbUpdate for CDP messages to flow (the bridge rides the task queue). OFF
 // unless started; the embedder WebSocket bridge remains fully supported.
 // Returns 1 on success (or already running on `port`), 0 on bind/listen
-// failure or on a non-POSIX platform (macOS/Linux only). mbDevToolsStopServer
-// closes all clients + the listener; mbDevToolsServerPort returns the live
-// port, 0 when stopped.
+// failure. Cross-platform (BSD sockets on macOS/Linux, Winsock on Windows).
+// mbDevToolsStopServer closes all clients + the listener; mbDevToolsServerPort
+// returns the live port, 0 when stopped.
 MB_EXPORT int  mbDevToolsStartServer(int port);
 MB_EXPORT void mbDevToolsStopServer(void);
 MB_EXPORT int  mbDevToolsServerPort(void);

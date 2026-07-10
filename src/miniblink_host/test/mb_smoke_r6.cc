@@ -10,17 +10,13 @@
 // configured BEFORE mbInitialize: custom-scheme registration and the JS heap
 // limit.
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
 #include <atomic>
 #include <cstdint>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "compat/mb_socket.h"  // internal cross-platform TCP socket compat
 #include "miniblink_host/test/mb_smoke_harness.h"
 #include "miniblink2/webview.h"
 
@@ -285,28 +281,31 @@ void TestTlsPinningApi(mbView* v) {
 // while the main thread pumps the engine (the server marshals /json/list to
 // the main thread).
 std::string HttpGet(int port, const std::string& path) {
-  int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0)
+  namespace c = mb::compat;
+  if (!c::SocketPlatformInit())
+    return {};
+  c::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  if (!c::SocketValid(fd))
     return {};
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin_port = htons(static_cast<uint16_t>(port));
-  if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-    ::close(fd);
+  if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+    c::SocketClose(fd);
     return {};
   }
   std::string req = "GET " + path + " HTTP/1.1\r\nHost: localhost\r\n\r\n";
-  ::send(fd, req.data(), req.size(), 0);
+  c::SocketSend(fd, req.data(), req.size());
   std::string resp;
   char buf[2048];
   for (;;) {
-    ssize_t r = ::recv(fd, buf, sizeof(buf), 0);
+    long r = c::SocketRecv(fd, buf, sizeof(buf));
     if (r <= 0)
       break;
     resp.append(buf, static_cast<size_t>(r));
   }
-  ::close(fd);
+  c::SocketClose(fd);
   return resp;
 }
 

@@ -1,9 +1,13 @@
-// webview_mac.h — OPTIONAL macOS companion to webview.h: translate real AppKit
-// events (NSEvent) into the typed mb* input events, so a host doesn't hand-roll
-// the kVK -> Windows-VK table, the RawKeyDown/Char split, or the coordinate
-// flip. Header-only (static inline; no new ABI, no ObjC in the engine) — this
-// header is the SDK-owned version of the mapping recipe documented at
-// mbKeyEvent in webview.h.
+// webview_mac.h — macOS input glue for mb hosts: translate real AppKit events
+// (NSEvent) into the typed mb* input events, so a host doesn't hand-roll the
+// kVK -> Windows-VK table, the RawKeyDown/Char split, or the coordinate flip.
+// Header-only (static inline; no new ABI, no ObjC in the engine).
+//
+// Like samples/compat/mb_window.h, this is an INTERNAL repo helper (src/compat/)
+// — it is NOT part of the shipped SDK; the flat mb* ABI in webview.h stays
+// ObjC/Win32-free, and a host that wants native-event translation copies this
+// in. Its Windows peer is src/compat/webview_win.h. It is the runnable version
+// of the NSEvent field-mapping recipe documented at mbKeyEvent in webview.h.
 //
 // Usage (in your NSView subclass; `view` is the mbView*, `self` the NSView):
 //
@@ -31,7 +35,7 @@
 
 #import <AppKit/AppKit.h>
 
-#include "webview.h"
+#include "miniblink2/webview.h"
 
 // ---- Key code translation ----------------------------------------------------
 // Windows virtual-key code for a mac hardware key code (NSEvent.keyCode /

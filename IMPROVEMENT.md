@@ -815,27 +815,54 @@ lessons; what's left is the residue — and two deliberate reversals of earlier
 embedder experience they buy. Everything below except the gamepad surface
 (still out of scope — round 4's verdict stands) is adopted this round.
 
-### 40. Native-event translation helpers (`webview_mac.h`)
+### 40. Native-event translation helpers (`src/compat/webview_{mac,win}.h`)
 
 **Then:** item 24 shipped the typed `mbKeyEvent`, but the NSEvent→field
-mapping lives as a 15-line comment in webview.h — every mac host re-implements
-the kVK→Windows-VK table, the RAW_DOWN/CHAR split, and the modifier mapping by
-hand. This is the single most error-prone step of embedding an interactive
-view.
+mapping lives as a 15-line comment in webview.h — every host re-implements the
+kVK/VK table, the RAW_DOWN/CHAR split, and the modifier mapping by hand. This
+is the single most error-prone step of embedding an interactive view.
 
 **Prior art:** `KeyEvent(NSEvent*)` and `KeyEvent(Type, wparam, lparam,
 is_system_key)` constructors, plus exported
 `GetKeyIdentifierFromVirtualKeyCode` / `GetKeyFromVirtualKeyCode` helpers —
 the SDK owns the translation tables, not the host.
 
-**Shipped**: `include/miniblink2/webview_mac.h` — a HEADER-ONLY Objective-C
-companion (no new ABI: static inline functions building the existing
-structs). `mbKeyEventFromNSEvent(NSEvent*, mbKeyEvent*)` (kVK→VK table,
-modifiers, text/unmodified_text, keypad/auto-repeat flags, and the
-send-as-RAW_DOWN+CHAR recipe as `mbSendKeyNSEvent`),
-`mbMouseEventFromNSEvent` + `mbWheelEventFromNSEvent` (view-local flipped
-coordinates, precise trackpad deltas). The C ABI stays ObjC-free; the header
-compiles only where NSEvent exists.
+**Shipped, both platforms**: header-only translators that build the existing
+mb structs (no new ABI, no ObjC/Win32 in the C ABI):
+- `src/compat/webview_mac.h` — `mbKeyEventFromNSEvent` / `mbSendKeyNSEvent`
+  (kVK→VK table, modifiers, text/unmodified_text, keypad/auto-repeat, the
+  RAW_DOWN+CHAR recipe), `mbMouseEventFromNSEvent`, `mbWheelEventFromNSEvent`
+  (view-local flipped coords, precise trackpad deltas).
+- `src/compat/webview_win.h` — the Win32 peer: `mbKeyEventFromWin32`
+  (WM_KEY*/WM_CHAR → RAW_DOWN/CHAR/UP, VK code = windows_key_code, UTF-16→UTF-8
+  text, scancode/auto-repeat/keypad from lParam), `mbMouseEventFromWin32`
+  (WM_*BUTTON*/WM_MOUSEMOVE, MK_* modifiers), `mbWheelEventFromWin32`
+  (WM_MOUSEWHEEL/HWHEEL, screen→client, WHEEL_DELTA→px, DOM sign).
+
+PLACEMENT: these live in `src/compat/` — the library's INTERNAL platform layer
+— and are deliberately NOT staged into the public SDK (like
+samples/compat/mb_window.h, a host copies what it needs). The flat mb* ABI in
+webview.h stays ObjC/Win32-free.
+
+### 41. In-engine DevTools endpoint (`mbDevToolsStartServer`)
+
+**Then:** stage B (the WebSocket + /json bridge) deliberately lived in the
+embedder; the engine stayed socket-free (round 5, item 39). That keeps the
+core pure but makes "just inspect this view" a day of host plumbing — the
+prior art's `StartRemoteInspectorServer(addr, port)` is a one-call story.
+
+**Reversal, by maintainer directive (2026-07-10):** the ergonomic gap won.
+The engine gains an OPT-IN local CDP endpoint — `mbDevToolsStartServer(port)`
+/ `mbDevToolsStopServer()` — serving `/json/version`, `/json/list` (one
+target per live view) and a WebSocket upgrade per target that bridges to the
+same per-view session `mbDevToolsAttach` uses (one client per view; attach
+conflicts refuse cleanly). Paste the ws:// URL into Chrome's
+`devtools://devtools/bundled/inspector.html?ws=…` and inspect. Loopback-only
+by default, OFF unless the host calls it — the embedder bridge (stage B)
+remains fully supported. CROSS-PLATFORM: the socket layer is the internal
+`src/compat/mb_socket.h` shim (BSD sockets on macOS/Linux, Winsock2 on
+Windows), so the endpoint works the same on both; the socket types never
+cross the mb* ABI.
 
 ### 41. In-engine DevTools endpoint (`mbDevToolsStartServer`)
 
@@ -1005,7 +1032,7 @@ stylesheet caveat).
 | 9 | General zero-copy resource bodies (`mbResponseSetBodyOwned`); the IMAGE-SOURCE case shipped (item 43, `mbRegisterImageSourceBuffer`) | Response-body case still deferred by cost — revisit if a host serves large media |
 | 13c | Child worker/iframe DevTools targets (multi-session bridge). NOTE: the in-engine WebSocket endpoint shipped (item 41, `mbDevToolsStartServer`) but is still single-target-per-view | Open, unscheduled |
 | 35 | `mbAddFontData` on Windows (DirectWrite private collection) | Open — mac shipped; the export returns 0 on Windows |
-| 41 | In-engine DevTools endpoint (`mbDevToolsStartServer`) — POSIX only; Windows returns 0 (winsock port pending) | Shipped (macOS/Linux) |
+| 41 | In-engine DevTools endpoint (`mbDevToolsStartServer`) — cross-platform via `src/compat/mb_socket.h` (BSD sockets / Winsock2) | Shipped (macOS/Linux/Windows) |
 
 ---
 

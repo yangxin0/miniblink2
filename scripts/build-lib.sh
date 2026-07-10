@@ -50,12 +50,12 @@
 #                               runtime data the engine loads at startup
 set -euo pipefail
 
-HERE="$(cd "$(dirname "$0")/.." && pwd)"   # repo root (this script lives in scripts/)
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"   # repo root (this script lives in scripts/)
 # This project, the Chromium checkout, and depot_tools are SIBLINGS under one parent:
 #   <parent>/{<this-project>, chromium-150.0.7871.24, depot_tools}
 # Both default to siblings of this project; override via env (CHROMIUM=… DEPOT=…) or
 # the --chromium / --depot flags. No absolute path is hardcoded.
-PARENT="$(dirname "$HERE")"
+PARENT="$(dirname "$ROOT")"
 CHROMIUM="${CHROMIUM:-$PARENT/chromium-150.0.7871.24}"
 DEPOT="${DEPOT:-$PARENT/depot_tools}"
 MODE=release         # release | debug
@@ -113,7 +113,7 @@ fi
 
 [ -d "$CHROMIUM/third_party/blink/renderer" ] || {
   echo "error: not a Chromium checkout: $CHROMIUM" >&2
-  echo "  expected $PARENT/chromium-150.0.7871.24 (sibling of $(basename "$HERE")/)," >&2
+  echo "  expected $PARENT/chromium-150.0.7871.24 (sibling of $(basename "$ROOT")/)," >&2
   echo "  or set CHROMIUM=/path/to/chromium-<ver> (or --chromium DIR)." >&2
   exit 1
 }
@@ -126,7 +126,7 @@ fi
 [ -d "$DEPOT" ] && export PATH="$DEPOT:$PATH"
 command -v gn >/dev/null 2>&1 || {
   echo "error: 'gn' not found — need depot_tools to build Chromium." >&2
-  echo "  expected $PARENT/depot_tools (sibling of $(basename "$HERE")/)," >&2
+  echo "  expected $PARENT/depot_tools (sibling of $(basename "$ROOT")/)," >&2
   echo "  or set DEPOT=/path/to/depot_tools (or --depot DIR)." >&2
   exit 1
 }
@@ -136,10 +136,11 @@ MB_JOBS="${MB_JOBS:-}"
 
 DEST="$CHROMIUM/third_party/blink/renderer/miniblink_host"
 MB2_DEST="$CHROMIUM/third_party/blink/renderer/miniblink2"
+COMPAT_DEST="$CHROMIUM/third_party/blink/renderer/compat"
 CURL_DEST="$CHROMIUM/third_party/blink/renderer/miniblink2_curl"
 GN_PATH="third_party/blink/renderer/miniblink_host"
 SHARED="$GN_PATH:miniblink2"
-DIST="$HERE/dist/$MODE"
+DIST="$ROOT/dist/$MODE"
 
 # One out dir PER PROFILE: profile flags change every compile command (-Oz/ThinLTO/
 # no-DCHECK vs -O2/DCHECK), and ninja keys rebuilds on the command hash — sharing one
@@ -173,13 +174,17 @@ if [ "$STAGE" = 1 ]; then
   # ninja's incremental build reuses every unchanged .o. (cp -R stamps every file with a
   # fresh mtime, forcing ninja to recompile all ~60 host objects on every run.) Trailing
   # slashes sync directory CONTENTS; --delete prunes files removed from src.
-  mkdir -p "$DEST" "$MB2_DEST" "$CURL_DEST"
-  rsync -a --delete "$HERE/src/miniblink_host/" "$DEST/"
-  rsync -a --delete "$HERE/src/miniblink2/" "$MB2_DEST/"
+  mkdir -p "$DEST" "$MB2_DEST" "$COMPAT_DEST" "$CURL_DEST"
+  rsync -a --delete "$ROOT/src/miniblink_host/" "$DEST/"
+  rsync -a --delete "$ROOT/src/miniblink2/" "$MB2_DEST/"
+  # src/compat/: the library's INTERNAL platform-abstraction layer (mac/win
+  # socket compat, native-input helpers). Staged next to the host sources so
+  # host code includes it as "compat/<hdr>"; never part of the public SDK.
+  rsync -a --delete "$ROOT/src/compat/" "$COMPAT_DEST/"
   # Vendored curl SDK (headers + dylib chain) staged like the sources, so
   # BUILD.gn references it RELATIVELY — no absolute repo path in build files.
   # -a keeps the libcurl.dylib symlink.
-  rsync -a --delete "$HERE/third_party/curl/include" "$HERE/third_party/curl/lib" "$CURL_DEST/"
+  rsync -a --delete "$ROOT/third_party/curl/include" "$ROOT/third_party/curl/lib" "$CURL_DEST/"
   # Retarget the STAGED libcurl's install id to THIS repo's copy. The id baked
   # into the tracked binary may be stale (folder renames), and the tracked file
   # must never be modified (no binary churn in git). The linker records this id
@@ -187,11 +192,11 @@ if [ "$STAGE" = 1 ]; then
   # point at wherever the repo currently lives; package.sh rewrites it to
   # @loader_path for distribution. Re-sign: install_name_tool invalidates the
   # ad-hoc signature and dyld kills invalidly-signed arm64 images at load.
-  install_name_tool -id "$HERE/third_party/curl/lib/libcurl.4.dylib" \
+  install_name_tool -id "$ROOT/third_party/curl/lib/libcurl.4.dylib" \
       "$CURL_DEST/lib/libcurl.4.dylib" 2>/dev/null
   codesign --force --sign - "$CURL_DEST/lib/libcurl.4.dylib" 2>/dev/null
   echo "==> applying blink compatibility patches"
-  for p in "$HERE"/patches/*.patch; do
+  for p in "$ROOT"/patches/*.patch; do
     [ -f "$p" ] || continue
     if git -C "$CHROMIUM" apply --reverse --check "$p" 2>/dev/null; then
       :  # already applied
@@ -420,8 +425,15 @@ mkdir -p "$DIST/include/miniblink2"
 # Public API header — the SDK surface: the miniblink2 mb* C API, self-contained
 # (standard-library includes only). Consumer:
 #   -Idist/<mode>/include   +   #include "miniblink2/miniblink2.h"
-cp "$HERE"/src/miniblink2/*.h "$DIST/include/miniblink2/"
-rm -f "$DIST/include/miniblink2/wke.h" "$DIST/include/miniblink2/mb_capi.h" "$DIST/include/miniblink2/view.h"  # pre-rename leftovers
+cp "$ROOT"/src/miniblink2/*.h "$DIST/include/miniblink2/"
+# Prune headers that are no longer public so a re-used dist tree can't ship a
+# stale copy (cp never deletes). Currently just the src/compat/ helpers that
+# briefly staged here before compat became internal-only.
+rm -f "$DIST/include/miniblink2/webview_mac.h" "$DIST/include/miniblink2/webview_win.h"
+# NOTE: src/compat/ is the library's INTERNAL platform-abstraction layer (the
+# mac/win socket compat + native-input helpers). It is intentionally NOT staged
+# into the public SDK — like samples/compat/mb_window.h, a host copies what it
+# wants from the repo source. Keep it out of dist/include.
 
 # 2+3. Run the profile's pass(es). DATA_OUT is where runtime data (V8 snapshots,
 # ANGLE dylibs) is collected from afterwards.
@@ -458,7 +470,7 @@ done
 # brkitr (incl. the CJK segmentation dictionary), converters, normalization and the
 # res_index/pool infrastructure are always kept. --icu-full ships the whole file instead.
 if [ "$ICUFULL" = 0 ] && [ -f "$REF/icudtl.dat" ]; then
-  python3 "$HERE/scripts/trim_icu.py" --keep "${MB_ICU_KEEP:-en,zh}" \
+  python3 "$ROOT/scripts/trim_icu.py" --keep "${MB_ICU_KEEP:-en,zh}" \
     "$REF/icudtl.dat" "$DIST/icudtl.dat"
 fi
 

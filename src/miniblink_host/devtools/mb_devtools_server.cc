@@ -1,6 +1,10 @@
-// mb_devtools_server.cc — a loopback CDP endpoint (item 41). POSIX sockets on
+// mb_devtools_server.cc — a loopback CDP endpoint (item 41). Sockets on
 // dedicated threads; every touch of a view or its CDP bridge is marshaled to
 // the engine main thread. See the header for the design contract.
+//
+// Cross-platform: one implementation over the internal socket-compat layer
+// (compat/mb_socket.h — BSD sockets on POSIX/macOS, Winsock2 on Windows). The
+// bridge it sits on is already platform-independent.
 
 #include "miniblink_host/devtools/mb_devtools_server.h"
 
@@ -16,14 +20,7 @@
 #include <vector>
 
 #include "build/build_config.h"
-
-#if BUILDFLAG(IS_POSIX)
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#endif
+#include "compat/mb_socket.h"
 
 #include "base/base64.h"
 #include "base/functional/bind.h"
@@ -37,10 +34,9 @@
 
 namespace mb {
 
-#if !BUILDFLAG(IS_POSIX)
+#if !BUILDFLAG(IS_WIN) && !BUILDFLAG(IS_POSIX)
 
-// Non-POSIX: the endpoint is unsupported (matches the mac-only precedent of
-// other host-service features). The exports still link.
+// No socket API available: the endpoint is unsupported. The exports still link.
 bool MbDevToolsServerStart(int) { return false; }
 void MbDevToolsServerStop() {}
 int MbDevToolsServerPort() { return 0; }
@@ -49,13 +45,23 @@ int MbDevToolsServerPort() { return 0; }
 
 namespace {
 
+// Socket primitives from the internal compat layer (compat/mb_socket.h).
+using compat::kInvalidSocket;
+using compat::kShutdownBoth;
+using compat::socket_t;
+using compat::SocketClose;
+using compat::SocketRecv;
+using compat::SocketSend;
+using compat::SocketSetOptInt;
+using compat::SocketValid;
+
 constexpr char kWsGuid[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-// Read exactly `n` bytes from `fd` into `out`. False on EOF/error.
-bool ReadN(int fd, char* out, size_t n) {
+// Read exactly `n` bytes from `s` into `out`. False on EOF/error.
+bool ReadN(socket_t s, char* out, size_t n) {
   size_t got = 0;
   while (got < n) {
-    ssize_t r = ::recv(fd, out + got, n - got, 0);
+    long r = SocketRecv(s, out + got, n - got);
     if (r <= 0)
       return false;
     got += static_cast<size_t>(r);
@@ -63,10 +69,10 @@ bool ReadN(int fd, char* out, size_t n) {
   return true;
 }
 
-bool WriteAll(int fd, const char* data, size_t n) {
+bool WriteAll(socket_t s, const char* data, size_t n) {
   size_t sent = 0;
   while (sent < n) {
-    ssize_t w = ::send(fd, data + sent, n - sent, 0);
+    long w = SocketSend(s, data + sent, n - sent);
     if (w <= 0)
       return false;
     sent += static_cast<size_t>(w);
@@ -76,11 +82,11 @@ bool WriteAll(int fd, const char* data, size_t n) {
 
 // Read HTTP request headers up to the blank line (bounded). Returns the header
 // block (without the trailing CRLFCRLF) or empty on error/oversize.
-std::string ReadHttpHeaders(int fd) {
+std::string ReadHttpHeaders(socket_t s) {
   std::string buf;
   char c;
   while (buf.size() < 16 * 1024) {
-    ssize_t r = ::recv(fd, &c, 1, 0);
+    long r = SocketRecv(s, &c, 1);
     if (r <= 0)
       return {};
     buf.push_back(c);
@@ -145,14 +151,14 @@ std::string JsonEscape(const std::string& s) {
   return out;
 }
 
-void SendHttp(int fd, const std::string& status, const std::string& ctype,
+void SendHttp(socket_t s, const std::string& status, const std::string& ctype,
               const std::string& body) {
   std::string resp = "HTTP/1.1 " + status + "\r\n";
   resp += "Content-Type: " + ctype + "\r\n";
   resp += "Content-Length: " + std::to_string(body.size()) + "\r\n";
   resp += "Connection: close\r\n\r\n";
   resp += body;
-  WriteAll(fd, resp.data(), resp.size());
+  WriteAll(s, resp.data(), resp.size());
 }
 
 // Format/parse the opaque target id — the view pointer as hex. Validated
@@ -177,7 +183,7 @@ MbWebView* TargetFromId(const std::string& id) {
 // One connection's shared state: the socket plus a send lock (the main-thread
 // CDP callback and the shutdown path both write/close it).
 struct MbDevToolsConn {
-  int fd = -1;
+  socket_t fd = kInvalidSocket;
   std::mutex send_lock;
   bool closed = false;
 
@@ -216,22 +222,23 @@ class MbDevToolsServer {
     if (running_) {
       return port_ == port;  // idempotent on the same port
     }
+    if (!compat::SocketPlatformInit())
+      return false;
     main_runner_ = base::SingleThreadTaskRunner::GetCurrentDefault();
     if (!main_runner_)
       return false;
 
-    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0)
+    socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (!SocketValid(fd))
       return false;
-    int one = 1;
-    ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    SocketSetOptInt(fd, SOL_SOCKET, SO_REUSEADDR, 1);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);  // 127.0.0.1 only
     addr.sin_port = htons(static_cast<uint16_t>(port));
-    if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0 ||
-        ::listen(fd, 8) < 0) {
-      ::close(fd);
+    if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 ||
+        ::listen(fd, 8) != 0) {
+      SocketClose(fd);
       return false;
     }
     listen_fd_ = fd;
@@ -245,10 +252,10 @@ class MbDevToolsServer {
     if (!running_)
       return;
     running_ = false;
-    if (listen_fd_ >= 0) {
-      ::shutdown(listen_fd_, SHUT_RDWR);
-      ::close(listen_fd_);
-      listen_fd_ = -1;
+    if (SocketValid(listen_fd_)) {
+      ::shutdown(listen_fd_, kShutdownBoth);
+      SocketClose(listen_fd_);
+      listen_fd_ = kInvalidSocket;
     }
     // Unblock all connection reads by closing their sockets.
     {
@@ -256,8 +263,8 @@ class MbDevToolsServer {
       for (const auto& c : conns_) {
         std::lock_guard<std::mutex> sl(c->send_lock);
         c->closed = true;
-        if (c->fd >= 0)
-          ::shutdown(c->fd, SHUT_RDWR);
+        if (SocketValid(c->fd))
+          ::shutdown(c->fd, kShutdownBoth);
       }
     }
     if (accept_thread_.joinable())
@@ -270,14 +277,13 @@ class MbDevToolsServer {
  private:
   void AcceptLoop() {
     while (running_) {
-      int cfd = ::accept(listen_fd_, nullptr, nullptr);
-      if (cfd < 0) {
+      socket_t cfd = ::accept(listen_fd_, nullptr, nullptr);
+      if (!SocketValid(cfd)) {
         if (!running_)
           break;
         continue;
       }
-      int one = 1;
-      ::setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+      SocketSetOptInt(cfd, IPPROTO_TCP, TCP_NODELAY, 1);
       std::thread([this, cfd] { HandleConnection(cfd); }).detach();
     }
   }
@@ -300,10 +306,10 @@ class MbDevToolsServer {
     ev.Wait();
   }
 
-  void HandleConnection(int fd) {
+  void HandleConnection(socket_t fd) {
     std::string headers = ReadHttpHeaders(fd);
     if (headers.empty()) {
-      ::close(fd);
+      SocketClose(fd);
       return;
     }
     // Request line: "GET <path> HTTP/1.1".
@@ -333,17 +339,17 @@ class MbDevToolsServer {
     } else {
       SendHttp(fd, "404 Not Found", "text/plain", "not found");
     }
-    ::close(fd);
+    SocketClose(fd);
   }
 
-  void ServeVersion(int fd) {
+  void ServeVersion(socket_t fd) {
     std::string body =
         "{\n  \"Browser\": \"miniblink2\",\n"
         "  \"Protocol-Version\": \"1.3\"\n}";
     SendHttp(fd, "200 OK", "application/json; charset=UTF-8", body);
   }
 
-  void ServeList(int fd) {
+  void ServeList(socket_t fd) {
     // Snapshot targets on the main thread (touches blink: URL/title).
     struct Target {
       std::string id, url, title;
@@ -384,12 +390,12 @@ class MbDevToolsServer {
     SendHttp(fd, "200 OK", "application/json; charset=UTF-8", body);
   }
 
-  void HandleWebSocket(int fd, const std::string& headers,
+  void HandleWebSocket(socket_t fd, const std::string& headers,
                        const std::string& target_id) {
     const std::string key = HeaderValue(headers, "sec-websocket-key");
     if (key.empty()) {
       SendHttp(fd, "400 Bad Request", "text/plain", "missing key");
-      ::close(fd);
+      SocketClose(fd);
       return;
     }
     // Handshake: Sec-WebSocket-Accept = base64(sha1(key + GUID)).
@@ -401,7 +407,7 @@ class MbDevToolsServer {
         "Connection: Upgrade\r\n"
         "Sec-WebSocket-Accept: " + accept + "\r\n\r\n";
     if (!WriteAll(fd, resp.data(), resp.size())) {
-      ::close(fd);
+      SocketClose(fd);
       return;
     }
 
@@ -428,7 +434,7 @@ class MbDevToolsServer {
       // Already attached elsewhere, or the view is gone — close cleanly.
       std::lock_guard<std::mutex> l(conn->send_lock);
       conn->closed = true;
-      ::close(fd);
+      SocketClose(fd);
       return;
     }
 
@@ -447,13 +453,13 @@ class MbDevToolsServer {
       std::lock_guard<std::mutex> l(conn->send_lock);
       conn->closed = true;
     }
-    ::close(fd);
+    SocketClose(fd);
   }
 
   // Read client->server frames; deliver each complete text message to the
   // view's CDP session on the main thread. Returns when the socket closes.
   void ReadLoop(const std::shared_ptr<MbDevToolsConn>& conn, MbWebView* view) {
-    const int fd = conn->fd;
+    const socket_t fd = conn->fd;
     std::string message;  // reassembled across continuation frames
     for (;;) {
       char h[2];
@@ -539,7 +545,7 @@ class MbDevToolsServer {
   }
 
   std::atomic<bool> running_{false};
-  int listen_fd_ = -1;
+  socket_t listen_fd_ = kInvalidSocket;
   int port_ = 0;
   std::thread accept_thread_;
   scoped_refptr<base::SingleThreadTaskRunner> main_runner_;
@@ -557,6 +563,6 @@ int MbDevToolsServerPort() {
   return MbDevToolsServer::Get()->port();
 }
 
-#endif  // BUILDFLAG(IS_POSIX)
+#endif  // socket API available
 
 }  // namespace mb

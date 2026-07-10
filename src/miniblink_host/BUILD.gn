@@ -51,7 +51,9 @@ component("miniblink_host") {
     "../miniblink2/miniblink2.cc",
     "../miniblink2/automation.h",
     "../miniblink2/webview.h",
-    "../miniblink2/webview_mac.h",
+    # Internal cross-platform socket compat (mac BSD / win Winsock), used by the
+    # in-engine DevTools endpoint. Header-only; not part of the public SDK.
+    "../compat/mb_socket.h",
     "blob/mb_blob_registry.cc",
     "blob/mb_blob_registry.h",
     "frame/mb_broadcast_channel.cc",
@@ -212,7 +214,11 @@ component("miniblink_host") {
   if (is_win) {
     # Windows vendored curl is a Schannel DLL (scripts/build-curl-macos.sh's
     # Windows counterpart); link its import library, ship libcurl.dll at runtime.
-    libs = [ "libcurl_imp.lib" ]
+    # ws2_32: Winsock, for the in-engine DevTools endpoint (mb_devtools_server.cc).
+    libs = [
+      "libcurl_imp.lib",
+      "ws2_32.lib",
+    ]
   } else {
     libs = [ "curl" ]  # -> third_party/curl/lib/libcurl.dylib (HTTP(S) + ws/wss)
   }

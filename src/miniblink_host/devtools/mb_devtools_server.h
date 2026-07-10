@@ -8,7 +8,8 @@
 // This is the ONLY part of the engine that opens a socket, and it does so only
 // when the host explicitly starts it. The bridge to blink runs on the engine
 // main thread (all mb_devtools_bridge calls are marshaled there); the socket
-// accept/read loops run on dedicated threads. macOS/POSIX only.
+// accept/read loops run on dedicated threads. Cross-platform: BSD sockets on
+// POSIX/macOS, Winsock2 on Windows.
 
 #ifndef MINIBLINK_HOST_DEVTOOLS_MB_DEVTOOLS_SERVER_H_
 #define MINIBLINK_HOST_DEVTOOLS_MB_DEVTOOLS_SERVER_H_
