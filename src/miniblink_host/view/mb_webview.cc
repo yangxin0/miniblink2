@@ -90,7 +90,6 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/paint/paint_flags.h"
 #include "third_party/blink/renderer/platform/graphics/paint/cull_rect.h"
-#include "third_party/blink/renderer/platform/graphics/paint/paint_artifact.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record_builder.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
@@ -3835,20 +3834,12 @@ bool MbWebView::NotifyNonCompositedPaint(blink::LocalFrameView& root_view,
     return false;
   if (!damage_tracker_)
     damage_tracker_ = std::make_unique<MbDamageTracker>();
-  // Diff only when it can pay. A LOADING document rewrites the artifact
-  // wholesale on every pump, so the chunk matching degenerates to
-  // O(old x new) — on a large page that stalls the synchronous load for
-  // seconds — only to conclude "everything changed", which full damage says
-  // for free. A pathological post-load chunk count gets the same treatment
-  // (the quadratic risk bound); 8k chunks is far beyond normal UI pages.
-  const auto& chunks = root_view.GetPaintArtifact().GetPaintChunks();
-  if (!load_finished_ || chunks.size() > 8192) {
-    damage_tracker_->SkipCycle(gfx::Rect(view_width_, view_height_));
-    return true;
-  }
-  // Runs unconditionally otherwise (even when repainted=false): Generate()
-  // both derives damage from in-place property mutations (scroll) and keeps
-  // the invalidator's old-artifact reference in step with the paint cycle.
+  // Runs unconditionally (even when repainted=false): Generate() both derives
+  // damage from in-place property mutations (scroll) and keeps the
+  // invalidator's old-artifact reference in step with the paint cycle. Cost is
+  // O(old + new) chunks per cycle — patch 0042 indexes the old chunks by id,
+  // fixing the upstream linear-scan matching that degenerated to O(old x new)
+  // under the wholesale chunk churn of a loading document.
   damage_tracker_->OnNonCompositedPaint(root_view);
   return true;
 }

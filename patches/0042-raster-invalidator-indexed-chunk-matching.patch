@@ -1,0 +1,91 @@
+diff --git a/third_party/blink/renderer/platform/graphics/paint/raster_invalidator.cc b/third_party/blink/renderer/platform/graphics/paint/raster_invalidator.cc
+index 0650945..8011fad 100644
+--- a/third_party/blink/renderer/platform/graphics/paint/raster_invalidator.cc
++++ b/third_party/blink/renderer/platform/graphics/paint/raster_invalidator.cc
+@@ -50,15 +50,19 @@ const PaintChunk& RasterInvalidator::GetOldChunk(wtf_size_t index) const {
+ 
+ wtf_size_t RasterInvalidator::MatchNewChunkToOldChunk(
+     const PaintChunk& new_chunk,
+-    wtf_size_t old_index) const {
++    wtf_size_t old_index,
++    const OldChunkIndexMap& old_chunk_index_map) const {
+   if (!new_chunk.CanMatchOldChunk())
+     return kNotFound;
+ 
+-  for (wtf_size_t i = old_index; i < old_paint_chunks_info_.size(); i++) {
+-    if (new_chunk.Matches(GetOldChunk(i)))
+-      return i;
+-  }
+-  return kNotFound;
++  // The index holds cacheable old chunks only, so a hit satisfies
++  // PaintChunk::Matches; >= old_index preserves the previous linear scan's
++  // forward-only semantics (and makes a double match impossible: old_index
++  // advances past every returned index).
++  auto it = old_chunk_index_map.find(new_chunk.id.AsHashKey());
++  if (it == old_chunk_index_map.end() || it->value < old_index)
++    return kNotFound;
++  return it->value;
+ }
+ 
+ PaintInvalidationReason RasterInvalidator::ChunkPropertiesChanged(
+@@ -203,6 +207,16 @@ void RasterInvalidator::GenerateRasterInvalidations(
+   old_chunks_matched.resize(old_paint_chunks_info_.size());
+   wtf_size_t old_index = 0;
+ 
++  // Index the old chunks by id once (O(old)), so the matching below is
++  // O(old + new) instead of O(old * new) under chunk-id churn. Duplicate ids
++  // keep the first (smallest) index — see MatchNewChunkToOldChunk.
++  OldChunkIndexMap old_chunk_index_map;
++  for (wtf_size_t i = 0; i < old_paint_chunks_info_.size(); ++i) {
++    const PaintChunk& old_chunk = GetOldChunk(i);
++    if (old_chunk.is_cacheable)
++      old_chunk_index_map.insert(old_chunk.id.AsHashKey(), i);
++  }
++
+   const float absolute_translation_tolerance = 1e-2f;
+   const float other_transform_tolerance = 1e-4f;
+ 
+@@ -212,7 +226,8 @@ void RasterInvalidator::GenerateRasterInvalidations(
+     }
+ 
+     const auto& new_chunk = *it;
+-    auto matched_old_index = MatchNewChunkToOldChunk(new_chunk, old_index);
++    auto matched_old_index =
++        MatchNewChunkToOldChunk(new_chunk, old_index, old_chunk_index_map);
+     if (matched_old_index == kNotFound) {
+       // The new chunk doesn't match any old chunk.
+       mapper.SwitchToChunk(new_chunk);
+diff --git a/third_party/blink/renderer/platform/graphics/paint/raster_invalidator.h b/third_party/blink/renderer/platform/graphics/paint/raster_invalidator.h
+index a6f1b97..8f87fab 100644
+--- a/third_party/blink/renderer/platform/graphics/paint/raster_invalidator.h
++++ b/third_party/blink/renderer/platform/graphics/paint/raster_invalidator.h
+@@ -14,6 +14,7 @@
+ #include "third_party/blink/renderer/platform/graphics/paint/paint_chunk_subset.h"
+ #include "third_party/blink/renderer/platform/graphics/paint/raster_invalidation_tracking.h"
+ #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
++#include "third_party/blink/renderer/platform/wtf/hash_map.h"
+ #include "third_party/blink/renderer/platform/wtf/vector.h"
+ #include "ui/gfx/geometry/rect.h"
+ #include "ui/gfx/geometry/rect_conversions.h"
+@@ -127,8 +128,19 @@ class PLATFORM_EXPORT RasterInvalidator
+                                    Vector<PaintChunkInfo>& new_chunks_info);
+ 
+   ALWAYS_INLINE const PaintChunk& GetOldChunk(wtf_size_t index) const;
+-  ALWAYS_INLINE wtf_size_t MatchNewChunkToOldChunk(const PaintChunk& new_chunk,
+-                                                   wtf_size_t old_index) const;
++  // miniblink host fix: old chunks indexed by id, so each new chunk matches in
++  // O(1) instead of a forward linear scan over all old chunks — under heavy
++  // chunk-id churn (e.g. lifecycle updates while a document loads) the scan
++  // degenerated to O(old * new). Semantics preserved: forward-only matching
++  // (only indices >= |old_index| match), CanMatchOldChunk/is_cacheable rules
++  // unchanged. Duplicate cacheable ids (a DCHECKed-invalid state) keep the
++  // FIRST index; a lookup landing before |old_index| then reports kNotFound,
++  // which only over-invalidates — never a wrong match.
++  using OldChunkIndexMap = HashMap<DisplayItem::Id::HashKey, wtf_size_t>;
++  ALWAYS_INLINE wtf_size_t
++  MatchNewChunkToOldChunk(const PaintChunk& new_chunk,
++                          wtf_size_t old_index,
++                          const OldChunkIndexMap& old_chunk_index_map) const;
+ 
+   ALWAYS_INLINE void IncrementallyInvalidateChunk(
+       const PaintChunkInfo& old_chunk_info,

@@ -46,16 +46,6 @@ class MbDamageTracker : public blink::RasterInvalidator::Callback {
   // blink's invalidation cannot see).
   void AddDamage(const gfx::Rect& rect);
 
-  // Skip this paint cycle's diff and report `full_view` damage instead. For
-  // cycles where diffing cannot pay: a LOADING document rewrites the artifact
-  // wholesale every pump, which degenerates the chunk matching to
-  // O(old x new) (nothing matches) only to conclude "everything changed" —
-  // on a large page that turns a synchronous load into seconds of stall.
-  // Resets the diff baseline (ClearOldStates empties the invalidator's layer
-  // bounds), so the next real OnNonCompositedPaint takes the cheap
-  // empty-bounds path and reports one full-layer damage to re-anchor.
-  void SkipCycle(const gfx::Rect& full_view);
-
   // The damage accumulated since the last Take, cleared for the next frame.
   // Logical px, viewport origin, NOT clamped to the view bounds.
   gfx::Rect TakeDamage();
@@ -66,6 +56,10 @@ class MbDamageTracker : public blink::RasterInvalidator::Callback {
 
   blink::Persistent<blink::RasterInvalidator> invalidator_;
   gfx::Rect pending_;
+  // Identity of the artifact the invalidator's baseline anchors to (null =
+  // baseline cleared). Compared, never dereferenced; the object is pinned by
+  // the invalidator's traced old-artifact reference, so it cannot alias.
+  const blink::PaintArtifact* last_artifact_ = nullptr;
 };
 
 }  // namespace mb
