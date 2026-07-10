@@ -117,6 +117,7 @@ try {
 if (-not $NoStage) {
   $dest    = Join-Path $Chromium 'third_party\blink\renderer\miniblink_host'
   $mb2dest = Join-Path $Chromium 'third_party\blink\renderer\miniblink2'
+  $compatdst = Join-Path $Chromium 'third_party\blink\renderer\compat'
   $curldst = Join-Path $Chromium 'third_party\blink\renderer\miniblink2_curl'
   Write-Host "==> staging host + miniblink2 API sources -> $dest"
   # robocopy /MIR = rsync -a --delete (mtimes preserved -> ninja stays incremental).
@@ -125,6 +126,11 @@ if (-not $NoStage) {
   if ($LASTEXITCODE -ge 8) { throw "robocopy miniblink_host failed ($LASTEXITCODE)" }
   & robocopy (Join-Path $Here 'src\miniblink2') $mb2dest /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
   if ($LASTEXITCODE -ge 8) { throw "robocopy miniblink2 failed ($LASTEXITCODE)" }
+  # src\compat: the library's INTERNAL platform-abstraction layer (mac/win socket
+  # compat + native-input helpers). Staged next to the host sources so host code
+  # includes it as "compat/<hdr>"; never part of the public SDK.
+  & robocopy (Join-Path $Here 'src\compat') $compatdst /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+  if ($LASTEXITCODE -ge 8) { throw "robocopy compat failed ($LASTEXITCODE)" }
   # Vendored curl: shared headers + the WINDOWS lib dir (Schannel DLL + import lib).
   $curlwin = Join-Path $Here 'third_party\curl\win\lib'
   if (-not (Test-Path (Join-Path $curlwin 'libcurl_imp.lib'))) {
