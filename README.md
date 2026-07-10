@@ -143,7 +143,7 @@ ships a 53 MB stripped dylib / 134 MB `.a`; this is the full 2026 engine at ~1.7
 those sizes (the archive ratio is worse because an archive can't be dead-stripped — it
 must carry every object a consumer might pull).
 Per-component size attribution for further pruning: `nm -n <out>/libminiblink2.dylib |
-scripts/sizemap.py` (see `BACKLOG.md` §E for the measured, deliberately-not-cut leftovers).
+scripts/sizemap.py` (see `docs/design/BACKLOG.md` §E for the measured, deliberately-not-cut leftovers).
 
 The first build of a mode is a full engine compile (slow); re-runs are incremental
 (staging uses rsync, builds are lock-serialized, flag flips rebuild only what changed).
@@ -489,8 +489,9 @@ executes the full test battery (490+ checks, green on macOS and Windows):
 
 `scripts/build-lib.sh` (the SDK build) uses a separate non-component out dir
 (`out/mono-release`), so the dev and ship builds don't interfere.
-`IMPROVEMENT.md` is the API design log — every embedder-facing surface traces to a
-real integration incident recorded there.
+`docs/design/IMPROVEMENT.md` is the API design log — every embedder-facing surface
+traces to a real integration incident recorded there — and `docs/design/BACKLOG.md`
+is the companion "what is NOT done, and why" ledger.
 
 ## Credits
 
