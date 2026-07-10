@@ -17,6 +17,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
@@ -138,6 +139,11 @@ struct MbRequestMutation {
   std::string set_url;      // empty = leave the fetch URL alone
   std::string add_headers;  // "Name: Value" lines to add/override (may be "")
   bool block = false;       // true = fail with ERR_BLOCKED_BY_CLIENT
+  // TLS public-key pin(s) for this request, curl CURLOPT_PINNEDPUBLICKEY
+  // syntax ("sha256//BASE64[;sha256//BASE64...]") — the transfer fails with
+  // CURLE_SSL_PINNEDPUBKEYNOTMATCH (90) unless the server's leaf public key
+  // matches. Empty = no pinning (IMPROVEMENT.md item 44).
+  std::string pin_pubkey;
 };
 using MbRequestMutateHook = std::function<void(
     const std::string& url, const std::string& method,
@@ -260,9 +266,33 @@ bool MbFollowRedirects();
 // (returns false). Process-wide, like the mock registry.
 bool MbSetImageSource(const std::string& id, const void* bgra, int width,
                       int height, int stride);
+// ZERO-COPY registration (item 43): the engine BORROWS the caller's BGRA
+// buffer — no copy, no eager encode; the PNG is produced lazily on the first
+// fetch and cached. The buffer must stay valid and unchanged until `release`
+// fires: on replacement (either registration variant) or MbRemoveImageSource.
+// Returns false (and does NOT take the buffer — no release fires) on an
+// invalid id/args.
+using MbImageSourceRelease = void (*)(void* release_ud, const void* bgra);
+bool MbSetImageSourceBuffer(const std::string& id, const void* bgra, int width,
+                            int height, int stride,
+                            MbImageSourceRelease release, void* release_ud);
 void MbRemoveImageSource(const std::string& id);
 // True + the stored PNG when `url` names a registered image source.
 bool MbFindImageSource(const std::string& url, std::string* out_png);
+
+// ---- Custom URL schemes (item 48) -------------------------------------------
+// Register `scheme` (e.g. "app") as a host-served scheme: parsed as a STANDARD
+// url (host/path/origin semantics), treated as secure and fetch-capable by
+// blink, and served exclusively through the interception stack (static mocks,
+// per-view + process dynamic mock callbacks) — never the network. Must be
+// called BEFORE the engine initializes (url/blink scheme registries are
+// consulted at bring-up); MbApplyCustomSchemes is the runtime's bring-up hook.
+// MbIsCustomScheme answers the loader's "is this fetchable?" question.
+void MbRegisterCustomScheme(const std::string& scheme);
+bool MbIsCustomScheme(const std::string& scheme);
+// The registered schemes, for the runtime to install into url:: / blink
+// registries during initialization.
+const std::vector<std::string>& MbCustomSchemes();
 
 // ---- Streaming download transport (the mb download lifecycle) --------------
 // A chunk-streaming HTTP(S) GET on a detached worker thread — the MbSseStream

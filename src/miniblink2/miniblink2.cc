@@ -19,6 +19,7 @@
 #include "miniblink_host/frame/mb_local_frame_host.h"
 #include "miniblink_host/frame/mb_opfs.h"
 #include "build/build_config.h"
+#include "miniblink_host/devtools/mb_devtools_server.h"
 #include "miniblink_host/frame/mb_notification_service.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/platform/mb_platform.h"
@@ -181,6 +182,11 @@ int mbInitialize(void) {
   return mb::MbRuntime::Initialize() ? 1 : 0;
 }
 
+void mbRegisterCustomScheme(const char* scheme) {
+  if (scheme && *scheme)
+    mb::MbRegisterCustomScheme(scheme);
+}
+
 void mbShutdown(void) {
   mb::MbRuntime::Shutdown();
 }
@@ -221,6 +227,80 @@ void mbLogMemoryUsage(void) {
     rt->LogMemoryUsage();
 }
 
+void mbSetImageCacheSize(size_t bytes) {
+  if (auto* rt = mb::MbRuntime::Get())
+    rt->SetImageCacheSize(bytes);
+}
+
+void mbSetFontCacheSize(size_t bytes) {
+  if (auto* rt = mb::MbRuntime::Get())
+    rt->SetFontCacheSize(bytes);
+}
+
+void mbSetJsHeapLimit(size_t bytes) {
+  mb::MbRuntime::SetJsHeapLimit(bytes);
+}
+
+// ---- Pixel-format utilities (pure buffer math; no engine state) --------------
+namespace {
+inline int MbEffectiveStride(int width, int stride) {
+  return stride > 0 ? stride : width * 4;
+}
+}  // namespace
+
+void mbConvertToStraightAlpha(void* pixels, int width, int height, int stride) {
+  if (!pixels || width <= 0 || height <= 0)
+    return;
+  const int row_bytes = MbEffectiveStride(width, stride);
+  for (int y = 0; y < height; ++y) {
+    uint8_t* row = static_cast<uint8_t*>(pixels) + static_cast<size_t>(y) * row_bytes;
+    for (int x = 0; x < width; ++x) {
+      uint8_t* px = row + x * 4;
+      const unsigned a = px[3];
+      if (a == 0 || a == 255)
+        continue;
+      // straight = premul * 255 / a, rounded; premul channels never exceed a.
+      px[0] = static_cast<uint8_t>((px[0] * 255u + a / 2) / a);
+      px[1] = static_cast<uint8_t>((px[1] * 255u + a / 2) / a);
+      px[2] = static_cast<uint8_t>((px[2] * 255u + a / 2) / a);
+    }
+  }
+}
+
+void mbConvertToPremultipliedAlpha(void* pixels, int width, int height,
+                                   int stride) {
+  if (!pixels || width <= 0 || height <= 0)
+    return;
+  const int row_bytes = MbEffectiveStride(width, stride);
+  for (int y = 0; y < height; ++y) {
+    uint8_t* row = static_cast<uint8_t*>(pixels) + static_cast<size_t>(y) * row_bytes;
+    for (int x = 0; x < width; ++x) {
+      uint8_t* px = row + x * 4;
+      const unsigned a = px[3];
+      if (a == 255)
+        continue;
+      px[0] = static_cast<uint8_t>((px[0] * a + 127) / 255);
+      px[1] = static_cast<uint8_t>((px[1] * a + 127) / 255);
+      px[2] = static_cast<uint8_t>((px[2] * a + 127) / 255);
+    }
+  }
+}
+
+void mbSwapRedBlueChannels(void* pixels, int width, int height, int stride) {
+  if (!pixels || width <= 0 || height <= 0)
+    return;
+  const int row_bytes = MbEffectiveStride(width, stride);
+  for (int y = 0; y < height; ++y) {
+    uint8_t* row = static_cast<uint8_t*>(pixels) + static_cast<size_t>(y) * row_bytes;
+    for (int x = 0; x < width; ++x) {
+      uint8_t* px = row + x * 4;
+      const uint8_t b = px[0];
+      px[0] = px[2];
+      px[2] = b;
+    }
+  }
+}
+
 void mbUpdateAt(double frame_time_seconds) {
   mb::MbSetHostFrameTime(frame_time_seconds);
   mbUpdate();
@@ -253,6 +333,20 @@ void mbDevToolsDetach(mbView* v) {
   EngineScope engine_scope;
   if (v && v->impl)
     v->impl->DetachDevTools();
+}
+
+int mbDevToolsStartServer(int port) {
+  EngineScope engine_scope;
+  return mb::MbDevToolsServerStart(port) ? 1 : 0;
+}
+
+void mbDevToolsStopServer(void) {
+  EngineScope engine_scope;
+  mb::MbDevToolsServerStop();
+}
+
+int mbDevToolsServerPort(void) {
+  return mb::MbDevToolsServerPort();
 }
 
 void mbOnSelectPopup(mbView* v, mbSelectPopupCallback cb, void* userdata) {
@@ -1524,6 +1618,11 @@ void mbRequestBlock(mbRequest* r) {
     r->mutation->block = true;
 }
 
+void mbRequestPinPublicKey(mbRequest* r, const char* pins) {
+  if (r && r->mutation)
+    r->mutation->pin_pubkey = pins ? pins : "";
+}
+
 void mbSetRequestHook(mbRequestHookCallback cb, void* userdata) {
   mb::MbSetRequestHook({});  // one slot across the three request hooks
   if (cb) {
@@ -1679,6 +1778,20 @@ void mbRegisterImageSource(const char* id, const void* bgra, int width,
 void mbUnregisterImageSource(const char* id) {
   if (id)
     mb::MbRemoveImageSource(id);
+}
+
+int mbRegisterImageSourceBuffer(const char* id, const void* bgra, int width,
+                                int height, int stride,
+                                mbImageSourceReleaseCallback release,
+                                void* userdata) {
+  EngineScope engine_scope;  // the update broadcast runs page JS
+  if (!id || !bgra)
+    return 0;
+  if (!mb::MbSetImageSourceBuffer(id, bgra, width, height, stride, release,
+                                  userdata))
+    return 0;  // refused: the engine did NOT take the buffer
+  mb::MbBroadcastImageSourceUpdate(id);
+  return 1;
 }
 
 // Dynamic request mock: a callback decides per-URL whether to serve a COMPUTED response
@@ -1871,6 +1984,7 @@ void mbOnConsoleMessage(mbView* v, mbConsoleCallback cb, void* userdata) {
     v->impl->SetConsoleCallback(
         [v, cb, userdata](const std::string& level, const std::string& message,
                           const std::string& /*source*/, int /*line*/,
+                          int /*column*/, const std::string& /*category*/,
                           const std::string& /*stack*/) {
           cb(v, userdata, level.c_str(), message.c_str());
         });
@@ -1884,10 +1998,35 @@ void mbOnConsoleMessageEx(mbView* v, mbConsoleCallbackEx cb, void* userdata) {
   if (cb)
     v->impl->SetConsoleCallback(
         [v, cb, userdata](const std::string& level, const std::string& message,
-                          const std::string& source, int line,
+                          const std::string& source, int line, int /*column*/,
+                          const std::string& /*category*/,
                           const std::string& stack) {
           cb(v, userdata, level.c_str(), message.c_str(), source.c_str(), line,
              stack.c_str());
+        });
+  else
+    v->impl->SetConsoleCallback({});
+}
+
+void mbOnConsoleMessage2(mbView* v, mbConsoleCallback2 cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetConsoleCallback(
+        [v, cb, userdata](const std::string& level, const std::string& message,
+                          const std::string& source, int line, int column,
+                          const std::string& category,
+                          const std::string& stack) {
+          mbConsoleMessageInfo info;
+          info.struct_size = static_cast<int>(sizeof(mbConsoleMessageInfo));
+          info.level = level.c_str();
+          info.message = message.c_str();
+          info.source = source.c_str();
+          info.line = line;
+          info.column = column;
+          info.category = category.c_str();
+          info.stack = stack.c_str();
+          cb(v, userdata, &info);
         });
   else
     v->impl->SetConsoleCallback({});
@@ -2154,6 +2293,40 @@ int mbEvalJSInFrame(mbView* v, int frame_index, const char* utf8_script, char* o
   if (!v || !v->impl)
     return 0;
   std::string result = v->impl->EvalInFrame(frame_index, utf8_script);
+  CopyToBuffer(result, out, out_cap);
+  return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
+}
+
+void mbOnFrameLoadEvent(mbView* v, mbFrameLoadCallback cb, void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetFrameLoadCallback(
+        [v, cb, userdata](uint64_t frame_id, bool is_main_frame, int phase,
+                          const std::string& url) {
+          cb(v, userdata, frame_id, is_main_frame ? 1 : 0, phase, url.c_str());
+        });
+  else
+    v->impl->SetFrameLoadCallback({});
+}
+
+int mbGetFrameIds(mbView* v, uint64_t* out, int cap) {
+  if (!v || !v->impl)
+    return 0;
+  std::vector<uint64_t> ids = v->impl->GetFrameIds();
+  if (out) {
+    const int n = std::min<int>(cap, static_cast<int>(ids.size()));
+    for (int i = 0; i < n; ++i)
+      out[i] = ids[i];
+  }
+  return static_cast<int>(std::min<size_t>(ids.size(), INT_MAX));
+}
+
+int mbEvalJSInFrameById(mbView* v, uint64_t frame_id, const char* utf8_script,
+                        char* out, int out_cap) {
+  if (!v || !v->impl)
+    return 0;
+  std::string result = v->impl->EvalInFrameById(frame_id, utf8_script);
   CopyToBuffer(result, out, out_cap);
   return static_cast<int>(std::min<size_t>(result.size(), INT_MAX));
 }

@@ -109,6 +109,18 @@ MB_EXPORT const char* mbChromiumVersion(void);
 MB_EXPORT int  mbInitialize(void);
 MB_EXPORT void mbShutdown(void);
 
+// Register a CUSTOM URL SCHEME (e.g. "app") the host serves itself: parsed as
+// a STANDARD URL (host/path/origin semantics, relative resolution), treated as
+// a secure context, fetch()/XHR-capable — and served EXCLUSIVELY through the
+// interception stack (mbMockResponse, mbSetRequestMockCallback,
+// mbOnRequestMock), never the network. The missing piece of a virtual-
+// filesystem story: pages live at app://assets/index.html and every request
+// under it lands in your mock callback. Unmocked custom-scheme requests fail
+// cleanly. MUST be called BEFORE mbInitialize (scheme registries are consulted
+// at engine bring-up); scheme is [A-Za-z][A-Za-z0-9+.-]*, case-insensitive.
+// Cross-origin use (fetching app:// from an https page) is not supported.
+MB_EXPORT void mbRegisterCustomScheme(const char* scheme);
+
 // Run pending main-thread tasks (loading, parsing, lifecycle). Call between
 // load and paint, and in the host's event loop.
 MB_EXPORT void mbPumpMessages(void);
@@ -169,6 +181,23 @@ MB_EXPORT void mbPurgeMemory(void);
 // Log a coarse memory summary (V8 heap, malloc footprint) to stderr —
 // before/after bookends for mbPurgeMemory.
 MB_EXPORT void mbLogMemoryUsage(void);
+
+// ---- Memory budget knobs -----------------------------------------------------
+// mbPurgeMemory shrinks AFTER the fact; these CAP the steady-state footprint —
+// for hosts (menu-bar apps, kiosks) that pick an embedded engine precisely for
+// its envelope. All process-wide.
+// Cap the decoded-image cache (the biggest steady-state consumer on image-heavy
+// pages). 0 restores the engine default (32 MB). Call after mbInitialize.
+MB_EXPORT void mbSetImageCacheSize(size_t bytes);
+// Cap the rasterized-glyph (font) cache. 0 restores the engine default (2 MB).
+// Call after mbInitialize.
+MB_EXPORT void mbSetFontCacheSize(size_t bytes);
+// Cap the JS heap (V8 old generation) of every isolate. MUST be called BEFORE
+// mbInitialize — it is an isolate-creation parameter; afterwards the call is
+// refused with a logged warning. 0 = engine default (sized from machine RAM).
+// A page whose live JS exceeds the cap gets a JS out-of-memory, not unbounded
+// growth.
+MB_EXPORT void mbSetJsHeapLimit(size_t bytes);
 
 // Host log sink: route the engine's diagnostic log (base logging — LOG(ERROR)
 // and friends, including mbLogMemoryUsage's summary) to a callback instead of
@@ -644,6 +673,25 @@ MB_EXPORT int  mbDevToolsAttach(mbView*, mbDevToolsMessageCallback, void* userda
 MB_EXPORT void mbDevToolsSend(mbView*, const char* json, int len);
 MB_EXPORT void mbDevToolsDetach(mbView*);
 
+// In-engine DevTools endpoint — the one-call alternative to bridging the raw
+// mbDevToolsAttach pipe to a socket yourself (item 41). Opens a LOOPBACK-ONLY
+// (127.0.0.1) HTTP+WebSocket CDP server on `port`: serves /json/version and
+// /json/list (one target per live view) and a WebSocket per view bridging to
+// the SAME per-view session mbDevToolsAttach uses (so one client per view — a
+// view already attached via mbDevToolsAttach or another socket refuses the new
+// one). Point Chrome at the printed devtoolsFrontendUrl, or
+// devtools://devtools/bundled/inspector.html?ws=127.0.0.1:<port>/devtools/page/<id>.
+// Call AFTER mbInitialize, on the engine thread; the host must keep pumping
+// mbUpdate for CDP messages to flow (the bridge rides the task queue). OFF
+// unless started; the embedder WebSocket bridge remains fully supported.
+// Returns 1 on success (or already running on `port`), 0 on bind/listen
+// failure or on a non-POSIX platform (macOS/Linux only). mbDevToolsStopServer
+// closes all clients + the listener; mbDevToolsServerPort returns the live
+// port, 0 when stopped.
+MB_EXPORT int  mbDevToolsStartServer(int port);
+MB_EXPORT void mbDevToolsStopServer(void);
+MB_EXPORT int  mbDevToolsServerPort(void);
+
 // Debugger pause/resume notification. Fires with paused=1 when the inspector
 // parks the main thread at a breakpoint (Debugger.pause, a `debugger`
 // statement, an exception with pause-on-exceptions) and paused=0 on resume.
@@ -1067,6 +1115,13 @@ MB_EXPORT const char* mbRequestBody(mbRequest*, int* out_len);
 MB_EXPORT void mbRequestSetUrl(mbRequest*, const char* url);
 MB_EXPORT void mbRequestSetHeader(mbRequest*, const char* name, const char* value);
 MB_EXPORT void mbRequestBlock(mbRequest*);
+// TLS public-key pinning for THIS request (the secure counterpart of
+// mbSetIgnoreCertErrors): the fetch fails with a curl-domain error
+// (CURLE_SSL_PINNEDPUBKEYNOTMATCH, code 90) unless the server's leaf public
+// key matches. `pins` is curl CURLOPT_PINNEDPUBLICKEY syntax, passed through
+// verbatim: "sha256//BASE64" hashes, several separated by ";". Applies to the
+// whole redirect chain of the fetch. NULL/"" = no pin (the default).
+MB_EXPORT void mbRequestPinPublicKey(mbRequest*, const char* pins);
 typedef void (*mbRequestHookCallback)(mbRequest*, void* userdata);
 MB_EXPORT void mbSetRequestHook(mbRequestHookCallback cb, void* userdata);
 
@@ -1148,6 +1203,20 @@ MB_EXPORT void mbClearMocks(void);
 MB_EXPORT void mbRegisterImageSource(const char* id, const void* bgra,
                                      int width, int height, int stride);
 MB_EXPORT void mbUnregisterImageSource(const char* id);
+
+// ZERO-COPY image source: like mbRegisterImageSource but the engine BORROWS
+// the caller's pixels — no copy, no eager PNG encode; the PNG is produced
+// lazily on the FIRST fetch and cached. For high-rate/large sources where the
+// copying variant's per-registration encode is the bottleneck. The buffer
+// must stay valid and UNCHANGED until `release` fires: when the id is
+// replaced (either register variant) or unregistered. Returns 1 on success;
+// 0 when refused (bad id/args) — then the engine did NOT take the buffer and
+// `release` will never fire. Fires the same mbimagesourceupdate event.
+typedef void (*mbImageSourceReleaseCallback)(void* userdata, const void* bgra);
+MB_EXPORT int mbRegisterImageSourceBuffer(const char* id, const void* bgra,
+                                          int width, int height, int stride,
+                                          mbImageSourceReleaseCallback release,
+                                          void* userdata);
 
 // Dynamic request mock — like mbMockResponse but DECIDED per-request by a callback, for
 // URLs you cannot pre-register as a fixed substring (e.g. compute a JSON body from the
@@ -1301,6 +1370,30 @@ typedef void (*mbConsoleCallbackEx)(mbView*, void* userdata, const char* level,
                                     int line, const char* stack);
 MB_EXPORT void mbOnConsoleMessageEx(mbView*, mbConsoleCallbackEx cb, void* userdata);
 
+// STRUCTURED console push — the terminal shape (a struct_size-versioned struct,
+// so new fields never need another Ex). Adds over mbOnConsoleMessageEx:
+//   column     the 1-based column within `line` (0 when unknown)
+//   category   blink's message-source category: which subsystem emitted it —
+//              "javascript" (exceptions), "console-api" (console.*),
+//              "network", "security", "rendering", "storage", "deprecation",
+//              "violation", "intervention", "worker", "xml", "other"
+// String pointers are valid only during the callback. ONE SLOT with
+// mbOnConsoleMessage/Ex (setting any of the three replaces the others).
+// NULL clears.
+typedef struct mbConsoleMessageInfo {
+  int struct_size;      // = sizeof(mbConsoleMessageInfo), ABI versioning
+  const char* level;    // "verbose" / "log" / "warn" / "error"
+  const char* message;  // UTF-8 message text
+  const char* source;   // source URL ("" when unknown)
+  int line;             // 1-based line (0 unknown)
+  int column;           // 1-based column (0 unknown)
+  const char* category; // source category, see above
+  const char* stack;    // JS stack ("" when unavailable)
+} mbConsoleMessageInfo;
+typedef void (*mbConsoleCallback2)(mbView*, void* userdata,
+                                   const mbConsoleMessageInfo* info);
+MB_EXPORT void mbOnConsoleMessage2(mbView*, mbConsoleCallback2 cb, void* userdata);
+
 // Evaluate JS and write its result (coerced to string) into `out` (NUL-terminated,
 // up to out_cap bytes). Returns the full result length in bytes (may exceed out_cap-1,
 // indicating truncation). Lets the host read data back from the page (e.g. document.title).
@@ -1315,6 +1408,39 @@ MB_EXPORT int mbEvalJS(mbView*, const char* utf8_script, char* out, int out_cap)
 MB_EXPORT int mbGetFrameCount(mbView*);
 MB_EXPORT int mbEvalJSInFrame(mbView*, int frame_index, const char* utf8_script,
                               char* out, int out_cap);
+
+// ---- Per-frame load lifecycle + stable frame IDs ------------------------------
+// The frame-aware sibling of the main-frame load callbacks: fires for EVERY
+// local frame (main document AND iframes, nested included) at each phase, with
+// the frame's STABLE id — constant for the frame's whole life, never reused
+// within a view — so iframe automation doesn't race the index-based APIs when
+// the page mutates its frame set. `url` is the frame's document URL, valid
+// only during the call. The main-frame-only callbacks (mbOnBeginLoading /
+// mbOnDOMContentLoaded / mbOnLoadFinish / mbOnFailLoading*) are unchanged and
+// remain the simple path. MB_FRAME_LOAD_FAIL currently reports top-level
+// failures only (is_main_frame=1). NULL clears.
+#define MB_FRAME_LOAD_BEGIN     0  /* navigation committed in the frame      */
+#define MB_FRAME_LOAD_DOM_READY 1  /* the frame's DOMContentLoaded dispatched */
+#define MB_FRAME_LOAD_FINISH    2  /* the frame's load event fired            */
+#define MB_FRAME_LOAD_FAIL      3  /* top-level load failed (main frame only) */
+typedef void (*mbFrameLoadCallback)(mbView*, void* userdata, uint64_t frame_id,
+                                    int is_main_frame, int phase,
+                                    const char* url);
+MB_EXPORT void mbOnFrameLoadEvent(mbView*, mbFrameLoadCallback, void* userdata);
+
+// Write the stable ids of all live local frames into `out` (up to `cap`):
+// main frame first, then depth-first document order — NESTED frames included,
+// unlike mbGetFrameCount's direct-children contract. Returns the total number
+// of live frames (may exceed cap; size first with out=NULL/cap=0).
+MB_EXPORT int mbGetFrameIds(mbView*, uint64_t* out, int cap);
+
+// mbEvalJSInFrame keyed by STABLE frame id (from mbOnFrameLoadEvent /
+// mbGetFrameIds) instead of a racy document-order index; reaches nested
+// frames too. Same out-buffer contract as mbEvalJS; "" for an unknown or
+// dead id.
+MB_EXPORT int mbEvalJSInFrameById(mbView*, uint64_t frame_id,
+                                  const char* utf8_script, char* out,
+                                  int out_cap);
 
 // Like mbEvalJS, but ALSO reports the JS typeof the result via `out_type` (one of
 // "number"/"string"/"boolean"/"object"/"function"/"undefined"/"array"/"null"),
@@ -1385,6 +1511,24 @@ MB_EXPORT int mbViewGetDirtyRect(mbView*, int* x, int* y, int* w, int* h);
 // comes from damage tracking or from the paint itself. 0 (default) restores
 // normal dirty gating.
 MB_EXPORT void mbSetForceRepaint(mbView*, int enabled);
+
+// ---- Pixel-format utilities ----------------------------------------------------
+// The conversions the paint contract implies (BGRA, PREMULTIPLIED, sRGB — see
+// the header top), so hosts stop hand-rolling them. All operate in place on a
+// width x height buffer with `stride` bytes per row (0 = width*4); no view or
+// engine state needed, callable before mbInitialize, any thread.
+// Premultiplied -> straight alpha (for consumers that need unassociated
+// alpha; note PNG exports already do this internally).
+MB_EXPORT void mbConvertToStraightAlpha(void* pixels, int width, int height,
+                                        int stride);
+// Straight -> premultiplied alpha (before handing host-generated pixels to
+// mbRegisterImageSource*, which expect premultiplied).
+MB_EXPORT void mbConvertToPremultipliedAlpha(void* pixels, int width,
+                                             int height, int stride);
+// Swap the R and B channels in place: BGRA <-> RGBA, for RGBA-only consumers
+// (OpenGL textures, image libraries).
+MB_EXPORT void mbSwapRedBlueChannels(void* pixels, int width, int height,
+                                     int stride);
 #if defined(__cplusplus)
 }  // extern "C"
 #endif

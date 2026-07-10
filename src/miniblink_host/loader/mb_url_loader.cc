@@ -219,8 +219,14 @@ curl_slist* ConfigureCurlEasy(CURL* curl,
                               bool follow_redirects,
                               std::string* header_block,
                               std::string* body,
-                              const std::string& cookie_session_key) {
+                              const std::string& cookie_session_key,
+                              const std::string& pinned_pubkey = std::string()) {
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  // Per-request TLS public-key pinning (mbRequestPinPublicKey, item 44):
+  // curl-native "sha256//BASE64[;...]" pin syntax passes through verbatim; a
+  // mismatched server key fails the transfer with CURLE_SSL_PINNEDPUBKEYNOTMATCH.
+  if (!pinned_pubkey.empty())
+    curl_easy_setopt(curl, CURLOPT_PINNEDPUBLICKEY, pinned_pubkey.c_str());
   // Restrict to http(s) on BOTH the initial request and any libcurl-followed
   // redirect, so a "302 Location: file:///etc/passwd" (or other non-web scheme)
   // can never reach curl's FILE/SCP/etc. handlers — a local-file read / SSRF.
@@ -341,7 +347,8 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
                bool follow_redirects = true,
                std::string* out_error = nullptr,
                int* out_error_code = nullptr,
-               const void* host_ctx = nullptr) {
+               const void* host_ctx = nullptr,
+               const std::string& pinned_pubkey = std::string()) {
   CURL* curl = curl_easy_init();
   if (!curl)
     return false;
@@ -349,7 +356,7 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
   curl_slist* header_list = ConfigureCurlEasy(
       curl, url, user_agent, extra_headers, post_body, post_content_type,
       http_method, follow_redirects, &header_block, body,
-      mb::MbLoaderSessionKeyFor(host_ctx));
+      mb::MbLoaderSessionKeyFor(host_ctx), pinned_pubkey);
   // Re-derive the effective method (same rule ConfigureCurlEasy uses) for the retry
   // decision below — only SAFE methods are retried.
   std::string method = http_method;
@@ -449,6 +456,7 @@ class MbCurlReactor {
   struct Request {
     std::string url, method, body, post_content_type, user_agent, extra_headers;
     std::string cookie_session_key;  // the submitting view's session jar
+    std::string pin_pubkey;  // per-request TLS public-key pin (may be empty)
   };
 
   static MbCurlReactor* Get() {
@@ -544,7 +552,7 @@ class MbCurlReactor {
             job->easy, p->req.url, p->req.user_agent, p->req.extra_headers,
             p->req.body, p->req.post_content_type, p->req.method,
             /*follow_redirects=*/false, &job->header_block, &job->body,
-            p->req.cookie_session_key);
+            p->req.cookie_session_key, p->req.pin_pubkey);
         curl_easy_setopt(job->easy, CURLOPT_PRIVATE, job.get());
         curl_multi_add_handle(lane->multi, job->easy);
         lane->active.push_back(std::move(job));
@@ -1206,18 +1214,27 @@ void MbSetRequestMockHookForContext(const void* ctx, MbRequestMockHook hook) {
 }
 
 namespace {
-// Host image sources: id -> PNG bytes (see MbSetImageSource). Main thread.
-std::map<std::string, std::string>& ImageSources() {
-  static std::map<std::string, std::string>* sources =
-      new std::map<std::string, std::string>();
+// Host image sources (see MbSetImageSource / MbSetImageSourceBuffer). An entry
+// is either eagerly-encoded PNG bytes (the copying registration) or a BORROWED
+// caller pixel buffer encoded lazily on first fetch (the zero-copy
+// registration, item 43) — `png` empty + `borrowed` set means "not encoded
+// yet". Main thread only (MbFindMock's thread).
+struct ImageSourceEntry {
+  std::string png;                 // encoded bytes; empty until first fetch
+  const void* borrowed = nullptr;  // caller-owned BGRA (zero-copy variant)
+  int width = 0, height = 0, stride = 0;
+  MbImageSourceRelease release = nullptr;  // fired on replace/unregister
+  void* release_ud = nullptr;
+};
+std::map<std::string, ImageSourceEntry>& ImageSources() {
+  static std::map<std::string, ImageSourceEntry>* sources =
+      new std::map<std::string, ImageSourceEntry>();
   return *sources;
 }
 constexpr char kImageSourcePrefix[] = "https://mb-image.internal/";
-}  // namespace
 
-bool MbSetImageSource(const std::string& id, const void* bgra, int width,
-                      int height, int stride) {
-  if (id.empty() || !bgra || width <= 0 || height <= 0)
+bool ImageSourceIdValid(const std::string& id) {
+  if (id.empty())
     return false;
   for (char c : id) {
     const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
@@ -1225,8 +1242,13 @@ bool MbSetImageSource(const std::string& id, const void* bgra, int width,
     if (!ok)
       return false;  // the id embeds in URLs and page-visible events verbatim
   }
-  if (stride <= 0)
-    stride = width * 4;
+  return true;
+}
+
+// PNG-encode a BGRA buffer (blink needs a decodable image format; PNG is
+// lossless and keeps alpha). Shared by the eager and lazy paths.
+bool EncodeBgraPng(const void* bgra, int width, int height, int stride,
+                   std::string* out) {
   SkBitmap bitmap;
   if (!bitmap.installPixels(
           SkImageInfo::Make(width, height, kBGRA_8888_SkColorType,
@@ -1234,18 +1256,64 @@ bool MbSetImageSource(const std::string& id, const void* bgra, int width,
           const_cast<void*>(bgra), static_cast<size_t>(stride))) {
     return false;
   }
-  // Encode ONCE at registration (blink needs a decodable image format; PNG is
-  // lossless and keeps alpha). Serving is then a string copy per fetch.
   std::optional<std::vector<uint8_t>> png =
       gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, /*discard_transparency=*/false);
   if (!png)
     return false;
-  ImageSources()[id] = std::string(png->begin(), png->end());
+  out->assign(png->begin(), png->end());
+  return true;
+}
+
+// Erase `id`, firing the release callback if the entry borrowed caller pixels.
+void ReleaseImageSourceEntry(const std::string& id) {
+  auto it = ImageSources().find(id);
+  if (it == ImageSources().end())
+    return;
+  ImageSourceEntry old = std::move(it->second);
+  ImageSources().erase(it);
+  if (old.borrowed && old.release)
+    old.release(old.release_ud, old.borrowed);
+}
+}  // namespace
+
+bool MbSetImageSource(const std::string& id, const void* bgra, int width,
+                      int height, int stride) {
+  if (!ImageSourceIdValid(id) || !bgra || width <= 0 || height <= 0)
+    return false;
+  if (stride <= 0)
+    stride = width * 4;
+  // Encode ONCE at registration; the caller's buffer is free the moment this
+  // returns. Serving is then a string copy per fetch.
+  ImageSourceEntry entry;
+  if (!EncodeBgraPng(bgra, width, height, stride, &entry.png))
+    return false;
+  ReleaseImageSourceEntry(id);  // replacing a borrowed entry releases it
+  ImageSources()[id] = std::move(entry);
+  return true;
+}
+
+bool MbSetImageSourceBuffer(const std::string& id, const void* bgra, int width,
+                            int height, int stride,
+                            MbImageSourceRelease release, void* release_ud) {
+  if (!ImageSourceIdValid(id) || !bgra || width <= 0 || height <= 0)
+    return false;
+  // ZERO-COPY: borrow the caller's pixels (no copy, no eager encode); the PNG
+  // is produced lazily on first fetch and cached. The buffer must stay valid
+  // and unchanged until `release` fires (on replace or unregister).
+  ImageSourceEntry entry;
+  entry.borrowed = bgra;
+  entry.width = width;
+  entry.height = height;
+  entry.stride = stride > 0 ? stride : width * 4;
+  entry.release = release;
+  entry.release_ud = release_ud;
+  ReleaseImageSourceEntry(id);
+  ImageSources()[id] = std::move(entry);
   return true;
 }
 
 void MbRemoveImageSource(const std::string& id) {
-  ImageSources().erase(id);
+  ReleaseImageSourceEntry(id);
 }
 
 bool MbFindImageSource(const std::string& url, std::string* out_png) {
@@ -1256,9 +1324,54 @@ bool MbFindImageSource(const std::string& url, std::string* out_png) {
   auto it = ImageSources().find(id);
   if (it == ImageSources().end())
     return false;
+  ImageSourceEntry& entry = it->second;
+  if (entry.png.empty() && entry.borrowed) {
+    // Lazy first-fetch encode of a borrowed buffer (cached for later fetches).
+    if (!EncodeBgraPng(entry.borrowed, entry.width, entry.height, entry.stride,
+                       &entry.png))
+      return false;
+  }
   if (out_png)
-    *out_png = it->second;
+    *out_png = entry.png;
   return true;
+}
+
+// --- Custom URL schemes (item 48) --------------------------------------------
+// Host-served schemes ("app", ...): standard-parsed, secure, fetch-capable,
+// served exclusively through the interception stack. The list is set before
+// engine init and read-only afterwards, so no locking.
+namespace {
+std::vector<std::string>& CustomSchemes() {
+  static std::vector<std::string>* s = new std::vector<std::string>();
+  return *s;
+}
+}  // namespace
+
+void MbRegisterCustomScheme(const std::string& scheme) {
+  if (scheme.empty())
+    return;
+  std::string lower;
+  for (char c : scheme) {
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.'))
+      return;  // not a legal scheme token
+    lower.push_back(
+        static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+  }
+  if ((lower[0] >= '0' && lower[0] <= '9') || MbIsCustomScheme(lower))
+    return;  // schemes start with a letter; ignore duplicates
+  CustomSchemes().push_back(lower);
+}
+
+bool MbIsCustomScheme(const std::string& scheme) {
+  for (const std::string& s : CustomSchemes())
+    if (s == scheme)
+      return true;
+  return false;
+}
+
+const std::vector<std::string>& MbCustomSchemes() {
+  return CustomSchemes();
 }
 
 bool MbFindMock(const std::string& url, std::string* body,
@@ -1422,9 +1535,11 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
   if (out_error_code)
     *out_error_code = 0;
   // Mutable request hook (item 37) at the TOP-LEVEL entry, mirroring the
-  // subresource loader: may block, redirect the fetch, or add headers.
+  // subresource loader: may block, redirect the fetch, add headers, or pin
+  // the server's TLS public key (item 44).
   std::string fetch_spec = url_spec;
   std::string merged_headers = extra_headers;
+  std::string pin_pubkey;
   {
     const std::string method = !http_method.empty()
                                    ? http_method
@@ -1441,6 +1556,7 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
         fetch_spec = mutation.set_url;
       if (!mutation.add_headers.empty())
         MergeHeaderLines(&merged_headers, mutation.add_headers);
+      pin_pubkey = std::move(mutation.pin_pubkey);
     }
   }
   GURL url(fetch_spec);
@@ -1473,7 +1589,7 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
     return FetchHttp(fetch_spec, body, content_type, user_agent, merged_headers,
                      post_body, post_content_type, http_method, out_status,
                      out_headers, out_final_url, MbFollowRedirects(), out_error,
-                     out_error_code, host_ctx);
+                     out_error_code, host_ctx, pin_pubkey);
   if (url.SchemeIs("data")) {
     std::string mime, charset;
     if (!net::DataURL::Parse(url, &mime, &charset, body))
@@ -1482,6 +1598,10 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
       *content_type = mime;
     return true;
   }
+  // A registered custom scheme (item 48) is served ONLY by the interception
+  // stack, which already ran above — reaching here means nothing answered.
+  if (MbIsCustomScheme(std::string(url.scheme())) && out_error)
+    *out_error = "no mock/handler answered the custom-scheme request";
   return false;
 }
 
@@ -1838,6 +1958,7 @@ struct MbURLLoader::FetchState {
   std::string post_ct; // request Content-Type (carried separately from headers)
   net::HttpRequestHeaders hop_headers;   // request's own headers (redirect-stripped)
   net::SiteForCookies site_for_cookies;  // for WillFollowRedirect on the main thread
+  std::string pin_pubkey;  // per-request TLS public-key pin (may be empty)
   int hop = 0;           // redirect hop count (capped at 20)
   bool redirected = false;  // a real 3xx hop was followed (vs. a transparent rewrite)
 };
@@ -2037,6 +2158,7 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
     state->post_ct = std::move(post_ct);
     state->hop_headers = std::move(hop_headers);
     state->site_for_cookies = request->site_for_cookies;
+    state->pin_pubkey = std::move(mutation.pin_pubkey);
     StartHttpFetch(std::move(state));
     return;  // async — OnHopComplete continues on the main thread when the hop returns
   } else if (fetch_url.SchemeIs("data")) {
@@ -2081,6 +2203,7 @@ void MbURLLoader::StartHttpFetch(std::unique_ptr<FetchState> state) {
   req.user_agent = user_agent_;
   req.extra_headers = std::move(req_headers);
   req.cookie_session_key = MbLoaderSessionKeyFor(host_ctx_);
+  req.pin_pubkey = state->pin_pubkey;  // survives across redirect hops
 
   auto main_runner = base::SingleThreadTaskRunner::GetCurrentDefault();
   auto weak = weak_factory_.GetWeakPtr();

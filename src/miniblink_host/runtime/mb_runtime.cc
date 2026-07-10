@@ -58,14 +58,25 @@
 #include "third_party/blink/public/platform/web_connection_type.h"
 #include "third_party/blink/public/platform/web_network_state_notifier.h"
 #include "third_party/blink/public/platform/web_runtime_features.h"
+#include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/blink.h"
+#include "third_party/blink/public/web/web_security_policy.h"
+#include "third_party/blink/renderer/platform/graphics/image_decoding_store.h"
+#include "third_party/skia/include/core/SkGraphics.h"
+#include "url/url_util.h"
+#include "v8/include/v8-initialization.h"
 #include "v8/include/v8-isolate.h"
+#include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/runtime/mb_script_watchdog.h"
 
 namespace mb {
 
 namespace {
 MbRuntime* g_runtime = nullptr;
+
+// JS old-generation heap cap (mbSetJsHeapLimit): recorded before init, applied
+// as a V8 flag ahead of blink::Initialize (isolate-creation parameter).
+size_t g_pending_js_heap_limit_bytes = 0;
 
 // Trivial in-process discardable memory: plain heap, never actually discarded.
 // (Image/gradient/shader caches require an allocator instance to exist.)
@@ -165,6 +176,26 @@ MbRuntime::MbRuntime() {
   MB_STEP("4 FeatureList");
   if (!base::FeatureList::GetInstance())
     base::FeatureList::SetInstance(std::make_unique<base::FeatureList>());
+
+  // Custom URL schemes (item 48), part 1: the url:: registries. Must precede
+  // any URL parsing of these schemes (and any registry lock), so this sits at
+  // the very front of bring-up. Standard = host/path/origin semantics; secure
+  // so app:// documents are secure contexts (they carry host-vetted content).
+  MB_STEP("4x custom url schemes");
+  for (const std::string& scheme : MbCustomSchemes()) {
+    url::AddStandardScheme(scheme, url::SCHEME_WITH_HOST);
+    url::AddSecureScheme(scheme);
+  }
+
+  // JS heap cap (item 45): an isolate-creation parameter, so it must be a V8
+  // flag set before blink::Initialize creates the main-thread isolate.
+  if (g_pending_js_heap_limit_bytes) {
+    const size_t mb_limit = (g_pending_js_heap_limit_bytes + 1024 * 1024 - 1) /
+                            (1024 * 1024);
+    const std::string flag =
+        "--max-old-space-size=" + std::to_string(mb_limit);
+    v8::V8::SetFlagsFromString(flag.c_str(), flag.size());
+  }
 
   // Discardable memory: image/gradient/shader caches allocate it; without an
   // allocator instance, rendering DCHECKs. Simple in-process allocator (never discards).
@@ -280,6 +311,14 @@ MbRuntime::MbRuntime() {
   blink::WebRuntimeFeatures::EnableFeatureFromString("Presentation", false);
   blink::WebRuntimeFeatures::EnableFeatureFromString("RemotePlayback", false);
 
+  // Custom URL schemes, part 2: blink's own registries (available only after
+  // blink::Initialize). Fetch/XHR to the scheme works; the loader serves it
+  // from the interception stack (MbFindMock).
+  for (const std::string& scheme : MbCustomSchemes()) {
+    blink::WebSecurityPolicy::RegisterURLSchemeAsSupportingFetchAPI(
+        blink::WebString::FromUtf8(scheme));
+  }
+
   // Initialize network state, or pages reading navigator.onLine/connection DCHECK
   // (network_state_notifier requires connection_initialized).
   blink::WebNetworkStateNotifier::SetOnLine(true);
@@ -357,6 +396,29 @@ void MbRuntime::LogMemoryUsage() {
 void MbRuntime::SetScriptTimeoutMs(int ms) {
   if (script_watchdog_)
     script_watchdog_->SetTimeoutMs(ms);
+}
+
+void MbRuntime::SetImageCacheSize(size_t bytes) {
+  // 0 restores blink's default (kDefaultMaxTotalSizeOfHeapEntries, 32 MB —
+  // there is no getter to capture, so the default is mirrored here).
+  blink::ImageDecodingStore::Instance().SetCacheLimitInBytes(
+      bytes ? bytes : 32 * 1024 * 1024);
+}
+
+void MbRuntime::SetFontCacheSize(size_t bytes) {
+  // 0 restores skia's default (SK_DEFAULT_FONT_CACHE_LIMIT, 2 MB).
+  SkGraphics::SetFontCacheLimit(bytes ? bytes : 2 * 1024 * 1024);
+}
+
+// static
+void MbRuntime::SetJsHeapLimit(size_t bytes) {
+  if (g_runtime) {
+    std::fprintf(stderr,
+                 "[mb] mbSetJsHeapLimit ignored: the JS heap limit is an "
+                 "isolate-creation parameter — call it BEFORE mbInitialize\n");
+    return;
+  }
+  g_pending_js_heap_limit_bytes = bytes;
 }
 
 // static

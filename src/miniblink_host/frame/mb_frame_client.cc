@@ -448,6 +448,13 @@ void MbFrameClient::DidCommitNavigation(
       scope = owner_->session()->id() + "\x1f" + scope;
     MbSetFrameOrigin(frame_key_, scope);
   }
+  // Per-frame load lifecycle (item 42): EVERY local frame (main and children)
+  // reports its commit with its stable frame id.
+  if (owner_ && web_frame_) {
+    owner_->OnFrameLoadEvent(frame_key_, /*is_main_frame=*/!self_owned_,
+                             MbWebView::kFrameLoadBegin,
+                             web_frame_->GetDocument().Url().GetString().Utf8());
+  }
   // Only the main frame feeds the view's history (child/iframe commits don't).
   if (self_owned_ || !web_frame_ || !owner_)
     return;
@@ -645,6 +652,12 @@ void MbFrameClient::DidReceiveTitle(const blink::WebString& title) {
 }
 
 void MbFrameClient::DidFinishLoad() {
+  // Per-frame load lifecycle (item 42): every local frame reports its finish.
+  if (owner_ && web_frame_) {
+    owner_->OnFrameLoadEvent(frame_key_, /*is_main_frame=*/!self_owned_,
+                             MbWebView::kFrameLoadFinish,
+                             web_frame_->GetDocument().Url().GetString().Utf8());
+  }
   // Main frame only — child/iframe load-finishes don't signal the page's completion.
   if (self_owned_ || !owner_)
     return;
@@ -652,6 +665,12 @@ void MbFrameClient::DidFinishLoad() {
 }
 
 void MbFrameClient::DidDispatchDOMContentLoadedEvent() {
+  // Per-frame load lifecycle (item 42).
+  if (owner_ && web_frame_) {
+    owner_->OnFrameLoadEvent(frame_key_, /*is_main_frame=*/!self_owned_,
+                             MbWebView::kFrameLoadDomReady,
+                             web_frame_->GetDocument().Url().GetString().Utf8());
+  }
   // Main frame only — DOMContentLoaded fires when the DOM is parsed and deferred scripts
   // have run (before subresources/images), the earliest "interactive" signal.
   if (self_owned_ || !owner_)
@@ -785,12 +804,45 @@ void MbFrameClient::DidAddMessageToConsole(const blink::WebConsoleMessage& msg,
     case blink::mojom::ConsoleMessageLevel::kWarning: level = "warn"; break;
     case blink::mojom::ConsoleMessageLevel::kError: level = "error"; break;
   }
+  // The message's source CATEGORY (item 46): which subsystem emitted it —
+  // page JS vs network vs security etc. Carried on WebConsoleMessage by
+  // patch 0043 (blink's public client call dropped it before).
+  const char* category = "other";
+  switch (msg.source) {
+    case blink::mojom::ConsoleMessageSource::kXml: category = "xml"; break;
+    case blink::mojom::ConsoleMessageSource::kJavaScript:
+      category = "javascript"; break;
+    case blink::mojom::ConsoleMessageSource::kNetwork:
+      category = "network"; break;
+    case blink::mojom::ConsoleMessageSource::kConsoleApi:
+      category = "console-api"; break;
+    case blink::mojom::ConsoleMessageSource::kStorage:
+      category = "storage"; break;
+    case blink::mojom::ConsoleMessageSource::kRendering:
+      category = "rendering"; break;
+    case blink::mojom::ConsoleMessageSource::kSecurity:
+      category = "security"; break;
+    case blink::mojom::ConsoleMessageSource::kDeprecation:
+      category = "deprecation"; break;
+    case blink::mojom::ConsoleMessageSource::kWorker:
+      category = "worker"; break;
+    case blink::mojom::ConsoleMessageSource::kViolation:
+      category = "violation"; break;
+    case blink::mojom::ConsoleMessageSource::kIntervention:
+      category = "intervention"; break;
+    case blink::mojom::ConsoleMessageSource::kRecommendation:
+      category = "recommendation"; break;
+    case blink::mojom::ConsoleMessageSource::kOther:
+      category = "other"; break;
+  }
   console_.push_back(std::string(level) + ": " + msg.text.Utf8());
-  // source/line locate the message; stack is populated for errors and uncaught exceptions
-  // / unhandled rejections (which blink reports here as console errors).
+  // source/line/column locate the message; stack is populated for errors and uncaught
+  // exceptions / unhandled rejections (which blink reports here as console errors).
   if (owner_)
     owner_->OnConsoleMessage(level, msg.text.Utf8(), source.Utf8(),
-                             static_cast<int>(line), stack.Utf8());
+                             static_cast<int>(line),
+                             static_cast<int>(msg.column_number), category,
+                             stack.Utf8());
 }
 
 std::string MbFrameClient::DrainConsole() {

@@ -1,0 +1,94 @@
+--- a/third_party/blink/public/web/web_console_message.h
++++ b/third_party/blink/public/web/web_console_message.h
+@@ -50,6 +50,10 @@
+   WebString url;
+   unsigned line_number = 0;
+   unsigned column_number = 0;
++  // The message's source category (JavaScript / Network / Security / ...).
++  // Populated by ChromeClientImpl so embedder clients can categorize
++  // messages (miniblink2: structured console callback).
++  mojom::ConsoleMessageSource source = mojom::ConsoleMessageSource::kOther;
+ 
+   WebConsoleMessage() = default;
+   WebConsoleMessage(mojom::ConsoleMessageLevel level,
+--- a/third_party/blink/renderer/core/page/chrome_client.h
++++ b/third_party/blink/renderer/core/page/chrome_client.h
+@@ -333,6 +333,7 @@
+                                    mojom::ConsoleMessageLevel,
+                                    const String& message,
+                                    unsigned line_number,
++                                   unsigned column_number,
+                                    const String& source_id,
+                                    const String& stack_trace) = 0;
+ 
+--- a/third_party/blink/renderer/core/frame/frame_console.cc
++++ b/third_party/blink/renderer/core/frame/frame_console.cc
+@@ -96,7 +96,8 @@
+   }
+ 
+   frame_->GetChromeClient().AddMessageToConsole(
+-      frame_, source, level, message, location->LineNumber(), url, stack_trace);
++      frame_, source, level, message, location->LineNumber(),
++      location->ColumnNumber(), url, stack_trace);
+ }
+ 
+ void FrameConsole::ReportResourceResponseReceived(
+--- a/third_party/blink/renderer/core/page/chrome_client_impl.h
++++ b/third_party/blink/renderer/core/page/chrome_client_impl.h
+@@ -141,6 +141,7 @@
+                            mojom::ConsoleMessageLevel,
+                            const String& message,
+                            unsigned line_number,
++                           unsigned column_number,
+                            const String& source_id,
+                            const String& stack_trace) override;
+   bool CanOpenBeforeUnloadConfirmPanel() override;
+--- a/third_party/blink/renderer/core/page/chrome_client_impl.cc
++++ b/third_party/blink/renderer/core/page/chrome_client_impl.cc
+@@ -464,6 +464,7 @@
+                                            mojom::ConsoleMessageLevel level,
+                                            const String& message,
+                                            unsigned line_number,
++                                           unsigned column_number,
+                                            const String& source_id,
+                                            const String& stack_trace) {
+   if (!message.IsNull()) {
+@@ -474,10 +475,14 @@
+ 
+   WebLocalFrameImpl* frame = WebLocalFrameImpl::FromFrame(local_frame);
+   if (frame && frame->Client()) {
+-    frame->Client()->DidAddMessageToConsole(
+-        WebConsoleMessage(static_cast<mojom::ConsoleMessageLevel>(level),
+-                          message),
+-        source_id, line_number, stack_trace);
++    WebConsoleMessage web_message(
++        static_cast<mojom::ConsoleMessageLevel>(level), message);
++    web_message.url = source_id;
++    web_message.line_number = line_number;
++    web_message.column_number = column_number;
++    web_message.source = source;
++    frame->Client()->DidAddMessageToConsole(web_message, source_id,
++                                            line_number, stack_trace);
+   }
+ }
+ 
+--- a/third_party/blink/renderer/core/loader/empty_clients.h
++++ b/third_party/blink/renderer/core/loader/empty_clients.h
+@@ -154,6 +154,7 @@
+                            mojom::ConsoleMessageLevel,
+                            const String&,
+                            unsigned,
++                           unsigned,
+                            const String&,
+                            const String&) override {}
+   bool CanOpenBeforeUnloadConfirmPanel() override { return false; }
+--- a/third_party/blink/renderer/core/exported/web_page_popup_impl.cc
++++ b/third_party/blink/renderer/core/exported/web_page_popup_impl.cc
+@@ -229,6 +229,7 @@
+                            mojom::ConsoleMessageLevel,
+                            const String& message,
+                            unsigned line_number,
++                           unsigned,
+                            const String&,
+                            const String&) override {
+ #ifndef NDEBUG

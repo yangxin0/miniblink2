@@ -5,6 +5,10 @@
 *.swp
 *~
 
+# Python bytecode cache (scripts/, test helpers) — regenerated on every run
+__pycache__/
+*.pyc
+
 # The engine is built inside a Chromium checkout (see build.sh) — no build
 # outputs live in this repo. Nothing to ignore there.
 #

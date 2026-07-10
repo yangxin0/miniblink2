@@ -39,6 +39,8 @@ class WebAgentGroupScheduler;
 
 namespace mb {
 
+class MbWebView;
+
 // Item 7b: host display-refresh timestamp for rAF (see mbUpdateAt).
 void MbSetHostFrameTime(double seconds);
 
@@ -46,6 +48,15 @@ void MbSetHostFrameTime(double seconds);
 // document CustomEvent 'mbimagesourceupdate' (detail = the image id) in every
 // live view, so a page displaying the image re-fetches it with a cache-buster.
 void MbBroadcastImageSourceUpdate(const std::string& id);
+
+// The live views, main frame first is not guaranteed (set order). For the
+// in-engine DevTools server to enumerate inspectable targets. Main-thread
+// only, like the views themselves.
+std::vector<MbWebView*> MbEnumerateViews();
+// True iff `view` is a currently-live view (validate a server-held pointer on
+// the main thread before dereferencing it — a view can be destroyed while a
+// DevTools socket still holds its address).
+bool MbIsLiveView(MbWebView* view);
 
 class MbDamageTracker;   // dirty-rect diffing (mb_damage_tracker.h)
 class MbDevToolsBridge;
@@ -559,16 +570,46 @@ class MbWebView {
   void SetWindowObjectReadyCallback(std::function<void()> cb);
   // Called by MbFrameClient for each page console message (console.log/warn/error, AND
   // uncaught exceptions / unhandled promise rejections, which blink reports as console
-  // errors). A live push (vs. polling DrainConsole). `source`/`line` locate the message
-  // and `stack` is the JS stack (both present for errors/exceptions, empty otherwise).
+  // errors). A live push (vs. polling DrainConsole). `source`/`line`/`column` locate the
+  // message, `category` is blink's source category ("javascript"/"network"/"security"/
+  // ..., item 46), and `stack` is the JS stack (present for errors/exceptions).
   void OnConsoleMessage(const std::string& level, const std::string& message,
-                        const std::string& source, int line,
-                        const std::string& stack);
+                        const std::string& source, int line, int column,
+                        const std::string& category, const std::string& stack);
   using ConsoleFn =
       std::function<void(const std::string& level, const std::string& message,
-                         const std::string& source, int line,
-                         const std::string& stack)>;
+                         const std::string& source, int line, int column,
+                         const std::string& category, const std::string& stack)>;
   void SetConsoleCallback(ConsoleFn cb);  // {} clears
+
+  // ---- Per-frame load lifecycle (item 42) -----------------------------------
+  // Fired by every LOCAL frame's MbFrameClient (main and children) with the
+  // frame's stable id (frame_key: unique per frame life, never reused in a
+  // view). Phases mirror MB_FRAME_LOAD_* in webview.h.
+  enum FrameLoadPhase {
+    kFrameLoadBegin = 0,     // navigation committed in the frame
+    kFrameLoadDomReady = 1,  // the frame's DOMContentLoaded dispatched
+    kFrameLoadFinish = 2,    // the frame's load event fired
+    kFrameLoadFail = 3,      // top-level load failed (main frame only)
+  };
+  void OnFrameLoadEvent(uint64_t frame_id, bool is_main_frame, int phase,
+                        const std::string& url);
+  using FrameLoadFn = std::function<void(uint64_t frame_id, bool is_main_frame,
+                                         int phase, const std::string& url)>;
+  void SetFrameLoadCallback(FrameLoadFn cb);  // {} clears
+  // Stable ids of all live LOCAL frames: main frame first, then depth-first
+  // document order (nested frames included, unlike GetFrameCount's direct-
+  // children-only contract).
+  std::vector<uint64_t> GetFrameIds();
+  // Eval in the frame with stable id `frame_id` — the deterministic sibling of
+  // index-based EvalInFrame. Empty result for an unknown/dead id.
+  std::string EvalInFrameById(uint64_t frame_id, const char* utf8_script);
+  // The main frame's stable id (0 before the frame exists).
+  uint64_t MainFrameKey() const;
+  // Shared host-privileged main-world eval used by both frame-targeted eval
+  // paths (declared here, defined with EvalInFrame).
+  std::string EvalScriptInWebFrame(blink::WebLocalFrame* frame,
+                                   const char* utf8_script);
   // Called by MbFrameClient for a PAGE-initiated main-frame navigation (link click,
   // location=, form submit, JS redirect) BEFORE it commits. Returns true to allow,
   // false to veto. Host-driven LoadURL does not route through here.
@@ -945,6 +986,7 @@ class MbWebView {
   std::function<void()> on_dom_content_loaded_;  // optional DOMContentLoaded callback
   std::function<void()> on_window_object_ready_;  // optional pre-page-script callback
   ConsoleFn on_console_;  // optional live console-message callback
+  FrameLoadFn on_frame_load_;  // optional per-frame load lifecycle callback
   NavigationFn on_navigation_;  // optional page-initiated navigation policy callback
   UrlChangedFn on_url_changed_;  // optional per-commit URL-changed notification
   TitleChangedFn on_title_changed_;  // optional title-changed notification

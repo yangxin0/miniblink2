@@ -584,7 +584,13 @@ void MbWebView::LoadURL(const char* utf8_url) {
     }
     return;
   }
-  if (url.rfind("http", 0) == 0 || url.rfind("data:", 0) == 0) {
+  // A registered custom scheme (item 48) is served by the interception stack
+  // inside MbFetchUrl (MbFindMock), so it commits through the same fetch+commit
+  // path as http — the only reason to special-case it is that its scheme isn't
+  // "http"/"data".
+  const bool is_custom_scheme = MbIsCustomScheme(std::string(GURL(url).scheme()));
+  if (url.rfind("http", 0) == 0 || url.rfind("data:", 0) == 0 ||
+      is_custom_scheme) {
     // Top-level http(s) (or a data: URI): fetch via the loader, commit with base = the
     // URL so relative subresources resolve and load through MbURLLoader.
     std::string body, content_type, final_url;
@@ -659,6 +665,11 @@ void MbWebView::NotifyLoadFailed() {
                         last_error_);
   else if (on_fail_loading_)
     on_fail_loading_(GetURL(), last_error_);
+  // Per-frame lifecycle (item 42): a top-level failure is the main frame's
+  // FAIL phase (subframe fetch failures surface as network errors in-page,
+  // not frame-load failures).
+  OnFrameLoadEvent(MainFrameKey(), /*is_main_frame=*/true, kFrameLoadFail,
+                   GetURL());
   if (on_load_finish_)
     on_load_finish_();
 }
@@ -2230,13 +2241,59 @@ void MbWebView::SetWindowObjectReadyCallback(std::function<void()> cb) {
 void MbWebView::OnConsoleMessage(const std::string& level,
                                  const std::string& message,
                                  const std::string& source, int line,
+                                 int column, const std::string& category,
                                  const std::string& stack) {
   if (on_console_)
-    on_console_(level, message, source, line, stack);
+    on_console_(level, message, source, line, column, category, stack);
 }
 
 void MbWebView::SetConsoleCallback(ConsoleFn cb) {
   on_console_ = std::move(cb);
+}
+
+void MbWebView::OnFrameLoadEvent(uint64_t frame_id, bool is_main_frame,
+                                 int phase, const std::string& url) {
+  if (on_frame_load_)
+    on_frame_load_(frame_id, is_main_frame, phase, url);
+}
+
+void MbWebView::SetFrameLoadCallback(FrameLoadFn cb) {
+  on_frame_load_ = std::move(cb);
+}
+
+std::vector<uint64_t> MbWebView::GetFrameIds() {
+  std::vector<uint64_t> out;
+  if (!main_frame_)
+    return out;
+  // Depth-first over the whole frame tree (TraverseNext), main frame first.
+  for (blink::WebFrame* f = main_frame_; f; f = f->TraverseNext()) {
+    if (!f->IsWebLocalFrame())
+      continue;
+    auto* impl = static_cast<blink::WebLocalFrameImpl*>(f->ToWebLocalFrame());
+    auto* client = static_cast<MbFrameClient*>(impl->Client());
+    if (client)
+      out.push_back(client->frame_key());
+  }
+  return out;
+}
+
+std::string MbWebView::EvalInFrameById(uint64_t frame_id,
+                                       const char* utf8_script) {
+  if (!main_frame_ || !utf8_script)
+    return {};
+  for (blink::WebFrame* f = main_frame_; f; f = f->TraverseNext()) {
+    if (!f->IsWebLocalFrame())
+      continue;
+    auto* impl = static_cast<blink::WebLocalFrameImpl*>(f->ToWebLocalFrame());
+    auto* client = static_cast<MbFrameClient*>(impl->Client());
+    if (client && client->frame_key() == frame_id)
+      return EvalScriptInWebFrame(f->ToWebLocalFrame(), utf8_script);
+  }
+  return {};
+}
+
+uint64_t MbWebView::MainFrameKey() const {
+  return frame_client_ ? frame_client_->frame_key() : 0;
 }
 
 bool MbWebView::OnBeginNavigation(const std::string& url) {
@@ -3288,6 +3345,13 @@ std::string MbWebView::EvalInFrame(int frame_index, const char* utf8_script) {
       return {};
     frame = child->ToWebLocalFrame();
   }
+  return EvalScriptInWebFrame(frame, utf8_script);
+}
+
+// The shared host-privileged main-world eval both frame-targeted eval paths
+// (index-based EvalInFrame, id-based EvalInFrameById) run.
+std::string MbWebView::EvalScriptInWebFrame(blink::WebLocalFrame* frame,
+                                            const char* utf8_script) {
   std::string result;
   RunInFrameTask(
       base::BindOnce(
@@ -3624,6 +3688,17 @@ double g_host_frame_time = 0;
 
 void MbSetHostFrameTime(double seconds) {
   g_host_frame_time = seconds > 0 ? seconds : 0;
+}
+
+std::vector<MbWebView*> MbEnumerateViews() {
+  std::vector<MbWebView*> out;
+  for (MbWebView* v : AllViews())
+    out.push_back(v);
+  return out;
+}
+
+bool MbIsLiveView(MbWebView* view) {
+  return view && AllViews().count(view) > 0;
 }
 
 void MbBroadcastImageSourceUpdate(const std::string& id) {

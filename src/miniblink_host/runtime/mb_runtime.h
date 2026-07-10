@@ -73,6 +73,17 @@ class MbRuntime {
   // disables (the default). Process-global. See mb_script_watchdog.h.
   void SetScriptTimeoutMs(int ms);
 
+  // ---- Memory budget knobs (IMPROVEMENT.md item 45) -------------------------
+  // Cap the decoded-image cache (blink ImageDecodingStore); 0 restores the
+  // engine default (32 MB). Callable any time after Initialize.
+  void SetImageCacheSize(size_t bytes);
+  // Cap skia's glyph/font cache; 0 restores the engine default (2 MB).
+  void SetFontCacheSize(size_t bytes);
+  // Cap each V8 isolate's old-generation heap. MUST be called BEFORE
+  // Initialize (it is an isolate-creation parameter, applied as a V8 flag);
+  // after init it is refused with a logged warning. 0 = engine default.
+  static void SetJsHeapLimit(size_t bytes);
+
   // Task runner of the IO/service thread (mb-io). In-process mojo services that
   // must answer [Sync] calls the main thread makes (e.g. BlobRegistry) bind their
   // receivers here, so the call is serviced off-thread instead of deadlocking.

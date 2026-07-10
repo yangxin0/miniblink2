@@ -16,7 +16,12 @@ hardening) is fully shipped. Round 5 (items 32–39, the from-scratch fifth
 re-read: window-object-ready, structured load errors, the OS-clipboard bridge,
 host font bytes, the creation-time view config, the mutable request handle) is
 fully shipped except mbAddFontData on Windows (mac shipped; DWrite private
-collection pending). Per-item status is inline under each item.
+collection pending). Round 6 (items 40–48, the final residue pass: native-event
+helpers, the in-engine DevTools endpoint, per-frame load events, zero-copy
+image sources, TLS pinning, memory budgets, structured console messages,
+pixel utilities, custom schemes) is fully shipped — verified by a new
+mb_smoke_r6 suite (24/24) plus no regression in mb_smoke (216) / mb_smoke_render
+(141). Per-item status is inline under each item.
 
 Verified in the Glyph host: engine smoke test + a 720-sample pointer-sweep
 harness with a damage-gated blit path and a liveness beacon (0 flicker,
@@ -801,6 +806,193 @@ original URL; Block → domain "blocked").
 
 ---
 
+## Round 6
+
+Sixth pass (2026-07-10): a final full re-read of the 1.4 SDK headers against
+the shipped 1393-line webview.h. Rounds 1–5 absorbed the big structural
+lessons; what's left is the residue — and two deliberate reversals of earlier
+"noted, not adopted" calls, made by maintainer decision after weighing the
+embedder experience they buy. Everything below except the gamepad surface
+(still out of scope — round 4's verdict stands) is adopted this round.
+
+### 40. Native-event translation helpers (`webview_mac.h`)
+
+**Then:** item 24 shipped the typed `mbKeyEvent`, but the NSEvent→field
+mapping lives as a 15-line comment in webview.h — every mac host re-implements
+the kVK→Windows-VK table, the RAW_DOWN/CHAR split, and the modifier mapping by
+hand. This is the single most error-prone step of embedding an interactive
+view.
+
+**Prior art:** `KeyEvent(NSEvent*)` and `KeyEvent(Type, wparam, lparam,
+is_system_key)` constructors, plus exported
+`GetKeyIdentifierFromVirtualKeyCode` / `GetKeyFromVirtualKeyCode` helpers —
+the SDK owns the translation tables, not the host.
+
+**Shipped**: `include/miniblink2/webview_mac.h` — a HEADER-ONLY Objective-C
+companion (no new ABI: static inline functions building the existing
+structs). `mbKeyEventFromNSEvent(NSEvent*, mbKeyEvent*)` (kVK→VK table,
+modifiers, text/unmodified_text, keypad/auto-repeat flags, and the
+send-as-RAW_DOWN+CHAR recipe as `mbSendKeyNSEvent`),
+`mbMouseEventFromNSEvent` + `mbWheelEventFromNSEvent` (view-local flipped
+coordinates, precise trackpad deltas). The C ABI stays ObjC-free; the header
+compiles only where NSEvent exists.
+
+### 41. In-engine DevTools endpoint (`mbDevToolsStartServer`)
+
+**Then:** stage B (the WebSocket + /json bridge) deliberately lived in the
+embedder; the engine stayed socket-free (round 5, item 39). That keeps the
+core pure but makes "just inspect this view" a day of host plumbing — the
+prior art's `StartRemoteInspectorServer(addr, port)` is a one-call story.
+
+**Reversal, by maintainer directive (2026-07-10):** the ergonomic gap won.
+The engine gains an OPT-IN local CDP endpoint — `mbDevToolsStartServer(port)`
+/ `mbDevToolsStopServer()` — serving `/json/version`, `/json/list` (one
+target per live view) and a WebSocket upgrade per target that bridges to the
+same per-view session `mbDevToolsAttach` uses (one client per view; attach
+conflicts refuse cleanly). Paste the ws:// URL into Chrome's
+`devtools://devtools/bundled/inspector.html?ws=…` and inspect. The socket
+code is isolated in one host file, loopback-only by default, and OFF unless
+the host calls it — the embedder bridge (stage B) remains fully supported.
+
+### 42. Per-frame load events + stable frame IDs
+
+**Then:** the load lifecycle is main-frame-only, and iframe access is
+`mbEvalJSInFrame(view, frame_index, …)` — a 0-based document-order INDEX,
+racy the moment the page mutates its iframe set. Round 5 (item 33) recorded
+the design rule for this day: per-frame load events carry
+`(uint64_t frame_id, int is_main_frame)` from day one.
+
+**Prior art:** every LoadListener callback carries
+`(frame_id, is_main_frame, url)` and fires for EVERY frame.
+
+**Shipped**: `mbOnFrameLoadEvent(view, cb, ud)` — one callback, an
+MB_FRAME_LOAD_* phase enum (BEGIN / DOM_READY / FINISH / FAIL), firing for
+every local frame with `(uint64 frame_id, int is_main_frame, const char*
+url)`; the existing main-frame callbacks are unchanged (and remain the
+simple path). `frame_id` is the frame's LocalFrameToken-derived stable id —
+constant across the frame's life, never reused within a view. Companions:
+`mbGetFrameIds(view, uint64* out, int cap)` (main frame first, then
+document-order children) and `mbEvalJSInFrameById(view, frame_id, js, out,
+cap)` — the deterministic sibling of the index-based eval.
+
+### 43. Zero-copy image sources
+
+**Then:** `mbRegisterImageSource` copies the caller's BGRA and PNG-encodes
+EAGERLY on every registration — the header itself admits "not a 60 fps video
+path". Item 9's general zero-copy body remains deferred, but the image-source
+case is self-contained and is where live-frame hosts actually hurt.
+
+**Prior art:** `Bitmap::Create(w, h, format, row_bytes, pixels, size,
+destruction_callback)` — borrow user memory, notify when done.
+
+**Shipped**: `mbRegisterImageSourceBuffer(id, bgra, w, h, stride,
+release_cb, ud)` — the engine BORROWS the pixels (no copy, no eager encode);
+the PNG is encoded lazily on first fetch and cached; `release_cb` fires when
+the source is replaced, unregistered, or the process-wide table clears at
+shutdown. Re-registering (either variant) over a borrowed source releases
+the old buffer and fires the same `mbimagesourceupdate` event. The copying
+`mbRegisterImageSource` keeps its eager-encode semantics (cheap for icons,
+and the caller's buffer is free the moment it returns).
+
+### 44. TLS public-key pinning
+
+**Then:** round 3 (item 21) deferred pinning "until a host pins." The mutable
+request handle (item 37) has since shipped, giving pinning its natural
+per-request attachment point — and the insecure direction
+(`mbSetIgnoreCertErrors`) shipping without the secure one is a bad look for
+a security-sensitive embedder.
+
+**Prior art:** `NetworkRequest::EnforcePinnedPublicKey(public_key)` →
+`CURLOPT_PINNEDPUBLICKEY` ("sha256//…;sha256//…" format).
+
+**Shipped**: `mbRequestPinPublicKey(mbRequest*, const char* pins)` on the
+item-37 hook handle — the fetch fails with a curl-domain error (CURLE 90)
+unless the server's leaf public key matches a pin; applies to both fetch
+entries (subresource loader and top-level/download). Curl-native pin syntax
+passes through verbatim.
+
+### 45. Memory budget knobs
+
+**Then:** item 10 shipped the reactive pair (`mbPurgeMemory`,
+`mbLogMemoryUsage`) and said budgets "can follow if the purge call proves
+insufficient." The purge is a floor, not an envelope: a menu-bar host wants
+to CAP steady-state footprint, not shrink it after the fact.
+
+**Prior art:** `Config::memory_cache_size` / `override_ram_size` /
+min-heap knobs.
+
+**Shipped**: `mbSetMemoryCacheSize(size_t bytes)` — caps blink's resource
+MemoryCache (decoded scripts/styles/images; 0 restores the engine default);
+callable any time, applies immediately. `mbSetJsHeapLimit(size_t bytes)` —
+caps each V8 isolate's old-space; must be called BEFORE mbInitialize
+(isolate-creation parameter; refused with a logged warning after). Two
+levers, not twelve: cache and JS heap are where the footprint actually goes.
+
+### 46. Structured console messages
+
+**Then:** round 5 (item 39) queued column/source-category behind "the next
+MB_API_VERSION bump rather than a third console slot." The bump keeps not
+happening; the queue was the mistake. The terminal fix is the shape the rest
+of the API already uses: a struct_size-versioned struct, which never needs
+an Ex again.
+
+**Prior art:** `ConsoleMessage` carries source-category enum
+(JS/Network/CSS/Security/Media/…), message type, line AND column, URL.
+
+**Shipped**: `mbOnConsoleMessage2(view, cb, ud)` delivering
+`const mbConsoleMessageInfo*` — struct_size, level string, message, source
+URL, line, COLUMN, JS stack, and `category` (blink's message source:
+"javascript"/"network"/"security"/"rendering"/…). Same ONE SLOT as
+mbOnConsoleMessage/Ex (setting any replaces the others). The struct is the
+extension point from now on; the two legacy shapes stay as sugar.
+
+### 47. Pixel-format utilities
+
+**Then:** item 25 stated the premultiplied-BGRA-sRGB contract in docs, and
+hosts still hand-roll the conversions the contract implies (straight-alpha
+consumers, RGBA APIs). The prior art ships them on Bitmap
+(`ConvertToStraightAlpha`, `SwapRedBlueChannels`).
+
+**Shipped**: three flat helpers, pure buffer math, no view needed:
+`mbConvertToStraightAlpha(pixels, w, h, stride)`,
+`mbConvertToPremultipliedAlpha(pixels, w, h, stride)`,
+`mbSwapRedBlueChannels(pixels, w, h, stride)` (BGRA↔RGBA). They codify the
+footgun the docs could only describe.
+
+### 48. Custom scheme registration
+
+**Then:** round 5 re-validated "mocking over a FileSystem interface" — but
+the mock layer only intercepts SCHEMES THE ENGINE ALREADY FETCHES. A host
+wanting `app://assets/logo.png` (packed resources, stable origin, no fake
+http host) couldn't get the URL parsed as standard, let alone served.
+
+**Shipped**: `mbRegisterCustomScheme(const char* scheme)` — call BEFORE
+mbInitialize; registers the scheme as standard + secure + fetch-enabled
+(url::AddStandardScheme + url::AddSecureScheme in early bring-up, then
+blink's RegisterURLSchemeAsSupportingFetchAPI after blink::Initialize) and
+routes its requests through the existing interception stack (static mocks,
+per-view + process dynamic mock callbacks) instead of the network. The
+top-level navigation path (`MbWebView::LoadURL`) gained a custom-scheme branch
+alongside its file/http/data cases — a registered scheme now fetches through
+MbFetchUrl (mock-served) and commits like any document. Unmocked
+custom-scheme requests fail cleanly as unfetchable. The mock layer stays the
+serving primitive — this just widens what it can serve, which is the part of
+a FileSystem/VFS interface that was actually missing. Smoke: mb_smoke_r6
+(app:// navigation commits, location.href round-trips, fetch() over app://
+reaches the mock).
+
+### 49. Round-6 scope note
+
+- **Gamepad surface**: still not adopted — round 4's market-fit verdict
+  stands (game-engine hosts, not ours). The one input class mb* cannot
+  express, accepted.
+- **Console JS-argument access** (`argument_at`/JSValueRef): not adopted —
+  exposing live JS values through a flat C ABI means a handle table and
+  lifetime rules for a debugging convenience; the stack + stringified
+  message cover the monitoring use case.
+
+---
+
 ## What's left (summary)
 
 Everything not listed here is shipped or a documented decision (nested-worker
@@ -810,11 +1002,10 @@ stylesheet caveat).
 | Item | What's left | Status |
 |---|---|---|
 | 2 | Engine-owned lockable surface (dirty RECTS shipped: `mbViewGetDirtyRect` diffs the persistent paint artifact via blink's RasterInvalidator — patch 0041 + mb_damage_tracker) | Surface still open; rect level shipped |
-| 9 | Zero-copy resource bodies (`mbResponseSetBodyOwned`) | Deferred by cost — revisit if a host serves large media |
-| 10 | Memory budget knobs (cache sizes) | Only if `mbPurgeMemory` proves insufficient |
-| 13c | Child worker/iframe DevTools targets (multi-session bridge) | Open, unscheduled |
-| 21 | TLS pinning (streaming downloads shipped: `mbOnDownloadStream` + `mbDownloadURLStream` + `mbCancelDownload`; ImageSource shipped v1: `mbRegisterImageSource` at `https://mb-image.internal/<id>` + `mbimagesourceupdate` events; composited shared-texture output shipped: `mbViewGetIOSurface` — the viz Display renders into an IOSurface on macOS) | TLS pinning still deferred by trigger |
+| 9 | General zero-copy resource bodies (`mbResponseSetBodyOwned`); the IMAGE-SOURCE case shipped (item 43, `mbRegisterImageSourceBuffer`) | Response-body case still deferred by cost — revisit if a host serves large media |
+| 13c | Child worker/iframe DevTools targets (multi-session bridge). NOTE: the in-engine WebSocket endpoint shipped (item 41, `mbDevToolsStartServer`) but is still single-target-per-view | Open, unscheduled |
 | 35 | `mbAddFontData` on Windows (DirectWrite private collection) | Open — mac shipped; the export returns 0 on Windows |
+| 41 | In-engine DevTools endpoint (`mbDevToolsStartServer`) — POSIX only; Windows returns 0 (winsock port pending) | Shipped (macOS/Linux) |
 
 ---
 
