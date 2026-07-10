@@ -5,6 +5,117 @@ Release notes for miniblink2. Each release is an annotated git tag
 
 ---
 
+## v0.5 — 2026-07-10 (`v0.5`)
+
+**The interactive-host release.** The embedder API is finished (rounds 5 and
+6 close every remaining item), the compositor grows a zero-copy output path
+with real dirty-rect damage, and a full numbered sample set — including a
+tabbed MiniBrowser that runs on macOS **and** Windows — ships as the guided
+tour. All suites green: `mb_smoke` 217, `mb_smoke_render` 141,
+`mb_smoke_platform` 46, `mb_shot_smoke` 66, plus the new `mb_smoke_r6` 24 —
+0 failures.
+
+**Compositor & paint.**
+
+- **Dirty-rect damage** (`mbViewGetDirtyRect`): a damage-gated host now blits
+  only the changed subrect and skips bit-identical frames outright. Blink's
+  `RasterInvalidator` diffs the persistent `PaintArtifact` across paint
+  cycles in Root space; patch 0041 runs that diff inside the non-composited
+  early return, patch 0042 indexes old chunks by id so matching is
+  O(old + new) instead of the upstream O(old × new) worst case on wholesale
+  chunk churn. Full-view fallbacks cover what invalidation can't see (first
+  paint, resize, dsf/transparency changes, composited views). Closes the
+  dirty-RECT half of IMPROVEMENT.md item 2.
+- **IOSurface compositor output** (`mbViewGetIOSurface`, macOS composited
+  views): the in-process viz `Display` renders straight into an IOSurface's
+  mapped memory; a host binds it as `CALayer.contents` and displays
+  composited frames with **zero CPU readback**, retiring the
+  `mbRepaintToBitmap` copy on that path. The bitmap capture the old device
+  paid every `EndPaint` is now lazy — only `mbViewCompositorPixel` / the
+  composited-screenshot branch pays it, on demand.
+- **Per-view frame time** (`mbViewSetFrameTime`): each view stamps its rAF
+  timestamps from its own display's vsync, taking precedence over the
+  process-global `mbUpdateAt` — a 60 Hz + 120 Hz multi-monitor host drives
+  each view at its real cadence in its display's time domain (IMPROVEMENT.md
+  item 39).
+
+**Round 5 — six embedder surfaces** (IMPROVEMENT.md items 32–38).
+
+- `mbOnWindowObjectReady` (pre-page-script hook, host JS runs inline);
+  `mbOnFailLoadingEx` (machine-checkable error_domain + error_code);
+  `mbSetClipboardHandler` (page copy/paste ↔ host OS clipboard);
+  `mbAddFontData` (register in-memory TTF/OTF via CoreText — DirectWrite
+  private collection still pending on Windows); the **`mbViewConfig` builder**
+  + `mbCreateViewWithConfig` (creation-time session/compositing/UA/scale/
+  fonts — retires the process-latch and call-before-load ordering traps);
+  `mbRequest` handle + `mbSetRequestHook` (per-request block / redirect /
+  header override at both loader entries).
+
+**Round 6 — the final embedder-residue pass** (nine additions from a
+last re-read of the Ultralight 1.4 headers, plus two reversals of earlier
+"not adopted" calls).
+
+- **DevTools in one call**: `mbDevToolsStartServer`/`Stop` stand up a
+  loopback HTTP + WebSocket CDP endpoint over the existing per-view session,
+  so **ordinary Chrome attaches as the frontend** without a host-side bridge.
+  Written over the new cross-platform socket layer — works on macOS and
+  Windows.
+- **Host image sources**: `mbRegisterImageSource`/`Unregister` (a host BGRA
+  image PNG-encoded once and served in-process at
+  `https://mb-image.internal/<id>` ahead of the mock layer and the network;
+  re-registering swaps pixels and fires the `mbimagesourceupdate` event in
+  every live view — the update loop for charts / camera frames / host-drawn
+  icons without data: URLs) and the zero-copy `mbRegisterImageSourceBuffer`.
+- **Per-frame lifecycle**: `mbOnFrameLoadEvent` + `mbGetFrameIds` +
+  `mbEvalJSInFrameById` — stable frame ids, the deterministic sibling of
+  index-based iframe eval.
+- `mbRegisterCustomScheme` (register `app://`-style schemes as
+  standard/secure/fetch-capable, served through the mock layer, with a
+  custom-scheme navigation branch in `LoadURL`).
+- `webview_mac.h` / `webview_win.h` header-only native-input translators
+  (NSEvent / Win32 `WM_*` → the `mb` input structs — the keycode table the
+  SDK should own, not every host); footprint caps
+  (`mbSetImageCacheSize`/`mbSetFontCacheSize`/`mbSetJsHeapLimit`);
+  `mbOnConsoleMessage2` (column + source category, patch 0043);
+  `mbRequestPinPublicKey`; the premultiplied-BGRA conversion helpers
+  (`mbConvertToStraightAlpha`/`ToPremultiplied`/`SwapRedBlueChannels`).
+
+**Streaming downloads.** `mbOnDownloadStream` + `mbDownloadURLStream` +
+`mbCancelDownload` add the begin → data → finish lifecycle (received/expected
+progress, prompt cancel) for bodies too large to buffer, on a curl worker
+that honors the session jar, proxy, UA, and interception layer; blob / data:
+/ mocked / navigation bodies deliver the same lifecycle from memory. Lifts
+the item-21 deferral.
+
+**Samples: the numbered set (1–9), OS-independent, macOS + Windows.** Every
+sample now lives in its own directory with OS-independent code; all
+platform-specific scaffold lives in `samples/compat/` (`mb_window.h`
+interface, Cocoa + Win32 backends) and is deliberately **not** part of the
+SDK — the engine stays windowless.
+
+- 1 render-to-png, 2/3 basic + resizable app, 4 javascript
+  (`mbJsBindFunction` + `mbOnWindowObjectReady`), 5 file loading
+  (`file://` + `mbMockResponse` virtual file), 6 intro to the C API (compiled
+  as plain **C99** — the headers are C-clean), 9 multi-window
+  (editor→preview, `mbDefer`, non-history loads). Slot 7 is reserved
+  (direct-to-GPU-texture output needs a host render-target abstraction the
+  engine doesn't expose yet).
+- **8 = tabbed MiniBrowser**, running on both platforms: the chrome (tab
+  strip + toolbar + address bar) is *itself a web page* wired with
+  `mbJsBindFunction` both ways (the engine dogfoods its own UI); per-tab
+  title/URL/history/cursor/tooltip/console/error-page/downloads;
+  `window.open`/`target=_blank` adopts the engine-created child view as a new
+  tab (live opener/`postMessage`, agent-cluster close order); F2 starts the
+  loopback CDP endpoint (`cdp_bridge.cc`) and real Chrome attaches.
+
+**New internal layer & patches.** `src/compat/` is the library's internal
+platform-abstraction layer (never staged into the SDK): `mb_socket.h`
+(BSD sockets / Winsock2, never crossing the ABI) + the native-input
+translators. Donor patches 0041–0043 (non-composited paint-artifact hook,
+indexed raster-invalidator chunk matching, console column + source category).
+
+---
+
 ## v0.4 — 2026-07-09 (`v0.4`)
 
 **The Windows release.** miniblink2 now fully supports **Windows x64** — the

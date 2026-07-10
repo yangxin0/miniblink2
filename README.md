@@ -191,10 +191,12 @@ durability barrier.
 
 **DevTools**: every view exposes a Chrome-DevTools-Protocol session
 (`mbDevToolsAttach`/`Send`/`Detach`). Bridge it to a WebSocket + `/json` endpoint —
-`samples/sample8_minibrowser/cdp_bridge.cc` is a drop-in — and **ordinary Chrome
-attaches as the frontend** via `chrome://inspect` (Elements/Console/Sources, verified
-against real Chrome). `mbOnDevToolsPaused` tells the host to stop its frame tick at a
-breakpoint instead of treating it as a hang.
+`samples/sample8_minibrowser/cdp_bridge.cc` is a drop-in — or let the engine host the
+endpoint itself with `mbDevToolsStartServer` (a loopback HTTP + WebSocket CDP server,
+one call, macOS + Windows). Either way **ordinary Chrome attaches as the frontend**
+via `chrome://inspect` (Elements/Console/Sources, verified against real Chrome).
+`mbOnDevToolsPaused` tells the host to stop its frame tick at a breakpoint instead of
+treating it as a hang.
 
 ## Samples (`samples/`) — macOS + Windows
 
@@ -250,7 +252,7 @@ WebGPU (--webgpu)  ───► Dawn ─► Metal             ───► Dawn 
   into the software page paint (`patches/0008` + `0018`), which is what makes WebGL
   content appear in `mbPaintToBitmap`/`mb_shot` screenshots.
 
-## What works (verified by a 460+ case automated battery, on macOS **and** Windows)
+## What works (verified by a 490+ case automated battery, on macOS **and** Windows)
 
 | Subsystem | Status |
 |---|---|
@@ -283,7 +285,10 @@ WebGPU (--webgpu)  ───► Dawn ─► Metal             ───► Dawn 
 | **DevTools**: per-view CDP sessions; real Chrome as the frontend | ✅ |
 | Editor commands + clipboard (incl. OS-clipboard bridge); file upload; find-in-page; AX-tree export | ✅ |
 | Screenshots: PNG/JPEG, transparent, element/region clip, full-page, zoom, mobile emulation | ✅ |
-| Threaded/GPU display compositor; dirty-rect damage; child-frame independent history | ⏳ roadmap |
+| **Dirty-rect damage** (`mbViewGetDirtyRect`) + zero-copy **IOSurface compositor output** (macOS); per-view frame time | ✅ |
+| **Host image sources** (`mbRegisterImageSource`, in-process serve + live update); **streaming downloads** (begin→data→finish) | ✅ |
+| DevTools loopback server (`mbDevToolsStartServer` — Chrome attaches, one call); custom `app://` schemes | ✅ |
+| Threaded/GPU display compositor; child-frame independent history | ⏳ roadmap |
 
 ## Tool: `mb_shot` (headless HTML → PNG/JPEG/PDF)
 
@@ -378,16 +383,18 @@ More demos — modern CSS, JS mutating the DOM, `file://` + SVG, `<canvas>` 2D:
 The **C ABI** dissolves the GN↔consumer build mismatch: GN builds everything that
 touches Blink/base/mojo C++ types; an app links only against the pure-C headers.
 
-**Donor patches** (`patches/`, 40): small, documented Chromium patches the build
+**Donor patches** (`patches/`, 43): small, documented Chromium patches the build
 applies automatically — offscreen-widget compat, in-process GPU de-testonly, the
 non-composited canvas paint path (`0008`/`0018`), gating Dawn out of the GPU path
 when WebGPU is off (`0017` mac, `0035`/`0036`/`0040` Windows), host `<select>`
-popups on every platform (`0033`), the host font-fallback hook (`0029`), and
-similar. Each patch header explains the exact reason.
+popups on every platform (`0033`), the host font-fallback hook (`0029`), the
+non-composited paint-artifact hook + indexed raster-invalidator that make
+dirty-rect damage cheap (`0041`/`0042`), and similar. Each patch header
+explains the exact reason.
 
 ## Public C ABI (`include/miniblink2/`)
 
-**264 functions** across the two headers, every one with a commented contract; the
+**286 functions** across the two headers, every one with a commented contract; the
 header preambles state the global threading, coordinate/pixel, and string
 conventions once. Grouped overview:
 
@@ -408,17 +415,24 @@ conventions once. Grouped overview:
   `mbOnNavigation` `mbOnNewWindow` `mbOnCreateChildView` `mbOnRequestClose`
   `mbOnSelectPopup` `mbOnDownload` `mbOnConsoleMessage(Ex)` `mbOnLogMessage`
 - **Scripting:** `mbRunJS` `mbSetInitScript` `mbInsertCSS` `mbSetUserStylesheet`
-  `mbEvalJS(Ex/Catch/Isolated/InFrame)` `mbJsBindFunction` `mbSetJsDialogCallback`
+  `mbEvalJS(Ex/Catch/Isolated/InFrame)` `mbGetFrameIds`/`mbEvalJSInFrameById`
+  `mbOnFrameLoadEvent` `mbJsBindFunction` `mbSetJsDialogCallback`
 - **Input:** typed events (`mbSendMouseEvent` `mbSendWheelEvent` `mbSendKeyEvent`)
   + shorthands (`mbSendMouseClick(Ex)`/`Down`/`Up`/`Move` `mbSendTouchTap`/`Swipe`
   `mbSendText` `mbSendKey(Ex/Up)` `mbSendIme` `mbSendWheel` `mbSendScroll`)
 - **Interception:** `mbMockResponse` `mbOnRequestMock` `mbRewriteUrl` `mbBlockUrl`
   `mbBlockResourceType` `mbSetRequestHeader` `mbSetRequestHook` + `mbRequest*`
-  handle `mbSetResponseCallback` + `mbResponse*` handle
-- **Paint:** `mbRepaintToBitmap` `mbViewIsDirty`/`mbViewSetDirty` (interactive);
+  handle `mbSetResponseCallback` + `mbResponse*` handle `mbRegisterCustomScheme`
+- **Paint:** `mbRepaintToBitmap` `mbViewIsDirty`/`mbViewSetDirty`
+  `mbViewGetDirtyRect` `mbViewGetIOSurface` `mbViewSetFrameTime` (interactive);
   `mbPaintToBitmap` `mbPaintRectToBitmap` `mbSavePng(Rect)` `mbSaveElementPng`
   `mbSavePdf(Ex)` `mbEncodePng` (one-shot, settling)
-- **DevTools:** `mbDevToolsAttach`/`Send`/`Detach` `mbOnDevToolsPaused`
+- **Image sources:** `mbRegisterImageSource`/`Unregister`
+  `mbRegisterImageSourceBuffer` (host BGRA served in-process, live update)
+- **Downloads:** `mbOnDownload` `mbOnDownloadStream` `mbDownloadURLStream`
+  `mbCancelDownload` (streaming begin→data→finish)
+- **DevTools:** `mbDevToolsAttach`/`Send`/`Detach` `mbDevToolsStartServer`/`Stop`
+  `mbOnDevToolsPaused`
 - **Automation kit** (automation.h): `mbWaitFor*`, selector actions
   (`mbClickSelector` `mbFillSelector` `mbDragSelector` …), scraping getters
   (`mbGetText/HTML/Attribute/ComputedStyle/…`), storage/cookie save-load,
@@ -430,6 +444,7 @@ conventions once. Grouped overview:
   `mbSetUserAgent` `mbSetLocale` `mbSetDarkMode` `mbSetDeviceScaleFactor`
   `mbSetZoomFactor` `mbSetTransparentBackground` `mbSetEnableJavascript`
   `mbSetLoadImages` `mbExecuteEditCommand(Value)`
+  `mbSetImageCacheSize`/`mbSetFontCacheSize`/`mbSetJsHeapLimit` (footprint caps)
 
 ## Requirements
 
@@ -462,9 +477,10 @@ conventions once. Grouped overview:
 
 `build.sh /path/to/chromium` is the inner-loop build: it stages `src/` into the donor
 tree, applies `patches/`, runs GN + ninja against the **component** `out/Release`, and
-executes the full test battery (466 checks, green on macOS and Windows):
+executes the full test battery (490+ checks, green on macOS and Windows):
 
-- `mb_smoke` — 213-check capability + regression suite over the C ABI.
+- `mb_smoke` — 217-check capability + regression suite over the C ABI, plus
+  `mb_smoke_r6` (24) for the round-6 surfaces.
 - `mb_smoke_platform` (46) + `mb_smoke_render` (141) — platform services and
   rendering/worker/storage regression suites.
 - `mb_shot_smoke.sh` — 66 offline CLI cases asserting `mb_shot`'s exact stdout,
