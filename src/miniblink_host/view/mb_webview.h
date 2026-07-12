@@ -846,11 +846,9 @@ class MbWebView {
   // or hidden (display:none / visibility:hidden / opacity:0). The "wait for the
   // loading spinner to disappear" primitive. True once gone/hidden, else timeout.
   bool WaitForSelectorHidden(const char* css, int timeout_ms);
-  // API-level-1 compatibility behavior: wait until the process-wide diagnostic
-  // request-log count stops changing for idle_ms.
+  // Per-view networkidle0 (Puppeteer semantics): nothing in flight and no newly
+  // started request for idle_ms. Backs mbWaitForNetworkIdle.
   bool WaitForNetworkIdle(int idle_ms, int timeout_ms);
-  // Robust per-view networkidle0 used by mbWaitForNetworkIdleEx.
-  bool WaitForNetworkIdleEx(int idle_ms, int timeout_ms);
   // settle=true: one-shot screenshot (full lifecycle settle). settle=false: fast
   // interactive paint (wkePaint) — single lifecycle update + paint, no task-queue drain.
   bool PaintToBitmap(void* out_bgra, int w, int h, int stride, bool settle = true);

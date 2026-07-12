@@ -12,7 +12,7 @@ platform is all a real host needs.
 
 | # | Sample | What it shows |
 |---|--------|---------------|
-| 1 | `sample1_render_to_png` | Headless URL → PNG in five calls (`mbLoadURL`, `mbWaitForNetworkIdleEx`, `mbSavePng`). The production version of this idea is the `mb_shot` tool. |
+| 1 | `sample1_render_to_png` | Headless URL → PNG in five calls (`mbLoadURL`, `mbWaitForNetworkIdle`, `mbSavePng`). The production version of this idea is the `mb_shot` tool. |
 | 2 | `sample2_basic_app` | A window showing an interactive in-memory page — the whole app is ~20 lines over the scaffold. |
 | 3 | `sample3_resizable_app` | Window resizes → `mbResize` (logical CSS px) → live relayout; `devicePixelRatio` from `mbSetDeviceScaleFactor`. |
 | 4 | `sample4_javascript` | The JS ⇄ native bridge: `mbJsBindFunction` (string + JSON returns), `mbOnWindowObjectReady` for host-computed setup before any page script. |

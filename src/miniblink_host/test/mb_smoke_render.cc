@@ -314,7 +314,7 @@ static void RunCases(mbView* v, int W, int H) {
             "else window.__ctxPayload=String(e.data)};");
     for (int i = 0; i < 80 && Eval(v, "window.__ctxReady") != "1"; ++i)
       mbWait(v, 25);
-    mbWaitForNetworkIdleEx(v, 50, 1000);  // settle creation before measuring the fetch
+    mbWaitForNetworkIdle(v, 50, 1000);  // settle creation before measuring the fetch
 
     struct WorkerResponseHookState {
       mbView* expected_view = nullptr;
@@ -344,7 +344,7 @@ static void RunCases(mbView* v, int W, int H) {
       mbWait(v, 25);
 
     const auto idle_start = std::chrono::steady_clock::now();
-    const bool idle = mbWaitForNetworkIdleEx(v, 600, 2500) == 1;
+    const bool idle = mbWaitForNetworkIdle(v, 600, 2500) == 1;
     const auto idle_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                              std::chrono::steady_clock::now() - idle_start)
                              .count();
@@ -904,7 +904,7 @@ static void RunCases(mbView* v, int W, int H) {
       mbWait(peer, 25);
     }
     if (peer)
-      mbWaitForNetworkIdleEx(peer, 50, 1000);
+      mbWaitForNetworkIdle(peer, 50, 1000);
     mbRunJS(v, "window.__activityWorker.port.postMessage('go')");
     for (int i = 0; peer && i < 40 && Eval(peer, "window.__sharedArmed") != "1";
          ++i) {
@@ -912,7 +912,7 @@ static void RunCases(mbView* v, int W, int H) {
     }
     const auto shared_idle_start = std::chrono::steady_clock::now();
     const bool shared_idle =
-        peer && mbWaitForNetworkIdleEx(peer, 600, 2500) == 1;
+        peer && mbWaitForNetworkIdle(peer, 600, 2500) == 1;
     const auto shared_idle_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - shared_idle_start)
@@ -950,7 +950,7 @@ static void RunCases(mbView* v, int W, int H) {
       mbWait(peer, 25);
     }
     const bool fallback_idle =
-        peer && mbWaitForNetworkIdleEx(peer, 600, 2500) == 1;
+        peer && mbWaitForNetworkIdle(peer, 600, 2500) == 1;
     const std::string fallback_done =
         peer ? Eval(peer, "window.__sharedDone") : std::string();
     mbSetResponseCallbackEx(nullptr, nullptr);

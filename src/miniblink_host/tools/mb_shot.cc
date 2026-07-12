@@ -547,7 +547,7 @@ int main(int argc, char** argv) {
   // --wait-idle: let the page's deferred fetches / lazy images settle (Puppeteer
   // networkidle) before scraping/capturing — for SPAs that fetch after load.
   if (wait_idle) {
-    if (!mbWaitForNetworkIdleEx(view, 500, wait_ms > 0 ? wait_ms : 10000))
+    if (!mbWaitForNetworkIdle(view, 500, wait_ms > 0 ? wait_ms : 10000))
       std::fprintf(stderr,
                    "mb_shot: WARNING — --wait-idle still busy at timeout\n");
   }

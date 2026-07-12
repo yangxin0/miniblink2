@@ -661,7 +661,7 @@ int main() {
     mbOnFailLoadingEx(v, nullptr, nullptr);
     mbClearMocks();
     Expect(static_blocked && callback_blocked,
-           "mbNavigate honors mbBlockUrl and legacy request callbacks",
+           "mbNavigate honors mbBlockUrl and simple request callbacks",
            "static=" + std::to_string(static_blocked) + " callback=" +
                std::to_string(callback_blocked));
   }
@@ -1478,7 +1478,7 @@ int main() {
         nav_events[1].outcome == MB_NAVIGATION_OUTCOME_FAILURE &&
         nav_events[1].error_domain == "file";
     Expect(*fin > before && mbIsLoadFinished(v) == 1 && failure_lifecycle,
-           "a failed load reports FAILURE while legacy load-finish still completes",
+           "a failed load reports FAILURE while uncorrelated load-finish still completes",
            "fin delta=" + std::to_string(*fin - before) +
                " finished=" + std::to_string(mbIsLoadFinished(v)) +
                " events=" + std::to_string(nav_events.size()));
@@ -7029,31 +7029,34 @@ int main() {
         mbCreateSessionEx("", "/tmp/mb-smoke-r4-profiles", &empty_st);
     mbSessionCreateStatus eph_st = MB_SESSION_ERROR;
     mbSession* empty_ephemeral = mbCreateSessionEx("", nullptr, &eph_st);
-    // The original symbol remains permissive for API-level-1 callers. Strict
-    // validation is additive in Ex, not a behavior change to an old export.
-    mbSession* legacy_nested =
-        mbCreateSession("legacy/nested", "/tmp/mb-smoke-r4-profiles");
-    mbSession* legacy_unnamed =
+    // The plain symbol shares the same validation — a non-portable or missing
+    // persistent name is rejected there too (just without the status detail),
+    // while an ephemeral NULL name still gets the "unnamed" convenience.
+    mbSession* plain_nested =
+        mbCreateSession("plain/nested", "/tmp/mb-smoke-r4-profiles");
+    mbSession* plain_null_persistent =
         mbCreateSession(nullptr, "/tmp/mb-smoke-r4-profiles");
-    char legacy_name[64] = {0};
-    if (legacy_unnamed)
-      mbSessionGetName(legacy_unnamed, legacy_name, sizeof(legacy_name));
-    const bool legacy_compatible = legacy_nested && legacy_unnamed &&
-                                   std::string(legacy_name) == "unnamed";
+    mbSession* plain_null_ephemeral = mbCreateSession(nullptr, nullptr);
+    char plain_name[64] = {0};
+    if (plain_null_ephemeral)
+      mbSessionGetName(plain_null_ephemeral, plain_name, sizeof(plain_name));
+    const bool plain_matches_ex = plain_nested == nullptr &&
+                                  plain_null_persistent == nullptr &&
+                                  plain_null_ephemeral != nullptr &&
+                                  std::string(plain_name) == "unnamed";
     const bool reject_ok = bad == nullptr && st == MB_SESSION_INVALID_NAME &&
                            bad_null == nullptr &&
                            null_st == MB_SESSION_INVALID_NAME &&
                            bad_empty == nullptr &&
                            empty_st == MB_SESSION_INVALID_NAME &&
                            empty_ephemeral != nullptr && eph_st == MB_SESSION_OK;
-    mbDestroySession(legacy_unnamed);
-    mbDestroySession(legacy_nested);
+    mbDestroySession(plain_null_ephemeral);
     mbDestroySession(empty_ephemeral);
     Expect(std::string(name) == "r4-ephemeral" && eph == 0 && eplen == 0 &&
                per == 1 && path_ok && std::string(pname) == "r4-persistent" &&
-               reject_ok && legacy_compatible &&
+               reject_ok && plain_matches_ex &&
                mbSessionIsPersistent(mbDefaultSession()) == 0,
-           "session introspection + strict Ex and compatible legacy creation",
+           "session introspection + uniform strict name validation",
            "name=[" + std::string(name) + "] eph=" + std::to_string(eph) +
                " per=" + std::to_string(per) + " pname=[" + std::string(pname) +
                "] path=[" + ppath_s + "] reject_st=" + std::to_string(st) +

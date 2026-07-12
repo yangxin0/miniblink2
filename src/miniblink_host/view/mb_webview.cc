@@ -4159,36 +4159,6 @@ bool MbWebView::WaitForSelectorHidden(const char* css, int timeout_ms) {
 bool MbWebView::WaitForNetworkIdle(int idle_ms, int timeout_ms) {
   if (!main_frame_)
     return false;
-  // Preserve the API-level-1 entry point's observable behavior: it watches the
-  // process-wide capped diagnostic log and only notices count changes. New code
-  // should use WaitForNetworkIdleEx, which is per-view and tracks in-flight work.
-  if (idle_ms <= 0)
-    idle_ms = 500;
-  size_t last = mb::MbRequestCount();
-  const base::TimeTicks hard_deadline =
-      base::TimeTicks::Now() + base::Milliseconds(timeout_ms > 0 ? timeout_ms : 0);
-  base::TimeTicks idle_deadline =
-      base::TimeTicks::Now() + base::Milliseconds(idle_ms);
-  for (;;) {
-    base::RunLoop().RunUntilIdle();
-    ServiceAnimations();
-    const base::TimeTicks now = base::TimeTicks::Now();
-    const size_t cur = mb::MbRequestCount();
-    if (cur != last) {
-      last = cur;
-      idle_deadline = now + base::Milliseconds(idle_ms);
-    }
-    if (now >= idle_deadline)
-      return true;
-    if (now >= hard_deadline)
-      return false;
-    base::PlatformThread::Sleep(base::Milliseconds(10));
-  }
-}
-
-bool MbWebView::WaitForNetworkIdleEx(int idle_ms, int timeout_ms) {
-  if (!main_frame_)
-    return false;
   // Pump until THIS view has had no outstanding request and no newly-started
   // request for `idle_ms` (Puppeteer's networkidle0) — for SPAs that lazy-fetch
   // after the initial load. Main-resource navigations remain keyed by `this`; frame

@@ -569,13 +569,6 @@ int mbWaitForNetworkIdle(mbView* v, int idle_ms, int timeout_ms) {
   return v->impl->WaitForNetworkIdle(idle_ms, timeout_ms) ? 1 : 0;
 }
 
-int mbWaitForNetworkIdleEx(mbView* v, int idle_ms, int timeout_ms) {
-  EngineScope engine_scope;
-  if (!v || !v->impl)
-    return 0;
-  return v->impl->WaitForNetworkIdleEx(idle_ms, timeout_ms) ? 1 : 0;
-}
-
 int mbWaitForFunction(mbView* v, const char* js_expr, int timeout_ms) {
   EngineScope engine_scope;
   if (!v || !v->impl || !js_expr)
@@ -631,15 +624,7 @@ mbSession* mbCreateSessionEx(const char* name, const char* persist_path,
 }
 
 mbSession* mbCreateSession(const char* name, const char* persist_path) {
-  EngineScope engine_scope;
-  auto s = std::make_unique<mbSession>();
-  s->impl = mb::MbSession::CreateLegacy(name && *name ? name : "unnamed",
-                                        persist_path ? persist_path : "");
-  if (!s->impl)
-    return nullptr;
-  s->impl->set_host_handle(s.get());
-  s->impl->set_host_handle_deleter(&DeleteSessionHandle);
-  return s.release();
+  return mbCreateSessionEx(name, persist_path, nullptr);
 }
 
 void mbDestroySession(mbSession* s) {
@@ -1762,12 +1747,12 @@ void mbClearCookies(mbView* v) {
 }
 
 int mbSaveCookies(const char* path) {
-  // Legacy no-view API: the empty key selects the implicit default session.
+  // No-view convenience API: the empty key selects the implicit default session.
   return (path && mb::MbSaveCookies(path)) ? 1 : 0;
 }
 
 int mbLoadCookies(const char* path) {
-  // Legacy no-view API: merge into the implicit default session only.
+  // No-view convenience API: merge into the implicit default session only.
   return (path && mb::MbLoadCookies(path)) ? 1 : 0;
 }
 

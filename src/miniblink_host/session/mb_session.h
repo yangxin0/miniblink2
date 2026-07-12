@@ -29,12 +29,6 @@ class MbSession {
   static MbSession* Create(const std::string& name,
                            const std::string& persist_path,
                            MbSessionCreateResult* out_result = nullptr);
-  // Compatibility path for the original mbCreateSession symbol. It preserves
-  // that entry point's permissive profile-name handling; new callers should use
-  // Create()/mbCreateSessionEx so malformed persistent names are rejected with
-  // a structured status.
-  static MbSession* CreateLegacy(const std::string& name,
-                                 const std::string& persist_path);
 
   const std::string& id() const { return id_; }
   const std::string& name() const { return name_; }
@@ -73,10 +67,6 @@ class MbSession {
   }
 
  private:
-  static MbSession* CreateImpl(const std::string& name,
-                               const std::string& persist_path,
-                               bool validate_name,
-                               MbSessionCreateResult* out_result);
   MbSession(std::string name, std::string persist_dir, std::string id);
   ~MbSession();
   void MaybeDelete();

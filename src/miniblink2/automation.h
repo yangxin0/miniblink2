@@ -43,21 +43,14 @@ MB_EXPORT int mbWaitForVisibleSelector(mbView*, const char* css_selector,
 MB_EXPORT int mbWaitForSelectorHidden(mbView*, const char* css_selector,
                                       int timeout_ms);
 
-// Legacy API-level-1 behavior: wait until the PROCESS-WIDE capped diagnostic
-// request-log count has not changed for `idle_ms`. Call mbClearRequestLog before
-// navigation to scope it approximately. This does not track in-flight requests,
-// and traffic in another view can reset the window. Kept unchanged for existing
-// binaries; new code should use mbWaitForNetworkIdleEx.
-MB_EXPORT int mbWaitForNetworkIdle(mbView*, int idle_ms, int timeout_ms);
-
-// Robust networkidle0 wait (API level 3): wait until THIS view has had nothing
-// in flight and no newly-started request for `idle_ms`. Covers main-frame,
-// subresource, dedicated-worker, and shared-worker loads. Unrelated traffic in
-// another view cannot disturb it; a shared worker intentionally counts for every
-// view currently connected to that worker. A slow request remains busy until
+// Robust networkidle0 wait: wait until THIS view has had nothing in flight and
+// no newly-started request for `idle_ms`. Covers main-frame, subresource,
+// dedicated-worker, and shared-worker loads. Unrelated traffic in another view
+// cannot disturb it; a shared worker intentionally counts for every view
+// currently connected to that worker. A slow request remains busy until
 // completion. Returns 1 once quiet, 0 if `timeout_ms` elapses. No request-log
 // clearing is needed.
-MB_EXPORT int mbWaitForNetworkIdleEx(mbView*, int idle_ms, int timeout_ms);
+MB_EXPORT int mbWaitForNetworkIdle(mbView*, int idle_ms, int timeout_ms);
 
 // Runaway-script guard. A single-process embedder shares the main thread with the
 // page, so a synchronous infinite loop in page JS (e.g. `while(true){}`) would hang
@@ -205,7 +198,7 @@ MB_EXPORT void mbScrollTo(mbView*, int x, int y);
 // number of steps that grew the page (0 = a static page).
 MB_EXPORT int mbScrollToBottom(mbView*, int max_steps);
 
-// Legacy default-profile cookie persistence: save the implicit default session's
+// Default-profile cookie persistence: save the implicit default session's
 // whole jar (all hosts, including session and persistent cookies) to a Netscape
 // cookie file, or merge such a file back into that jar. Custom mbSession profiles
 // are intentionally not included; persistent custom profiles use mbSessionFlush,

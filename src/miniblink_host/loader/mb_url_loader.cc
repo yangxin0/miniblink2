@@ -1617,7 +1617,7 @@ int MbResponseHookWaiterCountForTesting(const std::string& visible_url) {
   return it == ResponseHookWaitersForTesting().end() ? 0 : it->second;
 }
 
-// --- Per-view network activity (backs mbWaitForNetworkIdleEx) -----------------
+// --- Per-view network activity (backs mbWaitForNetworkIdle) -----------------
 // See the header for why the capped request-log size is the wrong idle signal.
 namespace {
 struct ViewNetActivity {
@@ -2991,7 +2991,7 @@ void MbStartNavigation(MbNavigationRequest req, MbNavigationCallback on_complete
   auto cancel = std::make_shared<std::atomic<bool>>(false);
   NavCancelTokens()[req.id] = cancel;
   // Count the whole navigation as one outstanding request for this view, so
-  // mbWaitForNetworkIdleEx sees the async main resource in flight (balanced in NavFinish,
+  // mbWaitForNetworkIdle sees the async main resource in flight (balanced in NavFinish,
   // which every terminal path — success, failure, cancel, local — funnels through).
   MbNetRequestStarted(NavActivityContext(req));
   auto chain = std::make_shared<NavChain>();
@@ -3747,7 +3747,7 @@ void MbURLLoader::LoadAsynchronously(
     blink::URLLoaderClient* client) {
   client_ = client;
   // Count this load as outstanding for its view (paired with the decrement in the
-  // destructor via net_counted_) so mbWaitForNetworkIdleEx sees a real in-flight
+  // destructor via net_counted_) so mbWaitForNetworkIdle sees a real in-flight
   // request until the loader is torn down — success, error, or cancel.
   net_activity_contexts_ = ActivityContexts();
   net_activity_keys_.reserve(net_activity_contexts_.size() + 1);

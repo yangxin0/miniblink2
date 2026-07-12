@@ -155,13 +155,13 @@ void MbClearRequestLog();
 // diagnostic. NOTE: do NOT use this for network-idle detection: the log is capped,
 // so once it fills its count stops changing and a still-busy page looks idle, and
 // it counts starts, not outstanding requests. Use the per-view activity counters
-// below instead (that is what MbWebView::WaitForNetworkIdleEx polls).
+// below instead (that is what MbWebView::WaitForNetworkIdle polls).
 size_t MbRequestCount();
 
 // The test-only rendezvous/probe hooks this TU defines are declared in
 // test/mb_test_seams.h; the .cc includes it so signatures cannot drift.
 
-// Per-view network activity, the correct backing for mbWaitForNetworkIdleEx. New
+// Per-view network activity, the correct backing for mbWaitForNetworkIdle. New
 // loaders use the owning view's stable MbLoaderViewContext activity key, so an
 // address-reused MbWebView cannot inherit old worker traffic. `started` is a MONOTONIC
 // (never-capped) count of loads begun for the view — it always advances on new
@@ -169,7 +169,7 @@ size_t MbRequestCount();
 // number of loads currently outstanding (a load raises it at LoadAsynchronously
 // and lowers it when its loader is destroyed), so a single slow request keeps the
 // view busy until it actually finishes. These counters are synchronized because
-// worker-owned loaders start/finish on worker sequences while WaitForNetworkIdleEx polls
+// worker-owned loaders start/finish on worker sequences while WaitForNetworkIdle polls
 // them on the engine sequence. Entries are retired when their stable attribution token
 // dies and erased once its last in-flight load finishes; monotonicity is therefore kept
 // for the full live-token lifetime without leaking one map entry per destroyed view.

@@ -112,16 +112,11 @@ MB_EXPORT const char* mbVersion(void);
 //                   of level <= N declares, so a host needs engine level >= its
 //                   own build level for the symbols it references to resolve.
 #define MB_ABI_EPOCH 1
-// Level 2 adds (purely additively — no existing entry point changed): mbAbiEpoch,
-// mbApiLevel, mbCheckCompat, mbHasFeature, mbOnNavigationStarted, mbSetResponseCallbackEx,
-// mbSessionFlushEx, mbSetRequestHeaderForHost, mbSetRequestHeaderForOrigin, mbNavigate,
-// mbNavigateEx, mbCancelNavigation, mbCreateSessionEx. The epoch stays 1 because nothing
-// breaking changed — old binaries keep working against this engine.
-// Level 3 adds mbOnNavigationEvent (an id-correlated, structured main-navigation
-// lifecycle) and mbWaitForNetworkIdleEx (robust per-view network-idle state).
-// Existing callbacks/functions and their binary ABI and legacy behavior remain
-// unchanged.
-#define MB_API_LEVEL 3
+// PRE-RELEASE: the project has not shipped, so neither number has ever been
+// consumed by an external binary and no compatibility is owed across commits —
+// entry points change in place. The two-axis scheme above is the contract the
+// FIRST release will freeze; until then both stay at 1.
+#define MB_API_LEVEL 1
 MB_EXPORT int mbAbiEpoch(void);
 MB_EXPORT int mbApiLevel(void);
 // Original name for the additive level; kept as an alias so existing callers and
@@ -288,19 +283,16 @@ MB_EXPORT void mbDefer(mbDeferredCallback cb, void* userdata);
 // normalization aliases resolve to one profile while a copied directory becomes
 // an independent clone. The mode is fixed for the session's life.
 //
-// For mbCreateSessionEx, a persistent `name` must be a portable single path
-// component: NULL/empty, ".",
+// A persistent `name` must be a portable single path component: NULL/empty, ".",
 // "..", path separators, control chars, the Windows-illegal characters (: * ? " < > |), a
 // trailing dot/space, or a Windows reserved device name (CON/PRN/NUL/COM1.../LPT1...) are
-// rejected. An ephemeral Ex session ignores `name` for storage and accepts anything.
+// rejected. An ephemeral session ignores `name` for storage and accepts anything
+// (NULL/empty becomes "unnamed").
 typedef struct mbSession mbSession;
-// Legacy compatibility entry point. NULL/empty `name` becomes "unnamed", and a
-// persistent name is accepted verbatim (including nested/otherwise non-portable
-// names), matching API level 1. This is trusted-host input: separators or ".."
-// can select a directory outside the nominal profile root. Prefer
-// mbCreateSessionEx for validated new code.
+// Create a session. Returns NULL on failure (invalid persistent name,
+// engine not initialized, unwritable profile directory).
 MB_EXPORT mbSession* mbCreateSession(const char* name, const char* persist_path);
-// Like mbCreateSession but reports WHY creation failed (API level 2). On failure returns
+// Like mbCreateSession but reports WHY creation failed. On failure returns
 // NULL and, if out_status != NULL, writes an mbSessionCreateStatus: MB_SESSION_INVALID_NAME
 // for a non-portable persistent profile name (see above), MB_SESSION_ERROR for
 // engine-not-initialized / other. MB_SESSION_OK (0) on success.
@@ -339,7 +331,7 @@ MB_EXPORT void mbSessionClearStorage(mbSession*);
 // under its persist dir now (also happens at final teardown). DOM storage is
 // currently memory-only. No-op for ephemeral profiles.
 MB_EXPORT void mbSessionFlush(mbSession*);
-// Extended form (API level 2): like mbSessionFlush but returns 1 on success (including
+// Extended form: like mbSessionFlush but returns 1 on success (including
 // the no-op flush of an ephemeral profile — nothing to persist), 0 if the profile
 // directory or any store could not be written (permissions, full disk), so a host can
 // surface a failed save instead of silently losing data. Added alongside — NOT changing —
@@ -434,13 +426,13 @@ MB_EXPORT void* mbViewGetIOSurface(mbView*);
 //   mbLoadHTML  — render an in-memory document (no network). First render proof.
 //   mbLoadURL   — fetch via libcurl (mb_url_loader) then render (SYNCHRONOUS: blocks the
 //                 calling thread until the fetch completes; simplest for automation).
-//   mbNavigate  — ASYNCHRONOUS navigation (API level 2): returns a navigation id
+//   mbNavigate  — ASYNCHRONOUS navigation: returns a navigation id
 //                 immediately and fetches off the main thread, so an interactive host stays
 //                 responsive and can repaint / cancel during a slow load. Prefer it for
 //                 interactive UIs. Mock lookup is posted too; file IO and data decoding
 //                 run on the background pool, so local responses neither materialize
 //                 inside mbNavigate nor freeze the next engine update. The
-//                 legacy main-frame lifecycle is: started (mbOnNavigationStarted)
+//                 simple main-frame lifecycle is: started (mbOnNavigationStarted)
 //                 -> begin (mbOnBeginLoading, on commit) -> finish
 //                 (mbOnLoadFinish) / fail (mbOnFailLoading). Exactly one finish fires per
 //                 navigation, including on failure, cancellation, supersession, and a
@@ -473,8 +465,8 @@ MB_EXPORT mbNavigationId mbNavigateEx(mbView*, const char* utf8_url,
 // finished / superseded / unknown id).
 MB_EXPORT int mbCancelNavigation(mbView*, mbNavigationId);
 
-// Structured main-frame navigation lifecycle (API level 3). This is the
-// correlation-safe counterpart to the legacy mbOnNavigationStarted /
+// Structured main-frame navigation lifecycle: the correlation-safe
+// counterpart to the simple mbOnNavigationStarted /
 // mbOnBeginLoading / mbOnLoadFinish / mbOnFailLoading callbacks. `navigation_id`
 // is the exact non-zero id returned by mbNavigate/mbNavigateEx; navigations begun
 // by another API or by the page report 0. For mbNavigate*, the id is reserved
@@ -532,11 +524,11 @@ MB_EXPORT void mbOnNavigationEvent(mbView*, mbNavigationEventCallback,
 MB_EXPORT void mbLoadHTMLEx(mbView*, const char* utf8_html,
                             const char* base_url, int add_to_history);
 
-// Legacy, uncorrelated completion notification. For a document that commits, this
+// Uncorrelated completion notification. For a document that commits, this
 // is the real Blink DidFinishLoad signal (the main document's `load` event, all
 // subresources done), not a poll or fixed timer. A navigation that terminates
 // WITHOUT a document (failure, cancellation, supersession, or download diversion)
-// also gets one synthesized callback so legacy waiters cannot hang. Therefore this
+// also gets one synthesized callback so uncorrelated waiters cannot hang. Therefore this
 // callback means "the current attempt ended", NOT "the page loaded successfully".
 // Use mbOnNavigationEvent when outcome or mbNavigationId correlation matters.
 // Register with mbOnLoadFinish (NULL clears); synchronous loads may invoke it before
@@ -1253,7 +1245,7 @@ MB_EXPORT int mbGetCookie(mbView*, const char* url, const char* name, char* out,
 // Write this view's browsing-profile cookie jar (every host, including both
 // session cookies and persistent cookies) into `out` as a Netscape cookie file
 // (NUL-terminated, up to out_cap; size first with out=NULL/out_cap=0). Returns
-// the full length. This exports custom sessions too; legacy mbSaveCookies writes
+// the full length. This exports custom sessions too; the view-less mbSaveCookies writes
 // only the implicit default session.
 MB_EXPORT int mbGetAllCookies(mbView*, char* out, int out_cap);
 
@@ -1365,7 +1357,7 @@ MB_EXPORT void mbSetRequestHook(mbRequestHookCallback cb, void* userdata);
 typedef struct mbResponse mbResponse;
 typedef void (*mbResponseCallback)(mbResponse*, void* userdata);
 MB_EXPORT void mbSetResponseCallback(mbResponseCallback cb, void* userdata);
-// Extended form (API level 2): identical to mbSetResponseCallback but the callback also
+// Extended form: identical to mbSetResponseCallback but the callback also
 // receives the ORIGINATING view so a multi-view host can tell which tab a response belongs
 // to (and reach its session via mbViewGetSession). `view` may be NULL for a load with no
 // owning view (a view-less/background fetch). A shared worker is attributed to its
@@ -1516,7 +1508,7 @@ MB_EXPORT void mbClearUrlRewrites(void);
 MB_EXPORT void mbSetRequestHeader(const char* url_substring, const char* name,
                                   const char* value);
 
-// Host-scoped request header injection (API level 2). The header rides a request when the
+// Host-scoped request header injection. The header rides a request when the
 // request URL's parsed HOST matches `host_filter`, applied PER-HOP on every buffered and
 // streaming HTTP transport (top-level navigation, fetch/XHR/subresource, SSE/download).
 // `host_filter`:
@@ -1531,7 +1523,7 @@ MB_EXPORT void mbSetRequestHeader(const char* url_substring, const char* name,
 MB_EXPORT void mbSetRequestHeaderForHost(const char* host_filter, const char* name,
                                          const char* value);
 
-// Origin-scoped request header injection (API level 2) — the strict, cross-origin-safe form
+// Origin-scoped request header injection — the strict, cross-origin-safe form
 // for credentials (Authorization / X-Api-Key). The header rides a request only when the
 // request URL's full ORIGIN matches: scheme AND host AND effective port. `origin` is
 // "scheme://host[:port][/path/prefix]" — a default port is implied by the scheme, so

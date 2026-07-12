@@ -869,7 +869,7 @@ static void RunCases(mbView* v, int W, int H) {
   }
 
   // 102b6b2. An ephemeral profile name is descriptive, not an identity key:
-  // two legacy mbCreateSession calls with the same name must still create two
+  // two mbCreateSession calls with the same name must still create two
   // independent in-memory profiles. Exercise both Blink-visible localStorage /
   // document.cookie and the host-facing HTTP cookie jar at one origin.
   {
@@ -1240,7 +1240,7 @@ static void RunCases(mbView* v, int W, int H) {
                (stays_shown ? "1" : "0"));
   }
 
-  // 102h. mbWaitForNetworkIdleEx: a page fires a deferred fetch (150ms) that routes
+  // 102h. mbWaitForNetworkIdle: a page fires a deferred fetch (150ms) that routes
   // through the loader; the wait must return idle (not timeout) only after that
   // request lands — so the log holds it afterward. A second quiet page confirms
   // it doesn't false-timeout. (file:// origin so the file:// fetch is same-scheme.)
@@ -1250,43 +1250,44 @@ static void RunCases(mbView* v, int W, int H) {
         "<body><script>setTimeout(function(){var i=document.createElement('img');"
         "i.src='file:///tmp/mb_ni_probe.png';document.body.appendChild(i);},150);"
         "</script></body>", "file:///tmp/mb_ni_page.html");
-    const bool idle = mbWaitForNetworkIdleEx(v, 300, 5000) == 1;
+    const bool idle = mbWaitForNetworkIdle(v, 300, 5000) == 1;
     char rb[4096] = {0};
     mbGetRequestLog(rb, sizeof(rb));
     const bool fetched = std::string(rb).find("mb_ni_probe.png") != std::string::npos;
     mbClearRequestLog();
     mbLoadHTML(v, "<body>quiet</body>", "about:blank");
-    const bool quiet_ok = mbWaitForNetworkIdleEx(v, 150, 3000) == 1;  // no false timeout
+    const bool quiet_ok = mbWaitForNetworkIdle(v, 150, 3000) == 1;  // no false timeout
     mbClearRequestLog();
-    const bool legacy_quiet = mbWaitForNetworkIdle(v, 20, 500) == 1;
+    const bool prior_quiet = mbWaitForNetworkIdle(v, 20, 500) == 1;
+    // ANOTHER view's traffic must not disturb this view's wait. The noise page
+    // fetches every 60 ms, so a process-wide wait would never find a 180 ms
+    // quiet window inside the 1500 ms budget (timeout), while the per-view wait
+    // returns idle on schedule. The process-wide diagnostic log still records
+    // the noise, proving the traffic really flowed during the wait.
     mbView* noise = mbCreateView(120, 80);
-    mbMockResponse("legacy-idle-noise.test/ping", "ok", "text/plain", 200);
+    mbMockResponse("idle-noise.test/ping", "ok", "text/plain", 200);
     mbLoadHTML(
         noise,
-        "<script>setTimeout(function(){fetch('/ping')},80)</script>",
-        "https://legacy-idle-noise.test/");
+        "<script>var n=0;setInterval(function(){fetch('/ping?n='+(n++))},60)"
+        "</script>",
+        "https://idle-noise.test/");
     mbClearRequestLog();
-    const auto legacy_start = std::chrono::steady_clock::now();
-    const bool legacy_process_wide = mbWaitForNetworkIdle(v, 180, 1500) == 1;
-    const auto legacy_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                               std::chrono::steady_clock::now() - legacy_start)
-                               .count();
-    char legacy_log[1024] = {0};
-    mbGetRequestLog(legacy_log, sizeof(legacy_log));
-    const bool legacy_saw_other_view =
-        std::string(legacy_log).find("legacy-idle-noise.test/ping") !=
+    const bool per_view_idle = mbWaitForNetworkIdle(v, 180, 1500) == 1;
+    char noise_log[1024] = {0};
+    mbGetRequestLog(noise_log, sizeof(noise_log));
+    const bool log_saw_other_view =
+        std::string(noise_log).find("idle-noise.test/ping") !=
         std::string::npos;
     mbDestroyView(noise);
     mbClearMocks();
-    Expect(idle && fetched && quiet_ok && legacy_quiet &&
-               legacy_process_wide && legacy_saw_other_view && legacy_ms >= 220,
-           "network-idle Ex tracks the view; legacy wait retains process-wide semantics",
+    Expect(idle && fetched && quiet_ok && prior_quiet && per_view_idle &&
+               log_saw_other_view,
+           "network-idle is per-view: another view's traffic cannot disturb it",
            std::string("idle=") + (idle ? "1" : "0") + " fetched=" +
                (fetched ? "1" : "0") + " quiet=" + (quiet_ok ? "1" : "0") +
-               " legacy=" + (legacy_quiet ? "1" : "0") +
-               " process=" + (legacy_process_wide ? "1" : "0") +
-               " other=" + (legacy_saw_other_view ? "1" : "0") +
-               " elapsed_ms=" + std::to_string(legacy_ms));
+               " prior=" + (prior_quiet ? "1" : "0") +
+               " per_view=" + (per_view_idle ? "1" : "0") +
+               " other_logged=" + (log_saw_other_view ? "1" : "0"));
   }
 
   // 102b. mbCountSelector + indexed list scraping. Count the matches, then read
