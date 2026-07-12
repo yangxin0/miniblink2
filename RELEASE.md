@@ -3,6 +3,11 @@
 Release notes for miniblink2. Each release is an annotated git tag
 (`v*`).
 
+> **Pre-1.0:** nothing has been distributed outside this repository. Tags are
+> development milestones, not compatibility promises — public `mb*` entry
+> points may change semantics in place between tags until 1.0 freezes the
+> ABI-epoch / API-level contract described in webview.h.
+
 ---
 
 ## v0.5 — 2026-07-10 (`v0.5`)

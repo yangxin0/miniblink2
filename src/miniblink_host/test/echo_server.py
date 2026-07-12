@@ -13,6 +13,14 @@ from urllib.parse import urlparse, parse_qs
 COUNTS = {}
 AUTH_OBSERVATIONS = {}
 COUNTS_LOCK = threading.Lock()
+LATCHES = {}
+LATCH_LOCK = threading.Lock()
+
+def latch_event(key):
+    with LATCH_LOCK:
+        if key not in LATCHES:
+            LATCHES[key] = threading.Event()
+        return LATCHES[key]
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -162,6 +170,29 @@ class H(BaseHTTPRequestHandler):
             time.sleep(delay_ms / 1000.0)
             marker = q.get('marker', ['SLOW'])[0]
             self.send_body(200, f'<html><body id="slow">{marker}</body></html>')
+            return
+        if u.path == '/latch':
+            # Hold the response until /latch-release fires the same key (each
+            # request runs on its own thread). The 15 s cap only bounds a test
+            # that forgot to release; callers use per-run keys so a leftover
+            # released event from a previous run cannot leak into a new latch.
+            # Arrival is published FIRST so /latch-entered lets a test prove
+            # the held request is already in flight (request-start ordering)
+            # instead of sleeping.
+            key = q.get('key', ['default'])[0]
+            latch_event('entered:' + key).set()
+            released = latch_event(key).wait(15)
+            self.send_body(200, 'released' if released else 'latch-timeout',
+                           'text/plain')
+            return
+        if u.path == '/latch-entered':
+            entered = latch_event(
+                'entered:' + q.get('key', ['default'])[0]).is_set()
+            self.send_body(200, 'yes' if entered else 'no', 'text/plain')
+            return
+        if u.path == '/latch-release':
+            latch_event(q.get('key', ['default'])[0]).set()
+            self.send_body(200, 'ok', 'text/plain')
             return
         if u.path == '/origin':
             host = self.headers.get('Host', '')

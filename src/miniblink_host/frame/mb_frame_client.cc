@@ -390,12 +390,20 @@ void MbFrameClient::DoCommit(
   // done. Only the MAIN frame — where a blocking fetch would freeze an interactive host —
   // fetches ASYNCHRONOUSLY and commits from the posted OnPageNavComplete.
   if (self_owned_) {
+    // Count the synchronous child-document fetch against the owning view's
+    // network-idle window: it is real traffic of this view, and the idle wait
+    // samples the counters only between engine pumps, so an uncounted slow
+    // iframe document could silently consume the whole idle interval.
+    const void* activity_key =
+        owner_ ? owner_->loader_view_context()->activity_key() : nullptr;
+    MbNetRequestStarted(activity_key);
     std::string body, content_type, final_url;
     const bool ok = MbFetchUrl(url.GetString().Utf8(), &body, &content_type, user_agent_,
                                extra_headers_, post_body, post_ct, method,
                                &final_url, /*out_status=*/nullptr,
                                /*out_headers=*/nullptr, /*out_error=*/nullptr,
                                /*out_error_code=*/nullptr, owner_);
+    MbNetRequestFinished(activity_key);
     if (!ok && body.empty()) {
       body =
           "<!doctype html><meta charset=utf-8><title>Navigation failed</title>"

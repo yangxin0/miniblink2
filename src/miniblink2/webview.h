@@ -89,7 +89,7 @@ typedef struct mbView mbView;
 // string and the #if-checkable numbers (e.g. #if MB_VERSION_MINOR >= 5) can never
 // drift apart — there is one source of truth, not a hand-kept duplicate.
 #define MB_VERSION_MAJOR 0
-#define MB_VERSION_MINOR 5
+#define MB_VERSION_MINOR 6
 #define MB_VERSION_PATCH 0
 #define MB_STRINGIZE_(x) #x
 #define MB_STRINGIZE(x) MB_STRINGIZE_(x)
@@ -111,11 +111,14 @@ MB_EXPORT const char* mbVersion(void);
 //                   Monotonic: an engine of level N provides every symbol a header
 //                   of level <= N declares, so a host needs engine level >= its
 //                   own build level for the symbols it references to resolve.
-#define MB_ABI_EPOCH 1
-// PRE-RELEASE: the project has not shipped, so neither number has ever been
-// consumed by an external binary and no compatibility is owed across commits —
-// entry points change in place. The two-axis scheme above is the contract the
-// FIRST release will freeze; until then both stay at 1.
+// PRE-1.0: nothing has been distributed outside this repository, so entry
+// points change in place between tags. The epoch still tracks binary breaks
+// among coexisting DEV builds — the 0.6 collapse removed exported symbols and
+// changed entry-point semantics, hence epoch 2 — so the mbCheckCompat promise
+// (an accepted engine resolves every symbol this header declares) holds even
+// against a stale pre-collapse build lying around a workspace. The API level
+// restarts at 1 within this epoch; 1.0 freezes the whole contract.
+#define MB_ABI_EPOCH 2
 #define MB_API_LEVEL 1
 MB_EXPORT int mbAbiEpoch(void);
 MB_EXPORT int mbApiLevel(void);
@@ -1362,7 +1365,8 @@ MB_EXPORT void mbSetResponseCallback(mbResponseCallback cb, void* userdata);
 // to (and reach its session via mbViewGetSession). `view` may be NULL for a load with no
 // owning view (a view-less/background fetch). A shared worker is attributed to its
 // starting connection while that connection remains live, then to another connected
-// live view in the same session; all connected views receive its network-idle activity.
+// live view in the same session; each request's network-idle activity is charged to
+// the views that were connected to the worker when that request started.
 // Added alongside — NOT replacing —
 // mbSetResponseCallback so already-compiled clients keep their (response, userdata) ABI.
 // Setting either callback replaces the other (one hook slot).

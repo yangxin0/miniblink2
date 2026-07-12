@@ -4183,10 +4183,13 @@ bool MbWebView::WaitForNetworkIdle(int idle_ms, int timeout_ms) {
     return mb::MbNetInFlight(ctx) + mb::MbNetInFlight(loader_ctx);
   };
   uint64_t last_started = started_count();
+  // ONE timestamp for both deadlines: the success check requires
+  // idle_deadline <= hard_deadline, and deriving each from its own Now() would
+  // make equal idle/timeout budgets fail by a few microseconds.
+  const base::TimeTicks start = base::TimeTicks::Now();
   const base::TimeTicks hard_deadline =
-      base::TimeTicks::Now() + base::Milliseconds(timeout_ms > 0 ? timeout_ms : 0);
-  base::TimeTicks idle_deadline =
-      base::TimeTicks::Now() + base::Milliseconds(idle_ms);
+      start + base::Milliseconds(timeout_ms > 0 ? timeout_ms : 0);
+  base::TimeTicks idle_deadline = start + base::Milliseconds(idle_ms);
   for (;;) {
     base::RunLoop().RunUntilIdle();
     ServiceAnimations();
@@ -4197,7 +4200,11 @@ bool MbWebView::WaitForNetworkIdle(int idle_ms, int timeout_ms) {
       last_started = started;
       idle_deadline = now + base::Milliseconds(idle_ms);
     }
-    if (now >= idle_deadline)
+    // Success only if the quiet window COMPLETED by the hard deadline. One
+    // long synchronous task can carry `now` past both deadlines at once; if
+    // the window's endpoint lies beyond the timeout, the caller's deadline
+    // expired first and timeout is the only truthful answer.
+    if (now >= idle_deadline && idle_deadline <= hard_deadline)
       return true;  // quiet (nothing in flight, no new starts) long enough
     if (now >= hard_deadline)
       return false;  // still busy at the hard timeout

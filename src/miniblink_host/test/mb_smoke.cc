@@ -5,6 +5,7 @@
 #include "miniblink_host/test/mb_test_seams.h"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <thread>
 
@@ -4861,6 +4862,130 @@ int main() {
                (port_redirect_visibility->urls.size() < 2
                     ? std::string()
                     : " second=[" + port_redirect_visibility->urls[1] + "]"));
+
+    // A SharedWorker request is charged to the views connected when it
+    // STARTED: a view that joins mid-request must not inherit the in-flight
+    // load, while the starter must stay charged for it. The worker's fetch is
+    // held by a SERVER-SIDE LATCH, so both directions are proven without
+    // wall-clock races: with the latch closed, B (joined mid-request) must
+    // reach idle while A must TIME OUT — if the load were attributed to no
+    // view, A would idle immediately and fail that check — then releasing the
+    // latch must let A go idle and the worker complete.
+    {
+      const std::string worker_pattern =
+          host.substr(host.find("://") + 3) + "/idle-join-worker.js";
+      const std::string latch_key =
+          "join" + std::to_string(std::chrono::steady_clock::now()
+                                      .time_since_epoch()
+                                      .count());
+      // The connect greeting carries the instance's state, so a client can
+      // PROVE which worker it reached: A must land on a fresh instance
+      // ("connected-idle"), and B — connecting after A's 'go' — must land on
+      // A's ACTIVE instance ("connected-active"). A fresh per-view worker
+      // (i.e. a sharing/keying regression) would greet B with
+      // "connected-idle" and fail the join assertion.
+      mbMockResponse(worker_pattern.c_str(),
+                     "var started=false;var ps=[];"
+                     "function send(x){for(var i=0;i<ps.length;i++)"
+                     "try{ps[i].postMessage(x)}catch(e){}}"
+                     "onconnect=function(e){var p=e.ports[0];ps.push(p);"
+                     "p.onmessage=function(ev){var d=String(ev.data);"
+                     "if(d.indexOf('go:')===0&&!started){started=true;"
+                     "fetch('/latch?key='+d.substring(3)).then(function(r){"
+                     "return r.text()}).then(function(t){send('done:'+t)})"
+                     ".catch(function(){send('done:err')});}};"
+                     "p.start&&p.start();"
+                     "p.postMessage(started?'connected-active':'connected-idle')}",
+                     "application/javascript", 200);
+      mbView* join_a = mbCreateView(200, 120);
+      mbView* join_b = mbCreateView(200, 120);
+      auto join_worker = [&](mbView* view) -> std::string {
+        if (!view)
+          return "no-view";
+        mbLoadURL(view, (host + "/get").c_str());
+        mbRunJS(view,
+                "window.__joinState='';window.__joinDone='';"
+                "window.__joinWorker=new SharedWorker('/idle-join-worker.js');"
+                "window.__joinWorker.port.onmessage=function(e){"
+                "if(String(e.data).indexOf('connected')===0)"
+                "window.__joinState=String(e.data);"
+                "else window.__joinDone=String(e.data)};"
+                "window.__joinWorker.port.start&&"
+                "window.__joinWorker.port.start();");
+        mbWaitForFunction(view, "window.__joinState!==''", 3000);
+        return Eval(view, "window.__joinState");
+      };
+      const bool a_connected = join_worker(join_a) == "connected-idle";
+      if (a_connected) {
+        mbRunJS(join_a, ("window.__joinWorker.port.postMessage('go:" +
+                         latch_key + "')")
+                            .c_str());
+      }
+      // B may only connect once the worker's fetch has provably reached the
+      // server: /latch publishes an "entered" flag when the held request
+      // arrives, which implies the loader already snapshotted its charged
+      // views. Polling that flag (instant, A-charged fetches that stop before
+      // any idle assertion) replaces a wall-clock sleep — connected-active
+      // alone only proves the worker's JS ran, not that the request started.
+      if (join_a) {
+        mbRunJS(join_a,
+                ("window.__latchEntered='';(function poll(){"
+                 "fetch('/latch-entered?key=" +
+                 latch_key +
+                 "').then(function(r){return r.text()}).then(function(t){"
+                 "if(t==='yes')window.__latchEntered='1';"
+                 "else setTimeout(poll,25)})"
+                 ".catch(function(){setTimeout(poll,25)})})();")
+                    .c_str());
+      }
+      const bool latch_entered =
+          join_a &&
+          mbWaitForFunction(join_a, "window.__latchEntered==='1'", 3000) == 1;
+      // "connected-active" is the proof B attached to A's running instance,
+      // not a fresh one.
+      const bool b_joined_active = join_worker(join_b) == "connected-active";
+      // Latch closed: B, which joined mid-request, is NOT charged and reaches
+      // idle; A, connected when the request started, IS charged and must time
+      // out. (If the load were attributed to no view, A would go idle at
+      // ~200 ms and fail a_busy_while_latched.)
+      const bool b_idle =
+          join_b && mbWaitForNetworkIdle(join_b, 200, 3000) == 1;
+      const bool fetch_outstanding_at_b_idle =
+          join_a && Eval(join_a, "window.__joinDone") == "";
+      const bool a_busy_while_latched =
+          join_a && mbWaitForNetworkIdle(join_a, 200, 700) == 0;
+      // Release the latch (A's page is same-origin with the echo server); the
+      // release fetch itself is charged to A and completes quickly.
+      if (join_a) {
+        mbRunJS(join_a, ("fetch('/latch-release?key=" + latch_key +
+                         "').catch(function(){})")
+                            .c_str());
+      }
+      const bool a_idle_after_release =
+          join_a && mbWaitForNetworkIdle(join_a, 200, 4000) == 1;
+      const bool done_after =
+          join_a && mbWaitForFunction(
+                        join_a, "window.__joinDone==='done:released'", 3000) ==
+                        1;
+      if (join_b)
+        mbDestroyView(join_b);
+      if (join_a)
+        mbDestroyView(join_a);
+      mbClearMocks();
+      Expect(a_connected && latch_entered && b_joined_active && b_idle &&
+                 fetch_outstanding_at_b_idle && a_busy_while_latched &&
+                 a_idle_after_release && done_after,
+             "SharedWorker requests charge start-time views: B idles, A holds",
+             "a=" + std::to_string(a_connected) +
+                 " entered=" + std::to_string(latch_entered) +
+                 " b_active=" + std::to_string(b_joined_active) +
+                 " b_idle=" + std::to_string(b_idle) +
+                 " in_flight_at_b=" +
+                 std::to_string(fetch_outstanding_at_b_idle) +
+                 " a_held=" + std::to_string(a_busy_while_latched) +
+                 " a_idle=" + std::to_string(a_idle_after_release) +
+                 " done=" + std::to_string(done_after));
+    }
 
     // A transport failure before any HTTP response must likewise report the
     // attempted PUBLIC URL, never the transparent backend target, through both

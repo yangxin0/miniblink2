@@ -1290,6 +1290,58 @@ static void RunCases(mbView* v, int W, int H) {
                " other_logged=" + (log_saw_other_view ? "1" : "0"));
   }
 
+  // 102h2. Idle-wait edge cases. (a) A child-frame DOCUMENT fetch counts toward
+  // the idle window: an iframe inserted 150 ms into the wait must restart it,
+  // so the wait cannot return before insertion + idle_ms (the child document
+  // is fetched synchronously outside the subresource loader and used to be
+  // invisible to the counters). (b) One long synchronous task can sweep `now`
+  // past the idle and hard deadlines in a single pump; when the timeout
+  // expired before the quiet window could complete, the wait must report
+  // timeout, not success.
+  {
+    mbMockResponse("idle-child.test/child.html", "<body>child</body>",
+                   "text/html", 200);
+    mbLoadHTML(v,
+               "<body><script>setTimeout(function(){"
+               "var f=document.createElement('iframe');f.src='/child.html';"
+               "document.body.appendChild(f);},150);</script></body>",
+               "https://idle-child.test/");
+    const auto child_start = std::chrono::steady_clock::now();
+    const bool child_idle = mbWaitForNetworkIdle(v, 400, 5000) == 1;
+    const auto child_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now() - child_start)
+                              .count();
+    const std::string child_count =
+        Eval(v, "String(document.getElementsByTagName('iframe').length)");
+    mbClearMocks();
+
+    // (b): quiet page, then a busy task armed to fire ~30 ms into the wait.
+    // idle 500 > timeout 120: the 700 ms busy loop carries the first
+    // post-pump check past both deadlines, and since the quiet window could
+    // only complete at 500 ms — after the 120 ms timeout — the result must
+    // be 0. (If the busy task happens to run before the wait starts, 0 is
+    // still the correct and expected result.)
+    mbLoadHTML(v, "<body>busy</body>", "about:blank");
+    mbRunJS(v,
+            "setTimeout(function(){var e=Date.now()+700;"
+            "while(Date.now()<e);},30);");
+    const bool timeout_honored = mbWaitForNetworkIdle(v, 500, 120) == 0;
+
+    // (c) equal budgets must not time out on a quiet page: both deadlines
+    // derive from ONE timestamp, so idle_ms == timeout_ms can still succeed
+    // (two separate Now() calls would skew the idle deadline microseconds
+    // past the hard one and force a spurious 0).
+    mbLoadHTML(v, "<body>equal</body>", "about:blank");
+    const bool equal_budget = mbWaitForNetworkIdle(v, 300, 300) == 1;
+    Expect(child_idle && child_ms >= 500 && child_count == "1" &&
+               timeout_honored && equal_budget,
+           "idle wait counts child frames, honors timeouts, allows equal budgets",
+           "child_idle=" + std::to_string(child_idle) +
+               " child_ms=" + std::to_string(child_ms) + " iframes=[" +
+               child_count + "] timeout0=" + std::to_string(timeout_honored) +
+               " equal=" + std::to_string(equal_budget));
+  }
+
   // 102b. mbCountSelector + indexed list scraping. Count the matches, then read
   // each one via :nth-of-type(n) selectors on mbGetTextForSelector — the standard
   // "scrape a list" pattern. Also: 0 for no matches, -1 for an invalid selector.

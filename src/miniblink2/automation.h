@@ -44,12 +44,14 @@ MB_EXPORT int mbWaitForSelectorHidden(mbView*, const char* css_selector,
                                       int timeout_ms);
 
 // Robust networkidle0 wait: wait until THIS view has had nothing in flight and
-// no newly-started request for `idle_ms`. Covers main-frame, subresource,
-// dedicated-worker, and shared-worker loads. Unrelated traffic in another view
-// cannot disturb it; a shared worker intentionally counts for every view
-// currently connected to that worker. A slow request remains busy until
-// completion. Returns 1 once quiet, 0 if `timeout_ms` elapses. No request-log
-// clearing is needed.
+// no newly-started request for `idle_ms`. Covers main-frame, child-frame, and
+// subresource loads plus dedicated- and shared-worker traffic. Unrelated
+// traffic in another view cannot disturb it; a shared-worker request counts
+// for every view that was connected to the worker when that request STARTED (a
+// client joining mid-request is counted from its next request). A slow request
+// remains busy until completion. Returns 1 once quiet, 0 if `timeout_ms`
+// elapses. `idle_ms <= 0` defaults to 500 ms; `timeout_ms <= 0` makes the
+// deadline immediate, so the call returns 0. No request-log clearing is needed.
 MB_EXPORT int mbWaitForNetworkIdle(mbView*, int idle_ms, int timeout_ms);
 
 // Runaway-script guard. A single-process embedder shares the main thread with the
