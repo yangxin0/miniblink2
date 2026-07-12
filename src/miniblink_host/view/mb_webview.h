@@ -19,6 +19,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -61,6 +62,7 @@ bool MbIsLiveView(MbWebView* view);
 class MbDamageTracker;   // dirty-rect diffing (mb_damage_tracker.h)
 class MbDevToolsBridge;
 class MbDownloadStream;  // streaming download transport (mb_url_loader.h)
+struct MbNavigationResult;  // async navigation result (mb_url_loader.h)
 class MbSession;
 class MbSelectPopupClient;   // reply channel for a surfaced <select> popup
 struct MbSelectPopupData;    // items/bounds of one popup (mb_local_frame_host.h)
@@ -104,6 +106,17 @@ class MbWebView {
   void Resize(int width, int height);
   void LoadHTML(const char* utf8_html, const char* base_url);  // no network
   void LoadURL(const char* utf8_url);                          // via libcurl factory
+  // Asynchronous navigation (mbNavigate): kicks off a main-resource load on the reactor and
+  // returns a navigation id immediately — the fetch runs off the main thread and commits
+  // from a posted completion, so the UI thread stays live during a slow load. A new
+  // navigation supersedes an in-flight one (which then fires its finish). Cancel via
+  // CancelNavigation(id). LoadURL remains the synchronous path.
+  uint64_t Navigate(const char* utf8_url);  // GET wrapper over NavigateEx
+  // Async navigation with an explicit method/body/content-type (mbNavigateEx). An empty
+  // method means GET, or POST when a body is present.
+  uint64_t NavigateEx(const std::string& url, const std::string& method,
+                      const std::string& body, const std::string& content_type);
+  bool CancelNavigation(uint64_t id);
   // Fetch `url` through the engine network stack and write the body to `dest_path`
   // (a real download — not committed as a document). Honors the interception layer
   // (rewrite / block / mock / request+response hooks) and, for http(s), the view's
@@ -540,11 +553,22 @@ class MbWebView {
   // real engine push signal (vs. polling / a fixed settle timer).
   void OnDidFinishLoad();
   // A top-level load that never commits (file read / fetch failure) still ENDED: mark
-  // it finished and fire the finish callback so a caller awaiting completion isn't stuck.
-  void NotifyLoadFailed();
+  // it finished and fire the fail + finish callbacks so a caller awaiting completion
+  // isn't stuck. `failed_url` is the ATTEMPTED target — never GetURL(), which on a
+  // pre-commit failure still holds the PREVIOUS committed document.
+  void NotifyLoadFailed(const std::string& failed_url);
+  // Classify a fetch failure into last_error_domain_ from last_error_/last_error_code_
+  // (blocked / curl / network), with a generic message if none was set. Shared by the
+  // GET (LoadURL) and POST (PostURL) paths so both report the real cause consistently.
+  void ClassifyFetchFailure();
   // Register a callback fired on each main-frame load finish. Pass {} to clear.
   void SetLoadFinishCallback(std::function<void()> cb);
   // Embedder lifecycle callbacks (see mbOnBeginLoading / mbOnFailLoading).
+  // Navigation START (mbOnNavigationStarted): fires when a top-level navigation is
+  // KICKED OFF — before the (possibly slow) main-resource fetch — so a host can show
+  // loading UI immediately instead of only at commit (SetBeginLoadingCallback, which
+  // fires when the new document commits). `url` is the requested URL.
+  void SetNavigationStartedCallback(std::function<void(const std::string&)> cb);
   void SetBeginLoadingCallback(std::function<void(const std::string&)> cb);
   void SetFailLoadingCallback(
       std::function<void(const std::string&, const std::string&)> cb);
@@ -852,6 +876,8 @@ class MbWebView {
   bool PaintRectToBitmap(void* out_bgra, int x, int y, int w, int h, int stride);
 
  private:
+  friend class MbFrameClient;
+
   MbWebView();
   // Fetch a URL's bytes through the engine network stack + interception layer (no
   // document commit) — the shared core of host-initiated (DownloadURL, to disk)
@@ -867,6 +893,40 @@ class MbWebView {
   // charset). Empty => tentative, so the HTML parser honors <meta charset>/BOM.
   void CommitHtml(const char* data, size_t len, const char* base_url,
                   const std::string& charset = "");
+  // One coordinator for every main-frame navigation source. A generation is
+  // reserved before callbacks or posted page-navigation work; every later
+  // phase must still own it before publishing response state or committing.
+  struct PendingMainNavigation {
+    uint64_t generation = 0;
+    std::string url;
+    std::optional<uint64_t> fetch_id;
+    bool api_cancellable = false;
+    // Kept pending through CommitNavigation so an old document's DidFinishLoad
+    // cannot finish a newer pre-commit navigation. The new document's finish
+    // consumes the committed generation.
+    bool committed = false;
+  };
+  uint64_t BeginMainNavigation(const std::string& url,
+                               bool notify_started);
+  uint64_t SupersedePendingMainNavigation(const std::string& error,
+                                          bool notify_failure);
+  bool IsMainNavigationGenerationCurrent(uint64_t generation) const {
+    return main_navigation_generation_ == generation;
+  }
+  bool IsMainNavigationPending(uint64_t generation) const {
+    return pending_main_navigation_.has_value() &&
+           pending_main_navigation_->generation == generation;
+  }
+  bool AttachMainNavigationFetch(uint64_t generation, uint64_t fetch_id,
+                                 bool api_cancellable);
+  bool PrepareMainNavigationCommit(uint64_t generation, int status,
+                                   std::string headers);
+  bool FailMainNavigation(uint64_t generation, const std::string& failed_url,
+                          int status, std::string headers,
+                          std::string error_domain, int error_code,
+                          std::string error);
+  bool FinishMainNavigationWithoutCommit(uint64_t generation, int status,
+                                         std::string headers);
   // Run `body` inside a scheduler task (so subsystems that require task bracketing
   // — e.g. CanvasPerformanceMonitor around canvas draws — are satisfied), blocking
   // until it has executed. Host-driven JS must run here, not via a bare synchronous
@@ -965,6 +1025,12 @@ class MbWebView {
   std::string pending_charset_;
 
   bool load_finished_ = false;        // main-frame load event has fired (DidFinishLoad)
+  uint64_t main_navigation_generation_ = 0;
+  std::optional<PendingMainNavigation> pending_main_navigation_;
+  // Completion for MbStartNavigation (posted to the main thread; guarded by alive_token_).
+  void OnNavigationComplete(uint64_t generation, uint64_t id,
+                            std::string requested_url,
+                            mb::MbNavigationResult result);
   // True while RunDocumentStartScript runs host code (the window-object-ready
   // callback): RunInFrameTask then executes bodies INLINE — we are already
   // inside script execution at document start, and pumping a nested loop here
@@ -978,6 +1044,7 @@ class MbWebView {
   std::unique_ptr<MbSelectPopupClient> select_popup_client_;  // pending popup
   MbSession* session_ = nullptr;  // never null after construction
   std::string user_stylesheet_;  // injected per commit; empty = none
+  std::function<void(const std::string&)> on_nav_started_;  // fired at navigation kickoff
   std::function<void(const std::string&)> on_begin_loading_;
   std::function<void(const std::string&, const std::string&)> on_fail_loading_;
   std::function<void(const std::string&, const std::string&, int,

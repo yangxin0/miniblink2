@@ -261,6 +261,18 @@ component("miniblink_host") {
   # WebGPU OFF needs no stubs or -U: patches/0017 gates the mac GPU path's Dawn references
   # (iosurface_image_backing + the SkiaGraphite feature default) on BUILDFLAG(SKIA_USE_DAWN),
   # so with use_dawn=false Dawn is COMPLETELY absent — no code, no references, no runtime path.
+
+  # Feature-capability defines backing the mbHasFeature() runtime probe: mirror the
+  # GN feature flags into C macros so a host can ask which optional capabilities were
+  # actually compiled into THIS engine (a symbol may exist yet no-op when its flag is
+  # off — e.g. navigator.gpu present but returning null without --webgpu). WEBGPU is
+  # defined above inside the use_dawn block.
+  if (v8_enable_webassembly) {
+    defines += [ "MINIBLINK_ENABLE_WASM=1" ]
+  }
+  if (mb_enable_webrtc) {
+    defines += [ "MINIBLINK_ENABLE_WEBRTC=1" ]
+  }
 }
 
 # ---------------------------------------------------------------------------

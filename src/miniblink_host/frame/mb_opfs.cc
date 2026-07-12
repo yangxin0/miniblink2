@@ -627,6 +627,68 @@ void ReadNodeInto(OpfsReader* r, FsNode* dst) {
   }
 }
 
+// Merge a fully validated detached tree onto a live tree. Existing nodes are
+// updated in place so any already-bound handles remain valid.
+void MergeNodeInto(const FsNode& src, FsNode* dst) {
+  dst->is_dir = src.is_dir;
+  if (!src.is_dir) {
+    dst->bytes = src.bytes;
+    return;
+  }
+  for (const auto& [name, child] : src.children) {
+    auto it = dst->children.find(name);
+    if (it == dst->children.end())
+      it = dst->children.emplace(name, std::make_shared<FsNode>()).first;
+    MergeNodeInto(*child, it->second.get());
+  }
+}
+
+bool ParseAndMergeScopedOpfs(const std::string& buf,
+                             const std::string& target_scope_prefix,
+                             bool* out_rekeyed) {
+  if (out_rekeyed)
+    *out_rekeyed = false;
+  if (buf.size() < 8 || buf.compare(0, 8, kOpfsMagic, 8) != 0)
+    return false;
+
+  // Parse into detached roots first. A corrupt/truncated file must not leave a
+  // partial live tree that a later flush could serialize over the source.
+  OpfsReader r{buf, 8};
+  const uint32_t scope_count = r.Len();
+  std::map<std::string, std::shared_ptr<FsNode>> loaded;
+  std::string source_scope_prefix;
+  bool rekeyed = false;
+  for (uint32_t i = 0; i < scope_count && r.ok; ++i) {
+    std::string scope = r.Blob();
+    if (!r.ok)
+      return false;
+    const size_t scope_end = scope.find('\x1f');
+    if (scope_end == std::string::npos || scope_end == 0)
+      return false;
+    const std::string key_prefix = scope.substr(0, scope_end + 1);
+    if (source_scope_prefix.empty())
+      source_scope_prefix = key_prefix;
+    else if (source_scope_prefix != key_prefix)
+      return false;  // a per-profile file must not mix source identities
+    if (key_prefix != target_scope_prefix) {
+      scope = target_scope_prefix + scope.substr(scope_end + 1);
+      rekeyed = true;
+    }
+    auto root = std::make_shared<FsNode>();
+    ReadNodeInto(&r, root.get());
+    if (!r.ok || !loaded.emplace(scope, std::move(root)).second)
+      return false;
+  }
+  if (!r.ok)
+    return false;
+
+  for (const auto& [scope, root] : loaded)
+    MergeNodeInto(*root, OpfsRoot(scope).get());
+  if (out_rekeyed)
+    *out_rekeyed = rekeyed;
+  return true;
+}
+
 }  // namespace
 
 bool MbSaveOPFSScoped(const std::string& path,
@@ -646,6 +708,19 @@ bool MbSaveOPFSScoped(const std::string& path,
     WNode(&o, root.get());
   }
   return base::WriteFile(base::FilePath::FromUTF8Unsafe(path), o);
+}
+
+bool MbLoadOPFSScoped(const std::string& path,
+                      const std::string& scope_prefix,
+                      bool* rekeyed) {
+  if (rekeyed)
+    *rekeyed = false;
+  if (scope_prefix.empty() || scope_prefix.back() != '\x1f')
+    return false;
+  std::string buf;
+  if (!base::ReadFileToString(base::FilePath::FromUTF8Unsafe(path), &buf))
+    return false;
+  return ParseAndMergeScopedOpfs(buf, scope_prefix, rekeyed);
 }
 
 void MbClearOPFSScoped(const std::string& scope_prefix) {

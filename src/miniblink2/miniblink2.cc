@@ -7,8 +7,10 @@
 #include <algorithm>
 #include <cctype>
 #include <climits>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -60,6 +62,32 @@ extern "C" __attribute__((used, retain)) void* const mb_rust_alloc_keep[] = {
 struct mbView {
   std::unique_ptr<mb::MbWebView> impl;
 };
+
+namespace {
+// Reverse map from an engine view (mb::MbWebView*, the token the loader carries as
+// host_ctx) to its opaque C handle (mbView*). Lets process-wide loader callbacks —
+// e.g. the response hook — report WHICH view a load belongs to. Maintained at
+// mbCreateView*/mbDestroyView; main-thread only, like the views themselves.
+std::map<const mb::MbWebView*, mbView*>& ViewHandleRegistry() {
+  static auto* m = new std::map<const mb::MbWebView*, mbView*>();
+  return *m;
+}
+void RegisterViewHandle(mbView* v) {
+  if (v && v->impl)
+    ViewHandleRegistry()[v->impl.get()] = v;
+}
+void UnregisterViewHandle(mbView* v) {
+  if (v && v->impl)
+    ViewHandleRegistry().erase(v->impl.get());
+}
+mbView* ViewHandleForCtx(const void* host_ctx) {
+  if (!host_ctx)
+    return nullptr;
+  auto& reg = ViewHandleRegistry();
+  auto it = reg.find(static_cast<const mb::MbWebView*>(host_ctx));
+  return it == reg.end() ? nullptr : it->second;
+}
+}  // namespace
 
 // Creation-time view config (mbCreateViewConfig / item 36): a plain collector.
 // Tri-state ints (-1 = unset -> engine default); strings carry a *_set flag so
@@ -136,11 +164,60 @@ void DrainDeferred() {
 extern "C" {
 
 const char* mbVersion(void) {
-  return "0.4.0";
+  return MB_VERSION;  // derived from MB_VERSION_MAJOR/MINOR/PATCH — one source
 }
 
 int mbApiVersion(void) {
-  return MB_API_VERSION;
+  return MB_API_LEVEL;  // == mbApiLevel(); the original name for the additive level
+}
+
+int mbApiLevel(void) {
+  return MB_API_LEVEL;
+}
+
+int mbAbiEpoch(void) {
+  return MB_ABI_EPOCH;
+}
+
+int mbCheckCompat(int abi_epoch, int api_level) {
+  // Same breaking-ABI epoch AND an engine additive level at least the host's.
+  return (abi_epoch == MB_ABI_EPOCH && MB_API_LEVEL >= api_level) ? 1 : 0;
+}
+
+int mbHasFeature(const char* feature) {
+  if (!feature)
+    return 0;
+  static const struct {
+    const char* name;
+    int present;
+  } kCaps[] = {
+      {"webgpu",
+#if defined(MINIBLINK_ENABLE_WEBGPU)
+       1
+#else
+       0
+#endif
+      },
+      {"wasm",
+#if defined(MINIBLINK_ENABLE_WASM)
+       1
+#else
+       0
+#endif
+      },
+      {"webrtc",
+#if defined(MINIBLINK_ENABLE_WEBRTC)
+       1
+#else
+       0
+#endif
+      },
+  };
+  for (const auto& c : kCaps) {
+    if (std::strcmp(feature, c.name) == 0)
+      return c.present;
+  }
+  return 0;
 }
 
 const char* mbChromiumVersion(void) {
@@ -500,21 +577,58 @@ struct mbSession {
   mb::MbSession* impl = nullptr;
 };
 
-mbSession* mbCreateSession(const char* name, const char* persist_path) {
+namespace {
+// The impl frees its C handle through this deleter when the impl is destroyed
+// (every view/config has released it) — see MbSession::set_host_handle_deleter.
+void DeleteSessionHandle(mbSession* h) {
+  delete h;
+}
+}  // namespace
+
+mbSession* mbCreateSessionEx(const char* name, const char* persist_path,
+                             mbSessionCreateStatus* out_status) {
   EngineScope engine_scope;
+  const bool persistent = persist_path && *persist_path;
+  // Preserve the historical friendly fallback for ephemeral handles, but do
+  // not hide a missing persistent name: it must be rejected rather than alias
+  // the literal profile named "unnamed".
+  const std::string session_name =
+      name && *name ? std::string(name)
+                    : (persistent ? std::string() : std::string("unnamed"));
+  mb::MbSessionCreateResult create_result = mb::MbSessionCreateResult::kError;
   auto s = std::make_unique<mbSession>();
-  s->impl = mb::MbSession::Create(name && *name ? name : "unnamed",
-                                  persist_path ? persist_path : "");
+  s->impl = mb::MbSession::Create(session_name,
+                                  persistent ? persist_path : "",
+                                  &create_result);
+  if (!s->impl) {
+    if (out_status) {
+      *out_status = create_result == mb::MbSessionCreateResult::kInvalidName
+                        ? MB_SESSION_INVALID_NAME
+                        : MB_SESSION_ERROR;
+    }
+    return nullptr;
+  }
+  if (out_status)
+    *out_status = MB_SESSION_OK;
   s->impl->set_host_handle(s.get());
+  s->impl->set_host_handle_deleter(&DeleteSessionHandle);
   return s.release();
 }
 
+mbSession* mbCreateSession(const char* name, const char* persist_path) {
+  return mbCreateSessionEx(name, persist_path, nullptr);
+}
+
 void mbDestroySession(mbSession* s) {
-  if (!s)
+  if (!s || !s->impl)
     return;
-  if (s->impl)
-    s->impl->Detach();
-  delete s;
+  // Detach the owner handle but DON'T free it here: a view may still be bound to
+  // this session (and mbViewGetSession can still hand the handle back), and a
+  // view-config may still reference it. The impl is reference-counted; it — and
+  // the C handle, via the registered deleter — is destroyed only when the last
+  // view and config release it. Freeing `s` now, with the impl still live, is the
+  // use-after-free this avoids.
+  s->impl->Detach();
 }
 
 mbSession* mbDefaultSession(void) {
@@ -537,6 +651,13 @@ void mbSessionFlush(mbSession* s) {
   EngineScope engine_scope;
   if (s && s->impl)
     s->impl->FlushToDisk();
+}
+
+int mbSessionFlushEx(mbSession* s) {
+  EngineScope engine_scope;
+  if (!s || !s->impl)
+    return 0;
+  return s->impl->FlushToDisk() ? 1 : 0;
 }
 
 int mbSessionGetName(mbSession* s, char* out, int out_cap) {
@@ -581,6 +702,7 @@ mbView* mbCreateView(int width, int height) {
   view->impl = mb::MbWebView::Create(width, height);
   if (!view->impl)
     return nullptr;
+  RegisterViewHandle(view.get());
   return view.release();
 }
 
@@ -589,12 +711,27 @@ mbViewConfig* mbCreateViewConfig(void) {
 }
 
 void mbDestroyViewConfig(mbViewConfig* c) {
+  if (!c)
+    return;
+  // Release the ref this config held on its session's impl (see SetSession) so a
+  // session captured only by a config can tear down once the config is gone.
+  if (c->session && c->session->impl)
+    c->session->impl->Release();
   delete c;
 }
 
 void mbViewConfigSetSession(mbViewConfig* c, mbSession* session) {
-  if (c)
-    c->session = session;
+  if (!c || c->session == session)
+    return;
+  // Hold a ref on the impl while the config references it: a config keeps the
+  // session (and its C handle) alive until the config is consumed/destroyed, so a
+  // mbDestroySession between config setup and mbCreateViewWithConfig can't free
+  // the session out from under c->session.
+  if (session && session->impl)
+    session->impl->AddRef();
+  if (c->session && c->session->impl)
+    c->session->impl->Release();
+  c->session = session;
 }
 
 void mbViewConfigSetCompositing(mbViewConfig* c, int on) {
@@ -685,11 +822,13 @@ mbView* mbCreateViewWithConfig(int width, int height, const mbViewConfig* c) {
       view->impl->SetFontFamilies(c->ff_standard.c_str(), c->ff_fixed.c_str(),
                                   c->ff_serif.c_str(), c->ff_sans.c_str());
   }
+  RegisterViewHandle(view.get());
   return view.release();
 }
 
 void mbDestroyView(mbView* v) {
   EngineScope engine_scope;
+  UnregisterViewHandle(v);
   delete v;  // unique_ptr<MbWebView> dtor closes the WebView
 }
 
@@ -751,6 +890,41 @@ void mbLoadURL(mbView* v, const char* utf8_url) {
     v->impl->LoadURL(utf8_url);
 }
 
+mbNavigationId mbNavigate(mbView* v, const char* utf8_url) {
+  EngineScope engine_scope;
+  if (!v || !v->impl)
+    return 0;
+  return v->impl->Navigate(utf8_url);
+}
+
+mbNavigationId mbNavigateEx(mbView* v, const char* utf8_url,
+                            const mbNavigationOptions* opts) {
+  EngineScope engine_scope;
+  if (!v || !v->impl)
+    return 0;
+  std::string method, body, content_type;
+  // Accept a stable prefix (offsetof of the last field we read) so an older/newer caller's
+  // struct is honored — same prefix-ABI rule as the typed input events.
+  if (opts && opts->struct_size >=
+                  static_cast<int>(offsetof(mbNavigationOptions, content_type) +
+                                   sizeof(const char*))) {
+    if (opts->method)
+      method = opts->method;
+    if (opts->body && opts->body_len)
+      body.assign(static_cast<const char*>(opts->body), opts->body_len);
+    if (opts->content_type)
+      content_type = opts->content_type;
+  }
+  return v->impl->NavigateEx(utf8_url ? utf8_url : "", method, body, content_type);
+}
+
+int mbCancelNavigation(mbView* v, mbNavigationId id) {
+  EngineScope engine_scope;
+  if (!v || !v->impl)
+    return 0;
+  return v->impl->CancelNavigation(id) ? 1 : 0;
+}
+
 int mbDownloadURL(mbView* v, const char* url, const char* dest_path) {
   EngineScope engine_scope;
   if (!v || !v->impl || !url || !dest_path)
@@ -765,6 +939,17 @@ void mbOnLoadFinish(mbView* v, mbLoadFinishCallback cb, void* userdata) {
     v->impl->SetLoadFinishCallback([v, cb, userdata]() { cb(v, userdata); });
   else
     v->impl->SetLoadFinishCallback({});
+}
+
+void mbOnNavigationStarted(mbView* v, mbNavigationStartedCallback cb,
+                           void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb)
+    v->impl->SetNavigationStartedCallback(
+        [v, cb, userdata](const std::string& url) { cb(v, userdata, url.c_str()); });
+  else
+    v->impl->SetNavigationStartedCallback({});
 }
 
 void mbOnBeginLoading(mbView* v, mbBeginLoadingCallback cb, void* userdata) {
@@ -1014,6 +1199,10 @@ void mbOnCreateChildView(mbView* v, mbCreateChildViewCallback cb,
           return nullptr;
         // The child browses in the parent's profile (cookies, storage).
         child->impl->SetSession(v->impl->session());
+        // Register the reverse handle so loader callbacks (e.g. the response hook)
+        // can report THIS child view — without it an adopted popup's responses
+        // would surface a null view. mbDestroyView unregisters it.
+        RegisterViewHandle(child.get());
         mbView* handle = child.release();
         if (!cb(v, userdata, handle, url.c_str(), name.c_str(),
                 is_popup ? 1 : 0, x, y, w, h)) {
@@ -1236,10 +1425,25 @@ int mbSelectOption(mbView* v, const char* css_selector, const char* value) {
   return v->impl->SelectOption(css_selector, value) ? 1 : 0;
 }
 
+// Typed-event ABI compatibility: a typed event's struct_size is the caller's
+// sizeof, and the contract (webview.h) is that fields may only be APPENDED — the
+// existing prefix never moves. So the guard must accept any struct at least as
+// large as the STABLE PREFIX we actually read, NOT the engine's current full
+// sizeof. Using sizeof(current) would reject every older client the moment we
+// append a field (their smaller struct_size < the grown sizeof), silently
+// killing all input from them. offsetof(last-read field)+sizeof pins the check
+// to the prefix these functions read today; a future appended field must guard
+// its own read with a wider offsetof check, never by raising this minimum.
+constexpr int kMbMouseEventMinSize =
+    static_cast<int>(offsetof(mbMouseEvent, modifiers) + sizeof(int));
+constexpr int kMbWheelEventMinSize =
+    static_cast<int>(offsetof(mbWheelEvent, modifiers) + sizeof(int));
+constexpr int kMbKeyEventMinSize =
+    static_cast<int>(offsetof(mbKeyEvent, is_system_key) + sizeof(int));
+
 void mbSendMouseEvent(mbView* v, const mbMouseEvent* e) {
   EngineScope engine_scope;
-  if (!v || !v->impl || !e ||
-      e->struct_size < static_cast<int>(sizeof(mbMouseEvent)))
+  if (!v || !v->impl || !e || e->struct_size < kMbMouseEventMinSize)
     return;
   v->impl->SendMouseEvent(e->type, e->x, e->y, e->button, e->click_count,
                           e->modifiers);
@@ -1247,8 +1451,8 @@ void mbSendMouseEvent(mbView* v, const mbMouseEvent* e) {
 
 int mbSendWheelEvent(mbView* v, const mbWheelEvent* e) {
   EngineScope engine_scope;
-  if (!v || !v->impl || !e ||
-      e->struct_size < static_cast<int>(sizeof(mbWheelEvent)) || e->phase != 0)
+  if (!v || !v->impl || !e || e->struct_size < kMbWheelEventMinSize ||
+      e->phase != 0)
     return 0;
   return v->impl->SendWheelEx(e->x, e->y, e->delta_x, e->delta_y,
                               e->precise != 0, e->modifiers)
@@ -1423,8 +1627,7 @@ void mbSendKeyUp(mbView* v, int windows_key_code) {
 
 void mbSendKeyEvent(mbView* v, const mbKeyEvent* e) {
   EngineScope engine_scope;
-  if (!v || !v->impl || !e ||
-      e->struct_size < static_cast<int>(sizeof(mbKeyEvent)))
+  if (!v || !v->impl || !e || e->struct_size < kMbKeyEventMinSize)
     return;
   v->impl->SendKeyEvent(e->type, e->modifiers, e->windows_key_code,
                         e->native_key_code, e->text, e->unmodified_text,
@@ -1648,24 +1851,41 @@ struct mbResponse {
 };
 
 namespace {
+// One hook slot, two possible C entry points: the original (response, userdata) and the
+// level-2 Ex (response, view, userdata). Setting either clears the other.
 mbResponseCallback g_response_cb = nullptr;
+mbResponseCallbackEx g_response_cb_ex = nullptr;
 void* g_response_ud = nullptr;
-}  // namespace
 
-void mbSetResponseCallback(mbResponseCallback cb, void* userdata) {
-  g_response_cb = cb;
-  g_response_ud = userdata;
-  if (cb) {
+void UpdateResponseHook() {
+  if (g_response_cb || g_response_cb_ex) {
     mb::MbSetResponseHook(
-        [](const std::string& url, int* status, std::string* headers,
-           std::string* body) {
+        [](const void* host_ctx, const std::string& url, int* status,
+           std::string* headers, std::string* body) {
           mbResponse r{url, status, headers, body};
-          if (g_response_cb)
+          if (g_response_cb_ex)
+            g_response_cb_ex(&r, ViewHandleForCtx(host_ctx), g_response_ud);
+          else if (g_response_cb)
             g_response_cb(&r, g_response_ud);
         });
   } else {
     mb::MbSetResponseHook({});
   }
+}
+}  // namespace
+
+void mbSetResponseCallback(mbResponseCallback cb, void* userdata) {
+  g_response_cb = cb;
+  g_response_cb_ex = nullptr;  // one slot: plain replaces Ex
+  g_response_ud = userdata;
+  UpdateResponseHook();
+}
+
+void mbSetResponseCallbackEx(mbResponseCallbackEx cb, void* userdata) {
+  g_response_cb_ex = cb;
+  g_response_cb = nullptr;  // one slot: Ex replaces plain
+  g_response_ud = userdata;
+  UpdateResponseHook();
 }
 
 namespace {
@@ -1863,6 +2083,18 @@ void mbSetRequestHeader(const char* url_substring, const char* name,
                         const char* value) {
   if (url_substring && name)
     mb::MbAddRequestHeader(url_substring, name, value ? value : "");
+}
+
+void mbSetRequestHeaderForHost(const char* host_filter, const char* name,
+                               const char* value) {
+  if (host_filter && name)
+    mb::MbAddRequestHeaderForHost(host_filter, name, value ? value : "");
+}
+
+void mbSetRequestHeaderForOrigin(const char* origin, const char* name,
+                                 const char* value) {
+  if (origin && name)
+    mb::MbAddRequestHeaderForOrigin(origin, name, value ? value : "");
 }
 
 void mbClearRequestHeaders(void) {

@@ -28,7 +28,9 @@
 #include "third_party/skia/include/core/SkImageInfo.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/synchronization/lock.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/task/bind_post_task.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
@@ -263,13 +265,21 @@ curl_slist* ConfigureCurlEasy(CURL* curl,
   std::string method = http_method;
   if (method.empty() && !post_body.empty())
     method = "POST";
-  if (!method.empty() && method != "GET" && method != "HEAD") {
+  if (method == "HEAD") {
+    // CURLOPT_CUSTOMREQUEST alone only changes the request token; without
+    // NOBODY libcurl would still perform a GET and read a response body.
+    curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str());
+  } else {
     if (!post_body.empty()) {
       curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE,
                        static_cast<long>(post_body.size()));
       curl_easy_setopt(curl, CURLOPT_COPYPOSTFIELDS, post_body.c_str());
     }
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str());
+    // Preserve the caller's exact verb, including an explicit GET carrying a
+    // body and an empty-body POST/PUT/PATCH/DELETE.
+    if (!method.empty())
+      curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str());
   }
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CurlWrite);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, body);
@@ -294,7 +304,7 @@ curl_slist* ConfigureCurlEasy(CURL* curl,
   // so BOTH the top-level navigation (MbFetchUrl) and subresources/fetch (Deliver),
   // which share this function, get them. (HeaderList is lock-guarded; this runs on the
   // reactor IO thread for the subresource path.)
-  mb::MbApplyRequestHeaders(url, &lines);
+  mb::MbApplyRequestHeaders(url, &lines, follow_redirects);
   lines.push_back('\n');  // sentinel so the last line flushes
   for (char c : lines) {
     if (c == '\n' || c == '\r') {
@@ -302,20 +312,15 @@ curl_slist* ConfigureCurlEasy(CURL* curl,
         const std::string lline = ToLower(line);
         if (lline.rfind("accept-language:", 0) == 0)
           has_accept_language = true;
-        // Cross-origin credential leak guard. When libcurl auto-follows redirects
-        // (follow_redirects==true — the MbFetchUrl navigation/API path), it would
-        // re-send these caller-supplied headers verbatim to a cross-origin hop, and
-        // libcurl offers no per-hop scrub for custom CURLOPT_HTTPHEADER lines. So we
-        // drop the sensitive ones on the auto-follow path. Cookies still flow via
-        // curl's origin-scoped shared jar (safe); the fetch/XHR/subresource path uses
-        // manual per-hop following (follow_redirects==false) with proper origin-aware
-        // scrubbing and is unaffected.
-        const bool sensitive =
-            follow_redirects && (lline.rfind("authorization:", 0) == 0 ||
-                                 lline.rfind("cookie:", 0) == 0 ||
-                                 lline.rfind("proxy-authorization:", 0) == 0);
-        if (!sensitive)
-          header_list = curl_slist_append(header_list, line.c_str());
+        // Credential headers (Authorization/Cookie/...) are sent AS-IS to this hop's
+        // origin. Cross-origin scoping is NOT done here by dropping headers before the
+        // first request (the old, over-broad mitigation that also stripped them from the
+        // intended first-party origin); it is done PER-HOP by the manual redirect drivers
+        // (FetchHttp for navigation/API, MbURLLoader::OnHopComplete for subresources),
+        // which strip them only when a 3xx actually crosses to a different origin. Both
+        // configure curl with FOLLOWLOCATION off, so curl never re-sends a header across a
+        // redirect on its own.
+        header_list = curl_slist_append(header_list, line.c_str());
         line.clear();
       }
     } else {
@@ -337,6 +342,112 @@ curl_slist* ConfigureCurlEasy(CURL* curl,
   return header_list;
 }
 
+// Two URLs share an ORIGIN iff scheme, host, and effective port all match — the correct
+// boundary for deciding whether a credential may cross a redirect (host-only or substring
+// comparisons are not safe).
+bool MbSameOrigin(const GURL& a, const GURL& b) {
+  return a.scheme() == b.scheme() && a.host() == b.host() &&
+         a.EffectiveIntPort() == b.EffectiveIntPort();
+}
+
+// Drop credential-bearing request headers (Authorization / Cookie / Proxy-Authorization)
+// from a '\n'-joined header block. Applied when a redirect crosses origins so a credential
+// set for origin A does not ride to origin B. (Cookies for the new origin are still sent —
+// curl's origin-scoped shared jar handles those; this only strips an explicit Cookie header
+// the caller injected for the previous origin.)
+void MbStripCredentialHeaders(std::string* block) {
+  if (block->empty())
+    return;
+  std::string out;
+  size_t start = 0;
+  while (start <= block->size()) {
+    const size_t nl = block->find('\n', start);
+    std::string line = block->substr(
+        start, nl == std::string::npos ? std::string::npos : nl - start);
+    std::string lname = ToLower(line.substr(0, line.find(':')));
+    while (!lname.empty() && lname.back() == ' ')
+      lname.pop_back();
+    if (lname != "authorization" && lname != "cookie" &&
+        lname != "proxy-authorization" && !line.empty()) {
+      if (!out.empty())
+        out += '\n';
+      out += line;
+    }
+    if (nl == std::string::npos)
+      break;
+    start = nl + 1;
+  }
+  *block = std::move(out);
+}
+
+// Turn a '\n'/'\r'-separated "Name: Value" header block into a curl_slist (caller frees).
+curl_slist* BuildHeaderSlist(const std::string& block) {
+  curl_slist* headers = nullptr;
+  std::string line, lines = block;
+  lines.push_back('\n');  // sentinel so the last line flushes
+  for (char ch : lines) {
+    if (ch == '\n' || ch == '\r') {
+      if (!line.empty()) {
+        headers = curl_slist_append(headers, line.c_str());
+        line.clear();
+      }
+    } else {
+      line.push_back(ch);
+    }
+  }
+  return headers;
+}
+
+// Merge hook-added headers for the synchronous redirect driver. The public
+// loader helpers define the same operation inside namespace mb below; this
+// early copy lives in the file-local transport namespace used by FetchHttp.
+void MergeRedirectHeaderLines(std::string* lines, const std::string& add) {
+  std::vector<std::string> add_lines;
+  auto split = [](const std::string& block, std::vector<std::string>* out) {
+    size_t start = 0;
+    while (start <= block.size()) {
+      const size_t nl = block.find('\n', start);
+      std::string line = block.substr(
+          start, nl == std::string::npos ? std::string::npos : nl - start);
+      if (!line.empty())
+        out->push_back(std::move(line));
+      if (nl == std::string::npos)
+        break;
+      start = nl + 1;
+    }
+  };
+  split(add, &add_lines);
+  if (add_lines.empty())
+    return;
+  auto name_of = [](const std::string& line) {
+    std::string name = line.substr(0, line.find(':'));
+    for (char& c : name)
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return name;
+  };
+  std::vector<std::string> kept;
+  std::vector<std::string> existing;
+  split(*lines, &existing);
+  for (const std::string& line : existing) {
+    bool replaced = false;
+    for (const std::string& added : add_lines) {
+      if (name_of(added) == name_of(line)) {
+        replaced = true;
+        break;
+      }
+    }
+    if (!replaced)
+      kept.push_back(line);
+  }
+  kept.insert(kept.end(), add_lines.begin(), add_lines.end());
+  lines->clear();
+  for (const std::string& line : kept) {
+    if (!lines->empty())
+      lines->push_back('\n');
+    *lines += line;
+  }
+}
+
 bool FetchHttp(const std::string& url, std::string* body, std::string* content_type,
                const std::string& user_agent, const std::string& extra_headers,
                const std::string& post_body = "",
@@ -348,72 +459,200 @@ bool FetchHttp(const std::string& url, std::string* body, std::string* content_t
                std::string* out_error = nullptr,
                int* out_error_code = nullptr,
                const void* host_ctx = nullptr,
-               const std::string& pinned_pubkey = std::string()) {
-  CURL* curl = curl_easy_init();
-  if (!curl)
-    return false;
-  std::string header_block;  // final response's raw header lines (for the caller)
-  curl_slist* header_list = ConfigureCurlEasy(
-      curl, url, user_agent, extra_headers, post_body, post_content_type,
-      http_method, follow_redirects, &header_block, body,
-      mb::MbLoaderSessionKeyFor(host_ctx), pinned_pubkey);
-  // Re-derive the effective method (same rule ConfigureCurlEasy uses) for the retry
-  // decision below — only SAFE methods are retried.
-  std::string method = http_method;
-  if (method.empty() && !post_body.empty())
-    method = "POST";
+               const std::string& pinned_pubkey = std::string(),
+               const std::string& initial_origin_headers = std::string(),
+               bool* out_redirected = nullptr) {
+  if (out_redirected)
+    *out_redirected = false;
+  // Redirects are followed MANUALLY, one hop at a time (CURLOPT_FOLLOWLOCATION off in
+  // ConfigureCurlEasy), so we can apply proper per-hop credential scoping: send the
+  // caller's Authorization/Cookie/etc. to the INTENDED first origin, then strip them only
+  // when a 3xx crosses to a different origin. curl's own auto-follow re-sends custom
+  // CURLOPT_HTTPHEADER lines verbatim across origins with no scrub — which is exactly the
+  // leak (and the over-broad "drop before the first request" mitigation) this replaces.
+  std::string cur = url;                 // current hop URL (advances on each redirect)
+  std::string method = http_method;      // may be rewritten to GET on 301/302/303
+  if (method.empty())
+    method = post_body.empty() ? "GET" : "POST";
+  std::string cur_body = post_body;      // cleared when a redirect downgrades to GET
+  std::string cur_extra = extra_headers; // credential headers stripped on cross-origin
+  std::string visible_cur = url;
+  std::string hook_headers = initial_origin_headers;
+  GURL hook_header_origin(url);
+  std::string current_pin = pinned_pubkey;
 
   constexpr int kMaxAttempts = 3;
+  constexpr int kMaxHops = 20;
   CURLcode rc = CURLE_OK;
   long http_code = 0;
-  for (int attempt = 1; attempt <= kMaxAttempts; ++attempt) {
-    body->clear();  // CurlWrite appends; start each attempt fresh
-    rc = curl_easy_perform(curl);
-    http_code = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+  std::string header_block;  // the FINAL response's raw header lines (for the caller)
+  std::string final_ct;
+  int hop = 0;
+  bool redirected = false;
+  for (;;) {
+    CURL* curl = curl_easy_init();
+    if (!curl)
+      return false;
+    header_block.clear();
+    std::string hop_extra = cur_extra;
+    if (MbSameOrigin(hook_header_origin, GURL(cur)))
+      MergeRedirectHeaderLines(&hop_extra, hook_headers);
+    curl_slist* header_list = ConfigureCurlEasy(
+        curl, cur, user_agent, hop_extra, cur_body, post_content_type, method,
+        /*follow_redirects=*/false, &header_block, body,
+        mb::MbLoaderSessionKeyFor(host_ctx), current_pin);
 
-    // Retry decision (extracted to mb::MbShouldRetryFetch so it's unit-testable):
-    // only SAFE methods are retried, and 204/304/HEAD empty bodies are NOT treated
-    // as anomalies — so a write is never re-sent and a legit empty response isn't
-    // pointlessly retried.
-    const bool retryable = mb::MbShouldRetryFetch(
-        method, IsTransientCurlError(rc),
-        rc == CURLE_OK && IsTransientHttpCode(http_code), http_code,
-        body->empty(), attempt, kMaxAttempts);
-    if (!retryable)
+    // Per-hop transient-failure retry loop (only SAFE methods are retried; 204/304/HEAD
+    // empty bodies are not treated as anomalies).
+    for (int attempt = 1; attempt <= kMaxAttempts; ++attempt) {
+      body->clear();  // CurlWrite appends; start each attempt fresh
+      header_block.clear();  // never expose headers from a prior failed attempt
+      rc = curl_easy_perform(curl);
+      http_code = 0;
+      curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+      const bool retryable = mb::MbShouldRetryFetch(
+          method, IsTransientCurlError(rc),
+          rc == CURLE_OK && IsTransientHttpCode(http_code), http_code,
+          body->empty(), attempt, kMaxAttempts);
+      if (!retryable)
+        break;
+      if (std::getenv("MB_VERBOSE")) {
+        std::fprintf(stderr,
+                     "[mb_url_loader] transient failure (curl=%d http=%ld) on %s "
+                     "— retry %d/%d\n",
+                     rc, http_code, cur.c_str(), attempt, kMaxAttempts - 1);
+      }
+      base::PlatformThread::Sleep(base::Milliseconds(250 * attempt));
+    }
+
+    const char* ct = nullptr;
+    curl_easy_getinfo(curl, CURLINFO_CONTENT_TYPE, &ct);
+    final_ct = ct ? ct : std::string();
+
+    // Decide whether this is a redirect we should follow.
+    const bool is_redirect = follow_redirects && rc == CURLE_OK &&
+                             http_code >= 300 && http_code < 400;
+    const std::string loc =
+        is_redirect ? HeaderValueFromBlock(header_block, "location") : std::string();
+    GURL next;
+    bool follow = false;
+    if (is_redirect && !loc.empty()) {
+      const GURL prev(cur);
+      next = prev.Resolve(loc);
+      // Fetch redirect semantics retain the previous fragment when Location
+      // omits one. Fragments are not sent over HTTP, but remain page-visible.
+      if (next.is_valid() && !next.has_ref() && prev.has_ref()) {
+        GURL::Replacements replacements;
+        replacements.SetRefStr(prev.ref());
+        next = next.ReplaceComponents(replacements);
+      }
+      follow = next.is_valid() && hop < kMaxHops;
+    }
+
+    curl_easy_cleanup(curl);
+    if (header_list)
+      curl_slist_free_all(header_list);
+
+    if (!follow)
+      break;  // final response (or an unfollowable/invalid redirect) — deliver it
+
+    // Method rewrite: 303 (and POST on 301/302) becomes a bodyless GET; 307/308 preserve
+    // the method and body.
+    if (http_code == 303 ||
+        ((http_code == 301 || http_code == 302) && method == "POST")) {
+      method = "GET";
+      cur_body.clear();
+    }
+    const std::string next_visible = next.spec();
+    std::string next_fetch = mb::MbApplyUrlRewrites(next_visible);
+    if (mb::MbIsUrlBlocked(next_fetch) ||
+        mb::MbRequestHookBlocks(next_visible, method, cur_extra, cur_body)) {
+      if (out_status)
+        *out_status = 0;
+      if (out_headers)
+        out_headers->clear();
+      if (out_final_url)
+        *out_final_url = next_visible;
+      if (out_redirected)
+        *out_redirected = true;
+      if (out_error)
+        *out_error = mb::kMbBlockedByHookError;
+      if (out_error_code)
+        *out_error_code = 0;
+      return false;
+    }
+
+    mb::MbRequestMutation mutation;
+    if (mb::MbRunRequestMutateHook(next_fetch, method, cur_extra, cur_body,
+                                   &mutation)) {
+      if (mutation.block) {
+        if (out_status)
+          *out_status = 0;
+        if (out_headers)
+          out_headers->clear();
+        if (out_final_url)
+          *out_final_url = next_visible;
+        if (out_redirected)
+          *out_redirected = true;
+        if (out_error)
+          *out_error = mb::kMbBlockedByHookError;
+        if (out_error_code)
+          *out_error_code = 0;
+        return false;
+      }
+      if (!mutation.set_url.empty() && GURL(mutation.set_url).is_valid())
+        next_fetch = mutation.set_url;
+      if (!mutation.pin_pubkey.empty())
+        current_pin = std::move(mutation.pin_pubkey);
+    }
+
+    std::string mock_body;
+    std::string mock_ct;
+    int mock_status = 0;
+    if (mb::MbFindMock(next_fetch, &mock_body, &mock_ct, &mock_status,
+                       host_ctx)) {
+      *body = std::move(mock_body);
+      final_ct = std::move(mock_ct);
+      http_code = mock_status > 0 ? mock_status : 200;
+      header_block.clear();
+      visible_cur = next_visible;
+      redirected = true;
+      rc = CURLE_OK;
+      break;
+    }
+
+    // A raw non-web Location is never fetched. Interception above may block it,
+    // mock it, or explicitly rewrite it back to http(s); otherwise expose the
+    // original 3xx response without granting local-protocol access.
+    const GURL next_fetch_url(next_fetch);
+    if (!next_fetch_url.SchemeIsHTTPOrHTTPS())
       break;
 
-    if (std::getenv("MB_VERBOSE")) {
-      std::fprintf(stderr,
-                   "[mb_url_loader] transient failure (curl=%d http=%ld) on %s "
-                   "— retry %d/%d\n",
-                   rc, http_code, url.c_str(), attempt, kMaxAttempts - 1);
-    }
-    // Linear backoff: 250ms, 500ms. Modest — a render shouldn't stall for long,
-    // and curl already bounds each attempt with its own timeouts.
-    base::PlatformThread::Sleep(base::Milliseconds(250 * attempt));
+    // Cross-origin transition: strip the caller's credential headers so they don't ride to
+    // a different origin. Same-origin hops keep them.
+    if (!MbSameOrigin(GURL(cur), next_fetch_url))
+      MbStripCredentialHeaders(&cur_extra);
+    cur = next_fetch;
+    visible_cur = next_visible;
+    hook_headers = std::move(mutation.add_headers);
+    hook_header_origin = next_fetch_url;
+    hop++;
+    redirected = true;
   }
 
-  const char* ct = nullptr;
-  curl_easy_getinfo(curl, CURLINFO_CONTENT_TYPE, &ct);
-  if (ct)
-    *content_type = ct;
+  if (content_type)
+    *content_type = final_ct;
   if (out_status)
     *out_status = static_cast<int>(http_code);
   if (out_headers)
     *out_headers = std::move(header_block);
-  if (out_final_url) {
-    const char* eu = nullptr;  // URL after curl-followed redirects
-    if (curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &eu) == CURLE_OK && eu)
-      *out_final_url = eu;
-  }
-  curl_easy_cleanup(curl);
-  if (header_list)
-    curl_slist_free_all(header_list);
-  // Success means we got a complete HTTP response — ANY status, incl. 4xx/5xx.
-  // Those are real answers the caller must deliver (fetch needs response.status
-  // and the error body; a 404 page should render), NOT network failures. Only a
-  // transport error (no response at all) returns false.
+  if (out_final_url)
+    *out_final_url = redirected ? visible_cur : cur;
+  if (out_redirected)
+    *out_redirected = redirected;
+  // Success means we got a complete HTTP response — ANY status, incl. 4xx/5xx. Those are
+  // real answers the caller must deliver (a 404 page should render), NOT network failures.
+  // Only a transport error (no response at all) returns false.
   const bool ok = rc == CURLE_OK && http_code > 0;
   if (out_error) {
     if (ok)
@@ -448,6 +687,8 @@ class MbCurlReactor {
   struct Result {
     bool ok = false;
     long http_status = 0;
+    int curl_code = 0;          // CURLcode of the transfer (0 == CURLE_OK); nonzero on a
+                                // transport failure (DNS/TLS/timeout/aborted), for diagnostics
     std::string body;           // accumulated response body (decoded)
     std::string headers;        // raw final-response header block
     std::string content_type;   // curl CONTENT_TYPE (may be empty)
@@ -457,7 +698,18 @@ class MbCurlReactor {
     std::string url, method, body, post_content_type, user_agent, extra_headers;
     std::string cookie_session_key;  // the submitting view's session jar
     std::string pin_pubkey;  // per-request TLS public-key pin (may be empty)
+    // Optional cancellation token: setting *cancel aborts the transfer promptly (via the
+    // xferinfo callback) — used by the async navigation engine (MbCancelNavigation).
+    std::shared_ptr<std::atomic<bool>> cancel;
   };
+
+  // curl progress callback: return nonzero to abort this transfer when its cancel token is
+  // set. curl then reports the easy handle DONE with CURLE_ABORTED_BY_CALLBACK, reaped and
+  // posted like any other completion (ok=false).
+  static int CancelXfer(void* data, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+    auto* cancel = static_cast<std::atomic<bool>*>(data);
+    return (cancel && cancel->load()) ? 1 : 0;
+  }
 
   static MbCurlReactor* Get() {
     static MbCurlReactor* instance = new MbCurlReactor();  // leaked (process lifetime)
@@ -482,6 +734,15 @@ class MbCurlReactor {
       curl_multi_wakeup(lane->multi);
   }
 
+  // Break every lane out of its poll so a just-set cancel token is observed now (its
+  // xferinfo callback then aborts the transfer) instead of after the ~1s poll timeout.
+  void Wake() {
+    for (auto& lane : lanes_) {
+      if (lane->multi)
+        curl_multi_wakeup(lane->multi);
+    }
+  }
+
  private:
   struct Pending {
     Request req;
@@ -498,6 +759,7 @@ class MbCurlReactor {
     std::string body, header_block;  // WRITEDATA / HEADERDATA targets (outlive transfer)
     scoped_refptr<base::SequencedTaskRunner> reply_runner;
     base::OnceCallback<void(Result)> on_done;
+    std::shared_ptr<std::atomic<bool>> cancel;  // kept alive while the transfer runs
   };
   // One IO lane: an independent curl_multi event loop on its own dedicated thread.
   // Each lane owns its multi handle + active jobs (touched only on its thread) and a
@@ -540,6 +802,13 @@ class MbCurlReactor {
         auto job = std::make_unique<Job>();
         job->reply_runner = std::move(p->reply_runner);
         job->on_done = std::move(p->on_done);
+        job->cancel = std::move(p->req.cancel);
+        // Already cancelled before we even started — report failure and drop.
+        if (job->cancel && job->cancel->load()) {
+          job->reply_runner->PostTask(
+              FROM_HERE, base::BindOnce(std::move(job->on_done), Result{}));
+          continue;
+        }
         job->easy = curl_easy_init();
         if (!job->easy) {
           // Report the failure to the caller and drop the job.
@@ -553,6 +822,12 @@ class MbCurlReactor {
             p->req.body, p->req.post_content_type, p->req.method,
             /*follow_redirects=*/false, &job->header_block, &job->body,
             p->req.cookie_session_key, p->req.pin_pubkey);
+        // Wire prompt cancellation for a job that carries a token.
+        if (job->cancel) {
+          curl_easy_setopt(job->easy, CURLOPT_NOPROGRESS, 0L);
+          curl_easy_setopt(job->easy, CURLOPT_XFERINFOFUNCTION, &CancelXfer);
+          curl_easy_setopt(job->easy, CURLOPT_XFERINFODATA, job->cancel.get());
+        }
         curl_easy_setopt(job->easy, CURLOPT_PRIVATE, job.get());
         curl_multi_add_handle(lane->multi, job->easy);
         lane->active.push_back(std::move(job));
@@ -575,6 +850,7 @@ class MbCurlReactor {
           long code = 0;
           curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &code);
           r.http_status = code;
+          r.curl_code = static_cast<int>(m->data.result);  // CURLcode (for diagnostics)
           // A complete HTTP response of ANY status (incl. 4xx/5xx) is success; only a
           // transport error (no response) is a failure (matches FetchHttp).
           r.ok = (m->data.result == CURLE_OK && code > 0);
@@ -848,10 +1124,13 @@ std::string MbGetAllCookies(const std::string& session_key) {
 bool MbSaveCookies(const std::string& path, const std::string& session_key) {
   if (path.empty())
     return false;
-  // Write the whole-jar snapshot (a Netscape cookie file, curl's native format,
-  // reloadable by curl itself) to `path`.
+  // Write THIS session's jar snapshot (a Netscape cookie file, curl's native
+  // format, reloadable by curl itself) to `path`. session_key must be forwarded
+  // to MbGetAllCookies — the no-arg form snapshots the DEFAULT session's jar, so
+  // a custom session would otherwise persist the wrong cookies (they would not
+  // round-trip against MbLoadCookies(path, id_)).
   return base::WriteFile(base::FilePath::FromUTF8Unsafe(path),
-                         MbGetAllCookies());
+                         MbGetAllCookies(session_key));
 }
 
 bool MbLoadCookies(const std::string& path, const std::string& session_key) {
@@ -969,6 +1248,44 @@ void MbClearRequestLog() {
 
 size_t MbRequestCount() {
   return RequestLog().size();
+}
+
+// --- Per-view network activity (backs mbWaitForNetworkIdle) -------------------
+// See the header for why the capped request-log size is the wrong idle signal.
+namespace {
+struct ViewNetActivity {
+  uint64_t started = 0;  // monotonic; never pinned, so ongoing traffic always moves it
+  int in_flight = 0;     // loads currently outstanding for this view
+};
+// Main-thread only (LoadAsynchronously / ~MbURLLoader / the WaitForNetworkIdle
+// pump all run there), like the request log — no locking. Leaked-new to avoid an
+// exit-time destructor on a function-local static.
+std::map<const void*, ViewNetActivity>& ViewNetMap() {
+  static auto* m = new std::map<const void*, ViewNetActivity>();
+  return *m;
+}
+}  // namespace
+
+void MbNetRequestStarted(const void* view_ctx) {
+  ViewNetActivity& a = ViewNetMap()[view_ctx];
+  ++a.started;
+  ++a.in_flight;
+}
+
+void MbNetRequestFinished(const void* view_ctx) {
+  auto it = ViewNetMap().find(view_ctx);
+  if (it != ViewNetMap().end() && it->second.in_flight > 0)
+    --it->second.in_flight;
+}
+
+uint64_t MbNetStartedCount(const void* view_ctx) {
+  auto it = ViewNetMap().find(view_ctx);
+  return it == ViewNetMap().end() ? 0u : it->second.started;
+}
+
+int MbNetInFlight(const void* view_ctx) {
+  auto it = ViewNetMap().find(view_ctx);
+  return it == ViewNetMap().end() ? 0 : it->second.in_flight;
 }
 
 // --- Request blocking --------------------------------------------------------
@@ -1121,10 +1438,10 @@ void MbSetResponseHook(MbResponseHook hook) {
   ResponseHook() = std::move(hook);
 }
 
-void MbInvokeResponseHook(const std::string& url, int* status,
+void MbInvokeResponseHook(const void* host_ctx, const std::string& url, int* status,
                           std::string* headers, std::string* body) {
   if (ResponseHook())
-    ResponseHook()(url, status, headers, body);
+    ResponseHook()(host_ctx, url, status, headers, body);
 }
 
 // --- Response mocking --------------------------------------------------------
@@ -1476,26 +1793,131 @@ std::string MbApplyUrlRewrites(const std::string& url) {
 }
 
 // --- Per-URL request header injection ----------------------------------------
-// Add/override an outgoing request header for any http(s) request whose URL contains a
-// registered substring — e.g. send an Authorization / API-key header only to its own
-// API host (not leaked to every origin a page touches), or set a per-domain UA. Unlike
-// the global extra-headers, this is conditional on the URL.
+// Two registries, applied by MbApplyRequestHeaders, both conditional on the URL (unlike
+// the global extra-headers):
+//
+//  1) SUBSTRING (mbSetRequestHeader) — the ORIGINAL behavior, preserved for ABI/behavior
+//     compatibility: the header rides any request whose full URL contains the registered
+//     substring. Flexible (matches path/query too) but a footgun for credentials — a
+//     substring like "api.example.com" also matches "https://evil.test/?next=api.example.com".
+//
+//  2) HOST-scoped (mbSetRequestHeaderForHost) — the SAFE alternative for credentials: the
+//     header rides a request only when the request URL's parsed HOST matches the filter,
+//     and (crucially) it is applied PER-HOP on the manual-redirect path so it does not
+//     follow a cross-origin redirect. Filter syntax:
+//       "api.example.com"     exact host
+//       ".example.com"        that host OR any subdomain (leading dot opts in)
+//       "api.example.com/v2/" exact host AND request path starts with "/v2/"
 namespace {
-struct HeaderEntry {
+struct SubstringHeaderEntry {
   std::string substring;
   std::string name;
   std::string value;
 };
-std::vector<HeaderEntry>& HeaderList() {
-  static std::vector<HeaderEntry>* h = new std::vector<HeaderEntry>();
+struct HostHeaderEntry {
+  std::string host;          // lowercased registrable host (no leading dot)
+  bool match_subdomains;     // true if the filter began with '.'
+  std::string path_prefix;   // "" or a "/..."-rooted prefix the path must start with
+  std::string name;
+  std::string value;
+};
+// A FULL-ORIGIN filter: scheme + host + effective port must all match (the truly
+// cross-origin-safe form). "https://api.example.com" and "https://api.example.com:443" are
+// the same origin (default port); "http://..." and ":8443" are NOT.
+struct OriginHeaderEntry {
+  std::string scheme;        // lowercased ("https")
+  std::string host;          // lowercased host
+  int effective_port;        // scheme default filled in (443/80) if unspecified
+  std::string path_prefix;   // "" or a "/..."-rooted prefix the path must start with
+  std::string name;
+  std::string value;
+};
+std::vector<SubstringHeaderEntry>& SubstringHeaderList() {
+  static auto* h = new std::vector<SubstringHeaderEntry>();
   return *h;
 }
-// Guards HeaderList. MbApplyRequestHeaders now runs on the thread-pool worker (inside
-// FetchHttp on the async HTTP path), while the setters run on the main thread — so the
-// per-URL injected-header registry must be locked against that cross-thread access.
+std::vector<HostHeaderEntry>& HostHeaderList() {
+  static auto* h = new std::vector<HostHeaderEntry>();
+  return *h;
+}
+std::vector<OriginHeaderEntry>& OriginHeaderList() {
+  static auto* h = new std::vector<OriginHeaderEntry>();
+  return *h;
+}
+// Guards both lists. MbApplyRequestHeaders runs on the thread-pool worker (inside FetchHttp
+// on the async HTTP path) while the setters run on the main thread — so the registries must
+// be locked against that cross-thread access.
 base::Lock& HeaderListLock() {
   static base::NoDestructor<base::Lock> lock;
   return *lock;
+}
+
+// Parse a host filter into (host, match_subdomains, path_prefix). Empty host = unusable.
+HostHeaderEntry ParseHostFilter(const std::string& filter) {
+  HostHeaderEntry e;
+  e.match_subdomains = false;
+  std::string f = filter;
+  if (!f.empty() && f.front() == '.') {
+    e.match_subdomains = true;
+    f.erase(f.begin());
+  }
+  const size_t slash = f.find('/');
+  if (slash == std::string::npos) {
+    e.host = f;
+  } else {
+    e.host = f.substr(0, slash);
+    e.path_prefix = f.substr(slash);  // keeps the leading '/'
+  }
+  e.host = base::ToLowerASCII(e.host);
+  return e;
+}
+
+bool HostFilterMatches(const HostHeaderEntry& e, const std::string& host,
+                       const std::string& path) {
+  bool host_ok = (host == e.host);
+  if (!host_ok && e.match_subdomains) {
+    // ".example.com" matches "a.example.com" (a true subdomain), not "notexample.com" —
+    // require a '.' boundary.
+    host_ok = host.size() > e.host.size() + 1 &&
+              host.compare(host.size() - e.host.size(), e.host.size(), e.host) == 0 &&
+              host[host.size() - e.host.size() - 1] == '.';
+  }
+  if (!host_ok)
+    return false;
+  if (!e.path_prefix.empty() &&
+      path.compare(0, e.path_prefix.size(), e.path_prefix) != 0)
+    return false;
+  return true;
+}
+
+// Parse an origin filter "scheme://host[:port][/path/prefix]". Empty host = unusable.
+OriginHeaderEntry ParseOriginFilter(const std::string& origin) {
+  OriginHeaderEntry e;
+  e.effective_port = -1;
+  const GURL g(origin);
+  if (!g.is_valid() || !g.has_scheme() || !g.has_host())
+    return e;  // host stays empty -> caller drops
+  e.scheme = std::string(g.scheme());       // GURL lowercases scheme
+  e.host = std::string(g.host());           // GURL lowercases host
+  e.effective_port = g.EffectiveIntPort();  // scheme default (443/80) if unspecified
+  std::string p(g.path());
+  if (p != "/")  // a bare origin ("https://h") yields "/", which constrains nothing
+    e.path_prefix = std::move(p);
+  return e;
+}
+
+bool OriginFilterMatches(const OriginHeaderEntry& e, const GURL& gurl,
+                         const std::string& path) {
+  if (gurl.scheme() != e.scheme)
+    return false;
+  if (gurl.host() != e.host)
+    return false;
+  if (gurl.EffectiveIntPort() != e.effective_port)
+    return false;
+  if (!e.path_prefix.empty() &&
+      path.compare(0, e.path_prefix.size(), e.path_prefix) != 0)
+    return false;
+  return true;
 }
 }  // namespace
 
@@ -1503,22 +1925,81 @@ void MbAddRequestHeader(const std::string& substring, const std::string& name,
                         const std::string& value) {
   base::AutoLock guard(HeaderListLock());
   if (!substring.empty() && !name.empty())
-    HeaderList().push_back({substring, name, value});
+    SubstringHeaderList().push_back({substring, name, value});
+}
+
+void MbAddRequestHeaderForHost(const std::string& host_filter,
+                               const std::string& name, const std::string& value) {
+  base::AutoLock guard(HeaderListLock());
+  if (host_filter.empty() || name.empty())
+    return;
+  HostHeaderEntry e = ParseHostFilter(host_filter);
+  if (e.host.empty())  // e.g. "/foo" or "." alone — no host to bind to
+    return;
+  e.name = name;
+  e.value = value;
+  HostHeaderList().push_back(std::move(e));
+}
+
+void MbAddRequestHeaderForOrigin(const std::string& origin, const std::string& name,
+                                 const std::string& value) {
+  base::AutoLock guard(HeaderListLock());
+  if (origin.empty() || name.empty())
+    return;
+  OriginHeaderEntry e = ParseOriginFilter(origin);
+  if (e.host.empty())  // unparseable origin
+    return;
+  e.name = name;
+  e.value = value;
+  OriginHeaderList().push_back(std::move(e));
 }
 
 void MbClearRequestHeaders() {
   base::AutoLock guard(HeaderListLock());
-  HeaderList().clear();
+  SubstringHeaderList().clear();
+  HostHeaderList().clear();
+  OriginHeaderList().clear();
 }
 
-void MbApplyRequestHeaders(const std::string& url, std::string* req_headers) {
+void MbApplyRequestHeaders(const std::string& url, std::string* req_headers,
+                           bool follow_redirects) {
+  // OVERRIDE (last-write-wins), not append: MergeHeaderLines drops any existing line with
+  // the same (case-insensitive) name before adding, so re-registering a name — or an
+  // injected header colliding with an extra_header — replaces rather than duplicates it.
+  // Applied in ascending specificity (substring -> host -> origin), so the more specific
+  // rule wins for a shared name, and within a category the latest registration wins.
+  // (We use MergeHeaderLines rather than net::HttpRequestHeaders on purpose: SetHeader
+  // DCHECKs header validity, which would abort a dev build on an unusual embedder value.)
+  auto set = [&](const std::string& name, const std::string& value) {
+    MergeHeaderLines(req_headers, name + ": " + value);
+  };
   base::AutoLock guard(HeaderListLock());
-  for (const HeaderEntry& e : HeaderList()) {
-    if (url.find(e.substring) == std::string::npos)
-      continue;
-    if (!req_headers->empty())
-      *req_headers += "\n";
-    *req_headers += e.name + ": " + e.value;
+  // Substring headers: original semantics — matched against the whole URL spec.
+  for (const SubstringHeaderEntry& e : SubstringHeaderList()) {
+    if (url.find(e.substring) != std::string::npos)
+      set(e.name, e.value);
+  }
+  // Host- and origin-scoped headers are credential-safe ONLY on the manual per-hop path
+  // (follow_redirects==false): there ConfigureCurlEasy is re-invoked for each hop with that
+  // hop's URL, so the header re-binds against the matching host/origin and does NOT ride a
+  // cross-origin redirect. On the curl auto-follow path (follow_redirects==true — the
+  // top-level navigation and SSE), curl re-sends CURLOPT_HTTPHEADER verbatim on every hop
+  // with no per-hop scrub, so we withhold them entirely rather than leak a credential.
+  if (follow_redirects)
+    return;
+  const GURL gurl(url);
+  if (!gurl.is_valid() || !gurl.has_host())
+    return;
+  const std::string host(gurl.host());  // GURL already lowercases the host
+  const std::string path(gurl.path());
+  for (const HostHeaderEntry& e : HostHeaderList()) {
+    if (HostFilterMatches(e, host, path))
+      set(e.name, e.value);
+  }
+  // Origin-scoped (scheme + host + effective port) — the strict, cross-origin-safe form.
+  for (const OriginHeaderEntry& e : OriginHeaderList()) {
+    if (OriginFilterMatches(e, gurl, path))
+      set(e.name, e.value);
   }
 }
 
@@ -1529,7 +2010,7 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 const std::string& http_method, std::string* out_final_url,
                 int* out_status, std::string* out_headers,
                 std::string* out_error, int* out_error_code,
-                const void* host_ctx) {
+                const void* host_ctx, bool run_response_hook) {
   if (out_error)
     out_error->clear();
   if (out_error_code)
@@ -1537,13 +2018,20 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
   // Mutable request hook (item 37) at the TOP-LEVEL entry, mirroring the
   // subresource loader: may block, redirect the fetch, add headers, or pin
   // the server's TLS public key (item 44).
-  std::string fetch_spec = url_spec;
+  std::string fetch_spec = MbApplyUrlRewrites(url_spec);
   std::string merged_headers = extra_headers;
   std::string pin_pubkey;
+  std::string initial_origin_headers;
+  const std::string method = !http_method.empty()
+                                 ? http_method
+                                 : (post_body.empty() ? "GET" : "POST");
+  if (MbIsUrlBlocked(fetch_spec) ||
+      MbRequestHookBlocks(url_spec, method, extra_headers, post_body)) {
+    if (out_error)
+      *out_error = kMbBlockedByHookError;
+    return false;
+  }
   {
-    const std::string method = !http_method.empty()
-                                   ? http_method
-                                   : (post_body.empty() ? "GET" : "POST");
     MbRequestMutation mutation;
     if (MbRunRequestMutateHook(fetch_spec, method, extra_headers, post_body,
                                &mutation)) {
@@ -1554,12 +2042,43 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
       }
       if (!mutation.set_url.empty() && GURL(mutation.set_url).is_valid())
         fetch_spec = mutation.set_url;
-      if (!mutation.add_headers.empty())
-        MergeHeaderLines(&merged_headers, mutation.add_headers);
+      initial_origin_headers = std::move(mutation.add_headers);
       pin_pubkey = std::move(mutation.pin_pubkey);
     }
   }
   GURL url(fetch_spec);
+  // Response hook for a SUCCESSFUL top-level / navigation / worker-script fetch — the
+  // MAIN-document counterpart of the subresource hook (MbURLLoader::DeliverResponse).
+  // Every synchronous navigation path funnels through here (LoadURL, PostURL,
+  // page-initiated navigation in MbFrameClient, worker main scripts), so firing it once at
+  // MbFetchUrl's success return gives the embedder inspect/rewrite of the main document too
+  // — previously it saw only subresources and downloads. `visible_url` is the FINAL URL the
+  // bytes came from (post-redirect for http; the requested URL for mock/file/data). status
+  // and headers may be absent for local schemes, so synthesize a mutable local and
+  // propagate any rewrite back. `run_response_hook` lets a caller that runs the hook itself
+  // (FetchDownloadBody) opt out, so the hook fires exactly once per result.
+  auto run_hook = [&](const std::string& visible_url) {
+    if (!run_response_hook)
+      return;
+    int status = out_status ? *out_status : 200;
+    std::string headers = out_headers ? *out_headers : std::string();
+    MbInvokeResponseHook(host_ctx, visible_url, &status, &headers, body);
+    if (out_status)
+      *out_status = status;
+    if (out_headers)
+      *out_headers = headers;
+  };
+  auto run_local_hook = [&](const std::string& visible_url,
+                            int synthetic_status = 200) {
+    if (!run_response_hook)
+      return;
+    // Local bytes have a successful synthetic response for interception, but
+    // no HTTP status/header state for mbGetHttpStatus/mbGetResponseHeaders.
+    int hook_status = synthetic_status;
+    std::string hook_headers;
+    MbInvokeResponseHook(host_ctx, visible_url, &hook_status, &hook_headers,
+                         body);
+  };
   // Response mocking: a registered URL substring serves its canned body without a real fetch.
   // Checked before any scheme — matching the async loader (Deliver) — so worker scripts,
   // iframes, and top-level navigations (all of which fetch through here) can be mocked too.
@@ -1570,10 +2089,20 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
       *body = std::move(mock_body);
       if (content_type)
         *content_type = mock_ct;
-      if (out_status)
-        *out_status = mock_status > 0 ? mock_status : 200;
+      const int status = mock_status > 0 ? mock_status : 200;
       if (out_final_url)
         *out_final_url = url_spec;  // the page-visible URL, not the redirected fetch
+      if (GURL(url_spec).SchemeIsHTTPOrHTTPS()) {
+        if (out_status)
+          *out_status = status;
+        run_hook(url_spec);
+      } else {
+        if (out_status)
+          *out_status = 0;
+        if (out_headers)
+          out_headers->clear();
+        run_local_hook(url_spec, status);
+      }
       return true;
     }
   }
@@ -1581,21 +2110,42 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
     // Convert via net (percent-decodes the path; "Andale%20Mono.ttf" -> a space)
     // — a raw url.path() leaves it encoded and ReadFileToString fails.
     const bool ok = MbReadFileURL(url, body);
-    if (!ok && out_error)
-      *out_error = "file not found or unreadable";
+    if (!ok) {
+      if (out_error)
+        *out_error = "file not found or unreadable";
+      return false;
+    }
+    run_local_hook(url_spec);
+    return true;
+  }
+  if (url.SchemeIsHTTPOrHTTPS()) {
+    bool redirected = false;
+    std::string fetched_final_url;
+    std::string* final_url = out_final_url ? out_final_url : &fetched_final_url;
+    const bool ok = FetchHttp(fetch_spec, body, content_type, user_agent,
+                              merged_headers, post_body, post_content_type,
+                              http_method, out_status, out_headers, final_url,
+                              MbFollowRedirects(), out_error, out_error_code,
+                              host_ctx, pin_pubkey, initial_origin_headers,
+                              &redirected);
+    if (ok) {
+      // URL rewrites and mutate-hook set_url are transparent: absent a real
+      // server redirect, the document keeps the URL the page requested. Once a
+      // 3xx is followed, expose the resolved target so callers commit the
+      // response under the origin that actually supplied it.
+      if (!redirected)
+        *final_url = url_spec;
+      run_hook(final_url->empty() ? fetch_spec : *final_url);
+    }
     return ok;
   }
-  if (url.SchemeIsHTTPOrHTTPS())
-    return FetchHttp(fetch_spec, body, content_type, user_agent, merged_headers,
-                     post_body, post_content_type, http_method, out_status,
-                     out_headers, out_final_url, MbFollowRedirects(), out_error,
-                     out_error_code, host_ctx, pin_pubkey);
   if (url.SchemeIs("data")) {
     std::string mime, charset;
     if (!net::DataURL::Parse(url, &mime, &charset, body))
       return false;
     if (content_type)
       *content_type = mime;
+    run_local_hook(url_spec);
     return true;
   }
   // A registered custom scheme (item 48) is served ONLY by the interception
@@ -1604,6 +2154,408 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
     *out_error = "no mock/handler answered the custom-scheme request";
   return false;
 }
+
+// ---- Asynchronous top-level navigation engine (see header) ----------------------------
+namespace {
+// Per-id cancellation tokens for in-flight navigations, so MbCancelNavigation(id) can reach
+// the token the reactor transfer is watching. Main-thread only.
+std::map<uint64_t, std::shared_ptr<std::atomic<bool>>>& NavCancelTokens() {
+  static auto* m = new std::map<uint64_t, std::shared_ptr<std::atomic<bool>>>();
+  return *m;
+}
+
+struct NavChain {
+  MbNavigationRequest req;
+  // `visible_cur` is the URL the page navigated to. Transparent rewrite-table
+  // and mutate-hook targets never replace it; a real server redirect does.
+  // `fetch_cur` is the actual URL handed to curl for the active hop and is the
+  // base against which that hop's Location header is resolved.
+  std::string visible_cur;
+  std::string fetch_cur;
+  std::string method;
+  std::string body;
+  // Only caller-owned headers are carried between hops. Mutable-hook additions
+  // are rebuilt for each hop, so a URL-specific X-Api-Key does not silently
+  // persist onto a different redirect target. Credential-bearing carried
+  // headers are additionally scrubbed on a real cross-origin transition.
+  std::string extra_headers;
+  // A request pin applies to the redirect chain (matching subresource fetches).
+  // A later hop may replace it by returning another non-empty pin.
+  std::string pin_pubkey;
+  int hop = 0;
+  // Initial local URLs are allowed. For a server redirect whose raw Location
+  // uses a non-http(s) scheme, interception/mocking still gets a chance to veto
+  // or answer it, but the loader must never read the local target itself.
+  bool allow_local_resolution = true;
+  std::shared_ptr<std::atomic<bool>> cancel;
+  MbNavigationCallback on_complete;
+  scoped_refptr<base::SequencedTaskRunner> runner;
+};
+
+void NavFinish(std::shared_ptr<NavChain> chain, MbNavigationResult result) {
+  NavCancelTokens().erase(chain->req.id);
+  MbNetRequestFinished(chain->req.host_ctx);  // the navigation is no longer outstanding
+  std::move(chain->on_complete).Run(std::move(result));
+}
+
+void NavStartHop(std::shared_ptr<NavChain> chain);
+
+void NavPostFinish(std::shared_ptr<NavChain> chain, MbNavigationResult result) {
+  auto runner = chain->runner;
+  runner->PostTask(FROM_HERE,
+                   base::BindOnce(&NavFinish, std::move(chain),
+                                  std::move(result)));
+}
+
+void NavFinishBlocked(std::shared_ptr<NavChain> chain) {
+  MbNavigationResult res;
+  res.final_url = chain->visible_cur;
+  res.error = kMbBlockedByHookError;
+  res.error_domain = "blocked";
+  NavPostFinish(std::move(chain), std::move(res));
+}
+
+// Build the FINAL navigation result from a completed (or unfollowable) hop, carrying the
+// real transport failure domain/code (curl / network) so the async path classifies errors
+// the same way the synchronous path does.
+MbNavigationResult NavFinalResult(const std::string& final_url,
+                                  MbCurlReactor::Result& r) {
+  MbNavigationResult res;
+  res.ok = r.ok;
+  res.status = static_cast<int>(r.http_status);
+  res.body = std::move(r.body);
+  res.headers = std::move(r.headers);
+  res.content_type = std::move(r.content_type);
+  res.final_url = final_url;
+  if (!r.ok) {
+    res.error_code = r.curl_code;
+    if (r.curl_code != 0) {  // a real CURLcode -> transport failure
+      res.error_domain = "curl";
+      res.error = curl_easy_strerror(static_cast<CURLcode>(r.curl_code));
+    } else {
+      res.error_domain = "network";
+      res.error = "no response from server";
+    }
+  }
+  return res;
+}
+
+// Reactor completion for one hop (runs on the main thread).
+void NavOnHop(std::shared_ptr<NavChain> chain, MbCurlReactor::Result r) {
+  if (chain->cancel->load()) {
+    MbNavigationResult res;
+    res.error = "cancelled";
+    res.error_domain = "cancelled";
+    NavFinish(std::move(chain), std::move(res));
+    return;
+  }
+  // Follow a 3xx only when redirect-following is enabled (mbSetFollowRedirects) — otherwise
+  // deliver the 3xx as the final response, matching the synchronous path.
+  const bool is_redirect = MbFollowRedirects() && r.ok && r.http_status >= 300 &&
+                           r.http_status < 400;
+  const std::string loc =
+      is_redirect ? HeaderValueFromBlock(r.headers, "location") : std::string();
+  if (is_redirect && !loc.empty()) {
+    const GURL prev(chain->fetch_cur);
+    GURL next = prev.Resolve(loc);
+    // Fetch redirect semantics retain the previous fragment when Location does
+    // not provide one (fragments are not sent over HTTP, but remain page-visible).
+    if (next.is_valid() && !next.has_ref() && prev.has_ref()) {
+      GURL::Replacements replacements;
+      replacements.SetRefStr(prev.ref());
+      next = next.ReplaceComponents(replacements);
+    }
+    // A valid target gets one full main-thread interception pass before any
+    // next-hop fetch. This lets block/inspect hooks veto redirect targets and
+    // lets a mock answer a registered custom-scheme target without granting
+    // curl (or the file loader) access to an arbitrary non-web scheme.
+    if (next.is_valid() && chain->hop < 20) {
+      if (r.http_status == 303 ||
+          ((r.http_status == 301 || r.http_status == 302) && chain->method == "POST")) {
+        chain->method = "GET";
+        chain->body.clear();
+      }
+      if (!MbSameOrigin(prev, next))  // credential scoping: strip only across origins
+        MbStripCredentialHeaders(&chain->extra_headers);
+      chain->visible_cur = next.spec();
+      chain->allow_local_resolution = next.SchemeIsHTTPOrHTTPS();
+      chain->hop++;
+      NavStartHop(std::move(chain));
+      return;
+    }
+  }
+  MbNavigationResult res = NavFinalResult(chain->visible_cur, r);
+  NavFinish(std::move(chain), std::move(res));
+}
+
+void NavStartHop(std::shared_ptr<NavChain> chain) {
+  if (chain->cancel->load()) {
+    MbNavigationResult res;
+    res.error = "cancelled";
+    res.error_domain = "cancelled";
+    NavFinish(std::move(chain), std::move(res));
+    return;
+  }
+
+  // Every hop gets the complete interception policy on the main sequence:
+  // transparent rewrites, static blocks, the legacy inspect/block callback,
+  // the mutable callback, and mocks. In particular this runs again after each
+  // Location response, before curl can contact the redirect target.
+  std::string fetch_spec = MbApplyUrlRewrites(chain->visible_cur);
+  if (MbIsUrlBlocked(fetch_spec) ||
+      MbRequestHookBlocks(chain->visible_cur, chain->method,
+                          chain->extra_headers, chain->body)) {
+    NavFinishBlocked(std::move(chain));
+    return;
+  }
+
+  std::string hop_headers = chain->extra_headers;
+  MbRequestMutation mutation;
+  if (MbRunRequestMutateHook(fetch_spec, chain->method,
+                             chain->extra_headers, chain->body, &mutation)) {
+    if (mutation.block) {
+      NavFinishBlocked(std::move(chain));
+      return;
+    }
+    if (!mutation.set_url.empty() && GURL(mutation.set_url).is_valid())
+      fetch_spec = mutation.set_url;
+    if (!mutation.add_headers.empty())
+      MergeHeaderLines(&hop_headers, mutation.add_headers);
+    if (!mutation.pin_pubkey.empty())
+      chain->pin_pubkey = std::move(mutation.pin_pubkey);
+  }
+
+  const GURL fetch_url(fetch_spec);
+  // Re-check mocks on every hop, after transparent rewrite/mutation, just like
+  // the initial request. A mocked redirect target never reaches curl.
+  {
+    std::string mock_body, mock_ct;
+    int mock_status = 0;
+    if (MbFindMock(fetch_spec, &mock_body, &mock_ct, &mock_status,
+                   chain->req.host_ctx)) {
+      MbNavigationResult res;
+      res.ok = true;
+      res.status = mock_status > 0 ? mock_status : 200;
+      res.local_response =
+          !GURL(chain->visible_cur).SchemeIsHTTPOrHTTPS();
+      res.body = std::move(mock_body);
+      res.content_type = std::move(mock_ct);
+      res.final_url = chain->visible_cur;
+      NavPostFinish(std::move(chain), std::move(res));
+      return;
+    }
+  }
+
+  // A server redirect may be inspected or mocked above, but it may not directly
+  // pivot an http(s) response into file:/data:/another curl protocol. An explicit
+  // host rewrite/mutation of an http(s) target remains trusted and keeps the
+  // initial-navigation behavior.
+  if (!chain->allow_local_resolution && !fetch_url.SchemeIsHTTPOrHTTPS()) {
+    MbNavigationResult res;
+    res.final_url = chain->visible_cur;
+    res.error = "redirect target uses a disallowed scheme";
+    res.error_domain = "network";
+    NavPostFinish(std::move(chain), std::move(res));
+    return;
+  }
+
+  if (fetch_url.SchemeIs("data")) {
+    MbNavigationResult res;
+    std::string mime, charset;
+    res.ok = net::DataURL::Parse(fetch_url, &mime, &charset, &res.body);
+    res.local_response = res.ok;
+    res.status = res.ok ? 200 : 0;
+    res.content_type = std::move(mime);
+    res.final_url = chain->visible_cur;
+    if (!res.ok) {
+      res.error = "invalid data: URL";
+      res.error_domain = "network";
+    }
+    NavPostFinish(std::move(chain), std::move(res));
+    return;
+  }
+  if (fetch_url.SchemeIsFile()) {
+    MbNavigationResult res;
+    res.ok = MbReadFileURL(fetch_url, &res.body);
+    res.local_response = res.ok;
+    res.status = res.ok ? 200 : 0;
+    res.final_url = chain->visible_cur;
+    if (!res.ok) {
+      res.error = "file not found or unreadable";
+      res.error_domain = "file";
+    }
+    NavPostFinish(std::move(chain), std::move(res));
+    return;
+  }
+  if (!fetch_url.SchemeIsHTTPOrHTTPS()) {
+    MbNavigationResult res;
+    res.final_url = chain->visible_cur;
+    res.error = "no mock/handler answered the request";
+    res.error_domain = "network";
+    NavPostFinish(std::move(chain), std::move(res));
+    return;
+  }
+
+  chain->fetch_cur = fetch_spec;
+  MbCurlReactor::Request req;
+  req.url = chain->fetch_cur;
+  req.method = chain->method;
+  req.body = chain->body;
+  req.post_content_type = chain->req.content_type;
+  req.user_agent = chain->req.user_agent;
+  req.extra_headers = std::move(hop_headers);
+  req.cookie_session_key = MbLoaderSessionKeyFor(chain->req.host_ctx);
+  req.pin_pubkey = chain->pin_pubkey;
+  req.cancel = chain->cancel;
+  auto runner = chain->runner;
+  MbCurlReactor::Get()->Submit(std::move(req), runner,
+                               base::BindOnce(&NavOnHop, std::move(chain)));
+}
+}  // namespace
+
+uint64_t MbNextNavigationId() {
+  static std::atomic<uint64_t> g{1};
+  return g.fetch_add(1, std::memory_order_relaxed);
+}
+
+void MbStartNavigation(MbNavigationRequest req, MbNavigationCallback on_complete) {
+  auto cancel = std::make_shared<std::atomic<bool>>(false);
+  NavCancelTokens()[req.id] = cancel;
+  // Count the whole navigation as one outstanding request for this view, so
+  // mbWaitForNetworkIdle sees the async main resource in flight (balanced in NavFinish,
+  // which every terminal path — success, failure, cancel, local — funnels through).
+  MbNetRequestStarted(req.host_ctx);
+  auto chain = std::make_shared<NavChain>();
+  chain->visible_cur = req.url;
+  chain->method =
+      !req.method.empty() ? req.method : (req.body.empty() ? "GET" : "POST");
+  chain->body = req.body;
+  chain->extra_headers = req.extra_headers;
+  chain->cancel = std::move(cancel);
+  chain->on_complete = std::move(on_complete);
+  chain->runner = base::SequencedTaskRunner::GetCurrentDefault();
+  chain->req = std::move(req);
+  NavStartHop(std::move(chain));
+}
+
+void MbCancelNavigation(uint64_t id) {
+  auto it = NavCancelTokens().find(id);
+  if (it == NavCancelTokens().end())
+    return;
+  it->second->store(true);       // CancelXfer aborts the transfer; NavOnHop then finalizes
+  MbCurlReactor::Get()->Wake();  // observe the cancel now, not after the ~1s poll timeout
+}
+
+namespace {
+
+// Streaming curl transfers live on detached workers, but the interception
+// callbacks and mock registries are main-sequence APIs. A worker posts one of
+// these decisions between redirect hops and waits without touching any hook
+// state itself. The wait is cancellation-aware so tearing down a view does not
+// strand a detached stream behind a main-sequence task.
+enum class StreamHopAction { kStop, kFetch, kMock };
+
+struct StreamHopDecision {
+  base::WaitableEvent ready;
+  StreamHopAction action = StreamHopAction::kStop;
+  std::string fetch_url;
+  std::string add_headers;
+  std::string replacement_pin;
+  std::string mock_body;
+  std::string mock_content_type;
+  int mock_status = 0;
+};
+
+void EvaluateStreamRedirectTargetOnMain(
+    std::shared_ptr<StreamHopDecision> decision,
+    std::shared_ptr<std::atomic<bool>> stop,
+    std::string visible_url,
+    std::string policy_headers,
+    const void* host_ctx) {
+  auto finish = [&] { decision->ready.Signal(); };
+  if (stop->load()) {
+    finish();
+    return;
+  }
+
+  // Match the normal request entry order for every followed Location target:
+  // rewrite -> static/legacy block -> mutable hook -> mock -> network.
+  std::string fetch_url = MbApplyUrlRewrites(visible_url);
+  if (MbIsUrlBlocked(fetch_url) ||
+      MbRequestHookBlocks(visible_url, "GET", policy_headers, std::string()) ||
+      stop->load()) {
+    finish();
+    return;
+  }
+
+  MbRequestMutation mutation;
+  const bool mutated = MbRunRequestMutateHook(
+      fetch_url, "GET", policy_headers, std::string(), &mutation);
+  if (stop->load() || (mutated && mutation.block)) {
+    finish();
+    return;
+  }
+  if (mutated) {
+    if (!mutation.set_url.empty() && GURL(mutation.set_url).is_valid())
+      fetch_url = mutation.set_url;
+    decision->add_headers = std::move(mutation.add_headers);
+    if (!mutation.pin_pubkey.empty())
+      decision->replacement_pin = std::move(mutation.pin_pubkey);
+  }
+
+  if (MbFindMock(fetch_url, &decision->mock_body,
+                 &decision->mock_content_type, &decision->mock_status,
+                 host_ctx)) {
+    if (!stop->load())
+      decision->action = StreamHopAction::kMock;
+    finish();
+    return;
+  }
+  if (stop->load()) {
+    finish();
+    return;
+  }
+
+  // A raw non-web Location still gets the full interception pass above, so a
+  // rewrite or mock can answer it. It is never handed directly to curl.
+  if (GURL(fetch_url).SchemeIsHTTPOrHTTPS()) {
+    decision->fetch_url = std::move(fetch_url);
+    decision->action = StreamHopAction::kFetch;
+  }
+  finish();
+}
+
+std::shared_ptr<StreamHopDecision> WaitForStreamRedirectPolicy(
+    const scoped_refptr<base::SequencedTaskRunner>& hook_runner,
+    const std::shared_ptr<std::atomic<bool>>& stop,
+    const std::string& visible_url,
+    std::string policy_headers,
+    const void* host_ctx) {
+  auto decision = std::make_shared<StreamHopDecision>();
+  if (!hook_runner ||
+      !hook_runner->PostTask(
+          FROM_HERE,
+          base::BindOnce(&EvaluateStreamRedirectTargetOnMain, decision, stop,
+                         visible_url, std::move(policy_headers), host_ctx))) {
+    return nullptr;
+  }
+  while (!decision->ready.TimedWait(base::Milliseconds(50))) {
+    if (stop->load())
+      return nullptr;
+  }
+  return decision;
+}
+
+std::string StreamingMimeType(std::string content_type) {
+  const size_t semicolon = content_type.find(';');
+  if (semicolon != std::string::npos)
+    content_type.resize(semicolon);
+  while (!content_type.empty() && content_type.back() == ' ')
+    content_type.pop_back();
+  return content_type;
+}
+
+}  // namespace
 
 // A long-lived streaming HTTP GET over libcurl on a DETACHED worker thread, for
 // EventSource / SSE. The buffered FetchHttp would block until EOF (which a live
@@ -1621,83 +2573,154 @@ class MbSseStream : public std::enable_shared_from_this<MbSseStream> {
   MbSseStream(std::string url,
               std::string cookie_session_key,
               std::string req_headers,
+              std::string initial_origin_headers,
+              std::string pinned_pubkey,
               std::string user_agent,
+              const void* host_ctx,
               ChunkCb chunk,
               DoneCb done)
       : url_(std::move(url)),
         cookie_session_key_(std::move(cookie_session_key)),
         req_headers_(std::move(req_headers)),
+        initial_origin_headers_(std::move(initial_origin_headers)),
+        pinned_pubkey_(std::move(pinned_pubkey)),
         user_agent_(std::move(user_agent)),
+        host_ctx_(host_ctx),
+        hook_runner_(base::SequencedTaskRunner::GetCurrentDefault()),
         chunk_(std::move(chunk)),
-        done_(std::move(done)) {}
+        done_(std::move(done)),
+        stop_(std::make_shared<std::atomic<bool>>(false)) {}
 
   void Start() {
     auto self = shared_from_this();  // keep alive across the worker's life
     std::thread([self] { self->Run(); }).detach();
   }
-  void Stop() { stop_.store(true); }
+  void Stop() { stop_->store(true); }
 
  private:
+  static size_t HeaderThunk(char* p, size_t s, size_t n, void* ud) {
+    static_cast<MbSseStream*>(ud)->hop_headers_.append(p, s * n);
+    return s * n;  // capture this hop's header block (for the redirect Location)
+  }
   static size_t WriteThunk(char* p, size_t s, size_t n, void* ud) {
     auto* self = static_cast<MbSseStream*>(ud);
-    if (self->stop_.load())
+    if (self->stop_->load())
       return 0;  // returning <bytes aborts curl_easy_perform
+    // Determine once per hop whether this is a redirect whose (small) body must be swallowed
+    // rather than streamed to the page — the real stream is the final, non-3xx hop.
+    if (!self->hop_probed_) {
+      long status = 0;
+      curl_easy_getinfo(self->curl_, CURLINFO_RESPONSE_CODE, &status);
+      self->hop_redirect_ = status >= 300 && status < 400;
+      self->hop_probed_ = true;
+    }
+    if (self->hop_redirect_)
+      return s * n;  // swallow; the next hop delivers the actual response
     self->chunk_.Run(std::string(p, s * n));
     return s * n;
   }
   static int XferThunk(void* ud, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
     // Called periodically even while the stream is idle -> prompt cancellation.
-    return static_cast<MbSseStream*>(ud)->stop_.load() ? 1 : 0;
+    return static_cast<MbSseStream*>(ud)->stop_->load() ? 1 : 0;
   }
 
   void Run() {
-    CURL* c = curl_easy_init();
-    if (!c) {
-      std::move(done_).Run();
-      return;
-    }
-    curl_easy_setopt(c, CURLOPT_URL, url_.c_str());
-    std::string proxy;
-    if (MbProxyConfigured(&proxy))
-      curl_easy_setopt(c, CURLOPT_PROXY, proxy.c_str());
-    if (MbIgnoreCertErrors()) {
-      curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
-      curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
-    }
-    curl_easy_setopt(
-        c, CURLOPT_USERAGENT,
-        (user_agent_.empty() ? MbDefaultUserAgent() : user_agent_).c_str());
-    curl_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");
-    curl_easy_setopt(c, CURLOPT_COOKIEFILE, "");  // in-memory cookie engine
-    if (CURLSH* share = CookieShareForKey(cookie_session_key_))
-      curl_easy_setopt(c, CURLOPT_SHARE, share);
-    curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 15L);
-    // NO CURLOPT_TIMEOUT — an SSE stream is intentionally long-lived.
-    curl_slist* headers = nullptr;
-    std::string line, lines = req_headers_;
-    lines.push_back('\n');
-    for (char ch : lines) {
-      if (ch == '\n' || ch == '\r') {
-        if (!line.empty()) {
-          headers = curl_slist_append(headers, line.c_str());
-          line.clear();
-        }
-      } else {
-        line.push_back(ch);
+    std::string cur = url_;
+    std::string carried = req_headers_;  // base headers; credential-scrubbed per cross-origin hop
+    std::string exact_hop_headers = initial_origin_headers_;
+    int hop = 0;
+    for (;;) {
+      CURL* c = curl_easy_init();
+      if (!c)
+        break;
+      curl_ = c;
+      hop_headers_.clear();
+      hop_probed_ = false;
+      hop_redirect_ = false;
+      curl_easy_setopt(c, CURLOPT_URL, cur.c_str());
+      std::string proxy;
+      if (MbProxyConfigured(&proxy))
+        curl_easy_setopt(c, CURLOPT_PROXY, proxy.c_str());
+      if (MbIgnoreCertErrors()) {
+        curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
       }
+      if (!pinned_pubkey_.empty())
+        curl_easy_setopt(c, CURLOPT_PINNEDPUBLICKEY, pinned_pubkey_.c_str());
+      curl_easy_setopt(
+          c, CURLOPT_USERAGENT,
+          (user_agent_.empty() ? MbDefaultUserAgent() : user_agent_).c_str());
+      curl_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");
+      curl_easy_setopt(c, CURLOPT_COOKIEFILE, "");  // in-memory cookie engine
+      if (CURLSH* share = CookieShareForKey(cookie_session_key_))
+        curl_easy_setopt(c, CURLOPT_SHARE, share);
+      // Manual per-hop redirect following (NOT CURLOPT_FOLLOWLOCATION): we resolve the chain
+      // ourselves so a credential set for one origin is stripped before a cross-origin hop
+      // (curl auto-follow re-sends custom headers verbatim across origins) AND the injected
+      // host/origin headers are re-evaluated against each hop's URL — including the first, so
+      // a credential registered for the SSE endpoint's own origin IS delivered.
+      curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 0L);
+      curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 15L);
+      // NO CURLOPT_TIMEOUT — an SSE stream is intentionally long-lived.
+      std::string block = carried;
+      MergeHeaderLines(&block, exact_hop_headers);
+      mb::MbApplyRequestHeaders(cur, &block, /*follow_redirects=*/false);
+      curl_slist* headers = BuildHeaderSlist(block);
+      if (headers)
+        curl_easy_setopt(c, CURLOPT_HTTPHEADER, headers);
+      curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, &HeaderThunk);
+      curl_easy_setopt(c, CURLOPT_HEADERDATA, this);
+      curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, &WriteThunk);
+      curl_easy_setopt(c, CURLOPT_WRITEDATA, this);
+      curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
+      curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, &XferThunk);
+      curl_easy_setopt(c, CURLOPT_XFERINFODATA, this);
+      const CURLcode rc =
+          curl_easy_perform(c);  // final hop streams until EOF/error/abort
+      long status = 0;
+      curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
+      if (headers)
+        curl_slist_free_all(headers);
+      curl_easy_cleanup(c);
+      curl_ = nullptr;
+      // Follow a redirect manually (bounded). The target policy is evaluated
+      // on the main sequence before another worker fetch can begin.
+      if (MbFollowRedirects() && rc == CURLE_OK && status >= 300 &&
+          status < 400 && hop < 20 && !stop_->load()) {
+        const std::string loc = HeaderValueFromBlock(hop_headers_, "location");
+        const GURL prev(cur);
+        const GURL next = loc.empty() ? GURL() : prev.Resolve(loc);
+        if (next.is_valid()) {
+          std::string next_carried = carried;
+          if (!MbSameOrigin(prev, next))
+            MbStripCredentialHeaders(&next_carried);
+          auto decision = WaitForStreamRedirectPolicy(
+              hook_runner_, stop_, next.spec(), next_carried, host_ctx_);
+          if (decision && !stop_->load()) {
+            if (!decision->replacement_pin.empty())
+              pinned_pubkey_ = std::move(decision->replacement_pin);
+            if (decision->action == StreamHopAction::kMock) {
+              if (decision->mock_status < 400 &&
+                  !decision->mock_body.empty()) {
+                chunk_.Run(std::move(decision->mock_body));
+              }
+              break;
+            }
+            if (decision->action == StreamHopAction::kFetch) {
+              const GURL fetch_target(decision->fetch_url);
+              if (!MbSameOrigin(prev, fetch_target))
+                MbStripCredentialHeaders(&next_carried);
+              carried = std::move(next_carried);
+              cur = std::move(decision->fetch_url);
+              exact_hop_headers = std::move(decision->add_headers);
+              hop++;
+              continue;
+            }
+          }
+        }
+      }
+      break;  // final (streamed) or unfollowable redirect
     }
-    if (headers)
-      curl_easy_setopt(c, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, &WriteThunk);
-    curl_easy_setopt(c, CURLOPT_WRITEDATA, this);
-    curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
-    curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, &XferThunk);
-    curl_easy_setopt(c, CURLOPT_XFERINFODATA, this);
-    curl_easy_perform(c);  // streams via WriteThunk until EOF / error / abort
-    if (headers)
-      curl_slist_free_all(headers);
-    curl_easy_cleanup(c);
     std::move(done_).Run();  // -> OnSseDone on the loader thread (if alive)
   }
 
@@ -1705,10 +2728,22 @@ class MbSseStream : public std::enable_shared_from_this<MbSseStream> {
 
   std::string cookie_session_key_;
   std::string req_headers_;
+  // Headers supplied by the initial mutable request hook apply to that exact
+  // fetch. Every followed target gets a fresh main-sequence mutation pass.
+  std::string initial_origin_headers_;
+  // Request-hook TLS pins apply to the entire SSE redirect chain, like every
+  // other fetch path.
+  std::string pinned_pubkey_;
   std::string user_agent_;
+  const void* host_ctx_ = nullptr;
+  scoped_refptr<base::SequencedTaskRunner> hook_runner_;
   ChunkCb chunk_;
   DoneCb done_;
-  std::atomic<bool> stop_{false};
+  std::shared_ptr<std::atomic<bool>> stop_;
+  CURL* curl_ = nullptr;       // current hop handle (for status getinfo in WriteThunk)
+  std::string hop_headers_;    // current hop's raw header block (redirect Location)
+  bool hop_probed_ = false;    // did we classify this hop (redirect vs final) yet
+  bool hop_redirect_ = false;  // is the current hop a 3xx whose body we swallow
 };
 
 // The streaming download transport (mb download lifecycle; see the header).
@@ -1733,24 +2768,33 @@ class MbDownloadStream : public std::enable_shared_from_this<MbDownloadStream> {
                    std::string user_agent,
                    BeginCb begin,
                    DataCb data,
-                   DoneCb done)
+                   DoneCb done,
+                   std::string pinned_pubkey,
+                   std::string initial_origin_headers,
+                   const void* host_ctx)
       : url_(std::move(url)),
         cookie_session_key_(std::move(cookie_session_key)),
         req_headers_(std::move(req_headers)),
         user_agent_(std::move(user_agent)),
         begin_(std::move(begin)),
         data_(std::move(data)),
-        done_(std::move(done)) {}
+        done_(std::move(done)),
+        pinned_pubkey_(std::move(pinned_pubkey)),
+        initial_origin_headers_(std::move(initial_origin_headers)),
+        host_ctx_(host_ctx),
+        hook_runner_(base::SequencedTaskRunner::GetCurrentDefault()),
+        stop_(std::make_shared<std::atomic<bool>>(false)) {}
 
   void Start() {
     auto self = shared_from_this();  // keep alive across the worker's life
     std::thread([self] { self->Run(); }).detach();
   }
-  void Stop() { stop_.store(true); }
+  void Stop() { stop_->store(true); }
 
  private:
   static size_t HeaderThunk(char* p, size_t s, size_t n, void* ud) {
     auto* self = static_cast<MbDownloadStream*>(ud);
+    self->hop_headers_.append(p, s * n);  // this hop's block (for the redirect Location)
     // Track the LAST hop's Content-Disposition (each redirect hop delivers its
     // own header block; later hops overwrite earlier ones).
     std::string line(p, s * n);
@@ -1773,11 +2817,17 @@ class MbDownloadStream : public std::enable_shared_from_this<MbDownloadStream> {
 
   static size_t WriteThunk(char* p, size_t s, size_t n, void* ud) {
     auto* self = static_cast<MbDownloadStream*>(ud);
-    if (self->stop_.load())
+    if (self->stop_->load())
       return 0;  // returning <bytes aborts curl_easy_perform
+    if (self->hop_redirect_)
+      return s * n;  // this hop is a 3xx: swallow its body; Run() follows manually
     if (!self->began_) {
       long status = 0;
       curl_easy_getinfo(self->curl_, CURLINFO_RESPONSE_CODE, &status);
+      if (status >= 300 && status < 400) {
+        self->hop_redirect_ = true;
+        return s * n;  // redirect body; the real download is the post-redirect hop
+      }
       if (status >= 400) {
         self->http_error_ = true;
         return 0;  // fail the stream; the error body is not the download
@@ -1801,7 +2851,7 @@ class MbDownloadStream : public std::enable_shared_from_this<MbDownloadStream> {
 
   static int XferThunk(void* ud, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
     // Called periodically even while idle -> prompt cancellation.
-    return static_cast<MbDownloadStream*>(ud)->stop_.load() ? 1 : 0;
+    return static_cast<MbDownloadStream*>(ud)->stop_->load() ? 1 : 0;
   }
 
   // "attachment; filename=\"report.pdf\"" -> "report.pdf" (quoted or token
@@ -1824,66 +2874,119 @@ class MbDownloadStream : public std::enable_shared_from_this<MbDownloadStream> {
   }
 
   void Run() {
-    CURL* c = curl_easy_init();
-    if (!c) {
-      std::move(done_).Run(false);
-      return;
-    }
-    curl_ = c;
-    curl_easy_setopt(c, CURLOPT_URL, url_.c_str());
-    std::string proxy;
-    if (MbProxyConfigured(&proxy))
-      curl_easy_setopt(c, CURLOPT_PROXY, proxy.c_str());
-    if (MbIgnoreCertErrors()) {
-      curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
-      curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
-    }
-    curl_easy_setopt(
-        c, CURLOPT_USERAGENT,
-        (user_agent_.empty() ? MbDefaultUserAgent() : user_agent_).c_str());
-    curl_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");
-    curl_easy_setopt(c, CURLOPT_COOKIEFILE, "");  // in-memory cookie engine
-    if (CURLSH* share = CookieShareForKey(cookie_session_key_))
-      curl_easy_setopt(c, CURLOPT_SHARE, share);
-    if (MbFollowRedirects()) {
-      curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
-      curl_easy_setopt(c, CURLOPT_MAXREDIRS, 20L);
-    }
-    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 15L);
-    // NO CURLOPT_TIMEOUT — a large download legitimately runs for minutes;
-    // cancellation comes through XferThunk.
-    curl_slist* headers = nullptr;
-    std::string line, lines = req_headers_;
-    lines.push_back('\n');
-    for (char ch : lines) {
-      if (ch == '\n' || ch == '\r') {
-        if (!line.empty()) {
-          headers = curl_slist_append(headers, line.c_str());
-          line.clear();
-        }
-      } else {
-        line.push_back(ch);
+    std::string cur = url_;
+    std::string carried = req_headers_;  // credential-scrubbed per cross-origin hop
+    std::string exact_hop_headers = initial_origin_headers_;
+    int hop = 0;
+    CURLcode rc = CURLE_OK;
+    for (;;) {
+      CURL* c = curl_easy_init();
+      if (!c) {
+        std::move(done_).Run(false);
+        return;
       }
+      curl_ = c;
+      hop_headers_.clear();
+      hop_redirect_ = false;
+      curl_easy_setopt(c, CURLOPT_URL, cur.c_str());
+      std::string proxy;
+      if (MbProxyConfigured(&proxy))
+        curl_easy_setopt(c, CURLOPT_PROXY, proxy.c_str());
+      if (MbIgnoreCertErrors()) {
+        curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
+      }
+      if (!pinned_pubkey_.empty())
+        curl_easy_setopt(c, CURLOPT_PINNEDPUBLICKEY, pinned_pubkey_.c_str());
+      curl_easy_setopt(
+          c, CURLOPT_USERAGENT,
+          (user_agent_.empty() ? MbDefaultUserAgent() : user_agent_).c_str());
+      curl_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");
+      curl_easy_setopt(c, CURLOPT_COOKIEFILE, "");  // in-memory cookie engine
+      if (CURLSH* share = CookieShareForKey(cookie_session_key_))
+        curl_easy_setopt(c, CURLOPT_SHARE, share);
+      // Manual per-hop redirects (NOT CURLOPT_FOLLOWLOCATION): resolve the chain ourselves so
+      // a credential set for one origin is stripped before a cross-origin hop instead of curl
+      // re-sending custom headers verbatim across origins.
+      curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 0L);
+      curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 15L);
+      // NO CURLOPT_TIMEOUT — a large download legitimately runs for minutes;
+      // cancellation comes through XferThunk.
+      // Re-evaluate URL-scoped registrations for THIS hop. The base/caller
+      // headers are carried (and credential-scrubbed) separately, so a host- or
+      // origin-scoped X-Api-Key is present on its matching first hop and is not
+      // copied to a cross-origin redirect.
+      std::string hop_headers = carried;
+      MergeHeaderLines(&hop_headers, exact_hop_headers);
+      MbApplyRequestHeaders(cur, &hop_headers, /*follow_redirects=*/false);
+      curl_slist* headers = BuildHeaderSlist(hop_headers);
+      if (headers)
+        curl_easy_setopt(c, CURLOPT_HTTPHEADER, headers);
+      curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, &HeaderThunk);
+      curl_easy_setopt(c, CURLOPT_HEADERDATA, this);
+      curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, &WriteThunk);
+      curl_easy_setopt(c, CURLOPT_WRITEDATA, this);
+      curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
+      curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, &XferThunk);
+      curl_easy_setopt(c, CURLOPT_XFERINFODATA, this);
+      rc = curl_easy_perform(c);
+      long status = 0;
+      curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
+      if (headers)
+        curl_slist_free_all(headers);
+      curl_easy_cleanup(c);
+      curl_ = nullptr;
+      // Follow a redirect (only when redirect-following is enabled), scrubbing credentials
+      // across origins. The final hop's Content-Disposition wins.
+      if (MbFollowRedirects() && rc == CURLE_OK && status >= 300 &&
+          status < 400 && hop < 20 && !stop_->load()) {
+        const std::string loc = HeaderValueFromBlock(hop_headers_, "location");
+        const GURL prev(cur);
+        const GURL next = loc.empty() ? GURL() : prev.Resolve(loc);
+        if (next.is_valid()) {
+          std::string next_carried = carried;
+          if (!MbSameOrigin(prev, next))
+            MbStripCredentialHeaders(&next_carried);
+          auto decision = WaitForStreamRedirectPolicy(
+              hook_runner_, stop_, next.spec(), next_carried, host_ctx_);
+          if (decision && !stop_->load()) {
+            if (!decision->replacement_pin.empty())
+              pinned_pubkey_ = std::move(decision->replacement_pin);
+            if (decision->action == StreamHopAction::kMock) {
+              if (decision->mock_status >= 400)
+                break;
+              std::string body = std::move(decision->mock_body);
+              std::string mime =
+                  StreamingMimeType(std::move(decision->mock_content_type));
+              began_ = true;
+              std::move(begin_).Run(std::move(mime), std::string(),
+                                    static_cast<int64_t>(body.size()));
+              if (!body.empty())
+                data_.Run(std::move(body));
+              std::move(done_).Run(!stop_->load());
+              return;
+            }
+            if (decision->action == StreamHopAction::kFetch) {
+              const GURL fetch_target(decision->fetch_url);
+              if (!MbSameOrigin(prev, fetch_target))
+                MbStripCredentialHeaders(&next_carried);
+              carried = std::move(next_carried);
+              cur = std::move(decision->fetch_url);
+              exact_hop_headers = std::move(decision->add_headers);
+              hop++;
+              content_disposition_.clear();
+              continue;
+            }
+          }
+        }
+      }
+      break;
     }
-    if (headers)
-      curl_easy_setopt(c, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, &HeaderThunk);
-    curl_easy_setopt(c, CURLOPT_HEADERDATA, this);
-    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, &WriteThunk);
-    curl_easy_setopt(c, CURLOPT_WRITEDATA, this);
-    curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
-    curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, &XferThunk);
-    curl_easy_setopt(c, CURLOPT_XFERINFODATA, this);
-    const CURLcode rc = curl_easy_perform(c);
-    if (headers)
-      curl_slist_free_all(headers);
-    curl_easy_cleanup(c);
-    curl_ = nullptr;
     // Success = clean EOF after a non-error response began. A cancel
     // (stop_/http_error_ abort through the write/progress callbacks) surfaces
     // as CURLE_WRITE_ERROR / CURLE_ABORTED_BY_CALLBACK -> false.
     std::move(done_).Run(rc == CURLE_OK && began_ && !http_error_ &&
-                         !stop_.load());
+                         !stop_->load());
   }
 
   std::string url_;
@@ -1893,11 +2996,17 @@ class MbDownloadStream : public std::enable_shared_from_this<MbDownloadStream> {
   BeginCb begin_;
   DataCb data_;
   DoneCb done_;
+  std::string pinned_pubkey_;
+  std::string initial_origin_headers_;
+  const void* host_ctx_ = nullptr;
+  scoped_refptr<base::SequencedTaskRunner> hook_runner_;
   CURL* curl_ = nullptr;             // valid only inside Run()
   std::string content_disposition_;  // last hop's header value
+  std::string hop_headers_;          // current hop's header block (redirect Location)
   bool began_ = false;               // begin_ fired (worker thread only)
   bool http_error_ = false;          // aborted on a >= 400 status
-  std::atomic<bool> stop_{false};
+  bool hop_redirect_ = false;        // current hop is a 3xx whose body we swallow
+  std::shared_ptr<std::atomic<bool>> stop_;
 };
 
 std::shared_ptr<MbDownloadStream> MbStartDownloadStream(
@@ -1907,10 +3016,14 @@ std::shared_ptr<MbDownloadStream> MbStartDownloadStream(
     std::string user_agent,
     base::OnceCallback<void(std::string, std::string, int64_t)> begin,
     base::RepeatingCallback<void(std::string)> data,
-    base::OnceCallback<void(bool)> done) {
+    base::OnceCallback<void(bool)> done,
+    std::string pinned_pubkey,
+    std::string initial_origin_headers,
+    const void* host_ctx) {
   auto stream = std::make_shared<MbDownloadStream>(
       std::move(url), std::move(cookie_session_key), std::move(req_headers),
-      std::move(user_agent), std::move(begin), std::move(data), std::move(done));
+      std::move(user_agent), std::move(begin), std::move(data), std::move(done),
+      std::move(pinned_pubkey), std::move(initial_origin_headers), host_ctx);
   stream->Start();
   return stream;
 }
@@ -1926,6 +3039,8 @@ MbURLLoader::MbURLLoader(std::string user_agent, std::string extra_headers,
       extra_headers_(std::move(extra_headers)),
       host_ctx_(host_ctx) {}
 MbURLLoader::~MbURLLoader() {
+  if (net_counted_)
+    MbNetRequestFinished(host_ctx_);  // this load is no longer outstanding
   if (sse_stream_)
     sse_stream_->Stop();  // detached worker observes stop_ and exits
 }
@@ -1939,6 +3054,11 @@ void MbURLLoader::LoadAsynchronously(
     blink::CodeCacheHost* code_cache_host,
     blink::URLLoaderClient* client) {
   client_ = client;
+  // Count this load as outstanding for its view (paired with the decrement in the
+  // destructor via net_counted_) so mbWaitForNetworkIdle sees a real in-flight
+  // request until the loader is torn down — success, error, or cancel.
+  MbNetRequestStarted(host_ctx_);
+  net_counted_ = true;
   // Deliver on the main thread, async (blink expects no reentrancy here).
   base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE, base::BindOnce(&MbURLLoader::Deliver, weak_factory_.GetWeakPtr(),
@@ -1953,10 +3073,18 @@ struct MbURLLoader::FetchState {
   GURL original_url;   // the page's request URL (response.url, errors)
   GURL fetch_url;      // post-rewrite target (mime fallback)
   std::string cur;     // current hop URL (advances on each followed redirect)
+  std::string visible_cur;  // page-visible URL after real redirects
   std::string method;  // current hop method (303 / POST->GET rewrites it)
   std::string body;    // request body (cleared on a method->GET rewrite)
   std::string post_ct; // request Content-Type (carried separately from headers)
   net::HttpRequestHeaders hop_headers;   // request's own headers (redirect-stripped)
+  // Mutable-hook additions override same-name request headers on the origin
+  // where the hook ran (and same-origin redirects), but never cross origins.
+  std::string initial_origin_headers;
+  // The embedder's extra_headers_ CARRIED across hops (not re-read fresh each hop) so a
+  // credential set via mbSetExtraHeaders can be stripped on a cross-origin redirect just
+  // like the request's own headers — otherwise it would be re-prepended verbatim and leak.
+  std::string carried_extra_headers;
   net::SiteForCookies site_for_cookies;  // for WillFollowRedirect on the main thread
   std::string pin_pubkey;  // per-request TLS public-key pin (may be empty)
   int hop = 0;           // redirect hop count (capped at 20)
@@ -2064,10 +3192,14 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
           req_headers += "\n";
         req_headers += kv.key + ": " + kv.value;
       }
-      mb::MbApplyRequestHeaders(fetch_url.spec(), &req_headers);
-      if (!mutation.add_headers.empty())
-        MergeHeaderLines(&req_headers, mutation.add_headers);
-      StartSse(fetch_url.spec(), req_headers, url.spec());
+      // SSE now follows redirects MANUALLY per-hop (MbSseStream::Run), so the injected
+      // host/origin headers are applied there against each hop's URL — including the first —
+      // rather than here. Pass the base headers separately from mutable-hook
+      // additions: the latter belong to this origin and must not ride a
+      // cross-origin redirect merely because their name is not one of the
+      // built-in Authorization/Cookie credential names.
+      StartSse(fetch_url.spec(), req_headers, mutation.add_headers,
+               mutation.pin_pubkey, url.spec());
       return;
     }
   }
@@ -2118,29 +3250,6 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
       }
       hop_headers.SetHeader(kv.key, kv.value);
     }
-    // Mutate-hook header additions: SetHeader replaces same-name entries, so
-    // an added Authorization/UA overrides the request's own copy.
-    if (!mutation.add_headers.empty()) {
-      size_t start = 0;
-      const std::string& add = mutation.add_headers;
-      while (start <= add.size()) {
-        size_t nl = add.find('\n', start);
-        std::string line = add.substr(
-            start, nl == std::string::npos ? std::string::npos : nl - start);
-        size_t colon = line.find(':');
-        if (colon != std::string::npos) {
-          std::string name = line.substr(0, colon);
-          std::string value = line.substr(colon + 1);
-          while (!value.empty() && value.front() == ' ')
-            value.erase(value.begin());
-          if (!name.empty())
-            hop_headers.SetHeader(name, value);
-        }
-        if (nl == std::string::npos)
-          break;
-        start = nl + 1;
-      }
-    }
     // ASYNC: run the (blocking) curl transfer on the thread pool, NOT inline on the
     // main thread — this is the input-freeze fix and the architecture alignment with
     // miniblink49 (whose WebURLLoaderManager runs curl off-main on IO threads). Each
@@ -2153,10 +3262,13 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
     state->original_url = url;
     state->fetch_url = fetch_url;
     state->cur = fetch_url.spec();
+    state->visible_cur = url.spec();
     state->method = request->method;
     state->body = std::move(post_body);
     state->post_ct = std::move(post_ct);
     state->hop_headers = std::move(hop_headers);
+    state->initial_origin_headers = std::move(mutation.add_headers);
+    state->carried_extra_headers = extra_headers_;  // scrubbed per-hop (see OnHopComplete)
     state->site_for_cookies = request->site_for_cookies;
     state->pin_pubkey = std::move(mutation.pin_pubkey);
     StartHttpFetch(std::move(state));
@@ -2186,15 +3298,17 @@ void MbURLLoader::Deliver(std::unique_ptr<network::ResourceRequest> request) {
 }
 
 void MbURLLoader::StartHttpFetch(std::unique_ptr<FetchState> state) {
-  // Serialize THIS hop's request headers on the MAIN thread (reads extra_headers_):
-  // embedder extra_headers_ persist across hops; the request's own headers are subject
-  // to redirect stripping (applied in OnHopComplete via removed_headers/modified_headers).
-  std::string req_headers = extra_headers_;
+  // Serialize THIS hop's request headers on the MAIN thread from the CARRIED extra_headers
+  // (not the raw member): both the embedder's carried headers and the request's own
+  // hop_headers are redirect-stripped per-hop (in OnHopComplete), so a credential does not
+  // ride a cross-origin redirect.
+  std::string req_headers = state->carried_extra_headers;
   for (const auto& kv : state->hop_headers.GetHeaderVector()) {
     if (!req_headers.empty())
       req_headers += "\n";
     req_headers += kv.key + ": " + kv.value;
   }
+  MergeHeaderLines(&req_headers, state->initial_origin_headers);
   MbCurlReactor::Request req;
   req.url = state->cur;
   req.method = state->method;
@@ -2248,7 +3362,8 @@ void MbURLLoader::OnHopComplete(std::unique_ptr<FetchState> state, HopResult hop
       fr.http_content_type = std::move(hop.content_type);
       fr.http_status = hop.status;
       fr.resp_headers = std::move(hop.resp_headers);
-      fr.final_url = std::move(hop.final_url);
+      fr.final_url = state->redirected ? state->visible_cur
+                                       : std::move(hop.final_url);
     }
     fr.redirected = state->redirected;
     DeliverResponse(state->original_url, state->fetch_url, std::move(fr));
@@ -2315,7 +3430,75 @@ void MbURLLoader::OnHopComplete(std::unique_ptr<FetchState> state, HopResult hop
   for (const std::string& rm : removed_headers)
     state->hop_headers.RemoveHeader(rm);
   state->hop_headers.MergeFrom(modified_headers);
-  state->cur = next.spec();
+
+  const std::string next_visible = next.spec();
+  std::string next_fetch = MbApplyUrlRewrites(next_visible);
+  std::string policy_headers = state->carried_extra_headers;
+  for (const auto& kv : state->hop_headers.GetHeaderVector()) {
+    if (!policy_headers.empty())
+      policy_headers += "\n";
+    policy_headers += kv.key + ": " + kv.value;
+  }
+  bool blocked = MbIsUrlBlocked(next_fetch);
+  if (!blocked) {
+    blocked = MbRequestHookBlocks(next_visible, new_method, policy_headers,
+                                  state->body);
+  }
+  if (!alive)
+    return;
+  if (blocked) {
+    finalize(false);
+    return;
+  }
+  MbRequestMutation mutation;
+  const bool mutated = MbRunRequestMutateHook(
+      next_fetch, new_method, policy_headers, state->body, &mutation);
+  if (!alive)
+    return;
+  if (mutated) {
+    if (mutation.block) {
+      finalize(false);
+      return;
+    }
+    if (!mutation.set_url.empty() && GURL(mutation.set_url).is_valid())
+      next_fetch = mutation.set_url;
+    if (!mutation.pin_pubkey.empty())
+      state->pin_pubkey = std::move(mutation.pin_pubkey);
+  }
+
+  std::string mock_body;
+  std::string mock_ct;
+  int mock_status = 0;
+  const bool mocked =
+      MbFindMock(next_fetch, &mock_body, &mock_ct, &mock_status, host_ctx_);
+  if (!alive)
+    return;
+  if (mocked) {
+    FetchResult fr;
+    fr.ok = true;
+    fr.contents = std::move(mock_body);
+    fr.http_content_type = std::move(mock_ct);
+    fr.http_status = mock_status > 0 ? mock_status : 200;
+    fr.final_url = next_visible;
+    fr.redirected = true;
+    DeliverResponse(state->original_url, GURL(next_fetch), std::move(fr));
+    return;
+  }
+  const GURL next_fetch_url(next_fetch);
+  if (!next_fetch_url.SchemeIsHTTPOrHTTPS()) {
+    finalize(false);
+    return;
+  }
+
+  // Blink's removals cover the request's own headers (hop_headers); the embedder's CARRIED
+  // extra headers are ours to scrub. On a cross-origin hop, strip their credentials too so
+  // an Authorization/Cookie set via mbSetExtraHeaders doesn't ride to a different origin.
+  if (!MbSameOrigin(GURL(state->cur), next_fetch_url))
+    MbStripCredentialHeaders(&state->carried_extra_headers);
+  state->cur = next_fetch;
+  state->visible_cur = next_visible;
+  state->fetch_url = next_fetch_url;
+  state->initial_origin_headers = std::move(mutation.add_headers);
   state->method = new_method;
   state->redirected = true;  // a real 3xx hop was followed
   state->hop++;
@@ -2327,9 +3510,9 @@ void MbURLLoader::DeliverResponse(const GURL& url,
                                   FetchResult result) {
   if (!client_)
     return;
-  // Blink can SYNCHRONOUSLY cancel + delete this loader from inside DidReceiveResponse
-  // below. weak_factory_ guards a posted task, not reentrancy DURING this call, so
-  // capture a weak ptr and bail before touching any member after that callback.
+  // Host callbacks and Blink can SYNCHRONOUSLY cancel + delete this loader from
+  // inside the response hook or DidReceiveResponse below. weak_factory_ guards
+  // posted tasks, not reentrancy DURING this call, so validate it after each.
   const base::WeakPtr<MbURLLoader> alive = weak_factory_.GetWeakPtr();
   // Unpack into locals so the delivery body below reads unchanged. contents/resp_headers/
   // http_content_type/final_url are aliased (the response hook rewrites them in place);
@@ -2354,11 +3537,16 @@ void MbURLLoader::DeliverResponse(const GURL& url,
     return;
   }
 
-  // Response hook: let an embedder inspect the headers / rewrite the body before delivery
-  // (given the page's original URL + status + raw response header block). Any replacement
+  // Response hook: let an embedder inspect the headers / rewrite the body before delivery.
+  // Report the FINAL URL the bytes came from (post-redirect), matching the documented
+  // mbResponseURL contract and the page-visible response.url set below. Any replacement
   // flows into the mime/header/content-length build below (SetExpectedContentLength uses
   // contents.size()). resp_headers is the final response's header lines (empty for non-http).
-  MbInvokeResponseHook(url.spec(), &http_status, &resp_headers, &contents);
+  const std::string hook_url =
+      (redirected && !result.final_url.empty()) ? result.final_url : url.spec();
+  MbInvokeResponseHook(host_ctx_, hook_url, &http_status, &resp_headers, &contents);
+  if (!alive)
+    return;
 
   // If the hook set/overrode Content-Type in the header block, honor it for the delivered
   // MIME (Content-Type is special-cased below, so a block edit alone wouldn't take effect).
@@ -2512,6 +3700,8 @@ void MbURLLoader::OnBodyWritten(int64_t length, uint32_t /*MojoResult*/ result) 
 
 void MbURLLoader::StartSse(const std::string& fetch_url,
                            const std::string& req_headers,
+                           const std::string& initial_origin_headers,
+                           const std::string& pinned_pubkey,
                            const std::string& report_url) {
   if (!client_)
     return;
@@ -2535,7 +3725,10 @@ void MbURLLoader::StartSse(const std::string& fetch_url,
         blink::URLLoaderClient::kUnknownEncodedDataLength, 0, 0);
     return;
   }
+  const base::WeakPtr<MbURLLoader> alive = weak_factory_.GetWeakPtr();
   client_->DidReceiveResponse(response, std::move(consumer), std::nullopt);
+  if (!alive)
+    return;
   sse_producer_ = std::move(producer);
   sse_watcher_ = std::make_unique<mojo::SimpleWatcher>(
       FROM_HERE, mojo::SimpleWatcher::ArmingPolicy::MANUAL);
@@ -2545,7 +3738,8 @@ void MbURLLoader::StartSse(const std::string& fetch_url,
 
   auto runner = base::SingleThreadTaskRunner::GetCurrentDefault();
   sse_stream_ = std::make_shared<MbSseStream>(
-      fetch_url, MbLoaderSessionKeyFor(host_ctx_), req_headers, user_agent_,
+      fetch_url, MbLoaderSessionKeyFor(host_ctx_), req_headers,
+      initial_origin_headers, pinned_pubkey, user_agent_, host_ctx_,
       base::BindPostTask(runner, base::BindRepeating(
                                      &MbURLLoader::OnSseChunk,
                                      weak_factory_.GetWeakPtr())),

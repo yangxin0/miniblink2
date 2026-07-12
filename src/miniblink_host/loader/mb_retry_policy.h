@@ -16,9 +16,10 @@ namespace mb {
 //    (POST/PUT/PATCH/DELETE) is NEVER auto-retried — re-sending after an
 //    ambiguous failure can duplicate a server-side side effect.
 //  - Transient transport errors and transient HTTP statuses (429/5xx) retry.
-//  - An empty body on a 2xx/3xx is treated as a throttled-connection anomaly and
-//    retried, EXCEPT for responses that legitimately carry no body: 204, 304, and
-//    any HEAD (so a real 204/304 is not mistaken for a failure).
+//  - An empty body on a 2xx is treated as a throttled-connection anomaly and
+//    retried, EXCEPT for responses that legitimately carry no body: 204, 205,
+//    and any HEAD. Redirect responses are never retried merely for an empty body;
+//    an empty 3xx is normal and must advance to its Location exactly once.
 // `transient_transport_error` = IsTransientCurlError(rc); `transient_http_status`
 // = (rc == CURLE_OK && IsTransientHttpCode(http_code)). attempt is 1-based.
 inline bool MbShouldRetryFetch(const std::string& method,
@@ -37,11 +38,14 @@ inline bool MbShouldRetryFetch(const std::string& method,
     return true;
   // An empty body on an otherwise-OK response is the shape a throttled/half-open
   // connection produces (it once caused blank renders), so retry it — but NOT for
-  // responses that legitimately carry no body: 204 No Content, 304 Not Modified,
-  // and any HEAD. Otherwise a real 204/304 looks like a failure and is retried.
-  const bool body_expected =
-      method != "HEAD" && http_code != 204 && http_code != 304;
-  const bool success_code = http_code >= 200 && http_code < 400;
+  // responses that legitimately carry no body: 204 No Content, 205 Reset
+  // Content, and any HEAD.
+  // A bodyless redirect is also normal, but is excluded by the 2xx-only check
+  // below rather than being treated as a fetch anomaly and re-requested before
+  // its Location is followed.
+  const bool body_expected = method != "HEAD" && http_code != 204 &&
+                             http_code != 205;
+  const bool success_code = http_code >= 200 && http_code < 300;
   if (success_code && body_empty && body_expected)
     return true;
   return false;

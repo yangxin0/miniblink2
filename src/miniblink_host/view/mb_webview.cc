@@ -48,6 +48,7 @@
 #include "cc/paint/paint_record.h"
 #include "cc/paint/skia_paint_canvas.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "net/base/data_url.h"
 #include "third_party/blink/public/common/metrics/document_update_reason.h"
 #include "third_party/blink/public/mojom/page/prerender_page_param.mojom.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-shared.h"
@@ -395,6 +396,10 @@ MbWebView::MbWebView() {
 }
 
 MbWebView::~MbWebView() {
+  // Abort any coordinated navigation, including a page navigation whose
+  // BeginNavigation task is queued but has not attached its reactor fetch yet.
+  // Posted completions also no-op through alive_token_.
+  SupersedePendingMainNavigation("view destroyed", /*notify_failure=*/false);
   // Leave the paint-hook registry first: teardown below can still drive paint
   // cycles, and they must not dispatch into a half-dead view. The tracker (and
   // its RasterInvalidator) dies with this object; the artifacts it references
@@ -484,12 +489,136 @@ void MbWebView::CommitHtml(const char* data, size_t len, const char* base_url,
     base::RunLoop().RunUntilIdle();
 }
 
-void MbWebView::LoadHTML(const char* utf8_html, const char* base_url) {
-  http_status_ = 0;  // in-memory doc; no HTTP status
+uint64_t MbWebView::BeginMainNavigation(const std::string& url,
+                                        bool notify_started) {
+  // Reserve the new generation BEFORE terminalizing an older navigation. A
+  // fail callback may re-enter and start another load; if so, this caller sees
+  // itself as stale and must not overwrite that later request.
+  const uint64_t generation = ++main_navigation_generation_;
+  std::optional<PendingMainNavigation> old =
+      std::move(pending_main_navigation_);
+  pending_main_navigation_.reset();
+  if (old && old->fetch_id)
+    mb::MbCancelNavigation(*old->fetch_id);
+  if (old) {
+    http_status_ = 0;
+    response_headers_.clear();
+    last_error_ = "superseded by a newer navigation";
+    last_error_domain_ = "cancelled";
+    last_error_code_ = 0;
+    NotifyLoadFailed(old->url);
+    if (!IsMainNavigationGenerationCurrent(generation))
+      return generation;
+  }
+
+  pending_main_navigation_ =
+      PendingMainNavigation{generation, url, std::nullopt, false, false};
+  http_status_ = 0;
   response_headers_.clear();
-  last_error_.clear();  // an in-memory document always loads successfully
+  last_error_.clear();
   last_error_domain_.clear();
   last_error_code_ = 0;
+  pending_is_html_ = false;
+  pending_html_.clear();
+  pending_base_.clear();
+  pending_charset_.clear();
+  load_finished_ = false;
+  if (notify_started && on_nav_started_)
+    on_nav_started_(url);
+  return generation;
+}
+
+uint64_t MbWebView::SupersedePendingMainNavigation(
+    const std::string& error,
+    bool notify_failure) {
+  const uint64_t generation = ++main_navigation_generation_;
+  std::optional<PendingMainNavigation> old =
+      std::move(pending_main_navigation_);
+  pending_main_navigation_.reset();
+  if (old && old->fetch_id)
+    mb::MbCancelNavigation(*old->fetch_id);
+  if (old && notify_failure) {
+    http_status_ = 0;
+    response_headers_.clear();
+    last_error_ = error.empty() ? "cancelled" : error;
+    last_error_domain_ = "cancelled";
+    last_error_code_ = 0;
+    NotifyLoadFailed(old->url);
+  }
+  return generation;
+}
+
+bool MbWebView::AttachMainNavigationFetch(uint64_t generation,
+                                          uint64_t fetch_id,
+                                          bool api_cancellable) {
+  if (!IsMainNavigationPending(generation))
+    return false;
+  pending_main_navigation_->fetch_id = fetch_id;
+  pending_main_navigation_->api_cancellable = api_cancellable;
+  return true;
+}
+
+bool MbWebView::PrepareMainNavigationCommit(uint64_t generation,
+                                            int status,
+                                            std::string headers) {
+  if (!IsMainNavigationPending(generation))
+    return false;
+  http_status_ = status;
+  response_headers_ = std::move(headers);
+  last_error_.clear();
+  last_error_domain_.clear();
+  last_error_code_ = 0;
+  pending_main_navigation_->fetch_id.reset();
+  pending_main_navigation_->api_cancellable = false;
+  pending_main_navigation_->committed = true;
+  return true;
+}
+
+bool MbWebView::FailMainNavigation(uint64_t generation,
+                                   const std::string& failed_url,
+                                   int status,
+                                   std::string headers,
+                                   std::string error_domain,
+                                   int error_code,
+                                   std::string error) {
+  if (!IsMainNavigationPending(generation))
+    return false;
+  http_status_ = status;
+  response_headers_ = std::move(headers);
+  last_error_ = std::move(error);
+  last_error_domain_ = std::move(error_domain);
+  last_error_code_ = error_code;
+  if (last_error_domain_.empty())
+    ClassifyFetchFailure();
+  else if (last_error_.empty())
+    last_error_ = "navigation failed";
+  pending_main_navigation_.reset();
+  NotifyLoadFailed(failed_url);
+  return true;
+}
+
+bool MbWebView::FinishMainNavigationWithoutCommit(uint64_t generation,
+                                                  int status,
+                                                  std::string headers) {
+  if (!IsMainNavigationPending(generation))
+    return false;
+  http_status_ = status;
+  response_headers_ = std::move(headers);
+  last_error_.clear();
+  last_error_domain_.clear();
+  last_error_code_ = 0;
+  pending_main_navigation_.reset();
+  load_finished_ = true;
+  if (on_load_finish_)
+    on_load_finish_();
+  return true;
+}
+
+void MbWebView::LoadHTML(const char* utf8_html, const char* base_url) {
+  const uint64_t generation = BeginMainNavigation(
+      base_url ? base_url : "about:blank", /*notify_started=*/false);
+  if (!IsMainNavigationPending(generation))
+    return;
   const char* html = utf8_html ? utf8_html : "";
   // Cache the source into the history entry recorded by this commit, so a later
   // back/forward can re-render this in-memory doc (its committed URL is about:blank).
@@ -502,6 +631,8 @@ void MbWebView::LoadHTML(const char* utf8_html, const char* base_url) {
   // mojibake'd every non-ASCII byte — the bug that made 😀 render as four
   // Latin-1 glyphs (and was long mis-filed as "emoji render monochrome").
   pending_charset_ = "UTF-8";
+  if (!PrepareMainNavigationCommit(generation, /*status=*/0, std::string()))
+    return;
   CommitHtml(html, std::strlen(html), base_url, pending_charset_);
 }
 
@@ -552,13 +683,34 @@ bool IsDownloadResponse(const std::string& url, const std::string& mime,
 
 void MbWebView::LoadURL(const char* utf8_url) {
   std::string url(utf8_url ? utf8_url : "");
-  http_status_ = 0;  // reset; only an http(s) load sets a real status
-  response_headers_.clear();
-  last_error_.clear();  // cleared up front; set only if this load fails
-  last_error_domain_.clear();
-  last_error_code_ = 0;
-  pending_is_html_ = false;  // a URL nav: the history entry re-fetches, no cached source
   constexpr char kFile[] = "file://";
+  const bool is_custom_scheme = MbIsCustomScheme(std::string(GURL(url).scheme()));
+  const bool handled = url.rfind(kFile, 0) == 0 || url.rfind("http", 0) == 0 ||
+                       url.rfind("data:", 0) == 0 || is_custom_scheme;
+  if (!handled) {
+    // An unsupported host request still supersedes queued/fetching page work,
+    // while preserving the legacy no-start/no-fail behavior for itself.
+    const uint64_t generation = SupersedePendingMainNavigation(
+        "superseded by a newer navigation", /*notify_failure=*/true);
+    if (!IsMainNavigationGenerationCurrent(generation))
+      return;  // the superseded load's failure callback started something newer
+    http_status_ = 0;
+    response_headers_.clear();
+    last_error_.clear();
+    last_error_domain_.clear();
+    last_error_code_ = 0;
+    pending_is_html_ = false;
+    pending_html_.clear();
+    pending_base_.clear();
+    pending_charset_.clear();
+    return;
+  }
+
+  const uint64_t generation =
+      BeginMainNavigation(url, /*notify_started=*/true);
+  if (!IsMainNavigationPending(generation))
+    return;
+
   if (url.rfind(kFile, 0) == 0) {
     // Top-level file load: read it and commit. (Self-contained docs + data: URIs
     // need no URLLoader; external subresources await the libcurl factory in P2-net.)
@@ -576,37 +728,48 @@ void MbWebView::LoadURL(const char* utf8_url) {
           &contents);
     }
     if (read_ok) {
+      // Run the response hook for the MAIN document too (the file:// subresource path via
+      // MbFetchUrl already does), so an embedder can inspect/rewrite a top-level file: load.
+      int hook_status = 200;
+      std::string hook_headers;
+      MbInvokeResponseHook(this, url, &hook_status, &hook_headers, &contents);
+      if (!IsMainNavigationPending(generation))
+        return;  // response hook started a newer navigation
+      if (!PrepareMainNavigationCommit(generation, /*status=*/0,
+                                       std::string()))
+        return;
       CommitHtml(contents.data(), contents.size(), url.c_str());
     } else {
-      last_error_ = "file not found or unreadable";
-      last_error_domain_ = "file";
-      NotifyLoadFailed();  // a failed load still "finishes" (signal waiters)
+      FailMainNavigation(generation, url, /*status=*/0, std::string(),
+                         "file", /*error_code=*/0,
+                         "file not found or unreadable");
     }
     return;
   }
   // A registered custom scheme (item 48) is served by the interception stack
   // inside MbFetchUrl (MbFindMock), so it commits through the same fetch+commit
   // path as http — the only reason to special-case it is that its scheme isn't
-  // "http"/"data".
-  const bool is_custom_scheme = MbIsCustomScheme(std::string(GURL(url).scheme()));
+  // "http"/"data". (is_custom_scheme computed above with the handled-scheme check.)
   if (url.rfind("http", 0) == 0 || url.rfind("data:", 0) == 0 ||
       is_custom_scheme) {
     // Top-level http(s) (or a data: URI): fetch via the loader, commit with base = the
     // URL so relative subresources resolve and load through MbURLLoader.
     std::string body, content_type, final_url;
+    int status = 0;
+    std::string headers, error;
+    int error_code = 0;
     const bool ok = MbFetchUrl(
         url, &body, &content_type,
         frame_client_ ? frame_client_->user_agent() : std::string(),
         frame_client_ ? frame_client_->extra_headers() : std::string(),
         /*post_body=*/std::string(), /*post_content_type=*/std::string(),
-        /*http_method=*/std::string(), &final_url, &http_status_,
-        &response_headers_, &last_error_, &last_error_code_);
-    if (!ok) {  // "curl" carries the CURLcode; "network" = no response at all
-      if (last_error_ == kMbBlockedByHookError)
-        last_error_domain_ = "blocked";  // the mutate hook vetoed the load
-      else
-        last_error_domain_ = last_error_code_ != 0 ? "curl" : "network";
-    }
+        /*http_method=*/std::string(), &final_url, &status,
+        &headers, &error, &error_code,
+        /*host_ctx=*/this);  // this view: its session cookie jar + per-view mocks
+    // MbFetchUrl runs the successful response hook before returning. Host code
+    // may re-enter a navigation API there, so do not publish or commit stale data.
+    if (!IsMainNavigationPending(generation))
+      return;
     // If the server redirected us, commit with the FINAL URL as the document's
     // base so location.href and relative subresources reflect where we landed.
     const std::string& doc_url = final_url.empty() ? url : final_url;
@@ -622,7 +785,10 @@ void MbWebView::LoadURL(const char* utf8_url) {
       mime.pop_back();
     std::string dl_name;
     if (ok && (on_download_ || HasDownloadStreamSink()) &&
-        IsDownloadResponse(doc_url, mime, response_headers_, &dl_name)) {
+        IsDownloadResponse(doc_url, mime, headers, &dl_name)) {
+      if (!FinishMainNavigationWithoutCommit(generation, status,
+                                             std::move(headers)))
+        return;
       if (HasDownloadStreamSink()) {
         // Streaming sink takes precedence. The navigation fetch is inherently
         // buffered (it had to be read to decide document-vs-download), so
@@ -648,28 +814,46 @@ void MbWebView::LoadURL(const char* utf8_url) {
         std::string::size_type end = content_type.find_first_of("; \t", p);
         charset = content_type.substr(p, end == std::string::npos ? end : end - p);
       }
+      if (!PrepareMainNavigationCommit(generation, status,
+                                       std::move(headers)))
+        return;
       CommitHtml(body.data(), body.size(), doc_url.c_str(), charset);
     } else {
-      NotifyLoadFailed();  // fetch failed -> still finish, so a waiter isn't stuck
+      FailMainNavigation(generation, doc_url, status, std::move(headers),
+                         std::string(), error_code, std::move(error));
     }
   }
 }
 
-void MbWebView::NotifyLoadFailed() {
+void MbWebView::ClassifyFetchFailure() {
+  if (last_error_ == kMbBlockedByHookError) {
+    last_error_domain_ = "blocked";  // the mutate hook vetoed the load
+  } else {
+    // A CURLcode present means the transport itself failed (DNS/timeout/TLS/...);
+    // absent, no response was produced at all.
+    last_error_domain_ = last_error_code_ != 0 ? "curl" : "network";
+  }
+  if (last_error_.empty())
+    last_error_ = "navigation failed";  // never leave the message blank
+}
+
+void MbWebView::NotifyLoadFailed(const std::string& failed_url) {
   // A top-level load that never commits (file read / fetch failure) still ENDED — mark
   // it finished and fire the load-finish callback, so mbIsLoadFinished is true and a
   // caller awaiting completion isn't stuck. (Success runs through DidFinishLoad instead.)
+  // `failed_url` is the ATTEMPTED target: GetURL() would return the PREVIOUS committed
+  // document here (this navigation never committed), which misreports which URL failed.
   load_finished_ = true;
   if (on_fail_loading_ex_)
-    on_fail_loading_ex_(GetURL(), last_error_domain_, last_error_code_,
+    on_fail_loading_ex_(failed_url, last_error_domain_, last_error_code_,
                         last_error_);
   else if (on_fail_loading_)
-    on_fail_loading_(GetURL(), last_error_);
+    on_fail_loading_(failed_url, last_error_);
   // Per-frame lifecycle (item 42): a top-level failure is the main frame's
   // FAIL phase (subframe fetch failures surface as network errors in-page,
   // not frame-load failures).
   OnFrameLoadEvent(MainFrameKey(), /*is_main_frame=*/true, kFrameLoadFail,
-                   GetURL());
+                   failed_url);
   if (on_load_finish_)
     on_load_finish_();
 }
@@ -679,37 +863,27 @@ bool MbWebView::FetchDownloadBody(const std::string& orig,
                                   std::string* content_type) {
   // Fetch a URL through the engine's network stack WITHOUT committing it as a
   // document — the shared core of a download. Honors the same interception layer
-  // as page loads: rewrite the URL, let a block rule / the request hook veto it,
-  // serve a mock with no fetch, and let the response hook inspect/rewrite the
-  // bytes. http(s) also carries the view's UA + extra headers + per-URL headers
-  // + cookies + proxy; data: is decoded inline by the loader.
-  const std::string url = MbApplyUrlRewrites(orig);
-  // A non-committing GET fetch (download core); no request body. Give the hook the URL +
-  // method so an embedder sees/vetoes it like any other request.
-  if (MbIsUrlBlocked(url) ||
-      MbRequestHookBlocks(orig, "GET", std::string(), std::string()))
-    return false;
+  // as page loads: rewrite/block/request-hook/mock policy is delegated to the
+  // one MbFetchUrl entry below so callbacks and rewrites run exactly once.
+  // http(s) also carries the view's UA + extra headers + per-URL headers +
+  // cookies + proxy; data: is decoded inline by the loader.
   std::string final_url, headers;
   int status = 0;
-  bool ok = false;
-  std::string mock_body, mock_ct;
-  int mock_status = 0;
-  if (MbFindMock(url, &mock_body, &mock_ct, &mock_status, this)) {
-    *body = std::move(mock_body);
-    *content_type = std::move(mock_ct);
-    status = mock_status > 0 ? mock_status : 200;
-    ok = true;
-  } else {
-    ok = MbFetchUrl(url, body, content_type,
-                    frame_client_ ? frame_client_->user_agent() : std::string(),
-                    frame_client_ ? frame_client_->extra_headers() : std::string(),
-                    /*post_body=*/std::string(), /*post_content_type=*/std::string(),
-                    /*http_method=*/std::string(), &final_url, &status, &headers,
-                    /*out_error=*/nullptr, /*out_error_code=*/nullptr, this);
-  }
+  const bool ok = MbFetchUrl(
+      orig, body, content_type,
+      frame_client_ ? frame_client_->user_agent() : std::string(),
+      frame_client_ ? frame_client_->extra_headers() : std::string(),
+      /*post_body=*/std::string(), /*post_content_type=*/std::string(),
+      /*http_method=*/std::string(), &final_url, &status, &headers,
+      /*out_error=*/nullptr, /*out_error_code=*/nullptr, this,
+      /*run_response_hook=*/false);  // fired exactly once below
   if (!ok)
     return false;
-  MbInvokeResponseHook(orig, &status, &headers, body);  // inspect/rewrite before delivery
+  // Fire the response hook once here for BOTH the mock and fetch paths (MbFetchUrl opted
+  // out above), so a download body is inspectable/rewritable exactly once. Report the FINAL
+  // URL (post-redirect) per the mbResponseURL contract; fall back to the requested URL.
+  const std::string hook_url = final_url.empty() ? orig : final_url;
+  MbInvokeResponseHook(this, hook_url, &status, &headers, body);
   return true;
 }
 
@@ -726,20 +900,32 @@ bool MbWebView::DownloadURL(const char* url_in, const char* dest_path) {
 void MbWebView::PostURL(const char* utf8_url, const char* utf8_body,
                         size_t body_len, const char* content_type) {
   std::string url(utf8_url ? utf8_url : "");
-  http_status_ = 0;
-  response_headers_.clear();
-  if (url.rfind("http", 0) != 0)
+  if (url.rfind("http", 0) != 0) {
+    SupersedePendingMainNavigation("superseded by a newer navigation",
+                                   /*notify_failure=*/true);
     return;  // POST navigation is only meaningful for http(s)
+  }
+  const uint64_t generation =
+      BeginMainNavigation(url, /*notify_started=*/true);
+  if (!IsMainNavigationPending(generation))
+    return;
   // Construct from (ptr, len) — NOT NUL-terminated — so binary bodies with embedded
   // NULs (protobuf, multipart, raw bytes) post whole; the loader uses post_body.size().
   std::string post_body(utf8_body ? std::string(utf8_body, body_len) : std::string());
   std::string post_ct(content_type ? content_type : "");
   std::string body, resp_ct, final_url;
+  int status = 0;
+  std::string headers, error;
+  int error_code = 0;
   const bool ok = MbFetchUrl(
       url, &body, &resp_ct,
       frame_client_ ? frame_client_->user_agent() : std::string(),
       frame_client_ ? frame_client_->extra_headers() : std::string(), post_body,
-      post_ct, "POST", &final_url, &http_status_, &response_headers_);
+      post_ct, "POST", &final_url, &status, &headers,
+      &error, &error_code,
+      /*host_ctx=*/this);  // this view: its session cookie jar + per-view mocks
+  if (!IsMainNavigationPending(generation))
+    return;  // response hook started a newer navigation
   const std::string& doc_url = final_url.empty() ? url : final_url;
   if (ok) {
     std::string charset;  // server charset (authoritative), as in LoadURL
@@ -750,8 +936,153 @@ void MbWebView::PostURL(const char* utf8_url, const char* utf8_body,
       std::string::size_type end = resp_ct.find_first_of("; \t", p);
       charset = resp_ct.substr(p, end == std::string::npos ? end : end - p);
     }
+    if (!PrepareMainNavigationCommit(generation, status, std::move(headers)))
+      return;
     CommitHtml(body.data(), body.size(), doc_url.c_str(), charset);
+  } else {
+    // Failed POST navigation: close the lifecycle (fires fail + finish) so a "started"
+    // is followed by a terminal event, matching LoadURL's failure path — now with the
+    // REAL error domain/code (DNS/timeout/TLS/blocked) from the error outs above, and the
+    // attempted URL rather than the previous document's.
+    FailMainNavigation(generation, doc_url, status, std::move(headers),
+                       std::string(), error_code, std::move(error));
   }
+}
+
+uint64_t MbWebView::Navigate(const char* utf8_url) {
+  return NavigateEx(utf8_url ? utf8_url : "", std::string(), std::string(),
+                    std::string());
+}
+
+uint64_t MbWebView::NavigateEx(const std::string& url, const std::string& method,
+                               const std::string& body,
+                               const std::string& content_type) {
+  // Navigation ids are PROCESS-GLOBAL and unique (MbNextNavigationId), never per-view
+  // counters: the loader keys its cancellation tokens by the raw id, so two views' "id 1"
+  // must not collide (cancelling one would abort the other).
+  const uint64_t id = mb::MbNextNavigationId();
+  const uint64_t generation =
+      BeginMainNavigation(url, /*notify_started=*/true);
+  if (!IsMainNavigationPending(generation) ||
+      !AttachMainNavigationFetch(generation, id,
+                                 /*api_cancellable=*/true)) {
+    return id;  // a lifecycle callback installed a newer navigation
+  }
+
+  mb::MbNavigationRequest req;
+  req.id = id;
+  req.url = url;
+  req.method = method;  // "" -> GET, or POST when a body is present (engine default)
+  req.body = body;
+  req.content_type = content_type;
+  req.user_agent = frame_client_ ? frame_client_->user_agent() : std::string();
+  req.extra_headers = frame_client_ ? frame_client_->extra_headers() : std::string();
+  req.host_ctx = this;
+  // Guard the posted completion with alive_token_ so it no-ops if the view is destroyed.
+  std::weak_ptr<int> token(alive_token_);
+  MbWebView* self = this;
+  mb::MbStartNavigation(
+      std::move(req),
+      base::BindOnce(
+          [](std::weak_ptr<int> token, MbWebView* view, uint64_t generation,
+             uint64_t id, std::string url, mb::MbNavigationResult result) {
+            if (token.lock())
+              view->OnNavigationComplete(generation, id, std::move(url),
+                                         std::move(result));
+          },
+          token, self, generation, id, url));
+  return id;
+}
+
+bool MbWebView::CancelNavigation(uint64_t id) {
+  if (!pending_main_navigation_ ||
+      !pending_main_navigation_->fetch_id ||
+      *pending_main_navigation_->fetch_id != id ||
+      !pending_main_navigation_->api_cancellable) {
+    return false;  // not the active navigation (finished, superseded, or unknown)
+  }
+  SupersedePendingMainNavigation("cancelled", /*notify_failure=*/true);
+  return true;
+}
+
+void MbWebView::OnNavigationComplete(uint64_t generation,
+                                     uint64_t id,
+                                     std::string requested_url,
+                                     mb::MbNavigationResult result) {
+  // Stale (superseded or cancelled): the owning navigation already emitted its terminal.
+  if (!IsMainNavigationPending(generation) ||
+      !pending_main_navigation_->fetch_id ||
+      *pending_main_navigation_->fetch_id != id) {
+    return;
+  }
+
+  const std::string visible_url =
+      result.final_url.empty() ? requested_url : result.final_url;
+
+  if (!result.ok) {
+    // Failure: NO response hook (it is documented for SUCCESSFUL loads only). Classify from
+    // the engine's domain (curl/file/blocked/cancelled/network) — the async counterpart of
+    // ClassifyFetchFailure — so DNS/TLS/timeout report "curl",<code> not "network",0.
+    FailMainNavigation(generation, visible_url, result.status,
+                       std::move(result.headers),
+                       std::move(result.error_domain), result.error_code,
+                       std::move(result.error));
+    return;
+  }
+
+  // Fire the MAIN-document response hook (may rewrite status/headers/body). Do NOT clear the
+  // generation guard first: if the hook starts another navigation (or cancels this one), the
+  // guard changes and this now-stale result must NOT commit over the newer one.
+  MbInvokeResponseHook(this, visible_url, &result.status, &result.headers,
+                       &result.body);
+  if (!IsMainNavigationPending(generation) ||
+      !pending_main_navigation_->fetch_id ||
+      *pending_main_navigation_->fetch_id != id) {
+    return;  // the hook superseded/cancelled this navigation — drop it (never commit)
+  }
+  const int stored_status = result.local_response ? 0 : result.status;
+
+  // Success — the same post-processing as LoadURL's http branch: download-divert, charset,
+  // commit.
+  std::string mime = result.content_type.substr(0, result.content_type.find(';'));
+  while (!mime.empty() && mime.back() == ' ')
+    mime.pop_back();
+  std::string dl_name;
+  if ((on_download_ || HasDownloadStreamSink()) &&
+      IsDownloadResponse(visible_url, mime, result.headers, &dl_name)) {
+    std::string stored_headers = result.local_response
+                                     ? std::string()
+                                     : std::move(result.headers);
+    if (!FinishMainNavigationWithoutCommit(generation, stored_status,
+                                           std::move(stored_headers)))
+      return;
+    if (HasDownloadStreamSink()) {
+      const unsigned did = ++next_download_id_;
+      StreamingDownload& dl = downloads_[did];
+      dl.url = visible_url;
+      dl.suggested_name = dl_name;
+      PostSynthesizedDownload(did, mime, std::move(result.body));
+    } else {
+      on_download_(visible_url, mime, dl_name, result.body);
+    }
+    return;
+  }
+  std::string charset;  // server charset (authoritative)
+  std::string lc = result.content_type;
+  for (char& c : lc)
+    c = static_cast<char>(std::tolower((unsigned char)c));
+  if (auto p = lc.find("charset="); p != std::string::npos) {
+    p += 8;
+    std::string::size_type end = result.content_type.find_first_of("; \t", p);
+    charset = result.content_type.substr(p, end == std::string::npos ? end : end - p);
+  }
+  std::string stored_headers = result.local_response
+                                   ? std::string()
+                                   : std::move(result.headers);
+  if (!PrepareMainNavigationCommit(generation, stored_status,
+                                   std::move(stored_headers)))
+    return;
+  CommitHtml(result.body.data(), result.body.size(), visible_url.c_str(), charset);
 }
 
 // Input dispatch (mouse/keyboard/IME) is bracketed in a scheduler task via RunInFrameTask:
@@ -2096,9 +2427,15 @@ void MbWebView::Reload() {
 }
 
 void MbWebView::StopLoading() {
+  // Invalidate the view-wide generation even when a page navigation is still
+  // only a queued BeginNavigation task and has no reactor fetch id yet.
+  const uint64_t stop_generation =
+      SupersedePendingMainNavigation("cancelled", /*notify_failure=*/true);
   // Abort any in-flight load on the main frame (provisional navigation or
-  // pending main resource). Harmless when the frame is already idle.
-  if (main_frame_)
+  // pending main resource). A cancellation callback may start a newer load;
+  // do not stop that re-entrant generation.
+  if (main_frame_ &&
+      IsMainNavigationGenerationCurrent(stop_generation))
     main_frame_->DeprecatedStopLoading();
 }
 
@@ -2190,6 +2527,14 @@ void MbWebView::OnDidCommitMainFrame(const std::string& url, bool standard) {
 }
 
 void MbWebView::OnDidFinishLoad() {
+  // Suppress a still-loading OLD document's finish while a NEW coordinated
+  // navigation is queued/fetching. Once the new document commits, its own
+  // DidFinishLoad consumes the committed generation.
+  if (pending_main_navigation_) {
+    if (!pending_main_navigation_->committed)
+      return;
+    pending_main_navigation_.reset();
+  }
   load_finished_ = true;
   if (on_load_finish_)
     on_load_finish_();
@@ -2197,6 +2542,11 @@ void MbWebView::OnDidFinishLoad() {
 
 void MbWebView::SetLoadFinishCallback(std::function<void()> cb) {
   on_load_finish_ = std::move(cb);
+}
+
+void MbWebView::SetNavigationStartedCallback(
+    std::function<void(const std::string&)> cb) {
+  on_nav_started_ = std::move(cb);
 }
 
 void MbWebView::SetBeginLoadingCallback(
@@ -2408,6 +2758,8 @@ unsigned MbWebView::StartDownloadStream(const std::string& url,
   std::string fetch_url = MbApplyUrlRewrites(url);
   std::string headers = frame_client_ ? frame_client_->extra_headers()
                                       : std::string();
+  std::string pin_pubkey;
+  std::string initial_origin_headers;
   if (MbIsUrlBlocked(fetch_url) ||
       MbRequestHookBlocks(url, "GET", std::string(), std::string()))
     return 0;
@@ -2419,11 +2771,8 @@ unsigned MbWebView::StartDownloadStream(const std::string& url,
         return 0;
       if (!mutation.set_url.empty() && GURL(mutation.set_url).is_valid())
         fetch_url = mutation.set_url;
-      if (!mutation.add_headers.empty()) {
-        if (!headers.empty() && headers.back() != '\n')
-          headers.push_back('\n');
-        headers += mutation.add_headers;
-      }
+      initial_origin_headers = std::move(mutation.add_headers);
+      pin_pubkey = std::move(mutation.pin_pubkey);
     }
   }
 
@@ -2441,8 +2790,22 @@ unsigned MbWebView::StartDownloadStream(const std::string& url,
     return id;
   }
   if (!GURL(fetch_url).SchemeIsHTTPOrHTTPS()) {
-    std::string body, content_type;
-    if (!FetchDownloadBody(fetch_url, &body, &content_type)) {
+    // The request interception stack already ran above. Materialize local
+    // schemes directly so rewrites/hooks are not invoked a second time (and so
+    // the documented streaming response-hook carve-out remains intact).
+    const GURL local_url(fetch_url);
+    std::string body;
+    std::string content_type;
+    bool ok = false;
+    if (local_url.SchemeIs("data")) {
+      std::string charset;
+      ok = net::DataURL::Parse(local_url, &content_type, &charset, &body);
+    } else if (local_url.SchemeIsFile()) {
+      base::FilePath file_path;
+      ok = net::FileURLToFilePath(local_url, &file_path) &&
+           base::ReadFileToString(file_path, &body);
+    }
+    if (!ok) {
       downloads_.erase(id);
       return 0;
     }
@@ -2483,7 +2846,8 @@ unsigned MbWebView::StartDownloadStream(const std::string& url,
                                        &MbWebView::OnDownloadStreamDone, id,
                                        success);
                       },
-                      token, this, id)));
+                      token, this, id)),
+      std::move(pin_pubkey), std::move(initial_origin_headers), this);
   return id;
 }
 
@@ -2689,13 +3053,21 @@ bool MbWebView::TraverseHistory(int target) {
   // this a host traversal would grow history.length and drop forward entries.
   if (frame_client_)
     frame_client_->BeginHostHistoryTraversal();
+  bool navigation_attempted = false;
   if (is_html) {
-    CommitHtml(html.data(), html.size(),
-               base_url.empty() ? nullptr : base_url.c_str(), charset);
+    const uint64_t generation =
+        BeginMainNavigation(url, /*notify_started=*/false);
+    if (IsMainNavigationPending(generation) &&
+        PrepareMainNavigationCommit(generation, /*status=*/0, std::string())) {
+      navigation_attempted = true;
+      CommitHtml(html.data(), html.size(),
+                 base_url.empty() ? nullptr : base_url.c_str(), charset);
+    }
   } else {
+    navigation_attempted = true;
     LoadURL(url.c_str());
   }
-  const bool committed = !in_history_nav_;  // the commit hook cleared the flag
+  const bool committed = navigation_attempted && !in_history_nav_;
   if (frame_client_)
     frame_client_->EndHostHistoryTraversal(committed ? url : std::string());
   if (!committed) {  // never committed (load failure / download diversion)
@@ -3650,14 +4022,21 @@ bool MbWebView::WaitForSelectorHidden(const char* css, int timeout_ms) {
 bool MbWebView::WaitForNetworkIdle(int idle_ms, int timeout_ms) {
   if (!main_frame_)
     return false;
-  // Pump until no NEW subresource request has been recorded for `idle_ms`
-  // (Puppeteer's networkidle) — for SPAs that lazy-fetch after the initial load.
-  // Reads the process-wide request log's count; each new fetch resets the idle
-  // window. Returns true once idle, false if `timeout_ms` elapses first. Clear the
-  // log (mbClearRequestLog) before the navigation to scope it to this page.
+  // Pump until THIS view has had no outstanding request and no newly-started
+  // request for `idle_ms` (Puppeteer's networkidle0) — for SPAs that lazy-fetch
+  // after the initial load. The signal is per-view (keyed by `this`, the loaders'
+  // host_ctx), so another view's traffic can't disturb this wait, and it is driven
+  // by two robust counters rather than the capped request-log size:
+  //   - in_flight > 0 keeps the view busy while any request is still running (so a
+  //     single slow fetch is not mistaken for idle), and
+  //   - a monotonic `started` count restarts the window whenever a NEW request
+  //     begins (it never pins, unlike the 2048-entry log, so a continuously-
+  //     fetching page never looks idle).
+  // No mbClearRequestLog dance is needed — the wait is already scoped to this view.
   if (idle_ms <= 0)
     idle_ms = 500;
-  size_t last = mb::MbRequestCount();
+  const void* ctx = this;
+  uint64_t last_started = mb::MbNetStartedCount(ctx);
   const base::TimeTicks hard_deadline =
       base::TimeTicks::Now() + base::Milliseconds(timeout_ms > 0 ? timeout_ms : 0);
   base::TimeTicks idle_deadline =
@@ -3666,13 +4045,14 @@ bool MbWebView::WaitForNetworkIdle(int idle_ms, int timeout_ms) {
     base::RunLoop().RunUntilIdle();
     ServiceAnimations();
     const base::TimeTicks now = base::TimeTicks::Now();
-    const size_t cur = mb::MbRequestCount();
-    if (cur != last) {  // activity -> restart the idle window
-      last = cur;
+    const uint64_t started = mb::MbNetStartedCount(ctx);
+    const int in_flight = mb::MbNetInFlight(ctx);
+    if (started != last_started || in_flight > 0) {  // activity -> restart window
+      last_started = started;
       idle_deadline = now + base::Milliseconds(idle_ms);
     }
     if (now >= idle_deadline)
-      return true;  // quiet long enough
+      return true;  // quiet (nothing in flight, no new starts) long enough
     if (now >= hard_deadline)
       return false;  // still busy at the hard timeout
     base::PlatformThread::Sleep(base::Milliseconds(10));

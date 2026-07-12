@@ -42,6 +42,15 @@ bool MbSaveIndexedDB(const std::string& path);
 bool MbSaveIndexedDBScoped(const std::string& path,
                            const std::string& scope_prefix);
 bool MbLoadIndexedDBMerge(const std::string& path);
+// Restore a dedicated profile snapshot while replacing its serialized session
+// prefix with `scope_prefix` before merging. This migrates snapshots written
+// when the session id embedded the caller's raw persist path. Parsing/re-keying
+// is transactional: malformed keys, mixed source profiles, or key collisions
+// fail without changing the live registry. `rekeyed` reports whether the file
+// used a different session prefix and therefore needs a backup before rewrite.
+bool MbLoadIndexedDBMergeScoped(const std::string& path,
+                                const std::string& scope_prefix,
+                                bool* rekeyed);
 void MbClearIndexedDBScoped(const std::string& scope_prefix);
 bool MbLoadIndexedDB(const std::string& path);
 

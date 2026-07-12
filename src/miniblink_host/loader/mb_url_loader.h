@@ -92,9 +92,25 @@ std::string MbGetAllCookies(const std::string& session_key = std::string());
 void MbRecordRequest(const std::string& url);
 std::string MbGetRequestLog();
 void MbClearRequestLog();
-// Number of requests recorded so far (monotone until cleared) — the signal a
-// network-idle wait polls: when it stops increasing, the page has gone quiet.
+// Number of requests recorded so far (monotone until cleared) — a coarse
+// diagnostic. NOTE: do NOT use this for network-idle detection: the log is capped,
+// so once it fills its count stops changing and a still-busy page looks idle, and
+// it counts starts, not outstanding requests. Use the per-view activity counters
+// below instead (that is what MbWebView::WaitForNetworkIdle now polls).
 size_t MbRequestCount();
+
+// Per-view network activity, the correct backing for mbWaitForNetworkIdle. Keyed
+// by the owning view (`view_ctx` == the loader's host_ctx == the MbWebView*), so
+// one view's traffic never resets another's idle window. `started` is a MONOTONIC
+// (never-capped) count of loads begun for the view — it always advances on new
+// traffic, so a continuously-fetching page never looks idle; `in_flight` is the
+// number of loads currently outstanding (a load raises it at LoadAsynchronously
+// and lowers it when its loader is destroyed), so a single slow request keeps the
+// view busy until it actually finishes. Main-thread only, like the request log.
+void MbNetRequestStarted(const void* view_ctx);
+void MbNetRequestFinished(const void* view_ctx);
+uint64_t MbNetStartedCount(const void* view_ctx);
+int MbNetInFlight(const void* view_ctx);
 
 // Process-wide request blocking: any fetched URL containing a registered
 // substring is failed (ERR_BLOCKED_BY_CLIENT) instead of loaded — block ads /
@@ -170,11 +186,14 @@ extern const char kMbBlockedByHookError[];
 // override header lines (e.g. add a CORS header, set a custom field). For SUBRESOURCE /
 // fetch / XHR loads the modified block is re-parsed onto the delivered response, so the
 // page's fetch Response.headers / XHR getResponseHeader see the changes.
-using MbResponseHook = std::function<void(const std::string& url, int* status,
-                                          std::string* headers,
-                                          std::string* body)>;
+// `host_ctx` is the load's owning view (the MbWebView*, same token as the loader's
+// host_ctx / per-context mocks), or null for a view-less load — the C-ABI layer maps it
+// to the originating mbView* it hands the embedder.
+using MbResponseHook =
+    std::function<void(const void* host_ctx, const std::string& url, int* status,
+                       std::string* headers, std::string* body)>;
 void MbSetResponseHook(MbResponseHook hook);
-void MbInvokeResponseHook(const std::string& url, int* status,
+void MbInvokeResponseHook(const void* host_ctx, const std::string& url, int* status,
                           std::string* headers, std::string* body);
 
 // Response mocking: serve a canned body for any request whose URL contains
@@ -217,15 +236,26 @@ void MbAddUrlRewrite(const std::string& from, const std::string& to);
 void MbClearUrlRewrites();
 std::string MbApplyUrlRewrites(const std::string& url);
 
-// Per-URL request header injection: add/override an outgoing http(s) header for any
-// request whose URL contains `substring` (e.g. send an Authorization / API-key header
-// only to its own host, not every origin; or set a per-domain UA). Conditional on the
-// URL, unlike the global extra-headers. MbAddRequestHeader registers one; MbClearRequest-
-// Headers removes all; MbApplyRequestHeaders appends matches to the loader's header block.
+// Per-URL request header injection (two registries, both cleared by MbClearRequestHeaders;
+// both appended by MbApplyRequestHeaders):
+//  - MbAddRequestHeader(substring, ...): ORIGINAL substring-of-full-URL match (flexible;
+//    matches path/query too; a footgun for credentials — see the .cc).
+//  - MbAddRequestHeaderForHost(host_filter, ...): parsed-HOST match ("host" / ".host" /
+//    "host/path/prefix"), applied per-hop on the manual-redirect path so a credential
+//    header does not follow a cross-origin redirect. Withheld on the curl auto-follow
+//    (top-level navigation) path, where per-hop scrubbing isn't possible.
+// MbApplyRequestHeaders takes follow_redirects so it can enforce that host-scoped policy.
 void MbAddRequestHeader(const std::string& substring, const std::string& name,
                         const std::string& value);
+void MbAddRequestHeaderForHost(const std::string& host_filter,
+                               const std::string& name, const std::string& value);
+// Full-origin (scheme + host + effective port) scoped injection — the strict,
+// cross-origin-safe form for credentials. `origin` is "scheme://host[:port][/path]".
+void MbAddRequestHeaderForOrigin(const std::string& origin, const std::string& name,
+                                 const std::string& value);
 void MbClearRequestHeaders();
-void MbApplyRequestHeaders(const std::string& url, std::string* req_headers);
+void MbApplyRequestHeaders(const std::string& url, std::string* req_headers,
+                           bool follow_redirects);
 
 // Process-wide HTTP(S) proxy for all network fetches, as a libcurl proxy string:
 // "http://host:port", "socks5://host:port", "host:port" (defaults to http), or
@@ -304,9 +334,15 @@ const std::vector<std::string>& MbCustomSchemes();
 // HTTP >= 400 status, transport error, or MbStopDownloadStream. ALL callbacks
 // run on the WORKER thread: bind them to the host thread (base::BindPostTask)
 // before calling. Honors the session cookie jar, proxy, cert-ignore and
-// redirect settings like MbFetchUrl; interception (rewrite/block/mock/request
-// hook) is the CALLER's job before starting the stream — the whole-body
-// response hook cannot apply to a stream and is intentionally skipped.
+// redirect settings like MbFetchUrl. URL-scoped request headers are evaluated
+// independently for every redirect hop; `pinned_pubkey` is installed on every
+// hop's curl handle. `initial_origin_headers` are request-hook additions for
+// the first hop only. The caller applies interception before starting; every
+// followed redirect target then re-runs rewrite/block/request-hook/mock policy
+// on the caller's sequence before its worker fetch. A successful mock target
+// completes the download from its body; a >=400 mock fails it. `host_ctx`
+// enables per-view mocks. The whole-body response hook cannot apply to a stream
+// and is intentionally skipped.
 class MbDownloadStream;  // defined in the .cc; opaque to callers
 std::shared_ptr<MbDownloadStream> MbStartDownloadStream(
     std::string url,
@@ -317,7 +353,10 @@ std::shared_ptr<MbDownloadStream> MbStartDownloadStream(
                             std::string disposition_filename,
                             int64_t expected_bytes)> begin,
     base::RepeatingCallback<void(std::string chunk)> data,
-    base::OnceCallback<void(bool success)> done);
+    base::OnceCallback<void(bool success)> done,
+    std::string pinned_pubkey = std::string(),
+    std::string initial_origin_headers = std::string(),
+    const void* host_ctx = nullptr);
 // Abort promptly (idle streams too); the stream's done(false) follows. The
 // handle can then be dropped — the worker keeps itself alive to unwind.
 void MbStopDownloadStream(const std::shared_ptr<MbDownloadStream>& stream);
@@ -334,12 +373,17 @@ void MbStopDownloadStream(const std::shared_ptr<MbDownloadStream>& stream);
 // submission and fetch()/XHR with a body. `http_method` (e.g. "POST", "PUT",
 // "DELETE") sets the verb; empty means GET, or POST when a body is present. The
 // body/method apply only to http(s); file/data ignore them.
-// `out_final_url` (optional) receives the URL after any server redirects curl
-// followed (http only) — use it as the committed document's base so location and
-// relative subresources reflect where we actually landed.
+// `out_final_url` (optional) preserves `url_spec` across transparent rewrite /
+// mutate-hook targets, and receives the resolved target after any real server
+// redirect (http only) — use it as the committed document's base so location and
+// relative subresources reflect the page-visible URL we actually landed on.
 // `out_error_code` (optional) receives the numeric failure code alongside
 // `out_error`'s prose: the CURLcode for transport failures, 0 otherwise
 // (structured load errors — IMPROVEMENT.md item 33).
+// `run_response_hook` (default true): fire the process-wide response hook once on a
+// successful result, so the MAIN document (navigation/POST/page-initiated/worker script)
+// is inspectable/rewritable like a subresource. A caller that runs the hook itself
+// (FetchDownloadBody) passes false so it fires exactly once.
 bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* content_type, const std::string& user_agent = "",
                 const std::string& extra_headers = "",
@@ -351,7 +395,59 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* out_headers = nullptr,
                 std::string* out_error = nullptr,
                 int* out_error_code = nullptr,
-                const void* host_ctx = nullptr);
+                const void* host_ctx = nullptr,
+                bool run_response_hook = true);
+
+// ---- Asynchronous top-level navigation ------------------------------------------------
+// The non-blocking counterpart of MbFetchUrl for a MAIN-resource navigation. The fetch runs
+// off the main thread on the shared MbCurlReactor and each hop's result posts back, so the
+// caller (mbNavigate) returns immediately and the UI thread stays live during a slow load.
+// Redirects are followed per-hop with the same origin-scoped credential stripping as
+// FetchHttp. `on_complete` runs on the CALLING sequence (the main thread) with the final
+// result; the caller then fires the response hook + commits. Local schemes (mock/data/file)
+// resolve instantly but still complete via a POSTED task, so a commit never happens
+// synchronously inside the call. It does NOT fire the response hook itself (the caller does,
+// once, before committing) — mirroring the subresource loader's DeliverResponse.
+struct MbNavigationRequest {
+  uint64_t id = 0;             // caller's navigation id (for MbCancelNavigation)
+  std::string url;
+  std::string method;         // "" -> GET, or POST if body present
+  std::string body;
+  std::string content_type;   // POST content-type
+  std::string user_agent;
+  std::string extra_headers;  // newline-separated "Name: Value"
+  const void* host_ctx = nullptr;  // owning view (session jar + per-view mocks)
+};
+struct MbNavigationResult {
+  bool ok = false;
+  // Successful file:/data: results expose a synthetic 200 to the response
+  // hook, but remain status 0 in mbGetHttpStatus/headers (HTTP-only getters).
+  bool local_response = false;
+  int status = 0;
+  std::string body;
+  std::string content_type;
+  std::string headers;     // raw final-response header block
+  // Page-visible URL: the original request across transparent rewrite/mutate
+  // targets, or the resolved target after a real server redirect.
+  std::string final_url;
+  std::string error;       // prose (empty on ok)
+  int error_code = 0;      // CURLcode (transport failures) or 0
+  // Machine-checkable failure domain, mirroring the sync path's classification:
+  // "curl" | "file" | "blocked" | "cancelled" | "network" (empty on ok). Set by the
+  // engine so the async path reports the SAME domain the documented mbOnFailLoadingEx
+  // contract promises, instead of inferring "network" from an absent CURLcode.
+  std::string error_domain;
+};
+using MbNavigationCallback = base::OnceCallback<void(MbNavigationResult)>;
+// A PROCESS-GLOBAL, monotonically increasing navigation id. Every async-navigation caller
+// (per-view mbNavigate AND page-initiated navigation) draws its id here, so ids never
+// collide in the loader's cancellation-token map keyed by id.
+uint64_t MbNextNavigationId();
+void MbStartNavigation(MbNavigationRequest req, MbNavigationCallback on_complete);
+// Abort an in-flight navigation started with the given id: aborts its active reactor
+// transfer (the caller also drops the completion via its own generation guard, so a
+// cancelled navigation never commits). A no-op for an unknown/finished id.
+void MbCancelNavigation(uint64_t id);
 
 class MbURLLoader : public blink::URLLoader {
  public:
@@ -421,6 +517,8 @@ class MbURLLoader : public blink::URLLoader {
   // worker thread so the page sees events as they arrive (the buffered path would
   // hang on a never-closing stream). OnSseChunk/OnSseDone hop from the worker.
   void StartSse(const std::string& fetch_url, const std::string& req_headers,
+                const std::string& initial_origin_headers,
+                const std::string& pinned_pubkey,
                 const std::string& report_url);
   void OnSseChunk(std::string bytes);
   void OnSseDone();
@@ -430,6 +528,7 @@ class MbURLLoader : public blink::URLLoader {
   std::string user_agent_;  // sent on each request (empty -> default)
   std::string extra_headers_;  // newline-separated "Name: Value" added per request
   const void* host_ctx_ = nullptr;  // owning view for per-context mocks (may be null)
+  bool net_counted_ = false;  // this load bumped its view's in-flight count (pair with dtor)
   std::string body_;  // owns the bytes while the data pipe drains them
   std::unique_ptr<mojo::DataPipeProducer> data_pipe_producer_;
   // SSE streaming state (main thread): the producer + a watcher draining chunks.

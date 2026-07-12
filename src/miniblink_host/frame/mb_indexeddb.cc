@@ -1430,7 +1430,12 @@ std::string SerializeRegistry(const BlobByteMap* blob_bytes,
   return o;
 }
 
-bool DeserializeRegistry(const std::string& buf, bool merge = false) {
+bool DeserializeRegistry(const std::string& buf,
+                         bool merge = false,
+                         const std::string* target_scope_prefix = nullptr,
+                         bool* out_rekeyed = nullptr) {
+  if (out_rekeyed)
+    *out_rekeyed = false;
   Reader r(buf);
   const bool v2 = buf.size() >= 8 && buf.compare(0, 8, kIdbMagic, 8) == 0;
   const bool v1 = buf.size() >= 8 && buf.compare(0, 8, kIdbMagicV1, 8) == 0;
@@ -1439,9 +1444,33 @@ bool DeserializeRegistry(const std::string& buf, bool merge = false) {
   r.pos = 8;
   uint32_t db_count = r.U32();
   std::map<std::string, std::unique_ptr<MbIDBBackend>> loaded;
+  std::string source_scope_prefix;
+  bool rekeyed = false;
   for (uint32_t d = 0; d < db_count && r.ok; ++d) {
     auto b = std::make_unique<MbIDBBackend>();
     std::string key = r.Str();  // the Registry key: "origin\nname" (composite)
+    if (target_scope_prefix) {
+      // A per-profile key is:
+      //   <session-id> US <origin[/partition]> LF <database-name>
+      // v0.4 embedded the raw profile path in <session-id>. Replace exactly
+      // that first component, without needing to guess which path spelling was
+      // used. A dedicated snapshot must contain one source session only.
+      const size_t scope_end = key.find('\x1f');
+      const size_t name_sep = key.find('\n');
+      if (scope_end == std::string::npos || scope_end == 0 ||
+          name_sep == std::string::npos || scope_end > name_sep) {
+        return false;
+      }
+      const std::string key_prefix = key.substr(0, scope_end + 1);
+      if (source_scope_prefix.empty())
+        source_scope_prefix = key_prefix;
+      else if (source_scope_prefix != key_prefix)
+        return false;  // mixed profiles: never merge them under one identity
+      if (key_prefix != *target_scope_prefix) {
+        key = *target_scope_prefix + key.substr(scope_end + 1);
+        rekeyed = true;
+      }
+    }
     // Recover the page-visible db name from the composite key (the part after the
     // origin separator). An OLD save (key == bare name, no '\n') loads unscoped.
     std::string real_name = key;
@@ -1535,8 +1564,8 @@ bool DeserializeRegistry(const std::string& buf, bool merge = false) {
         }
       }
     }
-    if (r.ok)
-      loaded[key] = std::move(b);
+    if (r.ok && !loaded.emplace(key, std::move(b)).second)
+      return false;  // corrupt/ambiguous snapshot; do not silently lose a DB
   }
   if (!r.ok)
     return false;
@@ -1559,6 +1588,8 @@ bool DeserializeRegistry(const std::string& buf, bool merge = false) {
       RetireBackend(std::move(kv.second));
     Registry() = std::move(loaded);
   }
+  if (out_rekeyed)
+    *out_rekeyed = rekeyed;
   return true;
 }
 
@@ -1666,6 +1697,29 @@ bool MbLoadIndexedDBMerge(const std::string& path) {
         *out = DeserializeRegistry(b, /*merge=*/true);
       },
       blob, &ok));
+  return ok;
+}
+
+bool MbLoadIndexedDBMergeScoped(const std::string& path,
+                                const std::string& scope_prefix,
+                                bool* rekeyed) {
+  if (rekeyed)
+    *rekeyed = false;
+  if (scope_prefix.empty() || scope_prefix.back() != '\x1f')
+    return false;
+  std::string blob;
+  if (!base::ReadFileToString(base::FilePath::FromUTF8Unsafe(path), &blob))
+    return false;
+  bool ok = false;
+  bool changed = false;
+  RunOnServiceSync(base::BindOnce(
+      [](const std::string& b, const std::string& prefix, bool* out_ok,
+         bool* out_changed) {
+        *out_ok = DeserializeRegistry(b, /*merge=*/true, &prefix, out_changed);
+      },
+      blob, scope_prefix, &ok, &changed));
+  if (ok && rekeyed)
+    *rekeyed = changed;
   return ok;
 }
 

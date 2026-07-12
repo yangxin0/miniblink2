@@ -3,7 +3,17 @@
 // robust; plus one pixel check). Prints PASS/FAIL per case and a summary; exit 0 iff all pass.
 #include "miniblink_host/test/mb_smoke_harness.h"
 
+#include <filesystem>
+
 #include "miniblink_host/loader/mb_retry_policy.h"  // mb::MbShouldRetryFetch (predicate test)
+
+// Narrow internal test hooks used only to evict migrated in-memory state
+// before reopening the profile. Forward declarations keep this C-ABI smoke
+// target from inheriting private service-header include requirements.
+namespace mb {
+void MbClearIndexedDBScoped(const std::string& scope_prefix);
+void MbClearOPFSScoped(const std::string& scope_prefix);
+}  // namespace mb
 
 using mbsmoke::Eval;     // shared harness helpers (see mb_smoke_harness.h)
 using mbsmoke::EvalIso;
@@ -27,6 +37,96 @@ const char* SmokeEcho(void* userdata, int argc, const char** argv,
 const char* SmokeJson(void*, int, const char**, const int*, int* out_type) {
   *out_type = 5;  // json
   return "{\"a\":1,\"b\":[2,3]}";
+}
+
+void AppendU32(std::string* out, uint32_t value) {
+  for (int i = 0; i < 4; ++i)
+    out->push_back(static_cast<char>((value >> (8 * i)) & 0xff));
+}
+
+void AppendI64(std::string* out, int64_t value) {
+  const uint64_t bits = static_cast<uint64_t>(value);
+  for (int i = 0; i < 8; ++i)
+    out->push_back(static_cast<char>((bits >> (8 * i)) & 0xff));
+}
+
+void AppendBlob(std::string* out, const std::string& value) {
+  AppendU32(out, static_cast<uint32_t>(value.size()));
+  out->append(value);
+}
+
+bool WriteBytes(const std::filesystem::path& path, const std::string& bytes) {
+  std::FILE* f = std::fopen(path.string().c_str(), "wb");
+  if (!f)
+    return false;
+  const bool ok = std::fwrite(bytes.data(), 1, bytes.size(), f) == bytes.size();
+  return std::fclose(f) == 0 && ok;
+}
+
+std::string ReadBytes(const std::filesystem::path& path) {
+  std::FILE* f = std::fopen(path.string().c_str(), "rb");
+  if (!f)
+    return {};
+  std::string out;
+  char buf[256];
+  for (;;) {
+    const size_t n = std::fread(buf, 1, sizeof(buf), f);
+    out.append(buf, n);
+    if (n != sizeof(buf))
+      break;
+  }
+  std::fclose(f);
+  return out;
+}
+
+std::string ReadProfileToken(const std::filesystem::path& profile_dir) {
+  const std::string manifest = ReadBytes(profile_dir / "profile.id");
+  constexpr char kProfileMagicV2[] = "MBPROFILE2\n";
+  constexpr char kProfileMagicV1[] = "MBPROFILE1\n";
+  size_t token_start = std::string::npos;
+  if (manifest.rfind(kProfileMagicV2, 0) == 0)
+    token_start = sizeof(kProfileMagicV2) - 1;
+  else if (manifest.rfind(kProfileMagicV1, 0) == 0)
+    token_start = sizeof(kProfileMagicV1) - 1;
+  if (token_start == std::string::npos)
+    return {};
+  const size_t token_end = manifest.find('\n', token_start);
+  return manifest.substr(token_start, token_end == std::string::npos
+                                          ? std::string::npos
+                                          : token_end - token_start);
+}
+
+// Write the smallest useful v0.4 session fixtures: one version-1 IndexedDB database and
+// one empty OPFS directory, both keyed by the OLD raw-path session prefix. The current
+// loader must remap those stored scopes to the canonical session id during restore.
+bool WriteLegacySessionFixtures(const std::filesystem::path& profile_dir,
+                                const std::string& legacy_scope) {
+  std::error_code ec;
+  std::filesystem::create_directories(profile_dir, ec);
+  if (ec)
+    return false;
+
+  std::string idb("MBIDB002", 8);
+  AppendU32(&idb, 1);                       // database count
+  AppendBlob(&idb, legacy_scope + "\nlegacydb");
+  AppendI64(&idb, 1);                       // version
+  AppendI64(&idb, 0);                       // max object-store id
+  AppendU32(&idb, 0);                       // object stores
+  AppendU32(&idb, 0);                       // record-bearing stores
+  AppendU32(&idb, 0);                       // key generators
+  AppendU32(&idb, 0);                       // secondary-index data
+
+  std::string opfs("MBOPFS01", 8);
+  AppendU32(&opfs, 1);                      // scope count
+  AppendBlob(&opfs, legacy_scope);
+  opfs.push_back(1);                        // root is a directory
+  AppendU32(&opfs, 1);                      // one child
+  AppendBlob(&opfs, "legacydir");
+  opfs.push_back(1);                        // child is a directory
+  AppendU32(&opfs, 0);                      // child is empty
+
+  return WriteBytes(profile_dir / "idb.dat", idb) &&
+         WriteBytes(profile_dir / "opfs.dat", opfs);
 }
 }  // namespace
 
@@ -82,6 +182,264 @@ int main() {
            "seq=[" + *seq + "]");
     mbOnDOMContentLoaded(v, nullptr, nullptr);
     mbOnLoadFinish(v, nullptr, nullptr);
+  }
+
+  // 0b3. mbOnNavigationStarted fires at navigation KICKOFF — before the main-resource
+  // fetch and before the commit signal (mbOnBeginLoading). Record both into one sequence:
+  // 'S' (started) must fire AND precede 'B' (begin/commit). Also verify the lifecycle is
+  // consistent: mbIsLoadFinished() must read 0 INSIDE the started callback (a new load is
+  // in progress), not the stale 1 from the previous load. Uses a data: URL so the load
+  // goes through the LoadURL fetch+commit path (not the direct mbLoadHTML commit).
+  {
+    static std::string* seq = new std::string();  // -Wexit-time-destructors
+    static int* fin_at_start = new int(-1);
+    seq->clear();
+    *fin_at_start = -1;
+    mbOnNavigationStarted(
+        v,
+        [](mbView* nv, void*, const char*) {
+          *seq += "S";
+          *fin_at_start = mbIsLoadFinished(nv);  // must be 0: a load is now in progress
+        },
+        nullptr);
+    mbOnBeginLoading(v, [](mbView*, void*, const char*) { *seq += "B"; }, nullptr);
+    mbLoadURL(v, "data:text/html,<body>nav-started</body>");
+    Expect(*seq == "SB" && *fin_at_start == 0,
+           "mbOnNavigationStarted fires at kickoff (before commit) with load-in-progress "
+           "lifecycle state",
+           "seq=[" + *seq + "] fin_at_start=" + std::to_string(*fin_at_start));
+    mbOnNavigationStarted(v, nullptr, nullptr);
+    mbOnBeginLoading(v, nullptr, nullptr);
+  }
+
+  // 0b4. mbNavigate: ASYNCHRONOUS navigation returns a non-zero id immediately and commits
+  // the document from a POSTED completion (here mock-served), driving the full lifecycle
+  // (started -> commit -> finish). Cancelling an already-finished nav returns 0.
+  {
+    static std::string* seq = new std::string();  // -Wexit-time-destructors
+    seq->clear();
+    mbOnNavigationStarted(
+        v, [](mbView*, void*, const char*) { *seq += "S"; }, nullptr);
+    mbOnLoadFinish(v, [](mbView*, void*) { *seq += "F"; }, nullptr);
+    mbMockResponse("nav.async.test", "<body id='b'>async-nav</body>", "text/html", 200);
+    const mbNavigationId id = mbNavigate(v, "https://nav.async.test/");
+    // The load happens on subsequent pumps; mbWaitForFunction drives them. Wait on
+    // readyState 'complete' so the load event (and thus the finish callback 'F') has fired.
+    mbWaitForFunction(v,
+                      "document.readyState==='complete'&&document.getElementById('b')&&"
+                      "document.getElementById('b').textContent==='async-nav'",
+                      3000);
+    const std::string r = Eval(v, "document.body?document.body.textContent:''");
+    const int cancel_done = mbCancelNavigation(v, id);  // already finished -> 0
+    Expect(id != 0 && r.find("async-nav") != std::string::npos &&
+               seq->find('S') != std::string::npos &&
+               seq->find('F') != std::string::npos && cancel_done == 0,
+           "mbNavigate commits asynchronously (mock-served) with started+finish lifecycle",
+           "id=" + std::to_string(id) + " body=[" + r + "] seq=[" + *seq +
+               "] cancel_finished=" + std::to_string(cancel_done));
+    mbOnNavigationStarted(v, nullptr, nullptr);
+    mbOnLoadFinish(v, nullptr, nullptr);
+    mbClearMocks();
+  }
+
+  // 0b5. Cancellation: a navigation cancelled before it commits NEVER commits — the current
+  // document stays put — and mbCancelNavigation returns 1 for the active nav.
+  {
+    mbLoadHTML(v, "<body>cancel-baseline</body>", "https://cancel.base.test/");
+    mbMockResponse("cancel.target.test", "<body>SHOULD-NOT-COMMIT</body>", "text/html",
+                   200);
+    const mbNavigationId id = mbNavigate(v, "https://cancel.target.test/");
+    const int cancelled = mbCancelNavigation(v, id);  // active -> 1, and dropped
+    mbWait(v, 300);  // pump: the (superseded) completion must NOT commit
+    const std::string body = Eval(v, "document.body?document.body.textContent:''");
+    Expect(cancelled == 1 && body.find("cancel-baseline") != std::string::npos &&
+               body.find("SHOULD-NOT-COMMIT") == std::string::npos,
+           "mbCancelNavigation drops an in-flight navigation (never commits)",
+           "cancelled=" + std::to_string(cancelled) + " body=[" + body + "]");
+    mbClearMocks();
+  }
+
+  // 0b6. Supersession: a second navigation supersedes the first before it commits; only the
+  // second document commits.
+  {
+    mbMockResponse("supersede.a.test", "<body>FIRST</body>", "text/html", 200);
+    mbMockResponse("supersede.b.test", "<body>SECOND</body>", "text/html", 200);
+    mbNavigate(v, "https://supersede.a.test/");
+    mbNavigate(v, "https://supersede.b.test/");  // supersedes the first
+    mbWaitForFunction(v, "document.body&&document.body.textContent==='SECOND'", 3000);
+    const std::string body = Eval(v, "document.body?document.body.textContent:''");
+    Expect(body == "SECOND",
+           "a second mbNavigate supersedes the first (only the second commits)",
+           "body=[" + body + "]");
+    mbClearMocks();
+  }
+
+  // 0b7. mbNavigateEx: async navigation with an explicit method commits (mock-served), and
+  // mbStopLoading cancels an in-flight async navigation (it never commits).
+  {
+    mbMockResponse("navex.test", "<body>navex-ok</body>", "text/html", 200);
+    mbNavigationOptions opt = {};
+    opt.struct_size = sizeof(mbNavigationOptions);
+    opt.method = "POST";
+    opt.body = "q=1";
+    opt.body_len = 3;
+    opt.content_type = "application/x-www-form-urlencoded";
+    const mbNavigationId nid = mbNavigateEx(v, "https://navex.test/", &opt);
+    mbWaitForFunction(v,
+                      "document.readyState==='complete'&&document.body&&"
+                      "document.body.textContent==='navex-ok'",
+                      3000);
+    const std::string b1 = Eval(v, "document.body?document.body.textContent:''");
+
+    // mbStopLoading cancels an in-flight async nav before it commits.
+    mbLoadHTML(v, "<body>stop-baseline</body>", "https://stop.base.test/");
+    mbMockResponse("stop.target.test", "<body>STOPPED-OUT</body>", "text/html", 200);
+    mbNavigate(v, "https://stop.target.test/");
+    mbStopLoading(v);  // aborts the in-flight navigation
+    mbWait(v, 300);
+    const std::string b2 = Eval(v, "document.body?document.body.textContent:''");
+    Expect(nid != 0 && b1.find("navex-ok") != std::string::npos &&
+               b2.find("stop-baseline") != std::string::npos &&
+               b2.find("STOPPED-OUT") == std::string::npos,
+           "mbNavigateEx (POST) commits async; mbStopLoading cancels an in-flight nav",
+           "id=" + std::to_string(nid) + " navex=[" + b1 + "] afterstop=[" + b2 + "]");
+    mbClearMocks();
+  }
+
+  // 0b8. Page-initiated MAIN-frame navigation (location.href / link / form) now fetches
+  // ASYNCHRONOUSLY (no blocking curl on Blink's task runner) and commits from a posted
+  // completion — mock-served here. Response-hook coverage for page navigation is preserved.
+  {
+    static std::string* seen = new std::string();  // -Wexit-time-destructors
+    seen->clear();
+    mbSetResponseCallback(
+        [](mbResponse* r, void*) {
+          if (std::strstr(mbResponseURL(r), "pageinit.dest.test"))
+            seen->assign("hooked");
+        },
+        nullptr);
+    mbMockResponse("pageinit.dest.test", "<body id='pi'>page-init-ok</body>", "text/html",
+                   200);
+    mbLoadHTML(v, "<body>start</body>", "https://pageinit.start.test/");
+    Eval(v, "location.href='https://pageinit.dest.test/'");
+    mbWaitForFunction(v,
+                      "document.getElementById('pi')&&"
+                      "document.getElementById('pi').textContent==='page-init-ok'",
+                      3000);
+    const std::string r = Eval(v, "document.body?document.body.textContent:''");
+    Expect(r.find("page-init-ok") != std::string::npos && *seen == "hooked",
+           "page-initiated navigation commits via the async engine (+ response hook)",
+           "body=[" + r + "] hook=[" + *seen + "]");
+    mbSetResponseCallback(nullptr, nullptr);
+    mbClearMocks();
+  }
+
+  // 0b9. Host- and page-initiated navigations share ONE top-level generation. A queued
+  // page navigation must not commit over a newer host navigation, and mbStopLoading must
+  // invalidate a page navigation even before its posted fetch task starts. Starting the
+  // page navigation also resets mbIsLoadFinished immediately.
+  {
+    mbMockResponse("cross.page.test", "<body>STALE-PAGE</body>", "text/html", 200);
+    mbMockResponse("cross.host.test", "<body>NEW-HOST</body>", "text/html", 200);
+    mbLoadHTML(v, "<body>cross-baseline</body>", "https://cross.start.test/");
+    Eval(v, "location.href='https://cross.page.test/'");
+    const int page_is_loading = mbIsLoadFinished(v) == 0;
+    mbNavigate(v, "https://cross.host.test/");
+    mbWait(v, 400);  // run both posted completions; the later host navigation must win
+    const std::string after_host = Eval(v, "document.body?document.body.textContent:''");
+
+    mbMockResponse("cross.stop.test", "<body>SHOULD-NOT-COMMIT</body>",
+                   "text/html", 200);
+    mbLoadHTML(v, "<body>stop-page-baseline</body>", "https://cross.start.test/");
+    Eval(v, "location.href='https://cross.stop.test/'");
+    mbStopLoading(v);  // also cancels/invalidates the queued page-navigation task
+    mbWait(v, 400);
+    const std::string after_stop = Eval(v, "document.body?document.body.textContent:''");
+    Expect(page_is_loading && after_host == "NEW-HOST" &&
+               after_stop == "stop-page-baseline",
+           "page/host navigations share generation; stop cancels queued page nav",
+           "loading=" + std::to_string(page_is_loading) + " host=[" + after_host +
+               "] stop=[" + after_stop + "]");
+    mbClearMocks();
+  }
+
+  // 0b10. The new async main-resource path must honor the legacy static blocklist and
+  // request callbacks before mocks/network. Both cases are offline: without the policy
+  // checks the matching mock commits; with them the baseline stays in place and the
+  // failure is classified as blocked.
+  {
+    static std::string* blocked_domain = new std::string();
+    mbOnFailLoadingEx(
+        v,
+        [](mbView*, void*, const char*, const char* domain, int, const char*) {
+          *blocked_domain = domain ? domain : "";
+        },
+        nullptr);
+
+    mbLoadHTML(v, "<body>block-baseline-a</body>", "https://block.base.test/");
+    mbMockResponse("blocked.async.test", "<body>BLOCKLIST-BYPASS</body>",
+                   "text/html", 200);
+    mbBlockUrl("blocked.async.test");
+    blocked_domain->clear();
+    mbNavigate(v, "https://blocked.async.test/");
+    mbWait(v, 250);
+    const std::string block_body = Eval(v, "document.body?document.body.textContent:''");
+    const bool static_blocked = block_body == "block-baseline-a" &&
+                                *blocked_domain == "blocked";
+    mbClearUrlBlocks();
+
+    mbLoadHTML(v, "<body>block-baseline-b</body>", "https://block.base.test/");
+    mbMockResponse("callback.async.test", "<body>CALLBACK-BYPASS</body>",
+                   "text/html", 200);
+    mbSetRequestCallback(
+        [](const char* url, void*) -> int {
+          return url && std::strstr(url, "callback.async.test") ? 1 : 0;
+        },
+        nullptr);
+    blocked_domain->clear();
+    mbNavigate(v, "https://callback.async.test/");
+    mbWait(v, 250);
+    const std::string callback_body =
+        Eval(v, "document.body?document.body.textContent:''");
+    const bool callback_blocked = callback_body == "block-baseline-b" &&
+                                  *blocked_domain == "blocked";
+    mbSetRequestCallback(nullptr, nullptr);
+    mbOnFailLoadingEx(v, nullptr, nullptr);
+    mbClearMocks();
+    Expect(static_blocked && callback_blocked,
+           "mbNavigate honors mbBlockUrl and legacy request callbacks",
+           "static=" + std::to_string(static_blocked) + " callback=" +
+               std::to_string(callback_blocked));
+  }
+
+  // 0b11. In-memory content and response-hook reentrancy both supersede an
+  // async result. The stale completion must never commit after the newer
+  // document, including when the newer load starts from inside the hook itself.
+  {
+    mbMockResponse("stale-html.test", "<body>STALE-HTML</body>", "text/html", 200);
+    mbNavigate(v, "https://stale-html.test/");
+    mbLoadHTML(v, "<body>FRESH-HTML</body>", "https://fresh-html.test/");
+    mbWait(v, 250);
+    const std::string after_html =
+        Eval(v, "document.body?document.body.textContent:''");
+
+    mbMockResponse("stale-hook.test", "<body>STALE-HOOK</body>", "text/html", 200);
+    mbSetResponseCallbackEx(
+        [](mbResponse* response, mbView* view, void*) {
+          if (view && std::strstr(mbResponseURL(response), "stale-hook.test"))
+            mbLoadHTML(view, "<body>FRESH-HOOK</body>",
+                       "https://fresh-hook.test/");
+        },
+        nullptr);
+    mbNavigate(v, "https://stale-hook.test/");
+    mbWait(v, 300);
+    mbSetResponseCallbackEx(nullptr, nullptr);
+    const std::string after_hook =
+        Eval(v, "document.body?document.body.textContent:''");
+    mbClearMocks();
+    Expect(after_html == "FRESH-HTML" && after_hook == "FRESH-HOOK",
+           "LoadHTML and response-hook reentrancy discard stale async results",
+           "html=[" + after_html + "] hook=[" + after_hook + "]");
   }
 
   // 0c. Dynamic per-request hook: mbSetRequestCallback is consulted for EVERY request
@@ -187,14 +545,17 @@ int main() {
   // the new (shorter/longer) length must be delivered. Fully offline.
   {
     static std::string* orig = new std::string();  // heap-owned (-Wexit-time-destructors)
+    static mbView** hook_view = new mbView*(nullptr);  // originating view seen by the hook
     orig->clear();
+    *hook_view = nullptr;
     mbMockResponse("api.test/v", "{\"v\":1}", "application/json", 200);
-    mbSetResponseCallback(
-        [](mbResponse* r, void*) {
+    mbSetResponseCallbackEx(
+        [](mbResponse* r, mbView* view, void*) {
           int n = 0;
           const char* b = mbResponseBody(r, &n);
           if (std::strstr(mbResponseURL(r), "api.test/v")) {
             orig->assign(b, n);  // inspect: capture what the server/mock returned
+            *hook_view = view;   // record which view this load belonged to
             const char* rep = "{\"v\":99}";
             mbResponseSetBody(r, rep, static_cast<int>(std::strlen(rep)));  // modify
           }
@@ -207,9 +568,11 @@ int main() {
                "https://api.test/");
     mbWaitForFunction(v, "document.getElementById('r').textContent!=='?'", 2000);
     const std::string r = Eval(v, "document.getElementById('r').textContent");
-    Expect(r == "v=99" && *orig == "{\"v\":1}",
-           "mbSetResponseCallback inspects + rewrites the response body before the page",
-           std::string("page=[") + r + "] orig=[" + *orig + "]");
+    Expect(r == "v=99" && *orig == "{\"v\":1}" && *hook_view == v,
+           "mbSetResponseCallback inspects + rewrites the response body before the page "
+           "(and reports the originating view)",
+           std::string("page=[") + r + "] orig=[" + *orig +
+               "] view_matches=" + (*hook_view == v ? "1" : "0"));
     mbSetResponseCallback(nullptr, nullptr);
     mbClearMocks();
   }
@@ -888,10 +1251,31 @@ int main() {
       std::fwrite(html, 1, std::strlen(html), f);
       std::fclose(f);
     }
+    static int* file_hook_status = new int(0);
+    static std::string* file_hook_url = new std::string();
+    *file_hook_status = 0;
+    file_hook_url->clear();
+    mbSetResponseCallback(
+        [](mbResponse* response, void*) {
+          if (std::strstr(mbResponseURL(response), "mb_test.html")) {
+            *file_hook_status = mbResponseStatus(response);
+            *file_hook_url = mbResponseURL(response);
+          }
+        },
+        nullptr);
     mbLoadURL(v, "file:///tmp/mb_test.html");
+    mbSetResponseCallback(nullptr, nullptr);
+    const int file_headers_len = mbGetResponseHeaders(v, nullptr, 0);
     Expect(Eval(v, "getComputedStyle(document.getElementById('q')).color") ==
-               "rgb(0, 128, 255)",
-           "external <link> CSS subresource");
+                   "rgb(0, 128, 255)" &&
+               *file_hook_status == 200 &&
+               file_hook_url->find("file:///tmp/mb_test.html") == 0 &&
+               mbGetHttpStatus(v) == 0 && file_headers_len == 0,
+           "file main response hook uses synthetic 200 while HTTP getters stay empty",
+           "hook_status=" + std::to_string(*file_hook_status) + " url=[" +
+               *file_hook_url + "] getter_status=" +
+               std::to_string(mbGetHttpStatus(v)) + " headers=" +
+               std::to_string(file_headers_len));
   }
 
   // 8. Rendering produces pixels (red bg -> red top-left pixel).
@@ -3695,6 +4079,258 @@ int main() {
   mbLoadURL(v, (host + "/get").c_str());
   const bool hb_ok = mbGetHttpStatus(v) == 200;
 
+  // Draft-navigation regression cases need deterministic endpoints supplied by the local
+  // echo_server.py (public httpbin-compatible hosts do not expose request counters/gates).
+  const bool local_echo = std::getenv("MB_NET_HOST") &&
+                          (host.find("127.0.0.1") != std::string::npos ||
+                           host.find("localhost") != std::string::npos);
+  if (local_echo) {
+    std::string other_origin = host;
+    if (auto p = other_origin.find("127.0.0.1"); p != std::string::npos)
+      other_origin.replace(p, std::strlen("127.0.0.1"), "localhost");
+    else if (auto q = other_origin.find("localhost"); q != std::string::npos)
+      other_origin.replace(q, std::strlen("localhost"), "127.0.0.1");
+
+    // Navigation ids share one process-global cancellation-token namespace.
+    // Canceling a slow navigation in one view must not abort another view's
+    // independently active navigation.
+    mbView* other_view = mbCreateView(240, 160);
+    mbLoadHTML(v, "<body>view-a-baseline</body>", (host + "/").c_str());
+    mbLoadHTML(other_view, "<body>view-b-baseline</body>",
+               (host + "/").c_str());
+    const mbNavigationId view_a_id =
+        mbNavigate(v, (host + "/slow?ms=450&marker=VIEW-A").c_str());
+    const mbNavigationId view_b_id = mbNavigate(
+        other_view, (host + "/slow?ms=120&marker=VIEW-B").c_str());
+    const int view_a_cancelled = mbCancelNavigation(v, view_a_id);
+    mbWaitForFunction(other_view,
+                      "document.body&&document.body.textContent==='VIEW-B'",
+                      2500);
+    const std::string view_a_body =
+        Eval(v, "document.body?document.body.textContent:''");
+    const std::string view_b_body =
+        Eval(other_view, "document.body?document.body.textContent:''");
+    Expect(view_a_id != view_b_id && view_a_cancelled == 1 &&
+               view_a_body == "view-a-baseline" && view_b_body == "VIEW-B",
+           "cross-view navigation ids/cancellation tokens do not collide",
+           "a=" + std::to_string(view_a_id) + " b=" +
+               std::to_string(view_b_id) + " cancel=" +
+               std::to_string(view_a_cancelled) + " bodies=[" + view_a_body +
+               "]/ [" + view_b_body + "]");
+    mbDestroyView(other_view);
+
+    // A server redirect changes the committed URL/origin/base. The final body is served by
+    // the alternate loopback hostname, so location.host must match that hostname rather
+    // than the original redirecting origin.
+    mbLoadHTML(v, "<body>redirect-origin-baseline</body>", (host + "/").c_str());
+    const std::string redirect_url =
+        host + "/redirect-to?status_code=302&url=" + other_origin + "/origin";
+    Eval(v, ("location.href='" + redirect_url + "'").c_str());
+    mbWaitForFunction(v, "document.body&&document.body.id==='origin'", 2500);
+    const std::string redirected_location = Eval(v, "String(location.origin)");
+    const std::string redirected_js_origin =
+        Eval(v, "document.body?document.body.dataset.jsOrigin:''");
+    Expect(redirected_location == other_origin && redirected_js_origin == other_origin,
+           "page redirect commits the final URL/origin (not the original origin)",
+           "location=[" + redirected_location + "] js=[" + redirected_js_origin + "]");
+
+    // The legacy request callback is re-evaluated on EVERY redirect hop. Allow the first
+    // loopback spelling but veto the alternate hostname; the final server must never commit.
+    static int* redirect_hook_calls = new int(0);
+    static std::string* redirect_block_origin = new std::string();
+    *redirect_hook_calls = 0;
+    *redirect_block_origin = other_origin;
+    mbLoadHTML(v, "<body>redirect-policy-baseline</body>", (host + "/").c_str());
+    mbSetRequestCallback(
+        [](const char* url, void*) -> int {
+          ++*redirect_hook_calls;
+          return url && url[0] &&
+                         std::string(url).rfind(*redirect_block_origin, 0) == 0
+                     ? 1
+                     : 0;
+        },
+        nullptr);
+    mbNavigate(v, redirect_url.c_str());
+    mbWait(v, 900);
+    const std::string redirect_policy_body =
+        Eval(v, "document.body?document.body.textContent:''");
+    mbSetRequestCallback(nullptr, nullptr);
+    Expect(*redirect_hook_calls >= 2 &&
+               redirect_policy_body == "redirect-policy-baseline",
+           "async redirect hops re-run request policy before fetching the target",
+           "calls=" + std::to_string(*redirect_hook_calls) + " body=[" +
+               redirect_policy_body + "]");
+
+    // A normal 302 with Content-Length: 0 is a redirect, not an anomalous empty success:
+    // it must be requested exactly once before following.
+    const std::string count_key = "mb-empty-redirect";
+    mbLoadURL(v, (host + "/reset-count?key=" + count_key).c_str());
+    mbLoadURL(v, (host + "/empty-redirect?key=" + count_key + "&url=/origin").c_str());
+    mbLoadURL(v, (host + "/count?key=" + count_key).c_str());
+    const std::string count_body = Eval(v, "document.body?document.body.innerText:''");
+    Expect(count_body.find("\"count\": 1") != std::string::npos ||
+               count_body.find("\"count\":1") != std::string::npos,
+           "bodyless redirect is fetched once (no empty-body retry loop)", count_body);
+
+    // The synchronous host-load path follows redirects independently from the
+    // async navigation engine. It must retain the previous fragment when a
+    // Location header omits one, matching Fetch redirect semantics.
+    mbLoadURL(v, (host + "/redirect-to?status_code=302&url=/origin#kept").c_str());
+    const std::string sync_redirect_hash = Eval(v, "String(location.hash)");
+    Expect(sync_redirect_hash == "#kept",
+           "synchronous redirects retain an omitted fragment",
+           "hash=[" + sync_redirect_hash + "]");
+
+    mbNavigationOptions head_options = {};
+    head_options.struct_size = sizeof(head_options);
+    head_options.method = "HEAD";
+    const mbNavigationId head_id =
+        mbNavigateEx(v, (host + "/head-only").c_str(), &head_options);
+    for (int i = 0; !mbIsLoadFinished(v) && i < 150; ++i)
+      mbWait(v, 10);
+    char head_headers[1024] = {0};
+    mbGetResponseHeaders(v, head_headers, sizeof(head_headers));
+    Expect(head_id != 0 && mbGetHttpStatus(v) == 200 &&
+               std::string(head_headers).find("X-Observed-Method: HEAD") !=
+                   std::string::npos,
+           "mbNavigateEx preserves an explicit HEAD method",
+           "status=" + std::to_string(mbGetHttpStatus(v)) + " headers=[" +
+               head_headers + "]");
+
+    // Mutable-hook headers are request/origin scoped even on transports that
+    // cannot call the main-thread hook again while following redirects.
+    mbSetRequestHook(
+        [](mbRequest* request, void*) {
+          if (std::strstr(mbRequestURL(request), "hook-header"))
+            mbRequestSetHeader(request, "X-Hook-Key", "hook-secret");
+        },
+        nullptr);
+    mbLoadURL(v, (host + "/headers?hook-header=1").c_str());
+    const std::string direct_sync_headers =
+        Eval(v, "document.body?document.body.innerText:''");
+    mbLoadURL(v, (host + "/redirect-to?status_code=302&url=" + other_origin +
+                  "/headers&hook-header=1")
+                     .c_str());
+    const std::string redirected_sync_headers =
+        Eval(v, "document.body?document.body.innerText:''");
+
+    mbLoadHTML(v, "<body>fetch-header-scope</body>", (host + "/").c_str());
+    mbRunJS(v,
+            "window.__directHeaders='pending';"
+            "fetch('/cors-headers?hook-header=1').then(function(r){return r.text();})"
+            ".then(function(t){window.__directHeaders=t;})"
+            ".catch(function(e){window.__directHeaders='error:'+e;});");
+    mbWaitForFunction(v, "window.__directHeaders!=='pending'", 2500);
+    const std::string direct_fetch_headers =
+        Eval(v, "String(window.__directHeaders)");
+    const std::string fetch_redirect_url =
+        host + "/redirect-to?status_code=302&url=" + other_origin +
+        "/cors-headers?final=1&hook-header=1";
+    const std::string fetch_script =
+        "window.__redirectHeaders='pending';fetch('" + fetch_redirect_url +
+        "').then(function(r){return r.text();})"
+        ".then(function(t){window.__redirectHeaders=t;})"
+        ".catch(function(e){window.__redirectHeaders='error:'+e;});";
+    mbRunJS(v, fetch_script.c_str());
+    mbWaitForFunction(v, "window.__redirectHeaders!=='pending'", 2500);
+    const std::string redirected_fetch_headers =
+        Eval(v, "String(window.__redirectHeaders)");
+    mbSetRequestHook(nullptr, nullptr);
+    const bool hook_header_scope_ok =
+        direct_sync_headers.find("hook-secret") != std::string::npos &&
+        redirected_sync_headers.find("hook-secret") == std::string::npos &&
+        direct_fetch_headers.find("hook-secret") != std::string::npos &&
+        redirected_fetch_headers.find("hook-secret") == std::string::npos;
+    Expect(hook_header_scope_ok,
+           "mutable-hook headers do not cross sync or buffered redirect origins",
+           "sync-direct=[" + direct_sync_headers + "] sync-redirect=[" +
+               redirected_sync_headers + "] fetch-direct=[" +
+               direct_fetch_headers + "] fetch-redirect=[" +
+               redirected_fetch_headers + "]");
+
+    // URL-scoped headers are evaluated on every streaming-download hop. Mutable-hook
+    // additions belong to the origin where the hook ran too: an arbitrary credential name
+    // such as X-Hook-Key must not be carried to the alternate origin.
+    struct StreamState {
+      std::string bytes;
+      int finished = 0;
+      int success = 0;
+    } direct, redirected;
+    mbSetRequestHeaderForOrigin(host.c_str(), "X-Stream-Key", "stream-secret");
+    static std::string* stream_hook_origin = new std::string();
+    static int* stream_hook_calls = new int(0);
+    *stream_hook_origin = host;
+    *stream_hook_calls = 0;
+    mbSetRequestHook(
+        [](mbRequest* request, void*) {
+          const std::string url = mbRequestURL(request);
+          if (url.find("-auth") != std::string::npos)
+            ++*stream_hook_calls;
+          if (url.rfind(*stream_hook_origin, 0) == 0 &&
+              url.find("-auth") != std::string::npos) {
+            mbRequestSetHeader(request, "X-Hook-Key", "hook-secret");
+          }
+        },
+        nullptr);
+    auto run_stream = [&](const std::string& url, StreamState* state) {
+      mbOnDownloadStream(
+          v, nullptr,
+          [](mbView*, void* ud, unsigned, const char* bytes, int len,
+             long long, long long) {
+            static_cast<StreamState*>(ud)->bytes.append(bytes,
+                                                        static_cast<size_t>(len));
+          },
+          [](mbView*, void* ud, unsigned, int success) {
+            auto* s = static_cast<StreamState*>(ud);
+            s->success = success;
+            s->finished = 1;
+          },
+          state);
+      const unsigned id = mbDownloadURLStream(v, url.c_str());
+      for (int i = 0; id != 0 && !state->finished && i < 150; ++i)
+        mbWait(v, 10);
+      return id;
+    };
+    const unsigned direct_id = run_stream(host + "/stream-auth", &direct);
+    const unsigned redirected_id = run_stream(
+        host + "/redirect-to?status_code=302&url=" + other_origin + "/stream-auth",
+        &redirected);
+    mbOnDownloadStream(v, nullptr, nullptr, nullptr, nullptr);
+    mbClearRequestHeaders();
+    const bool stream_ok =
+        direct_id != 0 && redirected_id != 0 && direct.success == 1 &&
+        redirected.success == 1 &&
+        direct.bytes.find("key=stream-secret") != std::string::npos &&
+        direct.bytes.find("hook=hook-secret") != std::string::npos &&
+        redirected.bytes.find("key=stream-secret") == std::string::npos &&
+        redirected.bytes.find("hook=hook-secret") == std::string::npos;
+    Expect(stream_ok,
+           "streaming downloads scope registered and hook headers across redirects",
+           "direct=[" + direct.bytes + "] redirect=[" + redirected.bytes + "]");
+
+    // EventSource uses a separate streaming transport. It must enforce the same
+    // mutable-header origin boundary while following a redirect on its worker thread.
+    auto run_sse = [&](const std::string& target) {
+      mbLoadHTML(v, "<body>sse-scope</body>", (host + "/").c_str());
+      const std::string script =
+          "window.__sse='pending';var es=new EventSource('" + target +
+          "');es.onmessage=function(e){window.__sse=e.data;es.close();};"
+          "es.onerror=function(){if(window.__sse==='pending')window.__sse='error';};";
+      mbRunJS(v, script.c_str());
+      mbWaitForFunction(v, "window.__sse!=='pending'", 2500);
+      return Eval(v, "String(window.__sse)");
+    };
+    const std::string direct_sse = run_sse(host + "/sse-auth");
+    const std::string redirected_sse = run_sse(
+        host + "/redirect-to?status_code=302&url=" + other_origin + "/sse-auth");
+    mbSetRequestHook(nullptr, nullptr);
+    Expect(direct_sse == "hook=hook-secret" && redirected_sse == "hook=" &&
+               *stream_hook_calls >= 6,
+           "SSE scopes mutable-hook headers across redirects",
+           "direct=[" + direct_sse + "] redirect=[" + redirected_sse +
+               "] hook_calls=" + std::to_string(*stream_hook_calls));
+  }
+
   // 31r. The response hook exposes the raw RESPONSE HEADERS (mbResponseHeaders) for http
   // loads — so an embedder can read Content-Type / Set-Cookie / rate-limit / custom API
   // headers, not just the body. A page fetch()es the host over http; the response hook
@@ -4420,8 +5056,8 @@ int main() {
   }
 
   // REVIEW-FIX #2. The loader retry predicate must NEVER retry a non-idempotent
-  // method (no duplicate POST/PUT/DELETE) and must NOT treat 204/304/HEAD empty
-  // bodies as failures. Pure function -> deterministic, offline.
+  // method (no duplicate POST/PUT/DELETE) and must NOT treat redirects or
+  // 204/205/304/HEAD empty bodies as failures. Pure function -> deterministic, offline.
   {
     using mb::MbShouldRetryFetch;
     const bool ok =
@@ -4434,14 +5070,18 @@ int main() {
         MbShouldRetryFetch("GET", true, false, 0, true, 1, 3) &&
         MbShouldRetryFetch("", true, false, 0, true, 1, 3) &&  // "" == GET
         MbShouldRetryFetch("GET", false, true, 503, false, 1, 3) &&
-        // empty-2xx anomaly retries on GET, but 204/304/HEAD legit-empty does NOT:
+        // empty-2xx anomaly retries on GET, but redirects and
+        // 204/205/304/HEAD legit-empty responses do NOT:
         MbShouldRetryFetch("GET", false, false, 200, true, 1, 3) &&
+        !MbShouldRetryFetch("GET", false, false, 302, true, 1, 3) &&
         !MbShouldRetryFetch("GET", false, false, 204, true, 1, 3) &&
+        !MbShouldRetryFetch("GET", false, false, 205, true, 1, 3) &&
         !MbShouldRetryFetch("GET", false, false, 304, true, 1, 3) &&
         !MbShouldRetryFetch("HEAD", false, false, 200, true, 1, 3) &&
         // attempts exhausted:
         !MbShouldRetryFetch("GET", true, false, 0, true, 3, 3);
-    Expect(ok, "MbShouldRetryFetch: no write retries; 204/304/HEAD not anomalies (#2)");
+    Expect(ok,
+           "MbShouldRetryFetch: no write retries; redirects/204/205/304/HEAD not anomalies (#2)");
   }
 
   // REG #1. IndexedDB open() with NO version must default to version 1, fire
@@ -5204,15 +5844,184 @@ int main() {
     char ppath[256] = {0};
     mbSessionGetPersistPath(ps, ppath, sizeof(ppath));
     const std::string ppath_s = ppath;
+    char pname[64] = {0};
+    mbSessionGetName(ps, pname, sizeof(pname));
     mbDestroySession(ps);
     mbDestroySession(es);
+    // Persist dir is <persist_path>/<name> (persist_path canonicalized, so /tmp may resolve
+    // to /private/tmp) — the stable documented layout, with the name round-tripping.
+    const bool path_ok =
+        ppath_s.find("mb-smoke-r4-profiles/r4-persistent") != std::string::npos;
+    // Name validation: a non-portable persistent name is REJECTED (no lossy aliasing);
+    // mbCreateSessionEx reports why. Ephemeral sessions accept any name.
+    mbSessionCreateStatus st = MB_SESSION_ERROR;
+    mbSession* bad = mbCreateSessionEx("a/b", "/tmp/mb-smoke-r4-profiles", &st);
+    mbSessionCreateStatus null_st = MB_SESSION_ERROR;
+    mbSession* bad_null =
+        mbCreateSessionEx(nullptr, "/tmp/mb-smoke-r4-profiles", &null_st);
+    mbSessionCreateStatus empty_st = MB_SESSION_ERROR;
+    mbSession* bad_empty =
+        mbCreateSessionEx("", "/tmp/mb-smoke-r4-profiles", &empty_st);
+    mbSessionCreateStatus eph_st = MB_SESSION_ERROR;
+    mbSession* empty_ephemeral = mbCreateSessionEx("", nullptr, &eph_st);
+    const bool reject_ok = bad == nullptr && st == MB_SESSION_INVALID_NAME &&
+                           bad_null == nullptr &&
+                           null_st == MB_SESSION_INVALID_NAME &&
+                           bad_empty == nullptr &&
+                           empty_st == MB_SESSION_INVALID_NAME &&
+                           empty_ephemeral != nullptr && eph_st == MB_SESSION_OK;
+    mbDestroySession(empty_ephemeral);
     Expect(std::string(name) == "r4-ephemeral" && eph == 0 && eplen == 0 &&
-               per == 1 && ppath_s.find("r4-persistent") != std::string::npos &&
-               mbSessionIsPersistent(mbDefaultSession()) == 0,
-           "session introspection getters (name / persistent / persist path)",
+               per == 1 && path_ok && std::string(pname) == "r4-persistent" &&
+               reject_ok && mbSessionIsPersistent(mbDefaultSession()) == 0,
+           "session introspection getters + portable-name validation",
            "name=[" + std::string(name) + "] eph=" + std::to_string(eph) +
-               " per=" + std::to_string(per) + " path=[" + ppath_s + "]");
+               " per=" + std::to_string(per) + " pname=[" + std::string(pname) +
+               "] path=[" + ppath_s + "] reject_st=" + std::to_string(st) +
+               " null=" + std::to_string(null_st) +
+               " empty=" + std::to_string(empty_st));
   }
+
+#if !defined(_WIN32)
+  // (l2) A copied profile directory is a clone, not an alias. Its copied
+  // marker is rebound to the new canonical directory, producing a distinct
+  // in-memory cookie/storage identity while symlink/path aliases still share.
+  {
+    const std::filesystem::path root("/tmp/mb-smoke-session-clone");
+    const std::filesystem::path source_dir = root / "source";
+    const std::filesystem::path clone_dir = root / "clone";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    mbSessionCreateStatus seed_st = MB_SESSION_ERROR;
+    mbSession* seed = mbCreateSessionEx("source", root.string().c_str(), &seed_st);
+    mbDestroySession(seed);
+    std::filesystem::copy(source_dir, clone_dir,
+                          std::filesystem::copy_options::recursive, ec);
+    const std::string copied_token = ReadProfileToken(clone_dir);
+
+    mbSessionCreateStatus source_st = MB_SESSION_ERROR;
+    mbSessionCreateStatus clone_st = MB_SESSION_ERROR;
+    mbSession* source =
+        mbCreateSessionEx("source", root.string().c_str(), &source_st);
+    mbSession* clone =
+        mbCreateSessionEx("clone", root.string().c_str(), &clone_st);
+    mbView* source_view =
+        source ? mbCreateViewInSession(160, 100, source) : nullptr;
+    mbView* clone_view = clone ? mbCreateViewInSession(160, 100, clone) : nullptr;
+    if (source_view)
+      mbSetCookie(source_view, "https://profile-clone.test/", "source_only=1");
+    char clone_cookie[64] = {0};
+    const int clone_cookie_len =
+        clone_view ? mbGetCookie(clone_view, "https://profile-clone.test/",
+                                 "source_only", clone_cookie,
+                                 sizeof(clone_cookie))
+                   : 0;
+    const std::string source_token = ReadProfileToken(source_dir);
+    const std::string rebound_token = ReadProfileToken(clone_dir);
+    if (source_view)
+      mbDestroyView(source_view);
+    if (clone_view)
+      mbDestroyView(clone_view);
+    mbDestroySession(source);
+    mbDestroySession(clone);
+    std::filesystem::remove_all(root, ec);
+    Expect(seed_st == MB_SESSION_OK && !ec && copied_token.size() == 32 &&
+               source_st == MB_SESSION_OK && clone_st == MB_SESSION_OK &&
+               source_token.size() == 32 && rebound_token.size() == 32 &&
+               source_token != rebound_token && copied_token != rebound_token &&
+               clone_cookie_len == -1 && clone_cookie[0] == '\0',
+           "copied persistent profiles rebind identity and remain isolated",
+           "seed=" + std::to_string(seed_st) + " source=" +
+               std::to_string(source_st) + " clone=" +
+               std::to_string(clone_st) + " tokens=[" + source_token + "]/ [" +
+               rebound_token + "] copied=[" + copied_token + "] cookie=[" +
+               clone_cookie + "] cookie_len=" +
+               std::to_string(clone_cookie_len) + " ec=" + ec.message());
+  }
+
+  // (l3) Upgrade an old profile whose partition scopes used the caller's RAW path spelling.
+  // The new session canonicalizes that path; restore must remap the serialized IDB/OPFS
+  // scopes, and the migrated data must survive the session's canonical scoped flush.
+  {
+    const std::filesystem::path root("/tmp/mb-smoke-session-upgrade");
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    const std::string raw_root = (root / "profiles").string() + "/.";
+    const std::filesystem::path profile_dir = root / "profiles" / "legacy";
+    const std::string legacy_id = "p:" + raw_root + "/legacy";
+    const std::string origin = "https://session-migrate.test";
+    const bool fixture_ok =
+        WriteLegacySessionFixtures(profile_dir, legacy_id + "\x1f" + origin);
+
+    auto check_migrated = [&](mbSession* session) {
+      if (!session)
+        return false;
+      mbView* sv = mbCreateViewInSession(240, 160, session);
+      mbLoadHTML(
+          sv,
+          "<body>migration<script>"
+          "window.__idbm='pending';"
+          "var rq=indexedDB.open('legacydb',1);"
+          "rq.onupgradeneeded=function(){window.__idbm='upgrade';};"
+          "rq.onsuccess=function(){if(window.__idbm==='pending')"
+          "window.__idbm='existing';rq.result.close();};"
+          "window.__opm='pending';navigator.storage.getDirectory()"
+          ".then(function(r){return r.getDirectoryHandle('legacydir');})"
+          ".then(function(){window.__opm='existing';})"
+          ".catch(function(e){window.__opm=e.name;});"
+          "</script></body>",
+          origin.c_str());
+      mbWaitForFunction(
+          sv,
+          "window.__idbm!=='pending'&&window.__opm!=='pending'",
+          3000);
+      const bool ok = Eval(sv, "String(window.__idbm)") == "existing" &&
+                      Eval(sv, "String(window.__opm)") == "existing";
+      mbDestroyView(sv);
+      return ok;
+    };
+
+    mbSessionCreateStatus first_st = MB_SESSION_ERROR;
+    mbSession* first = mbCreateSessionEx("legacy", raw_root.c_str(), &first_st);
+    char canonical_buf[1024] = {0};
+    if (first)
+      mbSessionGetPersistPath(first, canonical_buf, sizeof(canonical_buf));
+    const std::string canonical_profile(canonical_buf);
+    const std::string profile_token =
+        ReadProfileToken(std::filesystem::path(canonical_profile));
+    const bool first_ok = first_st == MB_SESSION_OK && check_migrated(first);
+    mbDestroySession(first);  // flushes only the NEW canonical scope back to the files
+
+    const std::string canonical_prefix = "p:" + profile_token + "\x1f";
+    if (profile_token.size() == 32) {
+      mb::MbClearIndexedDBScoped(canonical_prefix);
+      mb::MbClearOPFSScoped(canonical_prefix);
+    }
+    const std::string canonical_root =
+        std::filesystem::path(canonical_profile).parent_path().string();
+    mbSessionCreateStatus second_st = MB_SESSION_ERROR;
+    mbSession* second =
+        mbCreateSessionEx("legacy", canonical_root.c_str(), &second_st);
+    const std::string reopened_token =
+        ReadProfileToken(std::filesystem::path(canonical_profile));
+    const bool reopen_ok = second_st == MB_SESSION_OK && check_migrated(second);
+    mbDestroySession(second);
+    if (profile_token.size() == 32) {
+      mb::MbClearIndexedDBScoped(canonical_prefix);
+      mb::MbClearOPFSScoped(canonical_prefix);
+    }
+    std::filesystem::remove_all(root, ec);
+    Expect(fixture_ok && profile_token.size() == 32 &&
+               reopened_token == profile_token && first_ok && reopen_ok,
+           "session upgrade remaps raw-path IDB/OPFS scopes and persists them",
+           "fixture=" + std::to_string(fixture_ok) +
+               " token=" + std::to_string(profile_token.size()) +
+               " stable=" + std::to_string(reopened_token == profile_token) +
+               " first=" + std::to_string(first_ok) +
+               " reopen=" + std::to_string(reopen_ok) +
+               " path=[" + canonical_profile + "]");
+  }
+#endif
 
   // (m) Child views: with mbOnCreateChildView registered, window.open returns
   // a LIVE window — the engine creates an opener-wired child view, the host

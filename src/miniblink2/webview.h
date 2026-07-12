@@ -82,19 +82,65 @@ typedef struct mbView mbView;
 // Callable BEFORE mbInitialize — a dlopen-ing host verifies what it bound at
 // load time instead of failing at the first missing symbol (or worse, silently
 // running a mismatched pair). Returned strings are static; do not free.
-// Engine (this library) version, e.g. "0.4.0".
-// MB_VERSION is the compile-time string this header shipped with — log both
-// (compiled-against vs loaded) when diagnosing a dlopen'd engine. The numeric
-// components exist for preprocessor checks (#if MB_VERSION_MINOR >= 4).
+//
+// Engine (this library) version, e.g. "0.5.0". MB_VERSION is the compile-time
+// string this header shipped with — log both (compiled-against vs loaded) when
+// diagnosing a dlopen'd engine. It is DERIVED from the numeric components so the
+// string and the #if-checkable numbers (e.g. #if MB_VERSION_MINOR >= 5) can never
+// drift apart — there is one source of truth, not a hand-kept duplicate.
 #define MB_VERSION_MAJOR 0
-#define MB_VERSION_MINOR 4
+#define MB_VERSION_MINOR 5
 #define MB_VERSION_PATCH 0
-#define MB_VERSION "0.4.0"
+#define MB_STRINGIZE_(x) #x
+#define MB_STRINGIZE(x) MB_STRINGIZE_(x)
+#define MB_VERSION                                                       \
+  MB_STRINGIZE(MB_VERSION_MAJOR)                                         \
+  "." MB_STRINGIZE(MB_VERSION_MINOR) "." MB_STRINGIZE(MB_VERSION_PATCH)
 MB_EXPORT const char* mbVersion(void);
-// Header/ABI compatibility number; bumped on any breaking change to this API.
-// A host built against MB_API_VERSION N should refuse an engine reporting < N.
-#define MB_API_VERSION 1
+
+// Compatibility is TWO independent axes, not one overloaded number (the old
+// "refuse an engine reporting < N" rule was wrong in both directions: a NEWER
+// number can mean a BREAKING ABI, and two builds sharing a number can still
+// differ in which symbols exist):
+//   MB_ABI_EPOCH  — bumped on any BREAKING change (a field reordered/removed, a
+//                   signature or semantics changed). Host and engine are
+//                   ABI-compatible ONLY when their epochs are EQUAL. A higher
+//                   epoch is not "more compatible" — it is a different ABI.
+//   MB_API_LEVEL  — bumped on any purely ADDITIVE change (new function/enum/flag).
+//                   Monotonic: an engine of level N provides every symbol a header
+//                   of level <= N declares, so a host needs engine level >= its
+//                   own build level for the symbols it references to resolve.
+#define MB_ABI_EPOCH 1
+// Level 2 adds (purely additively — no existing entry point changed): mbAbiEpoch,
+// mbApiLevel, mbCheckCompat, mbHasFeature, mbOnNavigationStarted, mbSetResponseCallbackEx,
+// mbSessionFlushEx, mbSetRequestHeaderForHost, mbSetRequestHeaderForOrigin, mbNavigate,
+// mbNavigateEx, mbCancelNavigation, mbCreateSessionEx. The epoch stays 1 because nothing
+// breaking changed — old binaries keep working against this engine.
+#define MB_API_LEVEL 2
+MB_EXPORT int mbAbiEpoch(void);
+MB_EXPORT int mbApiLevel(void);
+// Original name for the additive level; kept as an alias so existing callers and
+// the value MB_API_VERSION still compile and mean exactly mbApiLevel().
+#define MB_API_VERSION MB_API_LEVEL
 MB_EXPORT int mbApiVersion(void);
+
+// One-call handshake for a dlopen-ing host: returns 1 iff the loaded engine is
+// safe to use against the header this host compiled with — the SAME ABI epoch AND
+// an API level AT LEAST the host's. Call it right after dlopen with the header's
+// own MB_ABI_EPOCH / MB_API_LEVEL:
+//   if (!mbCheckCompat(MB_ABI_EPOCH, MB_API_LEVEL)) { /* refuse this engine */ }
+// A 0 means refuse rather than risk a mismatched-ABI crash or a missing-symbol
+// failure at the first newer call.
+MB_EXPORT int mbCheckCompat(int abi_epoch, int api_level);
+
+// Feature capability probe. Some symbols exist in every build but only DO
+// something when the engine was compiled with the matching GN flag (e.g.
+// navigator.gpu is always present but returns null without --webgpu). Returns 1
+// if `feature` is compiled into THIS engine, else 0 (also 0 for an unknown name),
+// so a host lights up optional behavior from the actual capability instead of
+// inferring it from a failed call. Recognized names: "webgpu", "wasm", "webrtc".
+MB_EXPORT int mbHasFeature(const char* feature);
+
 // The upstream Chromium the engine embeds, e.g. "150.0.7871.24".
 MB_EXPORT const char* mbChromiumVersion(void);
 
@@ -227,13 +273,38 @@ MB_EXPORT void mbDefer(mbDeferredCallback cb, void* userdata);
 // A session isolates everything origin-keyed (DOM storage, IndexedDB, OPFS,
 // storage buckets, locks; cookies join in stage 2) per profile. Sessions are
 // capability handles: whoever holds the mbSession* controls the profile.
-// persist_path == NULL -> EPHEMERAL (memory only). Non-NULL -> the profile
-// roots at <persist_path>/<name>/ (durability lands in stage 3; the identity
-// and layout are already stable). The mode is fixed for the session's life.
+// persist_path == NULL or empty -> EPHEMERAL (memory only). Otherwise the profile roots at
+// <persist_path>/<name>/. The full profile directory is canonicalized and carries a stable
+// identity marker bound to that directory, so relative, symlink, case, and Unicode-
+// normalization aliases resolve to one profile while a copied directory becomes an
+// independent clone. The mode is fixed for the session's life. For a PERSISTENT profile, `name`
+// must be a portable single path component: NULL/empty, ".",
+// "..", path separators, control chars, the Windows-illegal characters (: * ? " < > |), a
+// trailing dot/space, or a Windows reserved device name (CON/PRN/NUL/COM1.../LPT1...) are
+// REJECTED — mbCreateSession returns NULL (an ephemeral session ignores `name` for storage
+// and accepts anything). Use mbCreateSessionEx for a structured rejection reason.
 typedef struct mbSession mbSession;
 MB_EXPORT mbSession* mbCreateSession(const char* name, const char* persist_path);
-// Safe with views still open: the handle detaches, the profile tears down
-// when the last view bound to it is destroyed.
+// Like mbCreateSession but reports WHY creation failed (API level 2). On failure returns
+// NULL and, if out_status != NULL, writes an mbSessionCreateStatus: MB_SESSION_INVALID_NAME
+// for a non-portable persistent profile name (see mbCreateSession), MB_SESSION_ERROR for
+// engine-not-initialized / other. MB_SESSION_OK (0) on success.
+// Kept int-compatible so both `int*` callers of the draft API and callers using
+// the named status typedef compile. The C ABI remains an int-sized status pointer.
+typedef int mbSessionCreateStatus;
+enum {
+  MB_SESSION_OK = 0,
+  MB_SESSION_INVALID_NAME = 1,
+  MB_SESSION_ERROR = 2
+};
+MB_EXPORT mbSession* mbCreateSessionEx(const char* name, const char* persist_path,
+                                       mbSessionCreateStatus* out_status);
+// Safe with views (or a view-config) still referencing this session: the handle
+// is reference-counted, so mbDestroySession only marks it for teardown. The
+// profile — and this handle — are torn down when the last view and view-config
+// referencing it are destroyed, and until then mbViewGetSession keeps returning a
+// valid handle. After you call mbDestroySession you must not use the handle again
+// yourself (a view may outlive your reference, but that is the engine's to track).
 MB_EXPORT void mbDestroySession(mbSession*);
 // The implicit shared EPHEMERAL profile plain mbCreateView uses. Never
 // destroy it.
@@ -247,9 +318,15 @@ MB_EXPORT mbSession* mbViewGetSession(mbView*);
 // clear it per document via JS if needed (mbClearStorage in automation.h).
 MB_EXPORT void mbSessionClearStorage(mbSession*);
 // Durability barrier: write a PERSISTENT profile cookies/IndexedDB/OPFS
-// under its persist dir now (also happens at final teardown). No-op for
-// ephemeral profiles. localStorage is not persisted (see above).
+// under its persist dir now (also happens at final teardown). localStorage is
+// not persisted (see above). No-op for ephemeral profiles.
 MB_EXPORT void mbSessionFlush(mbSession*);
+// Extended form (API level 2): like mbSessionFlush but returns 1 on success (including
+// the no-op flush of an ephemeral profile — nothing to persist), 0 if the profile
+// directory or any store could not be written (permissions, full disk), so a host can
+// surface a failed save instead of silently losing data. Added alongside — NOT changing —
+// mbSessionFlush's void ABI.
+MB_EXPORT int mbSessionFlushEx(mbSession*);
 // Introspection — a host juggling several handles can ask which is which.
 // mbSessionGetName / mbSessionGetPersistPath write into out (NUL-terminated,
 // truncated to out_cap; size first with out=NULL) and return the full length.
@@ -337,9 +414,41 @@ MB_EXPORT void* mbViewGetIOSurface(mbView*);
 
 // Content entry points.
 //   mbLoadHTML  — render an in-memory document (no network). First render proof.
-//   mbLoadURL   — fetch via libcurl (mb_url_loader) then render.
+//   mbLoadURL   — fetch via libcurl (mb_url_loader) then render (SYNCHRONOUS: blocks the
+//                 calling thread until the fetch completes; simplest for automation).
+//   mbNavigate  — ASYNCHRONOUS navigation (API level 2): returns a navigation id
+//                 immediately and fetches off the main thread, so an interactive host stays
+//                 responsive and can repaint / cancel during a slow load. Prefer it for
+//                 interactive UIs. The main-frame lifecycle is the same: started (mbOn-
+//                 NavigationStarted) -> begin (mbOnBeginLoading, on commit) -> finish
+//                 (mbOnLoadFinish) / fail (mbOnFailLoading). Exactly one finish fires per
+//                 navigation, including on failure, cancellation, supersession, and a
+//                 download-diverted load. Starting a new navigation (mbNavigate OR
+//                 mbLoadURL/mbPostURL) supersedes an in-flight one.
 MB_EXPORT void mbLoadHTML(mbView*, const char* utf8_html, const char* base_url);
 MB_EXPORT void mbLoadURL(mbView*, const char* utf8_url);
+
+typedef uint64_t mbNavigationId;
+MB_EXPORT mbNavigationId mbNavigate(mbView*, const char* utf8_url);
+
+// Async navigation with an explicit method/body (POST etc.) — the non-blocking counterpart
+// of mbPostURL. Set struct_size = sizeof(mbNavigationOptions). `method` NULL means GET (or
+// POST when a body is present); `body`/`body_len` is the request body (may contain NULs);
+// `content_type` is its Content-Type. `opts` NULL behaves like mbNavigate (GET).
+typedef struct mbNavigationOptions {
+  int struct_size;
+  const char* method;       // NULL -> GET, or POST if a body is present
+  const void* body;
+  size_t body_len;
+  const char* content_type;
+} mbNavigationOptions;
+MB_EXPORT mbNavigationId mbNavigateEx(mbView*, const char* utf8_url,
+                                      const mbNavigationOptions* opts);
+// Cancel an in-flight navigation by the id mbNavigate returned: aborts its network I/O
+// promptly and guarantees it never commits (its finish fires with a "cancelled" fail).
+// Returns 1 if `id` was the active navigation and was cancelled, 0 otherwise (already
+// finished / superseded / unknown id).
+MB_EXPORT int mbCancelNavigation(mbView*, mbNavigationId);
 
 // mbLoadHTML with explicit history control. add_to_history=1 behaves exactly
 // like mbLoadHTML (the load appends a back/forward entry). add_to_history=0
@@ -357,6 +466,17 @@ MB_EXPORT void mbLoadHTMLEx(mbView*, const char* utf8_html,
 // load starts), so callers can wait on the real finish instead of a fixed delay.
 typedef void (*mbLoadFinishCallback)(mbView*, void* userdata);
 MB_EXPORT void mbOnLoadFinish(mbView*, mbLoadFinishCallback, void* userdata);
+
+// Fires when a top-level navigation is KICKED OFF — at the very start of
+// mbLoadURL / mbPostURL, BEFORE the (possibly slow) main-resource fetch. This is
+// the "show a spinner now" signal: mbOnBeginLoading only fires once the new
+// document COMMITS (after the fetch returns), which for a slow server is too late
+// to start loading UI. `url` is the REQUESTED URL (pre-redirect), valid only for
+// the duration of the call. Per view. Pair with mbOnBeginLoading (commit) and
+// mbOnLoadFinish (end): started -> begin(commit) -> finish/fail.
+typedef void (*mbNavigationStartedCallback)(mbView*, void* userdata, const char* url);
+MB_EXPORT void mbOnNavigationStarted(mbView*, mbNavigationStartedCallback,
+                                     void* userdata);
 
 // Fires when a MAIN-FRAME navigation commits: the previous document is gone
 // and the new one starts loading subresources. Completes the lifecycle set
@@ -757,6 +877,15 @@ MB_EXPORT void mbSelectPopupCancel(mbView*);
 // fields, precise units, room to grow without another trailing parameter.
 // Set struct_size = sizeof(the struct); it versions the ABI (a newer engine
 // can tell how much of the struct the caller filled).
+//
+// ABI evolution is PREFIX-STABLE: new fields are only ever APPENDED, and the
+// engine accepts any struct at least as large as the prefix it needs, treating
+// fields your (older, smaller) struct doesn't carry as their zero default. So a
+// program built against an older header keeps working against a newer engine —
+// its smaller struct_size is honored, not rejected. (Conversely a newer caller
+// on an older engine is fine too: the engine simply ignores trailing fields it
+// doesn't know.) Always set struct_size = sizeof(the struct) and never reorder
+// or resize existing fields.
 
 #define MB_MOUSE_MOVE 0
 #define MB_MOUSE_DOWN 1
@@ -1125,16 +1254,35 @@ MB_EXPORT void mbRequestPinPublicKey(mbRequest*, const char* pins);
 typedef void (*mbRequestHookCallback)(mbRequest*, void* userdata);
 MB_EXPORT void mbSetRequestHook(mbRequestHookCallback cb, void* userdata);
 
-// Response hook: a process-wide callback invoked after a successful load (fetch / mock /
-// file / data) with an opaque mbResponse handle, BEFORE the body reaches the page — so
-// you can inspect the headers / status or REPLACE the response bytes (inject a script,
-// strip content, rewrite a JSON payload). The handle is valid only for the duration of the
-// callback; query it with mbResponseURL/Status/Headers/Body and replace the body with
-// mbResponseSetBody (which updates the delivered length). Runs on the main thread inside
-// the load. NULL clears it.
+// Response hook: a process-wide callback invoked after a successful load, BEFORE the body
+// reaches the page — so you can inspect the headers / status or REPLACE the response bytes
+// (inject a script, strip content, rewrite a JSON payload). Covers every load kind: the
+// MAIN document of a top-level navigation (mbLoadURL / mbPostURL) and a page-initiated
+// navigation (link click / location= / form submit), as well as subresources, fetch/XHR,
+// worker scripts, mocks, downloads, and file:/data: loads. The handle is valid only for the
+// duration of the callback; query it with mbResponseURL/Status/Headers/Body and replace the
+// body with mbResponseSetBody (which updates the delivered length). Runs on the main thread
+// inside the load. NULL clears it.
+//
+// mbResponseURL is the FINAL URL the bytes came from — i.e. after any server redirects for
+// an http(s) load (the requested URL for mock/file/data). Fires exactly once per load.
+//
+// Covers BUFFERED loads only — where the whole body is in hand before delivery, so it can be
+// inspected/replaced. STREAMING transports (EventSource/SSE, and streaming downloads via
+// mbOnDownloadStream) do NOT invoke it: their bytes are delivered incrementally with no
+// buffered body to rewrite. A host that must rewrite a body uses the buffered path.
+//
 typedef struct mbResponse mbResponse;
 typedef void (*mbResponseCallback)(mbResponse*, void* userdata);
 MB_EXPORT void mbSetResponseCallback(mbResponseCallback cb, void* userdata);
+// Extended form (API level 2): identical to mbSetResponseCallback but the callback also
+// receives the ORIGINATING view so a multi-view host can tell which tab a response belongs
+// to (and reach its session via mbViewGetSession). `view` may be NULL for a load with no
+// owning view (a view-less/background fetch). Added alongside — NOT replacing —
+// mbSetResponseCallback so already-compiled clients keep their (response, userdata) ABI.
+// Setting either callback replaces the other (one hook slot).
+typedef void (*mbResponseCallbackEx)(mbResponse*, mbView* view, void* userdata);
+MB_EXPORT void mbSetResponseCallbackEx(mbResponseCallbackEx cb, void* userdata);
 MB_EXPORT const char* mbResponseURL(mbResponse*);
 MB_EXPORT int mbResponseStatus(mbResponse*);
 // Rewrite the HTTP status the page will see for this response (e.g. force 503 to test a
@@ -1158,9 +1306,15 @@ MB_EXPORT void mbResponseSetBody(mbResponse*, const char* body, int len);
 // Notification hook: a process-wide callback fired when a page DISPLAYS a Notification
 // (new Notification(title, {body, tag, icon})). The embedder gets the notification's
 // fields and can surface it (a native toast / its own UI) — otherwise a page notification
-// is invisible to the host. (Notification.permission is granted, onshow still fires.)
-// Process-wide (the NotificationService is not view-scoped, like mbSetResponseCallback).
-// NULL clears it. `tag`/`icon` may be "" when unset.
+// is invisible to the host.
+//
+// SCOPE (be explicit — this is process-wide by design): the Notification permission is
+// auto-GRANTED for every origin (a headless engine has no permission UI), so onshow always
+// fires and this hook always runs. The callback carries the notification's own fields only,
+// NOT the originating view or origin — the engine's NotificationService is a single
+// process-wide binder, not per-view, so a multi-view host cannot attribute a notification
+// to a specific tab here. If you need per-origin policy, gate inside the page (or don't
+// grant it upstream). NULL clears it. `tag`/`icon` may be "" when unset.
 typedef void (*mbNotificationCallback)(void* userdata, const char* title,
                                        const char* body, const char* tag,
                                        const char* icon);
@@ -1252,13 +1406,47 @@ MB_EXPORT void mbOnRequestMock(mbView*, mbRequestMockCallback, void* userdata);
 MB_EXPORT void mbRewriteUrl(const char* from, const char* to);
 MB_EXPORT void mbClearUrlRewrites(void);
 
-// Per-URL request header injection: add/override the outgoing http(s) header `name:
-// value` for any request whose URL CONTAINS `url_substring` — e.g. send an Authorization
-// or API-key header only to its own host (not leaked to every origin the page touches),
-// or a per-domain User-Agent. Conditional on the URL, unlike the global mbSetExtraHeaders.
-// Register several; mbClearRequestHeaders removes all. Process-wide, applied at the loader.
+// Per-URL request header injection: add/override the outgoing http(s) header `name: value`
+// for any request whose URL CONTAINS `url_substring` — e.g. a per-domain User-Agent, or a
+// header keyed off a path/query marker. Conditional on the URL, unlike the global
+// mbSetExtraHeaders. NOTE: this is a raw SUBSTRING match over the whole URL, so it is a
+// footgun for CREDENTIALS — "api.example.com" also matches
+// "https://evil.test/?next=api.example.com". For an Authorization / API-key header bound to
+// a host, prefer mbSetRequestHeaderForHost. Register several; mbClearRequestHeaders removes
+// all (both kinds). Process-wide, applied at the loader.
 MB_EXPORT void mbSetRequestHeader(const char* url_substring, const char* name,
                                   const char* value);
+
+// Host-scoped request header injection (API level 2). The header rides a request when the
+// request URL's parsed HOST matches `host_filter`, applied PER-HOP on the fetch/XHR/
+// subresource path. `host_filter`:
+//   "api.example.com"       exact host only
+//   ".example.com"          that host or any subdomain (leading dot opts in)
+//   "api.example.com/v2/"   exact host AND request path starts with "/v2/"
+// NOTE: host-only — it does NOT check scheme or port, so http://host and https://host (and
+// any port) all match. It is tighter than the substring form but is NOT a full-origin
+// match; for a CREDENTIAL bound to one origin, prefer mbSetRequestHeaderForOrigin.
+// Non-http(s) URLs (data:/file:/blob:) have no host and never match. On the curl auto-follow
+// path (top-level navigation, SSE) it is withheld, since per-hop scrubbing isn't possible
+// there. Register several; mbClearRequestHeaders removes all. Process-wide.
+MB_EXPORT void mbSetRequestHeaderForHost(const char* host_filter, const char* name,
+                                         const char* value);
+
+// Origin-scoped request header injection (API level 2) — the strict, cross-origin-safe form
+// for credentials (Authorization / X-Api-Key). The header rides a request only when the
+// request URL's full ORIGIN matches: scheme AND host AND effective port. `origin` is
+// "scheme://host[:port][/path/prefix]" — a default port is implied by the scheme, so
+// "https://api.example.com" == "https://api.example.com:443" but != "http://..." and
+// != ":8443". An optional trailing path further narrows it (path-prefix match). Like the
+// host form it is applied PER-HOP and withheld on the curl auto-follow path, so a credential
+// binds to exactly its origin and never rides a cross-origin (or cross-scheme/port)
+// redirect. Register several; mbClearRequestHeaders removes all (all three kinds).
+//
+// Override semantics (all three injection APIs): re-registering the same header name, or an
+// injected header whose name also appears in mbSetExtraHeaders, OVERRIDES (case-insensitive,
+// last-registration-wins) rather than sending a duplicate line.
+MB_EXPORT void mbSetRequestHeaderForOrigin(const char* origin, const char* name,
+                                           const char* value);
 MB_EXPORT void mbClearRequestHeaders(void);
 
 // In-process text clipboard shared with the page (navigator.clipboard / execCommand).

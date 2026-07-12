@@ -307,7 +307,7 @@ static Tab* NewTab(const std::string& url) {
     if (url.empty())
         mbLoadHTML(g_tabs.back().view, kWelcomeHTML, "about:welcome");
     else
-        mbLoadURL(g_tabs.back().view, url.c_str());
+        mbNavigate(g_tabs.back().view, url.c_str());  // async: the UI stays live during load
     return &g_tabs.back();
 }
 
@@ -375,7 +375,7 @@ static const char* BindChangeURL(void*, int argc, const char** argv,
     if (argc > 0 && argv[0]) {
         std::string url = argv[0];
         Defer([url] {
-            if (Tab* t = ActiveTab()) mbLoadURL(t->view, url.c_str());
+            if (Tab* t = ActiveTab()) mbNavigate(t->view, url.c_str());
         });
     }
     return "";

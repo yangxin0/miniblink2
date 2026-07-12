@@ -39,6 +39,7 @@ struct UserAgentMetadata;
 namespace mb {
 
 class MbWebView;  // owner / callback sink
+struct MbNavigationResult;  // async navigation result (mb_url_loader.h)
 
 // Realistic UA Client Hints metadata matching MbDefaultUserAgent() (Chrome 150 /
 // macOS). Shared so document frames and workers report the same brands/platform.
@@ -261,8 +262,22 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // Build the WebNavigationParams (fetch body / srcdoc, policy container,
   // sandbox flags) and commit them into web_frame_. Called synchronously for
   // child frames and via a posted task for the main frame (see BeginNavigation).
-  void DoCommit(std::unique_ptr<blink::WebNavigationInfo> info);
-
+  // A MAIN-frame network navigation fetches ASYNCHRONOUSLY (so the main thread stays
+  // responsive) and commits from OnPageNavComplete; child frames + local schemes commit
+  // synchronously. `generation` is zero for children and the MbWebView-owned
+  // top-level generation for the main frame. FinishCommit is the shared tail.
+  void DoCommit(uint64_t generation,
+                std::unique_ptr<blink::WebNavigationInfo> info);
+  void OnPageNavComplete(uint64_t generation, uint64_t id,
+                         std::unique_ptr<blink::WebNavigationInfo> info,
+                         mb::MbNavigationResult result);
+  void FinishCommit(std::unique_ptr<blink::WebNavigationInfo> info, std::string body,
+                    std::string mime, std::string charset,
+                    const std::string& final_url = std::string());
+  // Derive the document MIME + charset from a fetched Content-Type (defaults text/html,
+  // UTF-8). Shared by the sync and async commit paths.
+  static void DeriveMimeCharset(const std::string& content_type, std::string* mime,
+                                std::string* charset);
   // Record the main frame's just-committed HistoryItem into our session-history
   // list. `is_standard` appends a new entry (truncating any forward entries);
   // otherwise it replaces the current entry (replaceState / reload / initial).

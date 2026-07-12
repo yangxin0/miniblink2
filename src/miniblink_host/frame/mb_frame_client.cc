@@ -229,28 +229,41 @@ void MbFrameClient::BeginNavigation(
     // Child frame: BeginNavigation fires during the parent's parse (not from JS
     // event handling), so committing synchronously is safe — and is what the
     // iframe path has always done.
-    DoCommit(std::move(info));
+    DoCommit(/*generation=*/0, std::move(info));
     return;
   }
   // Main frame: a page-initiated navigation (a link click, location= assignment,
   // or form submit). The *initial* document is committed by MbWebView
-  // (CommitHtml), not here, so only handle real document navigations and leave
-  // about:* / empty alone. Commit on a task rather than synchronously: we are
+  // (CommitHtml), not here, so leave an empty target alone. A page-requested
+  // about:blank is still a real replacement. Commit on a task rather than
+  // synchronously: we are
   // called from inside JS / event handling, where re-entrantly committing a new
   // document is unsafe. This mirrors frame_test_helpers, which also posts it.
   blink::KURL url = info->url_request.Url();
-  if (url.IsEmpty() || url.ProtocolIsAbout())
+  if (url.IsEmpty())
     return;
   // Navigation policy: let the host veto a page-initiated navigation (link click,
   // location= assignment, form submit, JS redirect) before it commits — block
   // popups/redirects/leaving the page. Host-driven loads (MbWebView::LoadURL) don't
   // come through here, so they are never vetoed by this.
-  if (owner_ && !owner_->OnBeginNavigation(url.GetString().Utf8()))
+  if (!owner_)
+    return;
+  const uint64_t observed_generation = owner_->main_navigation_generation_;
+  if (!owner_->OnBeginNavigation(url.GetString().Utf8()))
+    return;
+  // The policy callback is host code and can synchronously navigate or stop.
+  // Its allow decision belongs only to the generation it observed.
+  if (!owner_->IsMainNavigationGenerationCurrent(observed_generation))
+    return;
+  const uint64_t generation = owner_->BeginMainNavigation(
+      url.GetString().Utf8(), /*notify_started=*/true);
+  if (!owner_->IsMainNavigationPending(generation))
     return;
   web_frame_->GetTaskRunner(blink::TaskType::kInternalLoading)
       ->PostTask(FROM_HERE,
                  base::BindOnce(&MbFrameClient::DoCommit,
-                                weak_factory_.GetWeakPtr(), std::move(info)));
+                                weak_factory_.GetWeakPtr(), generation,
+                                std::move(info)));
 }
 
 blink::WebView* MbFrameClient::CreateNewWindow(
@@ -287,86 +300,193 @@ blink::WebView* MbFrameClient::CreateNewWindow(
   return nullptr;
 }
 
-void MbFrameClient::DoCommit(std::unique_ptr<blink::WebNavigationInfo> info) {
+void MbFrameClient::DeriveMimeCharset(const std::string& content_type,
+                                     std::string* mime, std::string* charset) {
+  if (content_type.empty())
+    return;
+  std::string m = content_type.substr(0, content_type.find(';'));
+  while (!m.empty() && m.back() == ' ')
+    m.pop_back();
+  if (!m.empty())
+    *mime = m;
+  // Pull an explicit charset= (authoritative); absent -> keep the caller's default.
+  std::string lc = content_type;
+  for (char& c : lc)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  if (auto p = lc.find("charset="); p != std::string::npos) {
+    p += 8;
+    std::string::size_type end = content_type.find_first_of("; \t", p);
+    std::string cs = content_type.substr(p, end == std::string::npos ? end : end - p);
+    if (!cs.empty())
+      *charset = cs;
+  }
+}
+
+void MbFrameClient::DoCommit(
+    uint64_t generation,
+    std::unique_ptr<blink::WebNavigationInfo> info) {
   if (!web_frame_)
     return;
-  auto params = blink::WebNavigationParams::CreateFromInfo(*info);
-  blink::KURL url = info->url_request.Url();
-  std::string body;  // CommitNavigation requires a body_loader (even for srcdoc)
-  std::string mime = "text/html";
-  // Child-frame charset: default UTF-8 (srcdoc body is extracted as UTF-8; safe for the
-  // common case), but honor an explicit charset= from the fetched Content-Type so a
-  // non-UTF-8 iframe (Shift-JIS, GBK, ...) decodes correctly instead of mojibake.
-  std::string charset = "UTF-8";
+  if (!self_owned_ &&
+      (!owner_ || !owner_->IsMainNavigationPending(generation))) {
+    return;  // superseded/stopped while the posted task was queued
+  }
+  const blink::KURL url = info->url_request.Url();
+  // srcdoc: body from the owner element (no fetch) -> commit synchronously.
   if (url.IsAboutSrcdocUrl()) {
-    params->fallback_base_url = info->requestor_base_url;
-    // The srcdoc text lives on the owner element, not in WebNavigationInfo.
+    std::string body;
     auto* impl = blink::To<blink::WebLocalFrameImpl>(web_frame_);
     if (blink::LocalFrame* lf = impl->GetFrame()) {
-      if (lf->Owner()) {
+      if (lf->Owner())
         body = blink::To<blink::HTMLFrameOwnerElement>(lf->Owner())
                    ->FastGetAttribute(blink::html_names::kSrcdocAttr)
                    .Utf8();
-      }
     }
-  } else if (!url.IsEmpty() && !url.ProtocolIsAbout()) {
-    // src=file/http/data, link click, location=, or form submit: fetch the body
-    // via the same loader subresources use. For an HTTP POST (form submission)
-    // pull the request body + content-type off the navigation and POST them.
-    std::string content_type;
-    std::string post_body, post_ct;
-    if (info->url_request.HttpMethod().Utf8() == "POST") {
-      blink::WebHTTPBody http_body = info->url_request.HttpBody();
-      if (!http_body.IsNull()) {
-        for (size_t i = 0; i < http_body.ElementCount(); ++i) {
-          blink::WebHTTPBody::Element el;
-          if (http_body.ElementAt(i, el) &&
-              el.type == blink::HTTPBodyElementType::kTypeData) {
-            std::vector<uint8_t> bytes = el.data.Copy();
-            post_body.append(reinterpret_cast<const char*>(bytes.data()),
-                             bytes.size());
-          }
+    if (!self_owned_ &&
+        !owner_->PrepareMainNavigationCommit(generation, /*status=*/0,
+                                             std::string()))
+      return;
+    FinishCommit(std::move(info), std::move(body), "text/html", "UTF-8");
+    return;
+  }
+  // about:blank / empty: commit an empty document (no fetch).
+  if (url.IsEmpty() || url.ProtocolIsAbout()) {
+    if (!self_owned_ &&
+        !owner_->PrepareMainNavigationCommit(generation, /*status=*/0,
+                                             std::string()))
+      return;
+    FinishCommit(std::move(info), std::string(), "text/html", "UTF-8");
+    return;
+  }
+  // A real resource (file/http/data/mock/custom). Extract the exact method + POST body.
+  std::string method = info->url_request.HttpMethod().Utf8();
+  std::string post_body, post_ct;
+  if (method == "POST") {
+    blink::WebHTTPBody http_body = info->url_request.HttpBody();
+    if (!http_body.IsNull()) {
+      for (size_t i = 0; i < http_body.ElementCount(); ++i) {
+        blink::WebHTTPBody::Element el;
+        if (http_body.ElementAt(i, el) &&
+            el.type == blink::HTTPBodyElementType::kTypeData) {
+          std::vector<uint8_t> bytes = el.data.Copy();
+          post_body.append(reinterpret_cast<const char*>(bytes.data()), bytes.size());
         }
       }
-      post_ct = info->url_request.HttpContentType().Utf8();
     }
-    // Honor a registered mock (mbMockResponse) for a page navigation too — consistent
-    // with subresource/fetch interception — so a navigation can be served offline.
-    std::string mock_body, mock_ct;
-    int mock_status = 0;
-    if (MbFindMock(url.GetString().Utf8(), &mock_body, &mock_ct, &mock_status,
-                   owner_)) {
-      body = std::move(mock_body);
-      content_type = mock_ct;
-    } else {
-      MbFetchUrl(url.GetString().Utf8(), &body, &content_type, user_agent_,
-                 extra_headers_, post_body, post_ct, /*http_method=*/"",
-                 /*out_final_url=*/nullptr, /*out_status=*/nullptr,
-                 /*out_headers=*/nullptr, /*out_error=*/nullptr,
-                 /*out_error_code=*/nullptr, owner_);
-    }
-    if (!content_type.empty()) {
-      std::string m = content_type.substr(0, content_type.find(';'));
-      while (!m.empty() && m.back() == ' ')
-        m.pop_back();
-      if (!m.empty())
-        mime = m;
-      // Pull an explicit charset= off the Content-Type (authoritative). Absent ->
-      // keep UTF-8 (no regression for the existing UTF-8/data: iframe cases).
-      std::string lc = content_type;
-      for (char& c : lc)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-      if (auto p = lc.find("charset="); p != std::string::npos) {
-        p += 8;
-        std::string::size_type end = content_type.find_first_of("; \t", p);
-        std::string cs = content_type.substr(
-            p, end == std::string::npos ? end : end - p);
-        if (!cs.empty())
-          charset = cs;
-      }
-    }
+    post_ct = info->url_request.HttpContentType().Utf8();
   }
-  // (about:blank / empty children commit an empty document — correct.)
+  // CHILD frames commit SYNCHRONOUSLY: BeginNavigation fires during the parent's parse (not
+  // from JS event handling), so a blocking fetch is safe and is what iframes have always
+  // done. Only the MAIN frame — where a blocking fetch would freeze an interactive host —
+  // fetches ASYNCHRONOUSLY and commits from the posted OnPageNavComplete.
+  if (self_owned_) {
+    std::string body, content_type, final_url;
+    const bool ok = MbFetchUrl(url.GetString().Utf8(), &body, &content_type, user_agent_,
+                               extra_headers_, post_body, post_ct, method,
+                               &final_url, /*out_status=*/nullptr,
+                               /*out_headers=*/nullptr, /*out_error=*/nullptr,
+                               /*out_error_code=*/nullptr, owner_);
+    if (!ok && body.empty()) {
+      body =
+          "<!doctype html><meta charset=utf-8><title>Navigation failed</title>"
+          "<body></body>";
+      content_type = "text/html; charset=utf-8";
+    }
+    std::string mime = "text/html", charset = "UTF-8";
+    DeriveMimeCharset(content_type, &mime, &charset);
+    FinishCommit(std::move(info), std::move(body), mime, charset, final_url);
+    return;
+  }
+  // MAIN frame: async fetch via the shared navigation engine (which handles mocks/rewrites/
+  // the block+mutate hook). The fetch is attached to the view-wide generation
+  // reserved in BeginNavigation, so every newer top-level navigation wins.
+  mb::MbNavigationRequest req;
+  req.id = mb::MbNextNavigationId();
+  req.url = url.GetString().Utf8();
+  req.method = method;  // preserve the exact method (even an empty-body POST)
+  req.body = post_body;
+  req.content_type = post_ct;
+  req.user_agent = user_agent_;
+  req.extra_headers = extra_headers_;
+  req.host_ctx = owner_;
+  const uint64_t id = req.id;
+  if (!owner_->AttachMainNavigationFetch(generation, id,
+                                         /*api_cancellable=*/false))
+    return;
+  auto info_sp =
+      std::make_shared<std::unique_ptr<blink::WebNavigationInfo>>(std::move(info));
+  base::WeakPtr<MbFrameClient> weak = weak_factory_.GetWeakPtr();
+  mb::MbStartNavigation(
+      std::move(req),
+      base::BindOnce(
+          [](base::WeakPtr<MbFrameClient> self, uint64_t generation,
+             uint64_t nav_id,
+             std::shared_ptr<std::unique_ptr<blink::WebNavigationInfo>> info_ref,
+             mb::MbNavigationResult result) {
+            if (self)
+              self->OnPageNavComplete(generation, nav_id,
+                                      std::move(*info_ref), std::move(result));
+          },
+          weak, generation, id, info_sp));
+}
+
+void MbFrameClient::OnPageNavComplete(uint64_t generation,
+                                      uint64_t id,
+                                      std::unique_ptr<blink::WebNavigationInfo> info,
+                                      mb::MbNavigationResult result) {
+  if (!web_frame_ || !owner_ ||
+      !owner_->IsMainNavigationPending(generation) ||
+      !owner_->pending_main_navigation_->fetch_id ||
+      *owner_->pending_main_navigation_->fetch_id != id)
+    return;  // frame gone, or a newer host/page navigation owns the view
+
+  const std::string requested = info->url_request.Url().GetString().Utf8();
+  const std::string visible =
+      result.final_url.empty() ? requested : result.final_url;
+  if (!result.ok) {
+    owner_->FailMainNavigation(
+        generation, visible, result.status, std::move(result.headers),
+        std::move(result.error_domain), result.error_code,
+        std::move(result.error));
+    return;
+  }
+
+  // Keep the generation pending while host response code runs. If that hook
+  // navigates or stops, its newer generation wins and this result is discarded.
+  MbInvokeResponseHook(owner_, visible, &result.status, &result.headers,
+                       &result.body);
+  if (!owner_->IsMainNavigationPending(generation) ||
+      !owner_->pending_main_navigation_->fetch_id ||
+      *owner_->pending_main_navigation_->fetch_id != id)
+    return;
+  const int stored_status = result.local_response ? 0 : result.status;
+  std::string stored_headers = result.local_response
+                                   ? std::string()
+                                   : std::move(result.headers);
+  if (!owner_->PrepareMainNavigationCommit(generation, stored_status,
+                                           std::move(stored_headers)))
+    return;
+  std::string mime = "text/html", charset = "UTF-8";
+  DeriveMimeCharset(result.content_type, &mime, &charset);
+  FinishCommit(std::move(info), std::move(result.body), mime, charset, visible);
+}
+
+void MbFrameClient::FinishCommit(std::unique_ptr<blink::WebNavigationInfo> info,
+                                 std::string body, std::string mime,
+                                 std::string charset,
+                                 const std::string& final_url) {
+  if (!web_frame_)
+    return;
+  auto params = blink::WebNavigationParams::CreateFromInfo(*info);
+  const blink::KURL requested_url = info->url_request.Url();
+  const blink::KURL commit_url = final_url.empty()
+                                     ? requested_url
+                                     : blink::KURL(final_url.c_str());
+  // CreateFromInfo retains the requested URL. A followed redirect must commit
+  // the final hop so document.URL, origin, relative URLs, and history agree.
+  params->url = blink::WebURL(commit_url);
+  if (requested_url.IsAboutSrcdocUrl())
+    params->fallback_base_url = info->requestor_base_url;
   blink::WebNavigationParams::FillStaticResponse(
       params.get(), blink::WebString::FromUtf8(mime),
       blink::WebString::FromUtf8(charset),
@@ -384,7 +504,7 @@ void MbFrameClient::DoCommit(std::unique_ptr<blink::WebNavigationInfo> info) {
        network::mojom::WebSandboxFlags::kOrigin) !=
       network::mojom::WebSandboxFlags::kNone) {
     params->origin_to_commit =
-        blink::SecurityOrigin::Create(url)->DeriveNewOpaqueOrigin();
+        blink::SecurityOrigin::Create(commit_url)->DeriveNewOpaqueOrigin();
   }
   // Third-party storage partitioning: compute the child frame's StorageKey so a
   // cross-site iframe gets a top-level-site-partitioned key (matching the
@@ -397,7 +517,7 @@ void MbFrameClient::DoCommit(std::unique_ptr<blink::WebNavigationInfo> info) {
        network::mojom::WebSandboxFlags::kOrigin) !=
       network::mojom::WebSandboxFlags::kNone;
   if (web_frame_ && web_frame_->Parent() && !opaque_sandbox) {
-    url::Origin child_origin = blink::WebSecurityOrigin::Create(url);
+    url::Origin child_origin = blink::WebSecurityOrigin::Create(commit_url);
     blink::WebFrame* top = web_frame_->Top();
     url::Origin top_origin =
         top ? url::Origin(top->GetSecurityOrigin()) : child_origin;
@@ -609,6 +729,15 @@ void MbFrameClient::GoToHistoryTarget(int target, bool has_user_gesture) {
   blink::LocalFrame* frame = impl ? impl->GetFrame() : nullptr;
   if (!frame || !frame->Loader().GetDocumentLoader())
     return;
+  // A history command is a later top-level navigation decision. It must
+  // invalidate a queued/fetching page or host async navigation before moving
+  // the current document's history cursor.
+  if (owner_) {
+    const uint64_t generation = owner_->SupersedePendingMainNavigation(
+        "superseded by history traversal", /*notify_failure=*/true);
+    if (!owner_->IsMainNavigationGenerationCurrent(generation))
+      return;  // cancellation callback started something newer
+  }
   // Try a same-document traversal first: this restores the entry's state object
   // and fires popstate (the whole point of page-driven back/forward in an SPA).
   // blink returns Ok if the target really is same-document; otherwise it signals

@@ -41,6 +41,14 @@ bool MbSaveOPFS(const std::string& path);
 // MERGES per scope, so it restores a per-session file in place);
 // ClearScoped erases matching roots.
 bool MbSaveOPFSScoped(const std::string& path, const std::string& scope_prefix);
+// Restore a dedicated profile snapshot while replacing its serialized legacy
+// session prefix with `scope_prefix` before merging. Parsing/re-keying is
+// transactional; malformed scopes, mixed source profiles, or collisions leave
+// the live roots untouched. `rekeyed` reports whether a backup is needed before
+// the migrated snapshot is rewritten.
+bool MbLoadOPFSScoped(const std::string& path,
+                      const std::string& scope_prefix,
+                      bool* rekeyed);
 void MbClearOPFSScoped(const std::string& scope_prefix);
 bool MbLoadOPFS(const std::string& path);
 

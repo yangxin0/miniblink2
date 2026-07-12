@@ -43,11 +43,15 @@ MB_EXPORT int mbWaitForVisibleSelector(mbView*, const char* css_selector,
 MB_EXPORT int mbWaitForSelectorHidden(mbView*, const char* css_selector,
                                       int timeout_ms);
 
-// Wait until no new subresource request has been recorded for `idle_ms`
-// (Puppeteer's networkidle) — let an SPA's deferred fetches (XHR/fetch, lazy
-// images) settle before scraping/capturing. Returns 1 once the network is quiet,
-// 0 if `timeout_ms` elapses while still busy. Reads the process-wide request log,
-// so clear it (mbClearRequestLog) before the navigation to scope it to this page.
+// Wait until THIS view has had nothing in flight and no newly-started request for
+// `idle_ms` (Puppeteer's networkidle0) — let an SPA's deferred fetches (XHR/fetch,
+// lazy images) settle before scraping/capturing. Returns 1 once the network is
+// quiet, 0 if `timeout_ms` elapses while still busy. The signal is PER-VIEW: it
+// tracks this view's outstanding request count and a monotonic start count, so
+// another view's traffic can't disturb the wait and a still-running request keeps
+// it busy — no mbClearRequestLog step is needed to scope it (that was a workaround
+// for the old process-wide log, which also went falsely idle once its buffer
+// filled). mbClearRequestLog/mbGetRequestLog remain as a separate diagnostic.
 MB_EXPORT int mbWaitForNetworkIdle(mbView*, int idle_ms, int timeout_ms);
 
 // Runaway-script guard. A single-process embedder shares the main thread with the
@@ -175,7 +179,12 @@ MB_EXPORT void mbEmulateMediaType(mbView*, const char* media_type);
 MB_EXPORT void mbSetVisibility(mbView*, int visible);
 
 // Override the timezone for Date and Intl (an IANA id, e.g. "America/New_York"),
-// so time-dependent UIs render deterministically. Process-global.
+// so time-dependent UIs render deterministically. SCOPE: PROCESS-GLOBAL, despite the
+// mbView* argument — it sets ICU's default timezone (and redetects it in the shared V8
+// isolate), which every view shares, so the last call wins for ALL views. The mbView*
+// selects nothing; it is kept only for call-site symmetry with the other per-view
+// automation setters. Pass any live view. There is no per-view timezone (one process,
+// one ICU default).
 MB_EXPORT void mbSetTimezone(mbView*, const char* iana_tz);
 
 // Scroll the layout viewport to an ABSOLUTE offset (x, y) in CSS px
