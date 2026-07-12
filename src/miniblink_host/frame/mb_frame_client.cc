@@ -117,6 +117,8 @@ MbFrameClient::~MbFrameClient() {
 
 void MbFrameClient::SetFrame(blink::WebLocalFrame* frame) {
   web_frame_ = frame;
+  if (web_frame_)
+    MbSetFrameToken(frame_key_, web_frame_->GetLocalFrameToken());
   // Main frame only: route page-driven history.back()/forward()/go() (which
   // blink sends to LocalFrameHost.GoToEntryAtOffset) back to this client on the
   // current (main/blink) thread, where GoToHistoryOffset replays the entry.
@@ -137,6 +139,14 @@ void MbFrameClient::SetFrame(blink::WebLocalFrame* frame) {
   MbSetRequestCloseHandler(
       frame_key_, base::BindRepeating(&MbFrameClient::OnRequestClose,
                                       weak_factory_.GetWeakPtr()));
+}
+
+void MbFrameClient::Bind(blink::WebLocalFrame* frame,
+                         std::unique_ptr<MbFrameClient> self_owned) {
+  web_frame_ = frame;
+  if (web_frame_)
+    MbSetFrameToken(frame_key_, web_frame_->GetLocalFrameToken());
+  self_owned_ = std::move(self_owned);
 }
 
 void MbFrameClient::OnRequestClose() {
@@ -409,6 +419,7 @@ void MbFrameClient::DoCommit(
   req.user_agent = user_agent_;
   req.extra_headers = extra_headers_;
   req.host_ctx = owner_;
+  req.view_context = owner_->loader_view_context();
   const uint64_t id = req.id;
   if (!owner_->AttachMainNavigationFetch(generation, id,
                                          /*api_cancellable=*/false))
@@ -453,6 +464,9 @@ void MbFrameClient::OnPageNavComplete(uint64_t generation,
 
   // Keep the generation pending while host response code runs. If that hook
   // navigates or stops, its newer generation wins and this result is discarded.
+  owner_->pending_main_navigation_->current_url = visible;
+  owner_->pending_main_navigation_->http_status =
+      result.local_response ? 0 : result.status;
   MbInvokeResponseHook(owner_, visible, &result.status, &result.headers,
                        &result.body);
   if (!owner_->IsMainNavigationPending(generation) ||
@@ -734,7 +748,8 @@ void MbFrameClient::GoToHistoryTarget(int target, bool has_user_gesture) {
   // the current document's history cursor.
   if (owner_) {
     const uint64_t generation = owner_->SupersedePendingMainNavigation(
-        "superseded by history traversal", /*notify_failure=*/true);
+        "superseded by history traversal", /*notify_failure=*/true,
+        MbWebView::NavigationOutcome::kSuperseded);
     if (!owner_->IsMainNavigationGenerationCurrent(generation))
       return;  // cancellation callback started something newer
   }
@@ -829,7 +844,8 @@ std::unique_ptr<blink::URLLoader> MbFrameClient::CreateURLLoaderForTesting() {
   // network identity is consistent across the document and its subresources.
   return std::make_unique<MbURLLoader>(
       user_agent_.empty() ? MbDefaultUserAgent() : user_agent_, extra_headers_,
-      owner_);
+      owner_ ? owner_->loader_view_context()
+             : scoped_refptr<MbLoaderViewContext>());
 }
 
 std::unique_ptr<blink::WebMediaPlayer> MbFrameClient::CreateMediaPlayer(
@@ -879,7 +895,9 @@ MbFrameClient::CreateWorkerFetchContext(
     top_origin = web_frame_->GetSecurityOrigin().ToString().Utf8();
   return base::MakeRefCounted<MbWorkerFetchContext>(
       user_agent_.empty() ? MbDefaultUserAgent() : user_agent_, extra_headers_,
-      std::move(top_origin));
+      std::move(top_origin),
+      owner_ ? owner_->loader_view_context()
+             : scoped_refptr<MbLoaderViewContext>());
 }
 
 blink::WebString MbFrameClient::UserAgentOverride() {

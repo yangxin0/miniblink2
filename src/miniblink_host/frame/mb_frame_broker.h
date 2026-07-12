@@ -47,6 +47,11 @@ std::string MbGetClipboardText();
 void MbSetClipboardHandler(std::function<std::string()> read,
                            std::function<void(const std::string&)> write);
 
+// Clear the page-visible document.cookie / Cookie Store mirror for one profile.
+// The HTTP jar is cleared separately by MbClearCookieJar. Safe to call from the
+// engine thread; mutation is queued onto the broker's service thread.
+void MbClearPageCookieStoreForSession(const std::string& session_key);
+
 }  // namespace mb
 
 #endif  // MINIBLINK_HOST_FRAME_MB_FRAME_BROKER_H_

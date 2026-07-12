@@ -12,18 +12,25 @@
 #include <memory>
 #include <string>
 
+#include "base/memory/scoped_refptr.h"
 #include "third_party/blink/public/common/loader/worker_main_script_load_parameters.h"
 
 namespace mb {
 
+class MbLoaderViewContext;
+
 // Fetch `url` and build the worker main-script load parameters. Returns nullptr if the
 // fetch fails (the caller should then report a script-load failure to blink). On success,
 // a delivery object is spawned that streams the bytes and self-destructs when consumed.
-// `host_ctx` (the creating document's MbWebView, may be null) scopes the fetch to that
-// view's per-view request-mock hook and session cookie jar; null falls back to the
-// process-wide hook and default jar.
+// `view_context` retains the creating view's session and engine runner across nested
+// workers. The whole interception/fetch/response-hook phase runs synchronously on that
+// engine runner even when a nested worker requests its script from a worker thread.
 std::unique_ptr<blink::WorkerMainScriptLoadParameters> MakeWorkerMainScriptParams(
-    const std::string& url, const void* host_ctx = nullptr);
+    const std::string& url,
+    scoped_refptr<MbLoaderViewContext> view_context = nullptr);
+
+// The MbWorkerScriptWaiterCountForTesting rendezvous diagnostic this TU
+// defines is declared in test/mb_test_seams.h (included by the .cc).
 
 }  // namespace mb
 

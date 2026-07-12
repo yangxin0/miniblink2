@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "base/functional/callback.h"
+#include "base/memory/scoped_refptr.h"
 #include "ui/gfx/geometry/rect.h"
 
 class SkCanvas;  // global scope (skia is not namespaced)
@@ -62,6 +63,7 @@ bool MbIsLiveView(MbWebView* view);
 class MbDamageTracker;   // dirty-rect diffing (mb_damage_tracker.h)
 class MbDevToolsBridge;
 class MbDownloadStream;  // streaming download transport (mb_url_loader.h)
+class MbLoaderViewContext;  // stable loader/worker attribution (mb_url_loader.h)
 struct MbNavigationResult;  // async navigation result (mb_url_loader.h)
 class MbSession;
 class MbSelectPopupClient;   // reply channel for a surfaced <select> popup
@@ -79,9 +81,12 @@ class MbWebView {
   // `compositing_override`: -1 uses the SetCompositingEnabled process latch
   // (legacy); 0/1 forces this view's widget non-compositing/compositing — the
   // per-view creation-config path (mbCreateViewWithConfig, item 36).
+  // `session` is bound before Blink creates the Page or any frame/worker. Null
+  // selects Default(); an opener child always inherits its opener's session.
   static std::unique_ptr<MbWebView> Create(int width, int height,
                                            MbWebView* opener = nullptr,
-                                           int compositing_override = -1);
+                                           int compositing_override = -1,
+                                           MbSession* session = nullptr);
   ~MbWebView();
 
   // Opt-in: when enabled, the NEXT Create() attaches its widget COMPOSITING (blink
@@ -556,13 +561,42 @@ class MbWebView {
   // it finished and fire the fail + finish callbacks so a caller awaiting completion
   // isn't stuck. `failed_url` is the ATTEMPTED target — never GetURL(), which on a
   // pre-commit failure still holds the PREVIOUS committed document.
-  void NotifyLoadFailed(const std::string& failed_url);
+  void NotifyLoadFailed(const std::string& failed_url,
+                        const std::string& error_domain,
+                        int error_code,
+                        const std::string& error);
   // Classify a fetch failure into last_error_domain_ from last_error_/last_error_code_
   // (blocked / curl / network), with a generic message if none was set. Shared by the
   // GET (LoadURL) and POST (PostURL) paths so both report the real cause consistently.
   void ClassifyFetchFailure();
   // Register a callback fired on each main-frame load finish. Pass {} to clear.
   void SetLoadFinishCallback(std::function<void()> cb);
+  enum class NavigationPhase {
+    kStarted = 0,
+    kCommitted = 1,
+    kTerminal = 2,
+  };
+  enum class NavigationOutcome {
+    kNone = 0,
+    kSuccess = 1,
+    kFailure = 2,
+    kCancelled = 3,
+    kSuperseded = 4,
+    kDownload = 5,
+  };
+  struct NavigationEventData {
+    uint64_t navigation_id = 0;
+    NavigationPhase phase = NavigationPhase::kStarted;
+    NavigationOutcome outcome = NavigationOutcome::kNone;
+    std::string requested_url;
+    std::string url;
+    int http_status = 0;
+    std::string error_domain;
+    int error_code = 0;
+    std::string description;
+  };
+  using NavigationEventFn = std::function<void(const NavigationEventData&)>;
+  void SetNavigationEventCallback(NavigationEventFn cb);
   // Embedder lifecycle callbacks (see mbOnBeginLoading / mbOnFailLoading).
   // Navigation START (mbOnNavigationStarted): fires when a top-level navigation is
   // KICKED OFF — before the (possibly slow) main-resource fetch — so a host can show
@@ -812,10 +846,11 @@ class MbWebView {
   // or hidden (display:none / visibility:hidden / opacity:0). The "wait for the
   // loading spinner to disappear" primitive. True once gone/hidden, else timeout.
   bool WaitForSelectorHidden(const char* css, int timeout_ms);
-  // Wait until no new subresource request has been recorded for idle_ms
-  // (Puppeteer networkidle) — for SPAs that fetch after the initial load. True
-  // once idle, false at timeout_ms. Reads the process-wide request log.
+  // API-level-1 compatibility behavior: wait until the process-wide diagnostic
+  // request-log count stops changing for idle_ms.
   bool WaitForNetworkIdle(int idle_ms, int timeout_ms);
+  // Robust per-view networkidle0 used by mbWaitForNetworkIdleEx.
+  bool WaitForNetworkIdleEx(int idle_ms, int timeout_ms);
   // settle=true: one-shot screenshot (full lifecycle settle). settle=false: fast
   // interactive paint (wkePaint) — single lifecycle update + paint, no task-queue drain.
   bool PaintToBitmap(void* out_bgra, int w, int h, int stride, bool settle = true);
@@ -847,11 +882,14 @@ class MbWebView {
   // callback and views on different refresh rates advance on their own
   // cadence. <= 0 clears the override (global time, then wall clock).
   void SetFrameTime(double seconds) { frame_time_ = seconds > 0 ? seconds : 0; }
-  // The session (storage profile) this view lives in; Default() unless
-  // SetSession replaced it BEFORE the first navigation commits (storage keys
-  // are computed at commit). The view holds a ref for its lifetime.
+  // The session (storage profile) this view lives in; the factory binds the
+  // requested profile (or Default()) before Blink creates the Page. There is
+  // deliberately no runtime setter: existing frame/worker identities retain
+  // the immutable creation-time partition. The view holds a ref for its lifetime.
   MbSession* session() const { return session_; }
-  void SetSession(MbSession* session);
+  const scoped_refptr<MbLoaderViewContext>& loader_view_context() const {
+    return loader_view_context_;
+  }
   bool SavePng(const char* path, int w, int h);  // render + encode PNG to disk
   // Render the full view to a w×h PNG held in memory (encoded_png_) — for
   // embedders that want the bytes (serve over HTTP, store in a DB) without a temp
@@ -878,7 +916,12 @@ class MbWebView {
  private:
   friend class MbFrameClient;
 
-  MbWebView();
+  explicit MbWebView(MbSession* session);
+  // Called exactly once by Create(), immediately after WebView::Create and
+  // before the main frame exists. Keeping both namespaces here makes it
+  // impossible for a factory caller to select a session without also installing
+  // the matching renderer-side localStorage cache partition.
+  void InstallStorageNamespacesForBoundSession();
   // Fetch a URL's bytes through the engine network stack + interception layer (no
   // document commit) — the shared core of host-initiated (DownloadURL, to disk)
   // and page-initiated (OnPageDownloadFetch, to the callback) downloads. Returns
@@ -899,17 +942,25 @@ class MbWebView {
   struct PendingMainNavigation {
     uint64_t generation = 0;
     std::string url;
+    std::string current_url;
+    // Public id returned by mbNavigate*. Other navigation sources keep this 0
+    // even if their internal reactor fetch has its own cancellation id.
+    uint64_t navigation_id = 0;
     std::optional<uint64_t> fetch_id;
     bool api_cancellable = false;
+    int http_status = 0;
     // Kept pending through CommitNavigation so an old document's DidFinishLoad
     // cannot finish a newer pre-commit navigation. The new document's finish
     // consumes the committed generation.
     bool committed = false;
   };
   uint64_t BeginMainNavigation(const std::string& url,
-                               bool notify_started);
+                               bool notify_started,
+                               uint64_t navigation_id = 0,
+                               bool api_cancellable = false);
   uint64_t SupersedePendingMainNavigation(const std::string& error,
-                                          bool notify_failure);
+                                          bool notify_failure,
+                                          NavigationOutcome outcome);
   bool IsMainNavigationGenerationCurrent(uint64_t generation) const {
     return main_navigation_generation_ == generation;
   }
@@ -926,7 +977,16 @@ class MbWebView {
                           std::string error_domain, int error_code,
                           std::string error);
   bool FinishMainNavigationWithoutCommit(uint64_t generation, int status,
-                                         std::string headers);
+                                         std::string headers,
+                                         const std::string& final_url);
+  void EmitNavigationEvent(const PendingMainNavigation& navigation,
+                           NavigationPhase phase,
+                           NavigationOutcome outcome,
+                           const std::string& url,
+                           int http_status,
+                           const std::string& error_domain = std::string(),
+                           int error_code = 0,
+                           const std::string& description = std::string());
   // Run `body` inside a scheduler task (so subsystems that require task bracketing
   // — e.g. CanvasPerformanceMonitor around canvas draws — are satisfied), blocking
   // until it has executed. Host-driven JS must run here, not via a bare synchronous
@@ -1042,9 +1102,10 @@ class MbWebView {
   std::function<void(bool)> devtools_paused_cb_;  // debugger paused/resumed
   std::function<void(const MbSelectPopupData&)> select_popup_cb_;
   std::unique_ptr<MbSelectPopupClient> select_popup_client_;  // pending popup
-  MbSession* session_ = nullptr;  // never null after construction
+  MbSession* const session_;  // immutable and never null after construction
   std::string user_stylesheet_;  // injected per commit; empty = none
   std::function<void(const std::string&)> on_nav_started_;  // fired at navigation kickoff
+  NavigationEventFn on_navigation_event_;  // structured id-correlated lifecycle
   std::function<void(const std::string&)> on_begin_loading_;
   std::function<void(const std::string&, const std::string&)> on_fail_loading_;
   std::function<void(const std::string&, const std::string&, int,
@@ -1080,6 +1141,9 @@ class MbWebView {
   };
   std::map<unsigned, StreamingDownload> downloads_;
   unsigned next_download_id_ = 0;
+  // Shared by frame + worker subresource factories. Worker loaders retain this token,
+  // never the MbWebView itself; the destructor invalidates it before tearing Blink down.
+  scoped_refptr<MbLoaderViewContext> loader_view_context_;
   // Expiry guard for cross-thread/posted download callbacks: they hold a weak_ptr
   // and no-op once the view is gone (the streams' worker threads can outlive us).
   std::shared_ptr<int> alive_token_ = std::make_shared<int>(0);

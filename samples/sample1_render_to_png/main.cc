@@ -23,7 +23,7 @@ int main(int argc, const char** argv) {
 
   std::printf("loading %s ...\n", url);
   mbLoadURL(view, url);                       // pumps until the `load` event
-  mbWaitForNetworkIdle(view, 500, 10000);     // late subresources/fonts settle
+  mbWaitForNetworkIdleEx(view, 500, 10000);   // this view's late resources/fonts settle
 
   // One-shot capture (mbSavePng settles the lifecycle before painting; the
   // interactive path would use mbRepaintToBitmap instead — see webview.h).

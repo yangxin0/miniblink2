@@ -8,6 +8,7 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/unguessable_token.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
@@ -102,9 +103,9 @@ class MbSwPolicyContainerHost : public blink::mojom::blink::PolicyContainerHost 
 
 class MbSharedWorkerInstance;
 
-// Process-wide registry of live shared workers, keyed by url|name|type. A SharedWorker is
-// shared across all documents that request the same key — the whole point of the API. All
-// access is on the main thread (the connector runs there), so no lock is needed.
+// Process-wide registry of live shared workers, keyed by session|url|name|type. A
+// SharedWorker is shared inside one storage/session partition, never across profiles.
+// All access is on the main thread (the connector runs there), so no lock is needed.
 std::map<std::string, MbSharedWorkerInstance*>& SwRegistry() {
   static auto* m = new std::map<std::string, MbSharedWorkerInstance*>();
   return *m;
@@ -122,8 +123,17 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
   // main-script fetch and the session prefix of the storage partition.
   bool Start(const blink::mojom::blink::SharedWorkerInfoPtr& info,
              MbWebView* view) {
-    auto params =
-        MakeWorkerMainScriptParams(info->url.GetString().Utf8(), view);
+    scoped_refptr<MbLoaderViewContext> owner_context =
+        view ? view->loader_view_context() : nullptr;
+    loader_view_context_ = owner_context
+                               ? base::MakeRefCounted<MbLoaderViewContext>(
+                                     std::move(owner_context))
+                               : base::MakeRefCounted<MbLoaderViewContext>(
+                                     nullptr,
+                                     base::SingleThreadTaskRunner::GetCurrentDefault(),
+                                     std::string());
+    auto params = MakeWorkerMainScriptParams(info->url.GetString().Utf8(),
+                                             loader_view_context_);
     if (!params)
       return false;
 
@@ -139,8 +149,8 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
     // BroadcastChannel wildcard (see mb_dedicated_worker_host.cc).
     worker_frame_key_ = MbAllocWorkerFrameKey();
     std::string scope = origin.ToString().Utf8();
-    if (view && view->session() && scope != "null")
-      scope = view->session()->id() + "\x1f" + scope;
+    if (!loader_view_context_->session_key().empty() && scope != "null")
+      scope = loader_view_context_->session_key() + "\x1f" + scope;
     MbSetFrameOrigin(worker_frame_key_, scope);
 
     mojo::PendingRemote<blink::mojom::WorkerContentSettingsProxy> content_settings;
@@ -152,7 +162,8 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
                                 host.InitWithNewPipeAndPassReceiver());
 
     auto fetch_context = base::MakeRefCounted<MbWorkerFetchContext>(
-        MbDefaultUserAgent(), std::string(), origin.ToString().Utf8());
+        MbDefaultUserAgent(), std::string(), origin.ToString().Utf8(),
+        loader_view_context_);
 
     worker_ = blink::WebSharedWorker::CreateAndStart(
         blink::SharedWorkerToken(), blink::WebURL(info->url),
@@ -182,9 +193,12 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
   void AddClient(
       mojo::PendingRemote<blink::mojom::blink::SharedWorkerClient> client,
       blink::mojom::blink::SharedWorkerCreationContextType ctx_type,
-      blink::MessagePortDescriptor message_port) {
+      blink::MessagePortDescriptor message_port,
+      scoped_refptr<MbLoaderViewContext> client_view_context) {
     mojo::Remote<blink::mojom::blink::SharedWorkerClient> c(std::move(client));
     c->OnCreated(ctx_type);
+    if (client_view_context)
+      loader_view_context_->AddActivityContext(client_view_context);
     worker_->Connect(next_connection_id_++, std::move(message_port));
     c->OnConnected({});
     // Track the client so we can EVICT the worker when the last one disconnects
@@ -192,7 +206,10 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
     // a SharedWorker. RemoteSet removes the entry + calls OnClientGone on drop.
     clients_.set_disconnect_handler(base::BindRepeating(
         &MbSharedWorkerInstance::OnClientGone, base::Unretained(this)));
-    clients_.Add(std::move(c));  // keep the page client alive
+    const mojo::RemoteSetElementId id =
+        clients_.Add(std::move(c));  // keep the page client alive
+    if (client_view_context)
+      client_view_contexts_[id] = std::move(client_view_context);
   }
 
   // A page client disconnected (already removed from the set). If it was the
@@ -200,7 +217,12 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
   // WorkerContextDestroyed) so a concurrent new SharedWorker(sameUrl) Connect can't
   // reuse this dying instance — its AddClient would be lost when WorkerContextDestroyed
   // deletes us. A fresh instance is created instead.
-  void OnClientGone(mojo::RemoteSetElementId /*id*/) {
+  void OnClientGone(mojo::RemoteSetElementId id) {
+    auto context_it = client_view_contexts_.find(id);
+    if (context_it != client_view_contexts_.end()) {
+      loader_view_context_->RemoveActivityContext(context_it->second.get());
+      client_view_contexts_.erase(context_it);
+    }
     if (clients_.empty() && worker_ && !terminating_) {
       terminating_ = true;
       auto& reg = SwRegistry();
@@ -229,6 +251,9 @@ class MbSharedWorkerInstance final : public blink::WebSharedWorkerClient {
   MbSwPolicyContainerHost policy_host_;  // must outlive the worker (bound remote)
   std::unique_ptr<blink::WebSharedWorker> worker_;
   mojo::RemoteSet<blink::mojom::blink::SharedWorkerClient> clients_;
+  scoped_refptr<MbLoaderViewContext> loader_view_context_;
+  std::map<mojo::RemoteSetElementId, scoped_refptr<MbLoaderViewContext>>
+      client_view_contexts_;
   int next_connection_id_ = 0;
   uint64_t worker_frame_key_ = 0;  // this worker's origin-map key (0 = unset)
   bool terminating_ = false;  // last client gone; deregistered, awaiting destruction
@@ -247,9 +272,19 @@ class MbSharedWorkerConnector
       blink::MessagePortDescriptor message_port,
       mojo::PendingRemote<blink::mojom::blink::BlobURLToken> /*blob_url_token*/)
       override {
-    // The key identifies a SHARED worker: same url+name+type -> same instance.
+    MbWebView* view = MbViewForFrameKey(frame_key_);
+    const scoped_refptr<MbLoaderViewContext> client_view_context =
+        view ? view->loader_view_context() : nullptr;
+    const std::string session_key =
+        client_view_context ? client_view_context->session_key() : std::string();
+    // A null view means the frame disappeared while its broker request was being posted
+    // from the service sequence. Its empty key cannot attach that teardown-only client
+    // to a live session-partitioned worker; at most it creates a short-lived unscoped
+    // instance whose root loader context intentionally has no host callback attribution.
+    // The key identifies a SHARED worker inside one session partition.
     const std::string key =
-        info->url.GetString().Utf8() + "\n" + info->options->name.Utf8() + "\n" +
+        session_key + "\n" + info->url.GetString().Utf8() + "\n" +
+        info->options->name.Utf8() + "\n" +
         base::NumberToString(static_cast<int>(info->options->type));
     auto& reg = SwRegistry();
     auto it = reg.find(key);
@@ -261,7 +296,7 @@ class MbSharedWorkerConnector
       // Scope the one-time main-script fetch to the creating frame's view (its
       // per-view mock hook + session cookie jar); null when the view is gone
       // or the key is unknown -> process-wide fallback.
-      if (!inst->Start(info, MbViewForFrameKey(frame_key_))) {
+      if (!inst->Start(info, view)) {
         mojo::Remote<blink::mojom::blink::SharedWorkerClient> c(std::move(client));
         c->OnCreated(creation_context_type);
         c->OnScriptLoadFailed("shared worker script failed to load");
@@ -271,7 +306,7 @@ class MbSharedWorkerConnector
       reg[key] = inst;  // instance self-deregisters on WorkerContextDestroyed
     }
     inst->AddClient(std::move(client), creation_context_type,
-                    std::move(message_port));
+                    std::move(message_port), client_view_context);
   }
 
  private:

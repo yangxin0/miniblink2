@@ -1,0 +1,171 @@
+diff --git a/third_party/blink/renderer/modules/storage/storage_namespace.cc b/third_party/blink/renderer/modules/storage/storage_namespace.cc
+index f097dc8..c3cff84 100644
+--- a/third_party/blink/renderer/modules/storage/storage_namespace.cc
++++ b/third_party/blink/renderer/modules/storage/storage_namespace.cc
+@@ -26,6 +26,8 @@
+ #include "third_party/blink/renderer/modules/storage/storage_namespace.h"
+ 
+ #include <memory>
++#include <string>
++#include <string_view>
+ 
+ #include "base/feature_list.h"
+ #include "base/memory/ptr_util.h"
+@@ -36,6 +38,7 @@
+ #include "third_party/blink/public/platform/platform.h"
+ #include "third_party/blink/public/platform/web_security_origin.h"
+ #include "third_party/blink/renderer/core/frame/local_dom_window.h"
++#include "third_party/blink/renderer/core/frame/local_frame.h"
+ #include "third_party/blink/renderer/modules/storage/cached_storage_area.h"
+ #include "third_party/blink/renderer/modules/storage/inspector_dom_storage_agent.h"
+ #include "third_party/blink/renderer/modules/storage/storage_area.h"
+@@ -70,6 +73,16 @@ void StorageNamespace::ProvideSessionStorageNamespaceTo(
+   ProvideTo(page, ss_namespace);
+ }
+
++// static
++void StorageNamespace::SetLocalStorageCachePartitionFor(
++    Page& page,
++    const String& partition) {
++  StorageNamespace* session_namespace = StorageNamespace::From(&page);
++  if (!session_namespace || !session_namespace->IsSessionStorage())
++    return;
++  session_namespace->local_storage_cache_partition_ = partition;
++}
++
+ scoped_refptr<CachedStorageArea> StorageNamespace::GetCachedArea(
+     LocalDOMWindow* local_dom_window,
+     mojo::PendingRemote<mojom::blink::StorageArea> storage_area,
+@@ -93,11 +106,47 @@ scoped_refptr<CachedStorageArea> StorageNamespace::GetCachedArea(
+     storage_key =
+         BlinkStorageKey::CreateFirstParty(storage_key.GetSecurityOrigin());
+   }
+-  auto cache_it = cached_areas_.find(&storage_key);
+-  if (cache_it != cached_areas_.end()) {
+-    metric = cache_it->value->HasOneRef() ? CacheMetrics::kHit
+-                                          : CacheMetrics::kUnused;
+-    result = cache_it->value;
++  String local_cache_key;
++  if (IsSessionStorage()) {
++    auto cache_it = cached_areas_.find(&storage_key);
++    if (cache_it != cached_areas_.end()) {
++      metric = cache_it->value->HasOneRef() ? CacheMetrics::kHit
++                                            : CacheMetrics::kUnused;
++      result = cache_it->value;
++    }
++  } else {
++    // The renderer's localStorage namespace is process-global. Miniblink's
++    // backing store is profile-scoped, so the frontend cache must use the
++    // calling Page's profile partition as well as its StorageKey. Pages in
++    // one profile deliberately reuse the same CachedStorageArea, preserving
++    // localStorage's synchronous same-profile consistency. A page that has
++    // not supplied a partition falls back to its frame token: isolation is
++    // safer than accidentally sharing an unscoped cache.
++    String partition;
++    if (LocalFrame* frame = local_dom_window->GetFrame()) {
++      if (Page* page = frame->GetPage()) {
++        if (StorageNamespace* session_namespace = StorageNamespace::From(page))
++          partition = session_namespace->local_storage_cache_partition_;
++      }
++    }
++    std::string partition_utf8 = partition.Utf8();
++    if (partition_utf8.empty()) {
++      partition_utf8 =
++          "frame:" + local_dom_window->GetLocalFrameToken().ToString();
++    }
++    const std::string storage_key_utf8 = storage_key.ToDebugString().Utf8();
++    std::string key = std::to_string(partition_utf8.size()) + ":" +
++                      partition_utf8 + std::to_string(storage_key_utf8.size()) +
++                      ":" + storage_key_utf8;
++    key += context == StorageContext::kStandard ? ":standard"
++                                                : ":storage-access";
++    local_cache_key = String::FromUtf8(std::string_view(key));
++    auto cache_it = local_cached_areas_.find(local_cache_key);
++    if (cache_it != local_cached_areas_.end()) {
++      metric = cache_it->value->HasOneRef() ? CacheMetrics::kHit
++                                            : CacheMetrics::kUnused;
++      result = cache_it->value;
++    }
+   }
+   if (IsSessionStorage()) {
+     base::UmaHistogramEnumeration("Storage.SessionStorage.RendererAreaCacheHit",
+@@ -115,8 +164,12 @@ scoped_refptr<CachedStorageArea> StorageNamespace::GetCachedArea(
+                          : CachedStorageArea::AreaType::kLocalStorage,
+       storage_key, local_dom_window, this,
+       /*is_session_storage_for_prerendering=*/false, std::move(storage_area));
+-  cached_areas_.insert(std::make_unique<const BlinkStorageKey>(storage_key),
+-                       result);
++  if (IsSessionStorage()) {
++    cached_areas_.insert(std::make_unique<const BlinkStorageKey>(storage_key),
++                         result);
++  } else {
++    local_cached_areas_.insert(local_cache_key, result);
++  }
+   return result;
+ }
+
+@@ -184,16 +237,25 @@ size_t StorageNamespace::TotalCacheSize() const {
+   size_t total = 0;
+   for (const auto& it : cached_areas_)
+     total += it.value->quota_used();
++  for (const auto& it : local_cached_areas_)
++    total += it.value->quota_used();
+   return total;
+ }
+ 
+ void StorageNamespace::CleanUpUnusedAreas() {
+   Vector<const BlinkStorageKey*, 16> to_remove;
++  Vector<String, 16> local_to_remove;
+   for (const auto& area : cached_areas_) {
+     if (area.value->HasOneRef())
+       to_remove.push_back(area.key.get());
+   }
++  for (const auto& area : local_cached_areas_) {
++    if (area.value->HasOneRef())
++      local_to_remove.push_back(area.key);
++  }
+   cached_areas_.RemoveAll(to_remove);
++  for (const String& key : local_to_remove)
++    local_cached_areas_.erase(key);
+ }
+
+ void StorageNamespace::AddInspectorStorageAgent(
+@@ -241,6 +303,8 @@ void StorageNamespace::BindStorageArea(
+ void StorageNamespace::ResetStorageAreaAndNamespaceConnections() {
+   for (const auto& area : cached_areas_)
+     area.value->ResetConnection();
++  for (const auto& area : local_cached_areas_)
++    area.value->ResetConnection();
+   namespace_.reset();
+ }
+
+diff --git a/third_party/blink/renderer/modules/storage/storage_namespace.h b/third_party/blink/renderer/modules/storage/storage_namespace.h
+index 470fc8a..3126f87 100644
+--- a/third_party/blink/renderer/modules/storage/storage_namespace.h
++++ b/third_party/blink/renderer/modules/storage/storage_namespace.h
+@@ -72,6 +72,10 @@ class MODULES_EXPORT StorageNamespace final
+   static void ProvideSessionStorageNamespaceTo(
+       Page&,
+       const SessionStorageNamespaceId&);
++  // Sets the profile identity used by the process-global localStorage
++  // frontend cache for callers belonging to `page`.
++  static void SetLocalStorageCachePartitionFor(Page&,
++                                               const String& partition);
+   static StorageNamespace* From(Page* page) {
+     return Supplement<Page>::From<StorageNamespace>(page);
+   }
+@@ -145,6 +149,14 @@ class MODULES_EXPORT StorageNamespace final
+           scoped_refptr<CachedStorageArea>,
+           BlinkStorageKeyHashTraits>
+       cached_areas_;
++  // Local storage uses a process-global namespace, but miniblink's backend is
++  // profile-scoped. This map keys its renderer-side areas by profile partition
++  // as well as StorageKey, so one profile stays synchronous without sharing
++  // cached values with another profile.
++  HashMap<String, scoped_refptr<CachedStorageArea>> local_cached_areas_;
++  // Set only on the per-Page session namespace. The process-global local
++  // namespace reads it from the calling window's Page in GetCachedArea().
++  String local_storage_cache_partition_;
+ };
+ 
+ }  // namespace blink

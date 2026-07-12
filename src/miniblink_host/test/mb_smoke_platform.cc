@@ -1,10 +1,62 @@
 // mb_smoke_platform — split from the mb_smoke monolith: cookies, screenshots,
 // scraping/selectors, storage, history, blob, forms, validation, PNG encode.
 #include "miniblink_host/test/mb_smoke_harness.h"
+#include "miniblink_host/test/mb_test_seams.h"
+
+#include <chrono>
+
+#include "base/files/file_util.h"
+#include "base/files/scoped_temp_dir.h"
+#include "net/base/filename_util.h"
+#include "url/gurl.h"
 
 using mbsmoke::Eval;
 using mbsmoke::EvalIso;
 using mbsmoke::Expect;
+
+namespace {
+
+struct DestroyNavigationProbe {
+  mbView* expected_view = nullptr;
+  mbNavigationId started_id = 0;
+  int started = 0;
+  int committed = 0;
+  int terminal = 0;
+  int malformed = 0;
+  int callbacks_during_or_after_teardown = 0;
+  bool teardown_started = false;
+};
+
+void RecordDestroyNavigationEvent(mbView* view,
+                                  void* userdata,
+                                  const mbNavigationEvent* event) {
+  auto* probe = static_cast<DestroyNavigationProbe*>(userdata);
+  if (!probe || !event)
+    return;
+  if (probe->teardown_started)
+    ++probe->callbacks_during_or_after_teardown;
+  if (view != probe->expected_view ||
+      event->struct_size != static_cast<int>(sizeof(mbNavigationEvent))) {
+    ++probe->malformed;
+  }
+  switch (event->phase) {
+    case MB_NAVIGATION_PHASE_STARTED:
+      ++probe->started;
+      probe->started_id = event->navigation_id;
+      break;
+    case MB_NAVIGATION_PHASE_COMMITTED:
+      ++probe->committed;
+      break;
+    case MB_NAVIGATION_PHASE_TERMINAL:
+      ++probe->terminal;
+      break;
+    default:
+      ++probe->malformed;
+      break;
+  }
+}
+
+}  // namespace
 
 static void RunCases(mbView* v, int W, int H) {
   // 87. Cookie session round-trip: mbSetCookie injects into the HTTP jar and
@@ -701,6 +753,363 @@ static void RunCases(mbView* v, int W, int H) {
                " session=" + Eval(v, "String(sessionStorage.length)"));
   }
 
+  // 102b6b. Browsing profiles partition every page-visible storage surface at
+  // the same origin. localStorage and both cookie APIs must not cross sessions;
+  // cookieStore writes must land in the owning session's HTTP jar; listeners in
+  // session A must not receive session B's changes. Clearing A leaves B intact.
+  {
+    mbSession* session_a = mbCreateSession("storage-isolation-a", nullptr);
+    mbSession* session_b = mbCreateSession("storage-isolation-b", nullptr);
+    mbView* a = session_a ? mbCreateViewInSession(240, 160, session_a) : nullptr;
+    mbView* b = session_b ? mbCreateViewInSession(240, 160, session_b) : nullptr;
+    bool isolated = false;
+    bool clear_scoped = false;
+    std::string detail = "setup failed";
+    if (a && b) {
+      const char* origin = "https://profile-storage.test/";
+      mbLoadHTML(a, "<body>a</body>", origin);
+      mbLoadHTML(b, "<body>b</body>", origin);
+      mbRunJS(a,
+              "localStorage.setItem('ls','A');"
+              "sessionStorage.setItem('ss','A');"
+              "document.cookie='doc=A';"
+              "window.__isoEvents=0;window.__isoReady='';"
+              "if(!window.cookieStore){window.__isoReady='noapi';}else{"
+              "cookieStore.set('cs','A').then(function(){"
+              "cookieStore.addEventListener('change',function(){window.__isoEvents++;});"
+              "window.__isoReady='ok';"
+              "}).catch(function(e){window.__isoReady='err:'+e.name;});}");
+      mbWaitForFunction(a, "window.__isoReady!==''", 2000);
+      mbWait(a, 30);  // let AddChangeListener bind before B writes
+
+      const std::string b_before = Eval(
+          b,
+          "(localStorage.getItem('ls')===null?'null':localStorage.getItem('ls'))+','+"
+          "(sessionStorage.getItem('ss')===null?'null':sessionStorage.getItem('ss'))+','+"
+          "(document.cookie.indexOf('doc=A')<0?'clean':'leaked')");
+      mbRunJS(b,
+              "localStorage.setItem('ls','B');"
+              "sessionStorage.setItem('ss','B');"
+              "document.cookie='doc=B';"
+              "window.__isoReady='';"
+              "cookieStore.set('cs','B').then(function(){window.__isoReady='ok';})"
+              ".catch(function(e){window.__isoReady='err:'+e.name;});");
+      mbWaitForFunction(b, "window.__isoReady!==''", 2000);
+      // Positive control instead of a fixed silence window: A's own probe write
+      // must reach A's listener, and change events are delivered in dispatch
+      // order — so once the probe event has arrived, a leaked event from B's
+      // earlier write would already have arrived too. Exactly ONE event
+      // therefore means "listener live, no cross-profile leak", with no
+      // wall-clock sensitivity.
+      mbRunJS(a, "cookieStore.set('probe','P').catch(function(){});");
+      mbWaitForFunction(a, "window.__isoEvents>=1", 2000);
+
+      char jar_a[16] = {0};
+      char jar_b[16] = {0};
+      const bool jar_a_ok =
+          mbGetCookie(a, origin, "cs", jar_a, sizeof(jar_a)) == 1 &&
+          std::string(jar_a) == "A";
+      const bool jar_b_ok =
+          mbGetCookie(b, origin, "cs", jar_b, sizeof(jar_b)) == 1 &&
+          std::string(jar_b) == "B";
+      const std::string a_after = Eval(
+          a,
+          "localStorage.getItem('ls')+','+sessionStorage.getItem('ss')+','+"
+          "(document.cookie.indexOf('doc=A')>=0)+','+String(window.__isoEvents)");
+      const std::string b_after = Eval(
+          b,
+          "localStorage.getItem('ls')+','+sessionStorage.getItem('ss')+','+"
+          "(document.cookie.indexOf('doc=B')>=0)");
+      // Exactly 1 event: A's own probe (positive control). A leaked event from
+      // B's earlier writes would have been dispatched first, making it >= 2.
+      isolated = Eval(a, "window.__isoReady") == "ok" &&
+                 Eval(b, "window.__isoReady") == "ok" &&
+                 b_before == "null,null,clean" &&
+                 a_after == "A,A,true,1" && b_after == "B,B,true" &&
+                 jar_a_ok && jar_b_ok;
+
+      mbSessionClearStorage(session_a);
+      mbWait(a, 80);
+      mbWait(b, 20);
+      char cleared_a[16] = {0};
+      char kept_b[16] = {0};
+      const bool jar_a_cleared =
+          mbGetCookie(a, origin, "cs", cleared_a, sizeof(cleared_a)) == -1;
+      const bool jar_b_kept =
+          mbGetCookie(b, origin, "cs", kept_b, sizeof(kept_b)) == 1 &&
+          std::string(kept_b) == "B";
+      const std::string a_cleared = Eval(
+          a,
+          "(localStorage.getItem('ls')===null)+','+"
+          "(document.cookie.indexOf('doc=A')<0&&document.cookie.indexOf('cs=A')<0)");
+      const std::string b_kept = Eval(
+          b,
+          "localStorage.getItem('ls')+','+"
+          "(document.cookie.indexOf('doc=B')>=0&&document.cookie.indexOf('cs=B')>=0)");
+      clear_scoped = a_cleared == "true,true" && b_kept == "B,true" &&
+                     jar_a_cleared && jar_b_kept;
+      detail = "before=[" + b_before + "] a=[" + a_after + "] b=[" +
+               b_after + "] jars=[" + jar_a + "/" + jar_b +
+               "] clear=[" + a_cleared + "/" + b_kept + "]";
+    }
+    Expect(isolated,
+           "two sessions isolate local/sessionStorage, cookies, Cookie Store + listeners",
+           detail);
+    Expect(clear_scoped,
+           "mbSessionClearStorage clears only that session's DOM/cookie state",
+           detail);
+    if (a)
+      mbDestroyView(a);
+    if (b)
+      mbDestroyView(b);
+    if (session_a)
+      mbDestroySession(session_a);
+    if (session_b)
+      mbDestroySession(session_b);
+  }
+
+  // 102b6b2. An ephemeral profile name is descriptive, not an identity key:
+  // two legacy mbCreateSession calls with the same name must still create two
+  // independent in-memory profiles. Exercise both Blink-visible localStorage /
+  // document.cookie and the host-facing HTTP cookie jar at one origin.
+  {
+    static constexpr char kSessionName[] = "same-name-ephemeral";
+    mbSession* session_a = mbCreateSession(kSessionName, nullptr);
+    mbSession* session_b = mbCreateSession(kSessionName, nullptr);
+    mbView* a = session_a ? mbCreateViewInSession(240, 160, session_a) : nullptr;
+    mbView* b = session_b ? mbCreateViewInSession(240, 160, session_b) : nullptr;
+    bool metadata_ok = false;
+    bool isolated = false;
+    std::string detail = "setup failed";
+    if (a && b) {
+      char name_a[64] = {0};
+      char name_b[64] = {0};
+      char path_a[8] = {0};
+      char path_b[8] = {0};
+      metadata_ok = session_a != session_b &&
+                    mbViewGetSession(a) == session_a &&
+                    mbViewGetSession(b) == session_b &&
+                    mbSessionIsPersistent(session_a) == 0 &&
+                    mbSessionIsPersistent(session_b) == 0 &&
+                    mbSessionGetName(session_a, name_a, sizeof(name_a)) ==
+                        static_cast<int>(sizeof(kSessionName) - 1) &&
+                    mbSessionGetName(session_b, name_b, sizeof(name_b)) ==
+                        static_cast<int>(sizeof(kSessionName) - 1) &&
+                    std::string(name_a) == kSessionName &&
+                    std::string(name_b) == kSessionName &&
+                    mbSessionGetPersistPath(session_a, path_a,
+                                            sizeof(path_a)) == 0 &&
+                    mbSessionGetPersistPath(session_b, path_b,
+                                            sizeof(path_b)) == 0;
+
+      const char* origin = "https://same-name-ephemeral.test/";
+      mbLoadHTML(a, "<body>a</body>", origin);
+      mbLoadHTML(b, "<body>b</body>", origin);
+      mbRunJS(a,
+              "localStorage.setItem('same-name-key','A');"
+              "document.cookie='same_name_doc=A; Path=/';");
+      mbSetCookie(a, origin, "same_name_jar=A; Path=/");
+
+      char b_jar_before[16] = {0};
+      const bool b_jar_clean =
+          mbGetCookie(b, origin, "same_name_jar", b_jar_before,
+                      sizeof(b_jar_before)) == -1;
+      const std::string b_before = Eval(
+          b,
+          "(localStorage.getItem('same-name-key')===null?'null':'leaked')+','+"
+          "(document.cookie.indexOf('same_name_doc=A')<0&&"
+          "document.cookie.indexOf('same_name_jar=A')<0?'clean':'leaked')");
+
+      mbRunJS(b,
+              "localStorage.setItem('same-name-key','B');"
+              "document.cookie='same_name_doc=B; Path=/';");
+      mbSetCookie(b, origin, "same_name_jar=B; Path=/");
+
+      char jar_a[16] = {0};
+      char jar_b[16] = {0};
+      const bool jars_scoped =
+          mbGetCookie(a, origin, "same_name_jar", jar_a, sizeof(jar_a)) == 1 &&
+          std::string(jar_a) == "A" &&
+          mbGetCookie(b, origin, "same_name_jar", jar_b, sizeof(jar_b)) == 1 &&
+          std::string(jar_b) == "B";
+      const std::string a_after = Eval(
+          a,
+          "localStorage.getItem('same-name-key')+','+"
+          "(document.cookie.indexOf('same_name_doc=A')>=0)+','+"
+          "(document.cookie.indexOf('same_name_doc=B')<0)");
+      const std::string b_after = Eval(
+          b,
+          "localStorage.getItem('same-name-key')+','+"
+          "(document.cookie.indexOf('same_name_doc=B')>=0)+','+"
+          "(document.cookie.indexOf('same_name_doc=A')<0)");
+      isolated = b_jar_clean && b_before == "null,clean" && jars_scoped &&
+                 a_after == "A,true,true" && b_after == "B,true,true";
+      detail = "metadata=" + std::to_string(metadata_ok) + " before=[" +
+               b_before + "] after=[" + a_after + "/" + b_after +
+               "] jars=[" + jar_a + "/" + jar_b + "]";
+    }
+    Expect(metadata_ok && isolated,
+           "same-name mbCreateSession ephemeral profiles remain independent",
+           detail);
+    if (a)
+      mbDestroyView(a);
+    if (b)
+      mbDestroyView(b);
+    if (session_a)
+      mbDestroySession(session_a);
+    if (session_b)
+      mbDestroySession(session_b);
+  }
+
+  // 102b6c. Src-less iframes publish their inherited about:blank document via
+  // DidCommitNavigation, which is what gives their frame token a session scope.
+  // Verify that invariant for both parser-created and dynamically appended
+  // frames, then exercise localStorage/document.cookie in two profiles. Positive
+  // same-profile controls prove both storage and Cookie Store event listeners
+  // work before we assert that the other profile cannot trigger them.
+  {
+    mbSession* session_a = mbCreateSession("src-less-isolation-a", nullptr);
+    mbSession* session_b = mbCreateSession("src-less-isolation-b", nullptr);
+    mbView* a = session_a ? mbCreateViewInSession(240, 160, session_a) : nullptr;
+    mbView* b = session_b ? mbCreateViewInSession(240, 160, session_b) : nullptr;
+    bool controls_work = false;
+    bool isolated = false;
+    int empty_commits_a = 0;
+    int empty_commits_b = 0;
+    std::string detail = "setup failed";
+    if (a && b) {
+      const char* origin = "https://src-less-storage.test/";
+      const char* frames = "<body><iframe id='primary'></iframe></body>";
+      mbFrameLoadCallback count_empty_commit =
+          [](mbView*, void* userdata, uint64_t, int is_main, int phase,
+             const char* url) {
+            if (!is_main && phase == MB_FRAME_LOAD_BEGIN && url &&
+                std::strcmp(url, "about:blank") == 0) {
+              ++*static_cast<int*>(userdata);
+            }
+          };
+      mbOnFrameLoadEvent(a, count_empty_commit, &empty_commits_a);
+      mbOnFrameLoadEvent(b, count_empty_commit, &empty_commits_b);
+      mbLoadHTML(a, frames, origin);
+      mbLoadHTML(b, frames, origin);
+      mbRunJS(a,
+              "(function(){var f=document.createElement('iframe');f.id='peer';"
+              "document.body.appendChild(f);})()");
+      mbRunJS(b,
+              "(function(){var f=document.createElement('iframe');f.id='peer';"
+              "document.body.appendChild(f);})()");
+
+      const std::string shape = Eval(
+          a,
+          "(function(){var f=document.getElementById('primary'),"
+          "p=document.getElementById('peer');return String(f.getAttribute('src'))+','+"
+          "f.contentWindow.location.href+','+String(p.getAttribute('src'))+','+"
+          "p.contentWindow.location.href;})()");
+      mbRunJS(
+          a,
+          "(function(){var w=document.getElementById('primary').contentWindow;"
+          "w.localStorage.setItem('mb-src-less-data','A');"
+          "w.document.cookie='mb_src_less_doc=A';"
+          "w.__slStorageEvents=0;w.__slCookieEvents=0;"
+          "w.addEventListener('storage',function(e){"
+          "if(e.key==='mb-src-less-event')w.__slStorageEvents++;});"
+          "w.__slCookieApi=!!w.cookieStore;"
+          "if(w.cookieStore)w.cookieStore.addEventListener('change',function(e){"
+          "var all=Array.prototype.slice.call(e.changed).concat("
+          "Array.prototype.slice.call(e.deleted));"
+          "for(var i=0;i<all.length;i++){if(all[i].name==='mb_src_less_event'){"
+          "w.__slCookieEvents++;break;}}});})()");
+      // Let CookieStore's AddChangeListener reach the service sequence. The
+      // following positive control still makes a missed registration fail
+      // deterministically rather than weakening the cross-session assertion.
+      mbWait(a, 40);
+      mbRunJS(
+          a,
+          "(function(){var w=document.getElementById('peer').contentWindow;"
+          "w.localStorage.setItem('mb-src-less-event','same-session');"
+          "w.document.cookie='mb_src_less_event=same-session';})()");
+      const bool events_delivered =
+          mbWaitForFunction(
+              a,
+              "document.getElementById('primary').contentWindow.__slStorageEvents>0&&"
+              "document.getElementById('primary').contentWindow.__slCookieEvents>0",
+              2000) == 1;
+      const std::string control_counts = Eval(
+          a,
+          "(function(){var w=document.getElementById('primary').contentWindow;"
+          "return w.__slStorageEvents+','+w.__slCookieEvents+','+w.__slCookieApi;})()");
+      mbRunJS(
+          a,
+          "(function(){var w=document.getElementById('primary').contentWindow;"
+          "w.__slStorageEvents=0;w.__slCookieEvents=0;})()");
+
+      const std::string b_before = Eval(
+          b,
+          "(function(){var w=document.getElementById('primary').contentWindow;"
+          "return (w.localStorage.getItem('mb-src-less-data')===null?'null':'leaked')+','+"
+          "(w.document.cookie.indexOf('mb_src_less_doc=A')<0?'clean':'leaked');})()");
+      mbRunJS(
+          b,
+          "(function(){var w=document.getElementById('primary').contentWindow;"
+          "w.localStorage.setItem('mb-src-less-data','B');"
+          "w.document.cookie='mb_src_less_doc=B';"
+          "w.localStorage.setItem('mb-src-less-event','other-session');"
+          "w.document.cookie='mb_src_less_event=other-session';})()");
+      const bool b_write_visible =
+          mbWaitForFunction(
+              b,
+              "(function(){var w=document.getElementById('primary').contentWindow;"
+              "return w.localStorage.getItem('mb-src-less-data')==='B'&&"
+              "w.document.cookie.indexOf('mb_src_less_doc=B')>=0;})()",
+              2000) == 1;
+      // The positive control above establishes that both listener paths are
+      // live. Pump well past their observed delivery before asserting silence.
+      mbWait(a, 250);
+      const std::string a_after = Eval(
+          a,
+          "(function(){var w=document.getElementById('primary').contentWindow;"
+          "return w.localStorage.getItem('mb-src-less-data')+','+"
+          "(w.document.cookie.indexOf('mb_src_less_doc=A')>=0)+','+"
+          "(w.document.cookie.indexOf('mb_src_less_doc=B')<0)+','+"
+          "w.__slStorageEvents+','+w.__slCookieEvents;})()");
+      const std::string b_after = Eval(
+          b,
+          "(function(){var w=document.getElementById('primary').contentWindow;"
+          "return w.localStorage.getItem('mb-src-less-data')+','+"
+          "(w.document.cookie.indexOf('mb_src_less_doc=B')>=0)+','+"
+          "(w.document.cookie.indexOf('mb_src_less_doc=A')<0);})()");
+
+      controls_work = shape == "null,about:blank,null,about:blank" &&
+                      empty_commits_a >= 2 && empty_commits_b >= 2 &&
+                      events_delivered && control_counts == "1,1,true";
+      isolated = b_before == "null,clean" && b_write_visible &&
+                 a_after == "A,true,true,0,0" && b_after == "B,true,true";
+      detail = "shape=[" + shape + "] commits=[" +
+               std::to_string(empty_commits_a) + "/" +
+               std::to_string(empty_commits_b) + "] control=[" +
+               control_counts + "] before=[" + b_before + "] after=[" +
+               a_after + "/" + b_after + "]";
+    }
+    Expect(controls_work,
+           "src-less parser/dynamic iframes commit and same-session events fire",
+           detail);
+    Expect(isolated,
+           "src-less iframes isolate localStorage, cookies and change events by session",
+           detail);
+    if (a)
+      mbOnFrameLoadEvent(a, nullptr, nullptr);
+    if (b)
+      mbOnFrameLoadEvent(b, nullptr, nullptr);
+    if (a)
+      mbDestroyView(a);
+    if (b)
+      mbDestroyView(b);
+    if (session_a)
+      mbDestroySession(session_a);
+    if (session_b)
+      mbDestroySession(session_b);
+  }
+
   // 102b5. mbInsertCSS appends a <style> that actually applies: a rule hiding #x
   // flips it from visible to hidden (verified via mbIsVisibleForSelector).
   {
@@ -831,7 +1240,7 @@ static void RunCases(mbView* v, int W, int H) {
                (stays_shown ? "1" : "0"));
   }
 
-  // 102h. mbWaitForNetworkIdle: a page fires a deferred fetch (150ms) that routes
+  // 102h. mbWaitForNetworkIdleEx: a page fires a deferred fetch (150ms) that routes
   // through the loader; the wait must return idle (not timeout) only after that
   // request lands — so the log holds it afterward. A second quiet page confirms
   // it doesn't false-timeout. (file:// origin so the file:// fetch is same-scheme.)
@@ -841,17 +1250,43 @@ static void RunCases(mbView* v, int W, int H) {
         "<body><script>setTimeout(function(){var i=document.createElement('img');"
         "i.src='file:///tmp/mb_ni_probe.png';document.body.appendChild(i);},150);"
         "</script></body>", "file:///tmp/mb_ni_page.html");
-    const bool idle = mbWaitForNetworkIdle(v, 300, 5000) == 1;
+    const bool idle = mbWaitForNetworkIdleEx(v, 300, 5000) == 1;
     char rb[4096] = {0};
     mbGetRequestLog(rb, sizeof(rb));
     const bool fetched = std::string(rb).find("mb_ni_probe.png") != std::string::npos;
     mbClearRequestLog();
     mbLoadHTML(v, "<body>quiet</body>", "about:blank");
-    const bool quiet_ok = mbWaitForNetworkIdle(v, 150, 3000) == 1;  // no false timeout
-    Expect(idle && fetched && quiet_ok,
-           "mbWaitForNetworkIdle returns after deferred fetch; quiet page is idle",
+    const bool quiet_ok = mbWaitForNetworkIdleEx(v, 150, 3000) == 1;  // no false timeout
+    mbClearRequestLog();
+    const bool legacy_quiet = mbWaitForNetworkIdle(v, 20, 500) == 1;
+    mbView* noise = mbCreateView(120, 80);
+    mbMockResponse("legacy-idle-noise.test/ping", "ok", "text/plain", 200);
+    mbLoadHTML(
+        noise,
+        "<script>setTimeout(function(){fetch('/ping')},80)</script>",
+        "https://legacy-idle-noise.test/");
+    mbClearRequestLog();
+    const auto legacy_start = std::chrono::steady_clock::now();
+    const bool legacy_process_wide = mbWaitForNetworkIdle(v, 180, 1500) == 1;
+    const auto legacy_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - legacy_start)
+                               .count();
+    char legacy_log[1024] = {0};
+    mbGetRequestLog(legacy_log, sizeof(legacy_log));
+    const bool legacy_saw_other_view =
+        std::string(legacy_log).find("legacy-idle-noise.test/ping") !=
+        std::string::npos;
+    mbDestroyView(noise);
+    mbClearMocks();
+    Expect(idle && fetched && quiet_ok && legacy_quiet &&
+               legacy_process_wide && legacy_saw_other_view && legacy_ms >= 220,
+           "network-idle Ex tracks the view; legacy wait retains process-wide semantics",
            std::string("idle=") + (idle ? "1" : "0") + " fetched=" +
-               (fetched ? "1" : "0") + " quiet=" + (quiet_ok ? "1" : "0"));
+               (fetched ? "1" : "0") + " quiet=" + (quiet_ok ? "1" : "0") +
+               " legacy=" + (legacy_quiet ? "1" : "0") +
+               " process=" + (legacy_process_wide ? "1" : "0") +
+               " other=" + (legacy_saw_other_view ? "1" : "0") +
+               " elapsed_ms=" + std::to_string(legacy_ms));
   }
 
   // 102b. mbCountSelector + indexed list scraping. Count the matches, then read
@@ -963,6 +1398,252 @@ static void RunCases(mbView* v, int W, int H) {
     Expect(navigated,
            "form GET submission navigates to the action URL with the query",
            Eval(v, "String(location.search)"));
+  }
+
+  // 104a. data: decoding and file: reads for mbNavigate execute on the blocking
+  // pool, not on the engine sequence. The exact-URL barrier is entered by the
+  // pool task itself; while it is held, no reply/commit can occur. This proves
+  // the scheduling property directly instead of inferring it from wall time.
+  {
+    static const char kFileBody[] =
+        "<body id='mb-local-pool-file'>file-pool</body>";
+    base::ScopedTempDir local_dir;
+    const bool temp_ready = local_dir.CreateUniqueTempDir();
+    const base::FilePath file_path =
+        temp_ready ? local_dir.GetPath().AppendASCII("pool-nav.html")
+                   : base::FilePath();
+    const bool file_written =
+        temp_ready && base::WriteFile(file_path, kFileBody);
+
+    struct LocalPoolResult {
+      mbNavigationId id = 0;
+      bool started = false;
+      bool off_engine = false;
+      bool no_early_reply = false;
+      bool finished = false;
+      bool replied = false;
+      bool committed = false;
+      bool no_timeout = false;
+    };
+    auto run_local_pool_case = [&](const std::string& url,
+                                   const char* selector) {
+      LocalPoolResult result;
+      mb::MbArmLocalNavigationForTesting(url);
+      result.id = mbNavigate(v, url.c_str());
+      // Run the posted initial hop. The pool barrier prevents RunUntilIdle from
+      // consuming the reply even if the worker starts immediately.
+      mbWait(v, 0);
+      result.started =
+          mb::MbWaitForLocalNavigationWorkerStartForTesting(url, 2000);
+      result.off_engine =
+          mb::MbLocalNavigationRanOffEngineSequenceForTesting(url);
+      result.no_early_reply =
+          mb::MbLocalNavigationReplyCountForTesting(url) == 0;
+      mb::MbReleaseLocalNavigationForTesting(url);
+      result.finished =
+          mb::MbWaitForLocalNavigationWorkerFinishForTesting(url, 2000);
+      result.no_timeout =
+          !mb::MbLocalNavigationBarrierTimedOutForTesting(url);
+      result.committed = mbWaitForSelector(v, selector, 2000) == 1;
+      result.replied =
+          mb::MbLocalNavigationReplyCountForTesting(url) == 1;
+      mb::MbClearLocalNavigationForTesting(url);
+      return result;
+    };
+
+    const std::string data_url =
+        "data:text/html,<body id='mb-local-pool-data'>data-pool</body>";
+    const LocalPoolResult data =
+        run_local_pool_case(data_url, "#mb-local-pool-data");
+    const std::string file_url =
+        file_written ? net::FilePathToFileURL(file_path).spec() : std::string();
+    const LocalPoolResult file = file_written
+                                     ? run_local_pool_case(
+                                           file_url, "#mb-local-pool-file")
+                                     : LocalPoolResult();
+    const auto passed = [](const LocalPoolResult& r) {
+      return r.id != 0 && r.started && r.off_engine && r.no_early_reply &&
+             r.finished && r.replied && r.committed && r.no_timeout;
+    };
+    Expect(temp_ready && file_written && passed(data) && passed(file),
+           "mbNavigate materializes data:/file: off the engine sequence",
+           "temp=" + std::to_string(temp_ready) + "/" +
+               std::to_string(file_written) + " data=" +
+               std::to_string(data.id) + "/" +
+               std::to_string(data.started) + "/" +
+               std::to_string(data.off_engine) + "/" +
+               std::to_string(data.finished) + "/" +
+               std::to_string(data.replied) + "/" +
+               std::to_string(data.committed) + " file=" +
+               std::to_string(file.id) + "/" +
+               std::to_string(file.started) + "/" +
+               std::to_string(file.off_engine) + "/" +
+               std::to_string(file.finished) + "/" +
+               std::to_string(file.replied) + "/" +
+               std::to_string(file.committed));
+  }
+
+  // 104b. Destroying a view immediately after mbNavigate must cancel the posted
+  // initial hop without delivering a commit/terminal callback through the dead
+  // view. STARTED is intentionally synchronous and carries the returned id;
+  // pump a surviving view afterward so the cancelled loader chain really drains.
+  {
+    mbView* doomed = mbCreateView(180, 100);
+    // Keep callback userdata alive for the process. A broken delayed callback
+    // should be observed (or expose the engine UAF), never become a test-stack UAF.
+    static DestroyNavigationProbe* probe = new DestroyNavigationProbe();
+    *probe = DestroyNavigationProbe();
+    mbNavigationId id = 0;
+    bool started_before_return = false;
+    int64_t destroy_ms = -1;
+    if (doomed) {
+      probe->expected_view = doomed;
+      mbOnNavigationEvent(doomed, &RecordDestroyNavigationEvent, probe);
+      id = mbNavigate(
+          doomed,
+          "data:text/html,<body id='must-not-commit'>destroyed-nav</body>");
+      started_before_return =
+          id != 0 && probe->started == 1 && probe->started_id == id &&
+          probe->committed == 0 && probe->terminal == 0 &&
+          probe->malformed == 0;
+      probe->teardown_started = true;
+      const auto destroy_start = std::chrono::steady_clock::now();
+      mbDestroyView(doomed);
+      destroy_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - destroy_start)
+                       .count();
+      doomed = nullptr;
+    }
+    // The first pump runs the cancelled posted initial hop and its completion;
+    // the remaining interval exposes any delayed callback that escaped the
+    // view's alive-token guard. Then prove the process and surviving view remain usable.
+    mbWait(v, 250);
+    mbLoadHTML(v, "<body id='destroy-survivor'>survivor-ok</body>",
+               "about:blank");
+    const bool survivor_ok =
+        Eval(v, "document.getElementById('destroy-survivor').textContent") ==
+        "survivor-ok";
+    const bool callbacks_stopped =
+        probe->started == 1 && probe->committed == 0 &&
+        probe->terminal == 0 &&
+        probe->callbacks_during_or_after_teardown == 0 &&
+        probe->malformed == 0;
+    Expect(id != 0 && started_before_return && callbacks_stopped &&
+               destroy_ms >= 0 && destroy_ms < 2000 && survivor_ok,
+           "mbNavigate followed by immediate view destruction drains safely",
+           "id=" + std::to_string(id) + " phases=" +
+               std::to_string(probe->started) + "/" +
+               std::to_string(probe->committed) + "/" +
+               std::to_string(probe->terminal) + " late=" +
+               std::to_string(probe->callbacks_during_or_after_teardown) +
+               " malformed=" + std::to_string(probe->malformed) +
+               " destroy_ms=" + std::to_string(destroy_ms) +
+               " survivor=" + std::to_string(survivor_ok));
+  }
+
+  // 104c. Destroy after the local-navigation pool task has definitely started,
+  // then let its file read and reply complete. The probe state is heap-owned by
+  // the loader and the callback userdata is process-lifetime, so this observes
+  // the reply-after-death interleaving without a timing race or stack UAF.
+  {
+    static const char kPoolDestroyBody[] =
+        "<body id='must-not-commit-pool'>destroyed-pool-nav</body>";
+    base::ScopedTempDir pool_dir;
+    const bool temp_ready = pool_dir.CreateUniqueTempDir();
+    const base::FilePath file_path =
+        temp_ready ? pool_dir.GetPath().AppendASCII("destroy-nav.html")
+                   : base::FilePath();
+    const bool file_written =
+        temp_ready && base::WriteFile(file_path, kPoolDestroyBody);
+    const std::string url =
+        file_written ? net::FilePathToFileURL(file_path).spec() : std::string();
+    if (file_written)
+      mb::MbArmLocalNavigationForTesting(url);
+
+    mbView* doomed = file_written ? mbCreateView(180, 100) : nullptr;
+    static DestroyNavigationProbe* probe = new DestroyNavigationProbe();
+    *probe = DestroyNavigationProbe();
+    mbNavigationId id = 0;
+    bool started_before_return = false;
+    bool worker_started = false;
+    bool worker_off_engine = false;
+    bool held_before_destroy = false;
+    if (doomed) {
+      probe->expected_view = doomed;
+      mbOnNavigationEvent(doomed, &RecordDestroyNavigationEvent, probe);
+      id = mbNavigate(doomed, url.c_str());
+      started_before_return =
+          id != 0 && probe->started == 1 && probe->started_id == id &&
+          probe->committed == 0 && probe->terminal == 0 &&
+          probe->malformed == 0;
+      // Execute the posted initial hop, then wait on the pool-side event. The
+      // barrier is still closed, so materialization/reply cannot race ahead.
+      mbWait(doomed, 0);
+      worker_started =
+          mb::MbWaitForLocalNavigationWorkerStartForTesting(url, 2000);
+      worker_off_engine =
+          mb::MbLocalNavigationRanOffEngineSequenceForTesting(url);
+      held_before_destroy =
+          mb::MbLocalNavigationReplyCountForTesting(url) == 0 &&
+          !mb::MbWaitForLocalNavigationWorkerFinishForTesting(url, 0);
+      probe->teardown_started = true;
+      mbDestroyView(doomed);
+      doomed = nullptr;
+    }
+
+    // The file read happens only after the view is gone. Wait for the pool task
+    // without pumping the engine, proving its reply has not run early.
+    if (file_written)
+      mb::MbReleaseLocalNavigationForTesting(url);
+    const bool worker_finished =
+        file_written &&
+        mb::MbWaitForLocalNavigationWorkerFinishForTesting(url, 2000);
+    const bool reply_not_run_before_pump =
+        file_written && mb::MbLocalNavigationReplyCountForTesting(url) == 0;
+    for (int i = 0;
+         file_written && i < 200 &&
+         mb::MbLocalNavigationReplyCountForTesting(url) == 0;
+         ++i) {
+      mbWait(v, 10);
+    }
+    const bool reply_ran_after_destroy =
+        file_written && mb::MbLocalNavigationReplyCountForTesting(url) == 1;
+    const bool no_barrier_timeout =
+        file_written &&
+        !mb::MbLocalNavigationBarrierTimedOutForTesting(url);
+
+    mbLoadHTML(v, "<body id='pool-destroy-survivor'>survivor-ok</body>",
+               "about:blank");
+    const bool survivor_ok =
+        Eval(v, "document.getElementById('pool-destroy-survivor').textContent") ==
+        "survivor-ok";
+    const bool callbacks_stopped =
+        probe->started == 1 && probe->committed == 0 &&
+        probe->terminal == 0 &&
+        probe->callbacks_during_or_after_teardown == 0 &&
+        probe->malformed == 0;
+    if (file_written)
+      mb::MbClearLocalNavigationForTesting(url);
+
+    Expect(temp_ready && file_written && id != 0 && started_before_return &&
+               worker_started && worker_off_engine && held_before_destroy &&
+               worker_finished &&
+               reply_not_run_before_pump && reply_ran_after_destroy &&
+               no_barrier_timeout && callbacks_stopped && survivor_ok,
+           "destroy during local ThreadPool navigation handles its late reply safely",
+           "temp=" + std::to_string(temp_ready) + "/" +
+               std::to_string(file_written) + " id=" +
+               std::to_string(id) + " worker=" +
+               std::to_string(worker_started) + "/" +
+               std::to_string(worker_off_engine) + "/" +
+               std::to_string(worker_finished) + " reply=" +
+               std::to_string(reply_not_run_before_pump) + "/" +
+               std::to_string(reply_ran_after_destroy) + " phases=" +
+               std::to_string(probe->started) + "/" +
+               std::to_string(probe->committed) + "/" +
+               std::to_string(probe->terminal) + " late=" +
+               std::to_string(probe->callbacks_during_or_after_teardown) +
+               " survivor=" + std::to_string(survivor_ok));
   }
 
   // 105. Cookie jar persistence: save the whole jar to a file, clear it, reload,

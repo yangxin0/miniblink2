@@ -4,9 +4,20 @@
 // selector automation, navigation, charset, reload, host-driven history.
 #include "miniblink_host/test/mb_smoke_harness.h"
 
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
+#include <thread>
+
+#include "base/functional/bind.h"
+#include "base/location.h"
+#include "base/synchronization/waitable_event.h"
+#include "base/time/time.h"
+#include "miniblink_host/runtime/mb_runtime.h"
+#include "miniblink_host/test/mb_test_seams.h"
 
 using mbsmoke::Eval;
 using mbsmoke::EvalIso;
@@ -278,6 +289,336 @@ static void RunCases(mbView* v, int W, int H) {
            "reply=[" + r + "]");
   }
 
+  // 37e2. Worker subresources retain their creating view identity and participate in
+  // that view's network-idle signal. The payload starts well after the idle wait begins:
+  // without worker attribution the wait returns at its first 600 ms window; with it, the
+  // worker fetch resets the window around 400 ms. Its response hook must synchronously hop
+  // to the engine thread, receive the originating view, and rewrite the body before the
+  // worker's fetch promise observes it.
+  {
+    mbMockResponse(
+        "worker-context.test/worker.js",
+        "postMessage('ready');onmessage=function(){postMessage('armed');"
+        "setTimeout(function(){fetch('/payload').then(function(r){return r.text()})"
+        ".then(function(t){postMessage('payload:'+t)})"
+        ".catch(function(e){postMessage('error:'+e)})},400)}",
+        "application/javascript", 200);
+    mbMockResponse("worker-context.test/payload", "ORIGINAL", "text/plain", 200);
+    mbLoadHTML(v, "<body>worker-context</body>", "https://worker-context.test/");
+    mbRunJS(v,
+            "window.__ctxReady='';window.__ctxArmed='';window.__ctxPayload='';"
+            "window.__ctxWorker=new Worker('/worker.js');"
+            "window.__ctxWorker.onmessage=function(e){"
+            "if(e.data==='ready')window.__ctxReady='1';"
+            "else if(e.data==='armed')window.__ctxArmed='1';"
+            "else window.__ctxPayload=String(e.data)};");
+    for (int i = 0; i < 80 && Eval(v, "window.__ctxReady") != "1"; ++i)
+      mbWait(v, 25);
+    mbWaitForNetworkIdleEx(v, 50, 1000);  // settle creation before measuring the fetch
+
+    struct WorkerResponseHookState {
+      mbView* expected_view = nullptr;
+      std::thread::id engine_thread;
+      bool saw = false;
+      bool correct_view = false;
+      bool correct_thread = false;
+    } hook_state;
+    hook_state.expected_view = v;
+    hook_state.engine_thread = std::this_thread::get_id();
+    mbSetResponseCallbackEx(
+        [](mbResponse* response, mbView* view, void* userdata) {
+          if (!std::strstr(mbResponseURL(response),
+                           "worker-context.test/payload")) {
+            return;
+          }
+          auto* state = static_cast<WorkerResponseHookState*>(userdata);
+          state->saw = true;
+          state->correct_view = view == state->expected_view;
+          state->correct_thread =
+              std::this_thread::get_id() == state->engine_thread;
+          mbResponseSetBody(response, "MUTATED", 7);
+        },
+        &hook_state);
+    mbRunJS(v, "window.__ctxWorker.postMessage('go')");
+    for (int i = 0; i < 40 && Eval(v, "window.__ctxArmed") != "1"; ++i)
+      mbWait(v, 25);
+
+    const auto idle_start = std::chrono::steady_clock::now();
+    const bool idle = mbWaitForNetworkIdleEx(v, 600, 2500) == 1;
+    const auto idle_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - idle_start)
+                             .count();
+    for (int i = 0; i < 40 && Eval(v, "window.__ctxPayload").empty(); ++i)
+      mbWait(v, 25);
+    const std::string payload = Eval(v, "window.__ctxPayload");
+
+    mbSetResponseCallbackEx(nullptr, nullptr);
+    mbRunJS(v, "window.__ctxWorker.terminate()");
+    mbWait(v, 50);
+    mbClearMocks();
+    Expect(idle && idle_ms >= 750 && payload == "payload:MUTATED" &&
+               hook_state.saw && hook_state.correct_view &&
+               hook_state.correct_thread,
+           "worker fetch is view-attributed for network-idle and response hooks",
+           "idle=" + std::to_string(idle) +
+               " elapsed_ms=" + std::to_string(idle_ms) + " payload=[" +
+               payload + "] saw=" + std::to_string(hook_state.saw) +
+               " view=" + std::to_string(hook_state.correct_view) +
+               " thread=" + std::to_string(hook_state.correct_thread));
+  }
+
+  // 37e3. Teardown while a worker is blocked waiting for main-sequence request policy.
+  // Arm the worker while pumping, then trigger its fetch with an Eval task whose
+  // queued quit runs before any worker-posted policy task. The loader's test-only
+  // waiter count proves the worker entered that wait before view destruction.
+  {
+    mbView* doomed = mbCreateView(200, 120);
+    const std::string payload_url =
+        "https://worker-teardown.test/teardown-payload";
+    mbMockResponse(
+        "worker-teardown.test/w.js",
+        "onmessage=function(){fetch('/teardown-payload').catch(function(){})};"
+        "postMessage('ready')",
+        "application/javascript", 200);
+    mbMockResponse("worker-teardown.test/teardown-payload", "ok", "text/plain",
+                   200);
+    bool worker_ready = false;
+    bool trigger_sent = false;
+    bool worker_waiting = false;
+    if (doomed) {
+      mbLoadHTML(
+          doomed,
+          "<body>worker-teardown<script>"
+          "window.__teardownReady='';"
+          "window.__teardownWorker=new Worker('/w.js');"
+          "window.__teardownWorker.onmessage=function(e){"
+          "window.__teardownReady=String(e.data)}"
+          "</script></body>",
+          "https://worker-teardown.test/");
+      worker_ready =
+          mbWaitForFunction(doomed, "window.__teardownReady==='ready'", 2000) ==
+          1;
+      trigger_sent =
+          worker_ready &&
+          Eval(doomed,
+               "(window.__teardownWorker.postMessage('go'),'sent')") == "sent";
+    }
+    for (int i = 0; trigger_sent && i < 400 && !worker_waiting; ++i) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      worker_waiting =
+          mb::MbRequestPolicyWaiterCountForTesting(payload_url) > 0;
+    }
+    const auto destroy_start = std::chrono::steady_clock::now();
+    if (doomed)
+      mbDestroyView(doomed);
+    const auto destroy_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - destroy_start)
+            .count();
+    bool waiter_released = false;
+    for (int i = 0; i < 100 && !waiter_released; ++i) {
+      waiter_released =
+          mb::MbRequestPolicyWaiterCountForTesting(payload_url) == 0;
+      if (!waiter_released)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    mbClearMocks();
+    Expect(doomed && worker_ready && trigger_sent && worker_waiting &&
+               waiter_released && destroy_ms < 5000,
+           "view teardown releases a worker waiting on engine-thread policy",
+           "ready=" + std::to_string(worker_ready) +
+               " sent=" + std::to_string(trigger_sent) +
+               " waiting=" + std::to_string(worker_waiting) +
+               " released=" + std::to_string(waiter_released) +
+               " destroy_ms=" + std::to_string(destroy_ms));
+  }
+
+  // 37e4. Nested-worker script loading rendezvous with the engine sequence. Once the
+  // exact inner-script waiter is published, destroying the owning view must invalidate
+  // its context and release the worker without requiring the queued fetch task to run.
+  {
+    const std::string inner_url =
+        "https://worker-script-teardown.test/inner.js";
+    mbView* doomed = mbCreateView(200, 120);
+    mbMockResponse(
+        "worker-script-teardown.test/outer.js",
+        "postMessage('ready');onmessage=function(){"
+        "self.__inner=new Worker('/inner.js')}",
+        "application/javascript", 200);
+    mbMockResponse("worker-script-teardown.test/inner.js",
+                   "postMessage('unexpected')", "application/javascript", 200);
+    bool outer_ready = false;
+    bool trigger_sent = false;
+    bool worker_waiting = false;
+    if (doomed) {
+      mbLoadHTML(doomed, "<body>worker-script-teardown</body>",
+                 "https://worker-script-teardown.test/");
+      mbRunJS(doomed,
+              "window.__scriptTeardownReady='';"
+              "window.__scriptTeardownWorker=new Worker('/outer.js');"
+              "window.__scriptTeardownWorker.onmessage=function(e){"
+              "window.__scriptTeardownReady=String(e.data)};");
+      outer_ready =
+          mbWaitForFunction(doomed,
+                            "window.__scriptTeardownReady==='ready'", 2000) == 1;
+      trigger_sent =
+          outer_ready &&
+          Eval(doomed,
+               "(window.__scriptTeardownWorker.postMessage('go'),'sent')") ==
+              "sent";
+    }
+    for (int i = 0; trigger_sent && i < 400 && !worker_waiting; ++i) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      worker_waiting =
+          mb::MbWorkerScriptWaiterCountForTesting(inner_url) > 0;
+    }
+    if (doomed)
+      mbDestroyView(doomed);
+    bool waiter_released = false;
+    for (int i = 0; i < 200 && !waiter_released; ++i) {
+      waiter_released =
+          mb::MbWorkerScriptWaiterCountForTesting(inner_url) == 0;
+      if (!waiter_released)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    // Run the cancelled fetch task now that no view or host callback state can
+    // be reached. Its shared state remains heap-owned until the task returns.
+    mbPumpMessages();
+    mbClearMocks();
+    Expect(doomed && outer_ready && trigger_sent && worker_waiting &&
+               waiter_released,
+           "view teardown releases a nested-worker main-script rendezvous",
+           "ready=" + std::to_string(outer_ready) +
+               " sent=" + std::to_string(trigger_sent) +
+               " waiting=" + std::to_string(worker_waiting) +
+               " released=" + std::to_string(waiter_released));
+  }
+
+  // 37e5. Worker response hooks use a second engine-thread rendezvous after request
+  // policy. Eval queues its body+quit behind the already-waiting policy task, so it
+  // deterministically advances policy and returns before the worker-posted hook task.
+  // Teardown must release that exact hook waiter, and the stale task must skip the host
+  // callback when it is drained later.
+  {
+    const std::string payload_url =
+        "https://worker-response-teardown.test/payload";
+    mbView* doomed = mbCreateView(200, 120);
+    mbMockResponse(
+        "worker-response-teardown.test/worker.js",
+        "postMessage('ready');onmessage=function(){"
+        "fetch('/payload').catch(function(){})}",
+        "application/javascript", 200);
+    mbMockResponse("worker-response-teardown.test/payload", "ok", "text/plain",
+                   200);
+    bool worker_ready = false;
+    if (doomed) {
+      mbLoadHTML(doomed, "<body>worker-response-teardown</body>",
+                 "https://worker-response-teardown.test/");
+      mbRunJS(doomed,
+              "window.__responseTeardownReady='';"
+              "window.__responseTeardownWorker=new Worker('/worker.js');"
+              "window.__responseTeardownWorker.onmessage=function(e){"
+              "window.__responseTeardownReady=String(e.data)};");
+      worker_ready =
+          mbWaitForFunction(doomed,
+                            "window.__responseTeardownReady==='ready'", 2000) ==
+          1;
+    }
+
+    struct ResponseTeardownState {
+      std::atomic<int> payload_callbacks{0};
+    };
+    std::shared_ptr<ResponseTeardownState> hook_state =
+        std::make_shared<ResponseTeardownState>();
+    mbSetResponseCallbackEx(
+        [](mbResponse* response, mbView*, void* userdata) {
+          if (std::strcmp(mbResponseURL(response),
+                          "https://worker-response-teardown.test/payload") == 0) {
+            static_cast<ResponseTeardownState*>(userdata)
+                ->payload_callbacks.fetch_add(1, std::memory_order_relaxed);
+          }
+        },
+        hook_state.get());
+
+    // The arm sequence has one benign race: after the policy task releases the
+    // worker, its hook task can land ahead of Eval's quit and run while the
+    // view is still alive — a legitimate early delivery, observable as a
+    // callback increment. Each 'go' message triggers a fresh fetch, so simply
+    // re-arm; losing the sub-millisecond race three times in a row is
+    // negligible, while a genuine parking failure still fails the test.
+    bool trigger_sent = false;
+    bool policy_waiting = false;
+    bool policy_advanced = false;
+    bool hook_waiting = false;
+    int attempts = 0;
+    while (doomed && worker_ready && !hook_waiting && attempts < 3) {
+      ++attempts;
+      const int before_attempt =
+          hook_state->payload_callbacks.load(std::memory_order_relaxed);
+      trigger_sent =
+          Eval(doomed,
+               "(window.__responseTeardownWorker.postMessage('go'),'sent')") ==
+          "sent";
+      policy_waiting = false;
+      for (int i = 0; trigger_sent && i < 400 && !policy_waiting; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        policy_waiting =
+            mb::MbRequestPolicyWaiterCountForTesting(payload_url) > 0;
+      }
+      if (!trigger_sent || !policy_waiting)
+        break;
+      // The pending policy task precedes Eval's body and quit task. Once Eval
+      // returns, the worker can progress to InvokeResponseHook, whose newly
+      // posted engine task normally sits behind that quit.
+      policy_advanced = Eval(doomed, "'advanced'") == "advanced";
+      for (int i = 0; policy_advanced && i < 400 && !hook_waiting; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        hook_waiting =
+            mb::MbResponseHookWaiterCountForTesting(payload_url) > 0;
+        if (!hook_waiting &&
+            hook_state->payload_callbacks.load(std::memory_order_relaxed) >
+                before_attempt) {
+          break;  // lost the race: the hook ran inside Eval's pump — re-arm
+        }
+      }
+    }
+
+    if (doomed)
+      mbDestroyView(doomed);
+    // Anything counted from here on is a genuinely LATE callback: a stale
+    // engine task wrongly reaching the host hook after view destruction.
+    const int at_destroy =
+        hook_state->payload_callbacks.load(std::memory_order_relaxed);
+    bool waiter_released = false;
+    for (int i = 0; i < 200 && !waiter_released; ++i) {
+      waiter_released =
+          mb::MbResponseHookWaiterCountForTesting(payload_url) == 0;
+      if (!waiter_released)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    // Drain the stale hook task with the callback STILL INSTALLED: if the
+    // is_alive() skip ever regressed, the drained task would reach the counter
+    // and fail the late==0 assertion (clearing first would mask exactly that).
+    mbPumpMessages();
+    const int late_callbacks =
+        hook_state->payload_callbacks.load(std::memory_order_relaxed) -
+        at_destroy;
+    mbSetResponseCallbackEx(nullptr, nullptr);
+    mbClearMocks();
+    Expect(doomed && worker_ready && trigger_sent && policy_waiting &&
+               policy_advanced && hook_waiting && waiter_released &&
+               late_callbacks == 0,
+           "view teardown releases a worker waiting on an engine response hook",
+           "ready=" + std::to_string(worker_ready) +
+               " sent=" + std::to_string(trigger_sent) +
+               " policy=" + std::to_string(policy_waiting) + "/" +
+               std::to_string(policy_advanced) +
+               " hook=" + std::to_string(hook_waiting) +
+               " released=" + std::to_string(waiter_released) +
+               " late=" + std::to_string(late_callbacks) +
+               " attempts=" + std::to_string(attempts));
+  }
+
   // 37f. NESTED worker: a Worker that spawns a sub-Worker (and relays through it). The
   // sub-worker is created ON the outer worker's thread, so its fetch context comes from
   // CloneWorkerFetchContext (not the frame) — returning null there used to FATAL on the
@@ -304,6 +645,107 @@ static void RunCases(mbView* v, int W, int H) {
     Expect(r == "inner:20",
            "a nested Worker (sub-Worker spawned on the worker thread) runs and relays",
            "reply=[" + r + "]");
+  }
+
+  // 37f2. A nested Worker's MAIN script is requested from the outer worker thread.
+  // Its full mock/policy/response phase must rendezvous with the original engine thread,
+  // retain the creating view/session, and then hand the rewritten bytes back to the worker.
+  {
+    mbSession* nested_session = mbCreateSession("nested-worker-context", nullptr);
+    mbView* nested_view = nested_session
+                              ? mbCreateViewInSession(260, 160, nested_session)
+                              : nullptr;
+    struct NestedWorkerContextState {
+      mbView* view = nullptr;
+      mbSession* session = nullptr;
+      std::thread::id engine_thread;
+      bool inner_mock_main = false;
+      bool inner_response_main = false;
+      bool response_view = false;
+      bool response_session = false;
+      bool response_cookie = false;
+    } nested_state;
+    nested_state.view = nested_view;
+    nested_state.session = nested_session;
+    nested_state.engine_thread = std::this_thread::get_id();
+    if (nested_view) {
+      mbSetCookie(nested_view, "https://nested-context.test/",
+                  "sid=nested-session; Path=/");
+      mbOnRequestMock(
+          nested_view,
+          [](const char* url, mbRequestMock* mock, void* userdata) -> int {
+            auto* state = static_cast<NestedWorkerContextState*>(userdata);
+            if (std::strstr(url, "/outer.js")) {
+              const char body[] =
+                  "var inner=new Worker('/inner.js');"
+                  "inner.onmessage=function(e){postMessage(e.data)};";
+              mbRequestMockResponse(mock, body, static_cast<int>(sizeof(body) - 1),
+                                    "application/javascript", 200);
+              return 1;
+            }
+            if (std::strstr(url, "/inner.js")) {
+              state->inner_mock_main =
+                  std::this_thread::get_id() == state->engine_thread;
+              const char body[] = "postMessage('nested-session-ok')";
+              mbRequestMockResponse(mock, body, static_cast<int>(sizeof(body) - 1),
+                                    "application/javascript", 200);
+              return 1;
+            }
+            return 0;
+          },
+          &nested_state);
+      mbLoadHTML(nested_view, "<body>nested-context</body>",
+                 "https://nested-context.test/");
+      mbSetResponseCallbackEx(
+          [](mbResponse* response, mbView* view, void* userdata) {
+            if (!std::strstr(mbResponseURL(response), "/inner.js"))
+              return;
+            auto* state = static_cast<NestedWorkerContextState*>(userdata);
+            state->inner_response_main =
+                std::this_thread::get_id() == state->engine_thread;
+            state->response_view = view == state->view;
+            state->response_session =
+                view && mbViewGetSession(view) == state->session;
+            char cookie[64] = {0};
+            state->response_cookie =
+                view && mbGetCookie(view, "https://nested-context.test/", "sid",
+                                    cookie, sizeof(cookie)) > 0 &&
+                std::string(cookie) == "nested-session";
+          },
+          &nested_state);
+      mbRunJS(nested_view,
+              "window.__nestedResult='';"
+              "window.__nestedOuter=new Worker('/outer.js');"
+              "window.__nestedOuter.onmessage=function(e){"
+              "window.__nestedResult=String(e.data)};");
+    }
+    std::string nested_result;
+    for (int i = 0; nested_view && i < 120; ++i) {
+      mbWait(nested_view, 25);
+      nested_result = Eval(nested_view, "window.__nestedResult");
+      if (!nested_result.empty())
+        break;
+    }
+    mbSetResponseCallbackEx(nullptr, nullptr);
+    if (nested_view) {
+      mbOnRequestMock(nested_view, nullptr, nullptr);
+      mbRunJS(nested_view, "window.__nestedOuter.terminate()");
+      mbDestroyView(nested_view);
+    }
+    if (nested_session)
+      mbDestroySession(nested_session);
+    Expect(nested_result == "nested-session-ok" &&
+               nested_state.inner_mock_main && nested_state.inner_response_main &&
+               nested_state.response_view && nested_state.response_session &&
+               nested_state.response_cookie,
+           "nested worker main-script hooks retain engine thread, view and session",
+           "result=[" + nested_result + "] mock_main=" +
+               std::to_string(nested_state.inner_mock_main) +
+               " response_main=" +
+               std::to_string(nested_state.inner_response_main) + " view=" +
+               std::to_string(nested_state.response_view) + " session=" +
+               std::to_string(nested_state.response_session) + " cookie=" +
+               std::to_string(nested_state.response_cookie));
   }
 
   // 37g. SharedWorker runs in-process. `new SharedWorker(url)` reaches the SharedWorker-
@@ -361,6 +803,264 @@ static void RunCases(mbView* v, int W, int H) {
     Expect(Eval(v, "window.__a") == "1" && b == "2",
            "two SharedWorker handles to one url share state (counter 1 then 2)",
            "a=[" + Eval(v, "window.__a") + "] b=[" + b + "]");
+  }
+
+  // 37h2. SharedWorker identity includes the browsing session. Two profiles opening the
+  // exact same URL/name/type must each start their own worker instance (counter 1/1),
+  // never share process-global state (which would produce 1/2).
+  {
+    mbSession* session_a = mbCreateSession("shared-worker-a", nullptr);
+    mbSession* session_b = mbCreateSession("shared-worker-b", nullptr);
+    mbView* view_a = session_a ? mbCreateViewInSession(240, 160, session_a) : nullptr;
+    mbView* view_b = session_b ? mbCreateViewInSession(240, 160, session_b) : nullptr;
+    mbMockResponse(
+        "shared-session.test/session-worker.js",
+        "var n=0;onconnect=function(e){var p=e.ports[0];"
+        "p.onmessage=function(){p.postMessage(String(++n))};p.start&&p.start()}",
+        "application/javascript", 200);
+    auto open_session_worker = [](mbView* view, const char* slot) {
+      if (!view)
+        return;
+      mbLoadHTML(view, "<body>session-shared</body>",
+                 "https://shared-session.test/");
+      const std::string script =
+          std::string("window.") + slot + "='';window.__sessionWorker=new "
+          "SharedWorker('/session-worker.js');"
+          "window.__sessionWorker.port.onmessage=function(e){window." + slot +
+          "=String(e.data)};window.__sessionWorker.port.start&&"
+          "window.__sessionWorker.port.start();"
+          "window.__sessionWorker.port.postMessage('go');";
+      mbRunJS(view, script.c_str());
+    };
+    open_session_worker(view_a, "__sessionReplyA");
+    std::string reply_a;
+    for (int i = 0; view_a && i < 120; ++i) {
+      mbWait(view_a, 25);
+      reply_a = Eval(view_a, "window.__sessionReplyA");
+      if (!reply_a.empty())
+        break;
+    }
+    open_session_worker(view_b, "__sessionReplyB");
+    std::string reply_b;
+    for (int i = 0; view_b && i < 120; ++i) {
+      mbWait(view_b, 25);
+      reply_b = Eval(view_b, "window.__sessionReplyB");
+      if (!reply_b.empty())
+        break;
+    }
+    if (view_a)
+      mbDestroyView(view_a);
+    if (view_b)
+      mbDestroyView(view_b);
+    mbWait(v, 100);
+    if (session_a)
+      mbDestroySession(session_a);
+    if (session_b)
+      mbDestroySession(session_b);
+    mbClearMocks();
+    Expect(reply_a == "1" && reply_b == "1",
+           "SharedWorker registry is partitioned by session",
+           "sessionA=[" + reply_a + "] sessionB=[" + reply_b + "]");
+  }
+
+  // 37h3. A running SharedWorker belongs to every connected live view for network-idle
+  // purposes. A fetch triggered through the first port must reset the second view's idle
+  // window too; the worker-owned context snapshots both activity keys for start/finish.
+  {
+    mbView* peer = mbCreateView(240, 160);
+    mbMockResponse(
+        "shared-activity.test/activity-worker.js",
+        "var ps=[];function send(x){for(var i=0;i<ps.length;i++)ps[i].postMessage(x)}"
+        "onconnect=function(e){var p=e.ports[0];ps.push(p);p.onmessage=function(ev){"
+        "if(ev.data==='go'){send('armed');setTimeout(function(){"
+        "fetch('/activity-payload').then(function(r){return r.text()}).then(function(t){"
+        "send('done:'+t)})},400)}};p.start&&p.start();p.postMessage('connected')}",
+        "application/javascript", 200);
+    mbMockResponse("shared-activity.test/activity-payload", "ok", "text/plain",
+                   200);
+    auto connect_activity_worker = [](mbView* view) {
+      if (!view)
+        return;
+      mbLoadHTML(view, "<body>shared-activity</body>",
+                 "https://shared-activity.test/");
+      mbRunJS(view,
+              "window.__sharedConnected='';window.__sharedArmed='';"
+              "window.__sharedDone='';window.__activityWorker="
+              "new SharedWorker('/activity-worker.js');"
+              "window.__activityWorker.port.onmessage=function(e){"
+              "if(e.data==='connected')window.__sharedConnected='1';"
+              "else if(e.data==='armed')window.__sharedArmed='1';"
+              "else window.__sharedDone=String(e.data)};"
+              "window.__activityWorker.port.start&&"
+              "window.__activityWorker.port.start();");
+    };
+    connect_activity_worker(v);
+    for (int i = 0; i < 120 && Eval(v, "window.__sharedConnected") != "1"; ++i)
+      mbWait(v, 25);
+    connect_activity_worker(peer);
+    for (int i = 0; peer && i < 120 &&
+                    Eval(peer, "window.__sharedConnected") != "1";
+         ++i) {
+      mbWait(peer, 25);
+    }
+    if (peer)
+      mbWaitForNetworkIdleEx(peer, 50, 1000);
+    mbRunJS(v, "window.__activityWorker.port.postMessage('go')");
+    for (int i = 0; peer && i < 40 && Eval(peer, "window.__sharedArmed") != "1";
+         ++i) {
+      mbWait(peer, 25);
+    }
+    const auto shared_idle_start = std::chrono::steady_clock::now();
+    const bool shared_idle =
+        peer && mbWaitForNetworkIdleEx(peer, 600, 2500) == 1;
+    const auto shared_idle_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - shared_idle_start)
+            .count();
+    const std::string shared_done =
+        peer ? Eval(peer, "window.__sharedDone") : std::string();
+
+    // Drop the STARTING connection but keep the peer connected. Subsequent response
+    // attribution must fall forward to that remaining live view, not stick to the
+    // navigated-away starter merely because its MbWebView object still exists.
+    mbLoadHTML(v, "<body>shared-activity-done</body>", "about:blank");
+    if (peer)
+      mbWait(peer, 100);
+    struct SharedFallbackState {
+      mbView* peer = nullptr;
+      bool saw_peer = false;
+    } fallback_state{peer, false};
+    mbSetResponseCallbackEx(
+        [](mbResponse* response, mbView* view, void* userdata) {
+          if (!std::strstr(mbResponseURL(response),
+                           "shared-activity.test/activity-payload")) {
+            return;
+          }
+          auto* state = static_cast<SharedFallbackState*>(userdata);
+          state->saw_peer = view == state->peer;
+        },
+        &fallback_state);
+    if (peer) {
+      mbRunJS(peer,
+              "window.__sharedArmed='';window.__sharedDone='';"
+              "window.__activityWorker.port.postMessage('go')");
+    }
+    for (int i = 0; peer && i < 40 && Eval(peer, "window.__sharedArmed") != "1";
+         ++i) {
+      mbWait(peer, 25);
+    }
+    const bool fallback_idle =
+        peer && mbWaitForNetworkIdleEx(peer, 600, 2500) == 1;
+    const std::string fallback_done =
+        peer ? Eval(peer, "window.__sharedDone") : std::string();
+    mbSetResponseCallbackEx(nullptr, nullptr);
+    if (peer)
+      mbDestroyView(peer);
+    mbWait(v, 100);
+    mbClearMocks();
+    Expect(shared_idle && shared_idle_ms >= 750 && shared_done == "done:ok" &&
+               fallback_idle && fallback_done == "done:ok" &&
+               fallback_state.saw_peer,
+           "SharedWorker network activity is attributed to every connected view",
+           "idle=" + std::to_string(shared_idle) +
+               " elapsed_ms=" + std::to_string(shared_idle_ms) + " done=[" +
+               shared_done + "] fallback_idle=" +
+               std::to_string(fallback_idle) + " fallback_done=[" +
+               fallback_done + "] fallback_peer=" +
+               std::to_string(fallback_state.saw_peer));
+  }
+
+  // 37h4. DEAD-STARTER SharedWorker: destroying the STARTING view outright (not
+  // merely navigating it away, 37h3) must not strand a worker that still has a
+  // live client. The worker's root context only DELEGATES liveness/attribution:
+  // once any client registered, is_alive()/host_ctx() walk the client list, so
+  // the survivor keeps the worker fetching and receives response attribution.
+  {
+    mbView* starter = mbCreateView(240, 160);
+    mbView* survivor = mbCreateView(240, 160);
+    mbMockResponse(
+        "shared-starter.test/starter-worker.js",
+        "var ps=[];function send(x){for(var i=0;i<ps.length;i++)"
+        "try{ps[i].postMessage(x)}catch(e){}}"
+        "onconnect=function(e){var p=e.ports[0];ps.push(p);"
+        "p.onmessage=function(ev){if(ev.data==='go'){"
+        "fetch('/starter-payload').then(function(r){return r.text()})"
+        ".then(function(t){send('done:'+t)})"
+        ".catch(function(){send('done:err')})}};"
+        "p.start&&p.start();p.postMessage('connected')}",
+        "application/javascript", 200);
+    mbMockResponse("shared-starter.test/starter-payload", "ok", "text/plain",
+                   200);
+    auto connect_starter_worker = [](mbView* view) {
+      if (!view)
+        return;
+      mbLoadHTML(view, "<body>shared-starter</body>",
+                 "https://shared-starter.test/");
+      mbRunJS(view,
+              "window.__starterConnected='';window.__starterDone='';"
+              "window.__starterWorker=new SharedWorker('/starter-worker.js');"
+              "window.__starterWorker.port.onmessage=function(e){"
+              "if(e.data==='connected')window.__starterConnected='1';"
+              "else window.__starterDone=String(e.data)};"
+              "window.__starterWorker.port.start&&"
+              "window.__starterWorker.port.start();");
+    };
+    connect_starter_worker(starter);
+    for (int i = 0; starter && i < 120 &&
+                    Eval(starter, "window.__starterConnected") != "1";
+         ++i) {
+      mbWait(starter, 25);
+    }
+    connect_starter_worker(survivor);
+    for (int i = 0; survivor && i < 120 &&
+                    Eval(survivor, "window.__starterConnected") != "1";
+         ++i) {
+      mbWait(survivor, 25);
+    }
+    const bool both_connected =
+        starter && survivor &&
+        Eval(starter, "window.__starterConnected") == "1" &&
+        Eval(survivor, "window.__starterConnected") == "1";
+
+    // Kill the starter outright; let its client disconnect propagate.
+    if (starter)
+      mbDestroyView(starter);
+    if (survivor)
+      mbWait(survivor, 100);
+
+    struct DeadStarterState {
+      mbView* survivor = nullptr;
+      bool saw_survivor = false;
+    } dead_starter_state{survivor, false};
+    mbSetResponseCallbackEx(
+        [](mbResponse* response, mbView* view, void* userdata) {
+          if (!std::strstr(mbResponseURL(response),
+                           "shared-starter.test/starter-payload")) {
+            return;
+          }
+          auto* state = static_cast<DeadStarterState*>(userdata);
+          state->saw_survivor = view == state->survivor;
+        },
+        &dead_starter_state);
+    if (survivor)
+      mbRunJS(survivor, "window.__starterWorker.port.postMessage('go')");
+    std::string dead_starter_done;
+    for (int i = 0; survivor && i < 120 && dead_starter_done.empty(); ++i) {
+      mbWait(survivor, 25);
+      dead_starter_done = Eval(survivor, "window.__starterDone");
+    }
+    mbSetResponseCallbackEx(nullptr, nullptr);
+    if (survivor)
+      mbDestroyView(survivor);
+    mbWait(v, 100);
+    mbClearMocks();
+    Expect(both_connected && dead_starter_done == "done:ok" &&
+               dead_starter_state.saw_survivor,
+           "a SharedWorker survives its starting view's destruction while a "
+           "client remains",
+           "connected=" + std::to_string(both_connected) + " done=[" +
+               dead_starter_done + "] survivor_attribution=" +
+               std::to_string(dead_starter_state.saw_survivor));
   }
 
   // 37i. MODULE SharedWorker: new SharedWorker(url,{type:'module'}) runs its
@@ -2768,6 +3468,109 @@ static void RunCases(mbView* v, int W, int H) {
              "ssview=[" + r + "]");
       mbDestroyView(v2);
     }
+  }
+
+  // 78b2. localStorage is synchronous across same-session contexts. Prime a
+  // sibling frame and a peer view BEFORE the writer mutates each key, then read
+  // immediately with no task-loop pumping. Per-frame renderer caches return a
+  // stale value here even though their backend eventually broadcasts the write.
+  {
+    mbSession* session = mbCreateSession("local-cache-sharing", nullptr);
+    mbView* a = session ? mbCreateViewInSession(W, H, session) : nullptr;
+    mbView* b = session ? mbCreateViewInSession(W, H, session) : nullptr;
+    bool sibling_sync = false;
+    bool view_sync = false;
+    std::string detail = "setup failed";
+    if (a && b) {
+      mbLoadHTML(a, "<body></body>", "https://cache-frame-sync.test/");
+      const std::string sibling = Eval(
+          a,
+          "(function(){var f=document.createElement('iframe');"
+          "document.body.appendChild(f);"
+          "void f.contentWindow.localStorage.getItem('instant-frame');"
+          "localStorage.setItem('instant-frame','visible-now');"
+          "return f.contentWindow.localStorage.getItem('instant-frame')||'null';})()");
+      sibling_sync = sibling == "visible-now";
+
+      mbLoadHTML(a, "<body>a</body>", "https://cache-view-sync.test/");
+      mbLoadHTML(b, "<body>b</body>", "https://cache-view-sync.test/");
+      const std::string primed_a = Eval(
+          a,
+          "localStorage.getItem('instant-view')===null?'empty':'unexpected'");
+      const std::string primed_b = Eval(
+          b,
+          "localStorage.getItem('instant-view')===null?'empty':'unexpected'");
+
+      // Park the service sequence after BOTH renderer caches are loaded. With
+      // the old per-frame cache, A's SetItem can update only A's local map and
+      // its backend Put/observer cannot run until we release this barrier; B's
+      // immediate read must therefore stay stale. The session-keyed cache
+      // updates the one shared map synchronously and passes without backend help.
+      struct ServiceBarrierState {
+        base::WaitableEvent parked;
+        base::WaitableEvent release;
+        base::WaitableEvent released;
+        std::atomic<bool> auto_released{false};
+      };
+      std::shared_ptr<ServiceBarrierState> barrier =
+          std::make_shared<ServiceBarrierState>();
+      scoped_refptr<base::SingleThreadTaskRunner> service_runner =
+          mb::MbRuntime::ServiceTaskRunner();
+      bool barrier_posted = false;
+      bool barrier_ready = false;
+      bool barrier_released = false;
+      std::string writer = "not-run";
+      std::string peer = "not-run";
+      if (service_runner &&
+          service_runner->PostTask(
+              FROM_HERE,
+              base::BindOnce(
+                  [](std::shared_ptr<ServiceBarrierState> state) {
+                    state->parked.Signal();
+                    // Self-release ensures a surprising sync IPC in Eval can
+                    // fail the test instead of wedging the suite forever.
+                    if (!state->release.TimedWait(base::Seconds(3)))
+                      state->auto_released.store(true);
+                    state->released.Signal();
+                  },
+                  barrier))) {
+        barrier_posted = true;
+        barrier_ready = barrier->parked.TimedWait(base::Seconds(2));
+        if (barrier_ready) {
+          writer = Eval(
+              a,
+              "(localStorage.setItem('instant-view','visible-now'),'set')");
+          peer = Eval(b, "localStorage.getItem('instant-view')||'null'");
+        }
+        // Unconditional for every posted-task path. The service-side timeout
+        // is a second line of defense if an Eval above unexpectedly blocks.
+        barrier->release.Signal();
+        barrier_released = barrier->released.TimedWait(base::Seconds(2));
+      }
+      const bool auto_released = barrier->auto_released.load();
+      view_sync = barrier_posted && barrier_ready && barrier_released &&
+                  !auto_released && primed_a == "empty" &&
+                  primed_b == "empty" && writer == "set" &&
+                  peer == "visible-now";
+      detail = "sibling=[" + sibling + "] peer=[" + primed_a + "/" +
+               primed_b + "/" + writer + "/" + peer + "] barrier=" +
+               std::to_string(barrier_posted) + "/" +
+               std::to_string(barrier_ready) + "/" +
+               std::to_string(barrier_released) + "/auto:" +
+               std::to_string(auto_released);
+    }
+    Expect(sibling_sync,
+           "same-session sibling frame sees localStorage write synchronously",
+           detail);
+    Expect(view_sync,
+           "same-session peer view sees localStorage write synchronously",
+           detail);
+    if (a)
+      mbDestroyView(a);
+    if (b)
+      mbDestroyView(b);
+    if (session)
+      mbDestroySession(session);
   }
 
   // 78c. Multi-view history isolation: each view's page-driven history.back() routes to ITS

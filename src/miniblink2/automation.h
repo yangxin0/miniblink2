@@ -43,16 +43,21 @@ MB_EXPORT int mbWaitForVisibleSelector(mbView*, const char* css_selector,
 MB_EXPORT int mbWaitForSelectorHidden(mbView*, const char* css_selector,
                                       int timeout_ms);
 
-// Wait until THIS view has had nothing in flight and no newly-started request for
-// `idle_ms` (Puppeteer's networkidle0) — let an SPA's deferred fetches (XHR/fetch,
-// lazy images) settle before scraping/capturing. Returns 1 once the network is
-// quiet, 0 if `timeout_ms` elapses while still busy. The signal is PER-VIEW: it
-// tracks this view's outstanding request count and a monotonic start count, so
-// another view's traffic can't disturb the wait and a still-running request keeps
-// it busy — no mbClearRequestLog step is needed to scope it (that was a workaround
-// for the old process-wide log, which also went falsely idle once its buffer
-// filled). mbClearRequestLog/mbGetRequestLog remain as a separate diagnostic.
+// Legacy API-level-1 behavior: wait until the PROCESS-WIDE capped diagnostic
+// request-log count has not changed for `idle_ms`. Call mbClearRequestLog before
+// navigation to scope it approximately. This does not track in-flight requests,
+// and traffic in another view can reset the window. Kept unchanged for existing
+// binaries; new code should use mbWaitForNetworkIdleEx.
 MB_EXPORT int mbWaitForNetworkIdle(mbView*, int idle_ms, int timeout_ms);
+
+// Robust networkidle0 wait (API level 3): wait until THIS view has had nothing
+// in flight and no newly-started request for `idle_ms`. Covers main-frame,
+// subresource, dedicated-worker, and shared-worker loads. Unrelated traffic in
+// another view cannot disturb it; a shared worker intentionally counts for every
+// view currently connected to that worker. A slow request remains busy until
+// completion. Returns 1 once quiet, 0 if `timeout_ms` elapses. No request-log
+// clearing is needed.
+MB_EXPORT int mbWaitForNetworkIdleEx(mbView*, int idle_ms, int timeout_ms);
 
 // Runaway-script guard. A single-process embedder shares the main thread with the
 // page, so a synchronous infinite loop in page JS (e.g. `while(true){}`) would hang
@@ -200,11 +205,13 @@ MB_EXPORT void mbScrollTo(mbView*, int x, int y);
 // number of steps that grew the page (0 = a static page).
 MB_EXPORT int mbScrollToBottom(mbView*, int max_steps);
 
-// Persist the WHOLE cookie jar (all hosts, session + persistent) to a Netscape
-// cookie file and load it back — for session reuse across process runs (log in
-// once, reload the jar next run). Process-wide (the jar is shared; no view param).
-// Return 1 on success, 0 on failure (unwritable path / missing file). The file is
-// curl's native --cookie-jar format, so it interoperates with curl/wget.
+// Legacy default-profile cookie persistence: save the implicit default session's
+// whole jar (all hosts, including session and persistent cookies) to a Netscape
+// cookie file, or merge such a file back into that jar. Custom mbSession profiles
+// are intentionally not included; persistent custom profiles use mbSessionFlush,
+// while mbGetAllCookies(view) can export any profile in memory. Return 1 on success,
+// 0 on failure (unwritable path / missing file). The file is curl's native
+// --cookie-jar format, so it interoperates with curl/wget.
 MB_EXPORT int mbSaveCookies(const char* path);
 MB_EXPORT int mbLoadCookies(const char* path);
 

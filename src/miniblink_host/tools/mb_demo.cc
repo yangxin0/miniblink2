@@ -57,7 +57,8 @@ int main() {
   mbClearRequestLog();
   step(mbDispatchEvent(v, "#name", "refresh") == 1,
        "mbDispatchEvent(#name, 'refresh')");
-  step(mbWaitForNetworkIdle(v, 400, 5000) == 1, "mbWaitForNetworkIdle settles");
+  step(mbWaitForNetworkIdleEx(v, 400, 5000) == 1,
+       "mbWaitForNetworkIdleEx settles this view");
 
   // 3. Scrape the asynchronously-appended result: its text and its outerHTML.
   char text[128] = {0};

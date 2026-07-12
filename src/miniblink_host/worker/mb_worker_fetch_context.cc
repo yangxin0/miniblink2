@@ -6,10 +6,13 @@
 
 namespace mb {
 
-MbWorkerURLLoaderFactory::MbWorkerURLLoaderFactory(std::string user_agent,
-                                                   std::string extra_headers)
+MbWorkerURLLoaderFactory::MbWorkerURLLoaderFactory(
+    std::string user_agent,
+    std::string extra_headers,
+    scoped_refptr<MbLoaderViewContext> view_context)
     : user_agent_(std::move(user_agent)),
-      extra_headers_(std::move(extra_headers)) {}
+      extra_headers_(std::move(extra_headers)),
+      view_context_(std::move(view_context)) {}
 
 MbWorkerURLLoaderFactory::~MbWorkerURLLoaderFactory() = default;
 
@@ -21,17 +24,22 @@ std::unique_ptr<blink::URLLoader> MbWorkerURLLoaderFactory::CreateURLLoader(
     blink::BackForwardCacheLoaderHelper* /*bf_cache_loader_helper*/,
     blink::Vector<std::unique_ptr<blink::URLLoaderThrottle>> /*throttles*/) {
   // Same libcurl-backed loader the frame uses for subresources.
-  return std::make_unique<MbURLLoader>(user_agent_, extra_headers_);
+  return std::make_unique<MbURLLoader>(user_agent_, extra_headers_,
+                                       view_context_);
 }
 
 MbWorkerFetchContext::MbWorkerFetchContext(std::string user_agent,
                                            std::string extra_headers,
-                                           std::string top_frame_origin)
+                                           std::string top_frame_origin,
+                                           scoped_refptr<MbLoaderViewContext>
+                                               view_context)
     : user_agent_(std::move(user_agent)),
       extra_headers_(std::move(extra_headers)),
       top_frame_origin_(std::move(top_frame_origin)),
+      view_context_(std::move(view_context)),
       factory_(std::make_unique<MbWorkerURLLoaderFactory>(user_agent_,
-                                                          extra_headers_)) {}
+                                                          extra_headers_,
+                                                          view_context_)) {}
 
 MbWorkerFetchContext::~MbWorkerFetchContext() = default;
 
@@ -50,7 +58,8 @@ MbWorkerFetchContext::WrapURLLoaderFactory(
         network::mojom::URLLoaderFactoryInterfaceBase> /*url_loader_factory*/) {
   // We ignore the passed network-service factory remote and keep routing through
   // libcurl, so a wrapped factory behaves identically to the primary one.
-  return std::make_unique<MbWorkerURLLoaderFactory>(user_agent_, extra_headers_);
+  return std::make_unique<MbWorkerURLLoaderFactory>(user_agent_, extra_headers_,
+                                                     view_context_);
 }
 
 void MbWorkerFetchContext::FinalizeRequest(blink::WebURLRequest&) {}
@@ -84,7 +93,8 @@ blink::WebString MbWorkerFetchContext::GetAcceptLanguages() const {
 
 scoped_refptr<MbWorkerFetchContext> MbWorkerFetchContext::CloneContext() const {
   return base::MakeRefCounted<MbWorkerFetchContext>(user_agent_, extra_headers_,
-                                                    top_frame_origin_);
+                                                    top_frame_origin_,
+                                                    view_context_);
 }
 
 }  // namespace mb

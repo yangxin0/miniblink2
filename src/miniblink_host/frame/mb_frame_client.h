@@ -192,10 +192,7 @@ class MbFrameClient : public blink::WebLocalFrameClient {
   // it so IndexedDB keys by the frame's current document origin).
   uint64_t frame_key() const { return frame_key_; }
   void Bind(blink::WebLocalFrame* frame,
-            std::unique_ptr<MbFrameClient> self_owned) {
-    web_frame_ = frame;
-    self_owned_ = std::move(self_owned);
-  }
+            std::unique_ptr<MbFrameClient> self_owned);
 
   // Host-driven (mbGoBack/mbGoForward) traversal bracket. The host re-navigates the
   // main frame to an adjacent entry's URL; that commit must NOT grow/truncate our

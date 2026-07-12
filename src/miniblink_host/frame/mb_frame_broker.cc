@@ -22,6 +22,7 @@
 #include "miniblink_host/frame/mb_websocket.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/runtime/mb_runtime.h"
+#include "miniblink_host/session/mb_session.h"
 #include "miniblink_host/worker/mb_shared_worker.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
@@ -89,11 +90,12 @@
 namespace mb {
 namespace {
 
-// One process-wide in-memory cookie store, keyed by origin. document.cookie is
-// origin-scoped; the network (curl) jar is separate. Session-only (no disk), which
-// is the right default for a headless host. Only ever touched on the runtime
-// service thread (MbCookieManager is bound there — see MakeFrameInterfaceBroker),
-// so no lock is needed.
+// One process-wide in-memory cookie store, keyed by (session, origin).
+// document.cookie is origin-scoped within a browsing profile; the network
+// (curl) jar is separate. Session-only (no disk), which is the right default
+// for a headless host. Only ever touched on the runtime service thread
+// (MbCookieManager is bound there — see MakeFrameInterfaceBroker), so no lock
+// is needed.
 using CookieList = std::vector<std::pair<std::string, std::string>>;
 std::map<std::string, CookieList>& CookieStore() {
   static std::map<std::string, CookieList>* store =
@@ -105,11 +107,20 @@ std::string OriginKey(const blink::KURL& url) {
   return blink::SecurityOrigin::Create(url)->ToString().Utf8();
 }
 
-// Process-wide registry of cookieStore change observers, paired with the origin
-// they watch. A page calls cookieStore.addEventListener('change',...) ->
-// AddChangeListener; a cookie write (document.cookie or cookieStore.set/delete)
-// fans out an OnCookieChange to every connected listener on the same origin.
-// Service-thread only (same as CookieStore()), so no lock.
+std::string CookieSessionKey(uint64_t frame_key) {
+  std::string key = MbSessionKeyFromScope(MbGetFrameOrigin(frame_key));
+  return key.empty() ? MbSession::Default()->id() : key;
+}
+
+std::string CookieScopeKey(uint64_t frame_key, const blink::KURL& url) {
+  return CookieSessionKey(frame_key) + "\x1f" + OriginKey(url);
+}
+
+// Process-wide registry of cookieStore change observers, paired with the
+// (session, origin) scope they watch. A page calls
+// cookieStore.addEventListener('change',...) -> AddChangeListener; a cookie
+// write fans out only inside that profile and origin. Service-thread only (same
+// as CookieStore()), so no lock.
 using CookieListenerEntry =
     std::pair<std::string,
               mojo::Remote<network::mojom::blink::CookieChangeListener>>;
@@ -134,17 +145,18 @@ std::unique_ptr<net::CanonicalCookie> MakeCanonicalCookie(
       /*partition_key=*/std::nullopt, &status);
 }
 
-// Notify cookieStore 'change' observers on `origin` of a cookie change. `cause`
-// is INSERTED for a set (blink files it under changed[]) or EXPLICIT for a delete
-// (deleted[]). Prunes disconnected listeners as it goes.
-void NotifyCookieChange(const blink::KURL& url,
+// Notify cookieStore 'change' observers in the writing frame's profile + origin.
+// `cause` is INSERTED for a set (blink files it under changed[]) or EXPLICIT for
+// a delete (deleted[]). Prunes disconnected listeners as it goes.
+void NotifyCookieChange(uint64_t frame_key,
+                        const blink::KURL& url,
                         const std::string& name,
                         const std::string& value,
                         network::mojom::blink::CookieChangeCause cause) {
   auto& listeners = CookieListeners();
   if (listeners.empty())
     return;
-  const std::string origin = OriginKey(url);
+  const std::string scope = CookieScopeKey(frame_key, url);
   std::unique_ptr<net::CanonicalCookie> cc = MakeCanonicalCookie(url, name, value);
   if (!cc)
     return;
@@ -153,7 +165,7 @@ void NotifyCookieChange(const blink::KURL& url,
       it = listeners.erase(it);
       continue;
     }
-    if (it->first == origin) {
+    if (it->first == scope) {
       it->second->OnCookieChange(network::mojom::blink::CookieChangeInfo::New(
           *cc, network::mojom::blink::CookieAccessResult::New(), cause));
     }
@@ -202,7 +214,7 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
     Trim(&value);
     if (name.empty())
       return;
-    CookieList& jar = CookieStore()[OriginKey(url)];
+    CookieList& jar = CookieStore()[CookieScopeKey(frame_key_, url)];
     // Decide deletion by parsing the cookie attributes (already lowercased). Per
     // RFC 6265 a cookie is deleted when Max-Age <= 0 or when Expires is in the
     // past; Max-Age (when present as a valid integer) takes precedence over
@@ -253,10 +265,9 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
     // GetCookiesString merges the HTTP jar, so erasing only the in-memory copy would
     // let the stale HTTP-jar copy reappear. MbAddCookieToJar honors the past Expires/
     // Max-Age in `raw` and drops the cookie. No-op for non-http(s) origins.
-    MbAddCookieToJar(url.GetString().Utf8(), raw,
-                     MbSessionKeyFromScope(MbGetFrameOrigin(frame_key_)));
+    MbAddCookieToJar(url.GetString().Utf8(), raw, CookieSessionKey(frame_key_));
     // Fan out a cookieStore 'change' event (document.cookie writes are observable).
-    NotifyCookieChange(url, name, value,
+    NotifyCookieChange(frame_key_, url, name, value,
                        deleting
                            ? network::mojom::blink::CookieChangeCause::EXPLICIT
                            : network::mojom::blink::CookieChangeCause::INSERTED);
@@ -273,7 +284,8 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
                         GetCookiesStringCallback callback) override {
     std::string out;
     std::set<std::string> seen;  // names already emitted (store is authoritative)
-    if (auto it = CookieStore().find(OriginKey(url)); it != CookieStore().end()) {
+    if (auto it = CookieStore().find(CookieScopeKey(frame_key_, url));
+        it != CookieStore().end()) {
       for (const auto& [n, v] : it->second) {
         if (!out.empty()) out += "; ";
         out += n + "=" + v;
@@ -284,7 +296,7 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
     // mbSetCookie-restored cookies never reach the in-memory store) so document.cookie
     // reflects them like a real browser. Empty for non-http(s). Store names win.
     const std::string jar = MbGetCookiesForUrl(url.GetString().Utf8(),
-                       MbSessionKeyFromScope(MbGetFrameOrigin(frame_key_)));
+                                               CookieSessionKey(frame_key_));
     for (size_t pos = 0; pos < jar.size();) {
       const size_t semi = jar.find("; ", pos);
       const std::string pair =
@@ -350,7 +362,8 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
         seen.insert(n);
       }
     };
-    if (auto it = CookieStore().find(OriginKey(url)); it != CookieStore().end()) {
+    if (auto it = CookieStore().find(CookieScopeKey(frame_key_, url));
+        it != CookieStore().end()) {
       for (const auto& [n, v] : it->second) {
         if (matches(n))
           add_cookie(n, v);
@@ -360,7 +373,7 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
     // names not already from the store — keeping cookieStore.getAll consistent with
     // document.cookie (GetCookiesString).
     const std::string jar = MbGetCookiesForUrl(url.GetString().Utf8(),
-                       MbSessionKeyFromScope(MbGetFrameOrigin(frame_key_)));
+                                               CookieSessionKey(frame_key_));
     for (size_t pos = 0; pos < jar.size();) {
       const size_t semi = jar.find("; ", pos);
       const std::string pair =
@@ -393,7 +406,7 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
       std::string value = params->value.Utf8();
       const bool deleting =
           !params->expires.is_null() && params->expires <= base::Time::Now();
-      CookieList& jar = CookieStore()[OriginKey(url)];
+      CookieList& jar = CookieStore()[CookieScopeKey(frame_key_, url)];
       bool found = false;
       for (auto it = jar.begin(); it != jar.end(); ++it) {
         if (it->first == name) {
@@ -408,9 +421,10 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
       if (!found && !deleting)
         jar.emplace_back(name, value);
       MbAddCookieToJar(url.GetString().Utf8(),
-                       deleting ? (name + "=; max-age=0") : (name + "=" + value));
+                       deleting ? (name + "=; max-age=0") : (name + "=" + value),
+                       CookieSessionKey(frame_key_));
       // cookieStore.set()/delete() is observable via cookieStore.onchange.
-      NotifyCookieChange(url, name, value,
+      NotifyCookieChange(frame_key_, url, name, value,
                          deleting
                              ? network::mojom::blink::CookieChangeCause::EXPLICIT
                              : network::mojom::blink::CookieChangeCause::INSERTED);
@@ -425,10 +439,10 @@ class MbCookieManager : public network::mojom::blink::RestrictedCookieManager {
       net::StorageAccessApiStatus,
       mojo::PendingRemote<network::mojom::blink::CookieChangeListener> listener,
       AddChangeListenerCallback callback) override {
-    // Register the observer against its origin; a later cookie write fans out an
-    // OnCookieChange to it (see NotifyCookieChange). cookieStore.onchange now fires.
+    // Register against this profile + origin; another session at the same URL
+    // must not observe the change.
     CookieListeners().emplace_back(
-        OriginKey(url),
+        CookieScopeKey(frame_key_, url),
         mojo::Remote<network::mojom::blink::CookieChangeListener>(
             std::move(listener)));
     std::move(callback).Run();
@@ -1653,6 +1667,28 @@ void MbSetClipboardHandler(std::function<std::string()> read,
   base::AutoLock al(ClipLock());
   ClipReadHandlerRef() = std::move(read);
   ClipWriteHandlerRef() = std::move(write);
+}
+
+void MbClearPageCookieStoreForSession(const std::string& session_key) {
+  if (session_key.empty())
+    return;
+  auto clear = base::BindOnce(
+      [](std::string prefix) {
+        auto& store = CookieStore();
+        for (auto it = store.begin(); it != store.end();) {
+          if (it->first.rfind(prefix, 0) == 0)
+            it = store.erase(it);
+          else
+            ++it;
+        }
+      },
+      session_key + "\x1f");
+  scoped_refptr<base::SingleThreadTaskRunner> runner =
+      MbRuntime::ServiceTaskRunner();
+  if (!runner || runner->RunsTasksInCurrentSequence())
+    std::move(clear).Run();
+  else
+    runner->PostTask(FROM_HERE, std::move(clear));
 }
 
 mojo::PendingRemote<blink::mojom::blink::BrowserInterfaceBroker>

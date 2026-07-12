@@ -12,12 +12,25 @@
 #include <cstdint>
 #include <string>
 
+#include "third_party/blink/public/common/tokens/tokens.h"
+
 namespace mb {
 
 // Record / forget a frame's current origin (a SecurityOrigin::ToString(), e.g.
 // "https://example.com"; opaque origins serialize to "null").
 void MbSetFrameOrigin(uint64_t frame_key, const std::string& origin);
 void MbClearFrameOrigin(uint64_t frame_key);
+
+// Associate blink's LocalFrameToken (carried by DOM Storage requests) with our
+// frame_key. The token is stable for the frame lifetime; MbClearFrameOrigin
+// removes this association along with the committed scope.
+void MbSetFrameToken(uint64_t frame_key,
+                     const blink::LocalFrameToken& frame_token);
+
+// Resolve the session-prefixed committed scope for a DOM Storage caller. Empty
+// means the token is unknown or the frame has not committed yet.
+std::string MbGetFrameScopeForToken(
+    const blink::LocalFrameToken& frame_token);
 
 // The frame's last-recorded origin, or "" if unknown (no commit yet, or a frame
 // that doesn't publish its origin — e.g. a worker bound without a frame_key).

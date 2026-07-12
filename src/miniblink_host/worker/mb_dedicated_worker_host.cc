@@ -33,11 +33,15 @@
 
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/loader/worker_fetch_context.h"
 #include "third_party/blink/renderer/core/workers/dedicated_worker.h"
+#include "third_party/blink/renderer/core/workers/worker_global_scope.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 
 #include "miniblink_host/frame/mb_frame_broker.h"
 #include "miniblink_host/frame/mb_frame_client.h"
 #include "miniblink_host/frame/mb_frame_origin.h"
+#include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/session/mb_session.h"
 #include "miniblink_host/view/mb_webview.h"
 #include "miniblink_host/worker/mb_worker_fetch_context.h"
@@ -86,16 +90,26 @@ class MbWorkerHostFactoryClient
     mojo::MakeSelfOwnedReceiver(
         std::make_unique<MbDedicatedWorkerHost>(),
         host_remote.InitWithNewPipeAndPassReceiver());
-    // The creating document's view (worker_ IS blink's DedicatedWorker — the
-    // only WebDedicatedWorker implementation — and its execution context is
-    // the creating window; a NESTED worker's context is a WorkerGlobalScope
-    // -> null frame -> null view, the documented residual). It scopes both
-    // the storage partition below and the script fetch.
+    // The creating document/worker's loader identity scopes storage + script fetch.
+    // For a nested worker, recover it from the parent Worker's WebWorkerFetchContext.
     MbWebView* view = nullptr;
-    if (auto* window = blink::DynamicTo<blink::LocalDOMWindow>(
-            static_cast<blink::DedicatedWorker*>(worker_)
-                ->GetExecutionContext())) {
+    scoped_refptr<MbLoaderViewContext> loader_view_context;
+    blink::ExecutionContext* execution_context =
+        static_cast<blink::DedicatedWorker*>(worker_)->GetExecutionContext();
+    if (auto* window =
+            blink::DynamicTo<blink::LocalDOMWindow>(execution_context)) {
       view = MbViewForFrame(window->GetFrame());
+      if (view)
+        loader_view_context = view->loader_view_context();
+    } else if (execution_context && execution_context->IsWorkerGlobalScope()) {
+      auto* scope = blink::To<blink::WorkerGlobalScope>(execution_context);
+      auto& parent_fetch_context =
+          static_cast<blink::WorkerFetchContext&>(scope->Fetcher()->Context());
+      if (blink::WebWorkerFetchContext* parent =
+              parent_fetch_context.GetWebWorkerFetchContext()) {
+        loader_view_context =
+            static_cast<MbWorkerFetchContext*>(parent)->loader_view_context();
+      }
     }
     // Scope the worker's per-origin storage (IndexedDB) by its origin, published
     // under a synthetic worker frame_key, so a same-origin worker SHARES its
@@ -114,18 +128,20 @@ class MbWorkerHostFactoryClient
     // "null" as a wildcard, which is what keeps data:/blob: worker<->window
     // bridging alive.
     std::string scope = origin.ToString().Utf8();
-    if (view && view->session() && scope != "null")
-      scope = view->session()->id() + "\x1f" + scope;
+    if (loader_view_context && !loader_view_context->session_key().empty() &&
+        scope != "null") {
+      scope = loader_view_context->session_key() + "\x1f" + scope;
+    }
     MbSetFrameOrigin(worker_frame_key_, scope);
     worker_->OnWorkerHostCreated(MakeFrameInterfaceBroker(worker_frame_key_),
                                  std::move(host_remote), origin);
 
     // 2-3. Fetch the top-level script (file://, http(s)://, or data:) and synthesize the
     //      browser-fetched-script load parameters (shared with shared workers).
-    //      The view scopes the fetch to its per-view request-mock hook and
-    //      session cookie jar (null -> process-wide hook, default jar).
-    auto params =
-        MakeWorkerMainScriptParams(script_url.GetString().Utf8(), view);
+    //      The retained loader context marshals nested fetch policy/hooks to the
+    //      engine runner and preserves the parent's session cookie jar.
+    auto params = MakeWorkerMainScriptParams(
+        script_url.GetString().Utf8(), std::move(loader_view_context));
     if (!params) {
       worker_->OnScriptLoadStartFailed();
       return;

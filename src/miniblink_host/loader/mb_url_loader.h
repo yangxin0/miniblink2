@@ -7,12 +7,15 @@
 // Body is delivered via SegmentedBuffer (the std::variant alternative to a Mojo data
 // pipe in URLLoaderClient::DidReceiveResponse) — no data-pipe plumbing.
 //
-// Today: reads file:// (and file-relative) URLs from disk. http(s) -> DidFail until the
-// libcurl backend lands. Modeled on third_party/blink/renderer/platform/testing/url_loader_mock.cc.
+// Handles intercepted/local responses and libcurl-backed HTTP(S), including
+// redirects and streaming transports. Modeled on Blink's testing URL loader but
+// used by the production in-process frame/worker paths here.
 
 #ifndef MINIBLINK_HOST_LOADER_MB_URL_LOADER_H_
 #define MINIBLINK_HOST_LOADER_MB_URL_LOADER_H_
 
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -20,7 +23,10 @@
 #include <vector>
 
 #include "base/functional/callback.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/synchronization/lock.h"
+#include "base/task/single_thread_task_runner.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/url_loader/url_loader.h"
@@ -40,6 +46,61 @@ namespace mb {
 // shared_ptr so it outlives the loader if the worker is mid-call during teardown.
 class MbSseStream;
 
+// Stable, thread-safe identity shared by every subresource loader that belongs to a
+// view, including loaders created on dedicated/shared worker threads. The raw view
+// pointer is only exposed while the owning view is alive; worker-held references keep
+// this token (not the view) alive after teardown. `activity_key()` is consequently safe
+// for cross-thread network-idle accounting and cannot be confused with a newly-created
+// view that happens to reuse the old view's address.
+class MbLoaderViewContext
+    : public base::RefCountedThreadSafe<MbLoaderViewContext> {
+ public:
+  MbLoaderViewContext(
+      const void* host_ctx,
+      scoped_refptr<base::SingleThreadTaskRunner> engine_task_runner,
+      std::string session_key);
+  // A worker-owned child context. It delegates callback attribution/liveness to the
+  // creating view context, retains that view's immutable session key, and may attach
+  // additional live-view activity targets (SharedWorker clients) without creating
+  // view-to-view reference cycles.
+  explicit MbLoaderViewContext(
+      scoped_refptr<MbLoaderViewContext> owner_context);
+
+  const void* host_ctx() const;
+  const void* activity_key() const { return this; }
+  bool is_alive() const;
+  const scoped_refptr<base::SingleThreadTaskRunner>& engine_task_runner() const {
+    return engine_task_runner_;
+  }
+  const std::string& session_key() const { return session_key_; }
+
+  // SharedWorker activity is relevant to every connected live view. Add/remove one
+  // connection reference. activity_contexts() returns a strong-ref snapshot of each
+  // distinct view context so a client that disconnects mid-load cannot have its
+  // activity key destroyed/reused before that load balances its counter.
+  void AddActivityContext(scoped_refptr<MbLoaderViewContext> context);
+  void RemoveActivityContext(const MbLoaderViewContext* context);
+  std::vector<scoped_refptr<MbLoaderViewContext>> activity_contexts() const;
+
+  // Called on the engine thread at the start of MbWebView teardown. Existing worker
+  // loaders may continue unwinding, but can no longer expose the destroyed view to a
+  // host callback or use it to consult a per-view registry.
+  void Invalidate();
+
+ private:
+  friend class base::RefCountedThreadSafe<MbLoaderViewContext>;
+  ~MbLoaderViewContext();
+
+  const void* const host_ctx_;
+  const scoped_refptr<base::SingleThreadTaskRunner> engine_task_runner_;
+  const std::string session_key_;
+  const scoped_refptr<MbLoaderViewContext> owner_context_;
+  mutable base::Lock activity_lock_;
+  std::vector<scoped_refptr<MbLoaderViewContext>> activity_contexts_;
+  bool activity_contexts_registered_ = false;
+  std::atomic<bool> alive_{true};
+};
+
 // The default User-Agent — a realistic modern desktop string so UA-sniffing sites
 // serve their current desktop experience (the base Platform::UserAgent() is empty).
 const std::string& MbDefaultUserAgent();
@@ -49,11 +110,9 @@ const std::string& MbDefaultUserAgent();
 // network requests. No-op for non-http(s) URLs. Bridges document.cookie -> fetches.
 // SESSION COOKIE JARS (IMPROVEMENT.md item 12, stage 2): every session id keys
 // its own curl cookie share, so profiles cannot see each other's cookies.
-// An empty/unknown key routes to the DEFAULT session's jar (the pre-session
-// behavior for untracked contexts like workers).
-//
-// Fetch paths resolve their jar from the opaque host context (the owning
-// view) via this registry — same pattern as the per-context request mocks.
+// An empty/unknown key routes to the DEFAULT session's jar for legacy/viewless
+// callers. Frame and worker loaders retain their immutable session key directly;
+// this raw-context registry remains for older synchronous entry points.
 void MbSetLoaderSessionKey(const void* ctx, const std::string& key);
 std::string MbLoaderSessionKeyFor(const void* ctx);
 // The partition scope has been "<session-id>\x1f<origin...>" since sessions
@@ -70,25 +129,25 @@ std::string MbGetCookiesForUrl(const std::string& url, const std::string& sessio
 // Erase all cookies from the shared HTTP jar (e.g. to reset a session).
 void MbClearCookieJar(const std::string& session_key = std::string());
 
-// Save the WHOLE shared cookie jar (every host, session + persistent) to `path`
-// as a Netscape cookie file, and load it back. For session persistence across
-// process runs — log in once, reuse the jar next run. Save returns false if the
+// Save one browsing session's whole cookie jar (every host, including session
+// and persistent cookies) to `path` as a Netscape cookie file, and load it back.
+// An empty key selects the implicit default session. Save returns false if the
 // file can't be written; Load returns false if `path` is missing/unreadable.
 // (Netscape format = curl's native --cookie-jar format, so it interoperates.)
 bool MbSaveCookies(const std::string& path, const std::string& session_key = std::string());
 bool MbLoadCookies(const std::string& path, const std::string& session_key = std::string());
 
-// Snapshot the WHOLE shared cookie jar (every host, session + persistent) as a
-// Netscape cookie file in memory — the same content MbSaveCookies writes, but
-// returned as a string for in-memory session export (DB, network) with no temp
-// file. Empty if the cookie engine is unavailable.
+// Snapshot one browsing session's whole jar as a Netscape cookie file in memory
+// — the same content MbSaveCookies writes, with no temporary file. An empty key
+// selects the implicit default session. Empty if the cookie engine is unavailable.
 std::string MbGetAllCookies(const std::string& session_key = std::string());
 
 // Process-wide request log: every subresource URL the loader fetches (img, css,
 // fetch/XHR, etc.) is appended via MbRecordRequest. MbGetRequestLog returns the
 // URLs newline-separated, oldest first; MbClearRequestLog empties it. The log is
 // capped (oldest entries dropped past the cap) so a long-lived process can't grow
-// it without bound. Single-threaded (main-thread loader), so no locking.
+// it without bound. Access is synchronized because worker-owned loaders also
+// record requests while the engine thread may read/clear the diagnostic log.
 void MbRecordRequest(const std::string& url);
 std::string MbGetRequestLog();
 void MbClearRequestLog();
@@ -96,21 +155,29 @@ void MbClearRequestLog();
 // diagnostic. NOTE: do NOT use this for network-idle detection: the log is capped,
 // so once it fills its count stops changing and a still-busy page looks idle, and
 // it counts starts, not outstanding requests. Use the per-view activity counters
-// below instead (that is what MbWebView::WaitForNetworkIdle now polls).
+// below instead (that is what MbWebView::WaitForNetworkIdleEx polls).
 size_t MbRequestCount();
 
-// Per-view network activity, the correct backing for mbWaitForNetworkIdle. Keyed
-// by the owning view (`view_ctx` == the loader's host_ctx == the MbWebView*), so
-// one view's traffic never resets another's idle window. `started` is a MONOTONIC
+// The test-only rendezvous/probe hooks this TU defines are declared in
+// test/mb_test_seams.h; the .cc includes it so signatures cannot drift.
+
+// Per-view network activity, the correct backing for mbWaitForNetworkIdleEx. New
+// loaders use the owning view's stable MbLoaderViewContext activity key, so an
+// address-reused MbWebView cannot inherit old worker traffic. `started` is a MONOTONIC
 // (never-capped) count of loads begun for the view — it always advances on new
 // traffic, so a continuously-fetching page never looks idle; `in_flight` is the
 // number of loads currently outstanding (a load raises it at LoadAsynchronously
 // and lowers it when its loader is destroyed), so a single slow request keeps the
-// view busy until it actually finishes. Main-thread only, like the request log.
+// view busy until it actually finishes. These counters are synchronized because
+// worker-owned loaders start/finish on worker sequences while WaitForNetworkIdleEx polls
+// them on the engine sequence. Entries are retired when their stable attribution token
+// dies and erased once its last in-flight load finishes; monotonicity is therefore kept
+// for the full live-token lifetime without leaking one map entry per destroyed view.
 void MbNetRequestStarted(const void* view_ctx);
 void MbNetRequestFinished(const void* view_ctx);
 uint64_t MbNetStartedCount(const void* view_ctx);
 int MbNetInFlight(const void* view_ctx);
+void MbNetForgetActivityContext(const void* view_ctx);
 
 // Process-wide request blocking: any fetched URL containing a registered
 // substring is failed (ERR_BLOCKED_BY_CLIENT) instead of loaded — block ads /
@@ -222,8 +289,8 @@ void MbSetRequestMockHook(MbRequestMockHook hook);
 // table and BEFORE the process-wide hook, for every fetch that carries the
 // context: a view's document (navigations), subresources, view-level fetch
 // helpers, and worker main scripts (dedicated: the creating document's view;
-// shared: the view of the starting connection). Residual viewless fetches
-// (nested workers' scripts) fall through to the process-wide hook.
+// shared: the starting connection while live, then another connected live view).
+// Residual viewless fetches fall through to the process-wide hook.
 // Pass {} to erase. The registrant must erase before the context dies.
 void MbSetRequestMockHookForContext(const void* ctx, MbRequestMockHook hook);
 
@@ -236,15 +303,17 @@ void MbAddUrlRewrite(const std::string& from, const std::string& to);
 void MbClearUrlRewrites();
 std::string MbApplyUrlRewrites(const std::string& url);
 
-// Per-URL request header injection (two registries, both cleared by MbClearRequestHeaders;
-// both appended by MbApplyRequestHeaders):
+// Per-URL request header injection (three registries, all cleared by
+// MbClearRequestHeaders and applied by MbApplyRequestHeaders):
 //  - MbAddRequestHeader(substring, ...): ORIGINAL substring-of-full-URL match (flexible;
 //    matches path/query too; a footgun for credentials — see the .cc).
 //  - MbAddRequestHeaderForHost(host_filter, ...): parsed-HOST match ("host" / ".host" /
-//    "host/path/prefix"), applied per-hop on the manual-redirect path so a credential
-//    header does not follow a cross-origin redirect. Withheld on the curl auto-follow
-//    (top-level navigation) path, where per-hop scrubbing isn't possible.
-// MbApplyRequestHeaders takes follow_redirects so it can enforce that host-scoped policy.
+//    "host/path/prefix"), applied per-hop so a credential does not follow a redirect.
+//  - MbAddRequestHeaderForOrigin(origin, ...): scheme+host+effective-port match.
+// All three categories share one registration sequence; matching rules are applied in
+// call order, so the latest registration wins across categories as well as within one.
+// `follow_redirects` is retained for internal source compatibility; every transport now
+// evaluates headers manually per hop, so it no longer changes which rules are applied.
 void MbAddRequestHeader(const std::string& substring, const std::string& name,
                         const std::string& value);
 void MbAddRequestHeaderForHost(const std::string& host_filter,
@@ -256,6 +325,10 @@ void MbAddRequestHeaderForOrigin(const std::string& origin, const std::string& n
 void MbClearRequestHeaders();
 void MbApplyRequestHeaders(const std::string& url, std::string* req_headers,
                            bool follow_redirects);
+// Same-name, case-insensitive last-write-wins merge used by request entry points that
+// compose mutable-hook additions before handing a finalized block to a worker transport.
+void MbMergeRequestHeaders(std::string* req_headers,
+                           const std::string& add_headers);
 
 // Process-wide HTTP(S) proxy for all network fetches, as a libcurl proxy string:
 // "http://host:port", "socks5://host:port", "host:port" (defaults to http), or
@@ -336,8 +409,8 @@ const std::vector<std::string>& MbCustomSchemes();
 // before calling. Honors the session cookie jar, proxy, cert-ignore and
 // redirect settings like MbFetchUrl. URL-scoped request headers are evaluated
 // independently for every redirect hop; `pinned_pubkey` is installed on every
-// hop's curl handle. `initial_origin_headers` are request-hook additions for
-// the first hop only. The caller applies interception before starting; every
+// hop's curl handle. `first_request_headers` is the complete first-hop block,
+// finalized by the caller after static registrations and request hooks. Every
 // followed redirect target then re-runs rewrite/block/request-hook/mock policy
 // on the caller's sequence before its worker fetch. A successful mock target
 // completes the download from its body; a >=400 mock fails it. `host_ctx`
@@ -346,6 +419,10 @@ const std::vector<std::string>& MbCustomSchemes();
 class MbDownloadStream;  // defined in the .cc; opaque to callers
 std::shared_ptr<MbDownloadStream> MbStartDownloadStream(
     std::string url,
+    // Page-visible URL kept distinct from `url` (the rewritten transport URL) so
+    // relative and exact-backend absolute/network-path redirects never leak the
+    // transport origin to policy callbacks.
+    std::string visible_url,
     std::string cookie_session_key,
     std::string req_headers,
     std::string user_agent,
@@ -355,7 +432,7 @@ std::shared_ptr<MbDownloadStream> MbStartDownloadStream(
     base::RepeatingCallback<void(std::string chunk)> data,
     base::OnceCallback<void(bool success)> done,
     std::string pinned_pubkey = std::string(),
-    std::string initial_origin_headers = std::string(),
+    std::string first_request_headers = std::string(),
     const void* host_ctx = nullptr);
 // Abort promptly (idle streams too); the stream's done(false) follows. The
 // handle can then be dropped — the worker keeps itself alive to unwind.
@@ -396,7 +473,8 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
                 std::string* out_error = nullptr,
                 int* out_error_code = nullptr,
                 const void* host_ctx = nullptr,
-                bool run_response_hook = true);
+                bool run_response_hook = true,
+                const std::string& cookie_session_key = std::string());
 
 // ---- Asynchronous top-level navigation ------------------------------------------------
 // The non-blocking counterpart of MbFetchUrl for a MAIN-resource navigation. The fetch runs
@@ -405,8 +483,9 @@ bool MbFetchUrl(const std::string& url_spec, std::string* body,
 // Redirects are followed per-hop with the same origin-scoped credential stripping as
 // FetchHttp. `on_complete` runs on the CALLING sequence (the main thread) with the final
 // result; the caller then fires the response hook + commits. Local schemes (mock/data/file)
-// resolve instantly but still complete via a POSTED task, so a commit never happens
-// synchronously inside the call. It does NOT fire the response hook itself (the caller does,
+// start from a POSTED task; file IO and data decoding then run on ThreadPool, so neither
+// local materialization nor a commit happens synchronously inside mbNavigate or freezes
+// the next engine update. It does NOT fire the response hook itself (the caller does,
 // once, before committing) — mirroring the subresource loader's DeliverResponse.
 struct MbNavigationRequest {
   uint64_t id = 0;             // caller's navigation id (for MbCancelNavigation)
@@ -417,6 +496,9 @@ struct MbNavigationRequest {
   std::string user_agent;
   std::string extra_headers;  // newline-separated "Name: Value"
   const void* host_ctx = nullptr;  // owning view (session jar + per-view mocks)
+  // Stable lifetime/session/activity identity. `host_ctx` remains the callback token,
+  // but is consulted only while this context still reports a live owning view.
+  scoped_refptr<MbLoaderViewContext> view_context;
 };
 struct MbNavigationResult {
   bool ok = false;
@@ -428,7 +510,9 @@ struct MbNavigationResult {
   std::string content_type;
   std::string headers;     // raw final-response header block
   // Page-visible URL: the original request across transparent rewrite/mutate
-  // targets, or the resolved target after a real server redirect.
+  // targets, including exact-backend absolute and network-path Location
+  // redirects, or the resolved target after a real server redirect to another
+  // origin (including a different backend port).
   std::string final_url;
   std::string error;       // prose (empty on ok)
   int error_code = 0;      // CURLcode (transport failures) or 0
@@ -438,6 +522,7 @@ struct MbNavigationResult {
   // contract promises, instead of inferring "network" from an absent CURLcode.
   std::string error_domain;
 };
+
 using MbNavigationCallback = base::OnceCallback<void(MbNavigationResult)>;
 // A PROCESS-GLOBAL, monotonically increasing navigation id. Every async-navigation caller
 // (per-view mbNavigate AND page-initiated navigation) draws its id here, so ids never
@@ -457,6 +542,11 @@ class MbURLLoader : public blink::URLLoader {
   // (see MbSetRequestMockHookForContext); null means process-wide only.
   explicit MbURLLoader(std::string user_agent = "", std::string extra_headers = "",
                        const void* host_ctx = nullptr);
+  // Stable-context form used by frame and worker subresource factories. Worker
+  // response hooks marshal through the context's engine runner and activity is keyed
+  // by the context rather than by a raw view address.
+  MbURLLoader(std::string user_agent, std::string extra_headers,
+              scoped_refptr<MbLoaderViewContext> view_context);
   ~MbURLLoader() override;
 
   // blink::URLLoader:
@@ -517,18 +607,29 @@ class MbURLLoader : public blink::URLLoader {
   // worker thread so the page sees events as they arrive (the buffered path would
   // hang on a never-closing stream). OnSseChunk/OnSseDone hop from the worker.
   void StartSse(const std::string& fetch_url, const std::string& req_headers,
-                const std::string& initial_origin_headers,
+                const std::string& first_request_headers,
                 const std::string& pinned_pubkey,
                 const std::string& report_url);
   void OnSseChunk(std::string bytes);
   void OnSseDone();
   void DrainSse(MojoResult result = 0);
 
+  const void* HostContext() const;
+  std::vector<scoped_refptr<MbLoaderViewContext>> ActivityContexts() const;
+  std::string SessionKey() const;
+  void InvokeResponseHook(const std::string& url, int* status,
+                          std::string* headers, std::string* body);
+
   blink::URLLoaderClient* client_ = nullptr;  // not owned; valid until done/cancel
   std::string user_agent_;  // sent on each request (empty -> default)
   std::string extra_headers_;  // newline-separated "Name: Value" added per request
   const void* host_ctx_ = nullptr;  // owning view for per-context mocks (may be null)
+  scoped_refptr<MbLoaderViewContext> view_context_;
   bool net_counted_ = false;  // this load bumped its view's in-flight count (pair with dtor)
+  // Strong refs keep SharedWorker client activity identities unique until this load's
+  // destructor has balanced every started counter.
+  std::vector<scoped_refptr<MbLoaderViewContext>> net_activity_contexts_;
+  std::vector<const void*> net_activity_keys_;  // includes legacy raw-host fallback
   std::string body_;  // owns the bytes while the data pipe drains them
   std::unique_ptr<mojo::DataPipeProducer> data_pipe_producer_;
   // SSE streaming state (main thread): the producer + a watcher draining chunks.

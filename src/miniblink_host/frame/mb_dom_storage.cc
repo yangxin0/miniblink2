@@ -12,7 +12,9 @@
 #include "base/location.h"
 #include "base/no_destructor.h"
 #include "base/task/single_thread_task_runner.h"
+#include "miniblink_host/frame/mb_frame_origin.h"
 #include "miniblink_host/runtime/mb_runtime.h"
+#include "miniblink_host/session/mb_session.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
@@ -31,8 +33,9 @@ namespace {
 using Bytes = blink::Vector<uint8_t>;
 using StorageAreaObserver = blink::mojom::blink::StorageAreaObserver;
 
-// One process-wide store per origin key: ordered key/value entries + the set of
-// observing contexts. Service-thread only, so no lock.
+// One process-wide store per (session, area type, namespace, origin) key:
+// ordered key/value entries + the set of observing contexts. Service-thread
+// only, so no lock.
 struct AreaStore {
   std::vector<std::pair<Bytes, Bytes>> entries;
   std::vector<mojo::Remote<StorageAreaObserver>> observers;
@@ -49,6 +52,18 @@ int FindEntry(const AreaStore& s, const Bytes& key) {
       return static_cast<int>(i);
   }
   return -1;
+}
+
+template <typename Fn>
+void ForEachObserver(AreaStore& s, Fn&& fn) {
+  for (auto it = s.observers.begin(); it != s.observers.end();) {
+    if (!it->is_connected()) {
+      it = s.observers.erase(it);
+      continue;
+    }
+    fn(it->get());
+    ++it;
+  }
 }
 
 // The origin key for a storage area. Same non-opaque origin -> same key (shared
@@ -74,6 +89,23 @@ std::string KeyForStorageKey(const blink::BlinkStorageKey& storage_key) {
       key += "\x1f""3p""\x1f" + top.Serialize().Utf8();
   }
   return key;
+}
+
+std::string SessionKeyForFrameToken(
+    const blink::LocalFrameToken& local_frame_token) {
+  const std::string scope = MbGetFrameScopeForToken(local_frame_token);
+  const size_t separator = scope.find('\x1f');
+  if (separator != std::string::npos)
+    return scope.substr(0, separator);
+  // DOM Storage can bind during initial-document setup before a committed scope
+  // is published. Such a frame still belongs to the implicit default profile.
+  return MbSession::Default()->id();
+}
+
+std::string ScopedAreaKey(const std::string& session_key,
+                          const char* area_kind,
+                          const std::string& area_key) {
+  return session_key + "\x1f" + area_kind + area_key;
 }
 
 // A StorageArea over one origin's shared AreaStore. Many instances (one per
@@ -166,18 +198,6 @@ class MbStorageArea : public blink::mojom::blink::StorageArea {
   }
 
  private:
-  template <typename Fn>
-  static void ForEachObserver(AreaStore& s, Fn&& fn) {
-    for (auto it = s.observers.begin(); it != s.observers.end();) {
-      if (!it->is_connected()) {
-        it = s.observers.erase(it);
-        continue;
-      }
-      fn(it->get());
-      ++it;
-    }
-  }
-
   std::string key_;
   bool broadcast_;
 };
@@ -192,11 +212,13 @@ class MbDomStorage : public blink::mojom::blink::DomStorage {
  public:
   void OpenLocalStorage(
       const blink::BlinkStorageKey& storage_key,
-      const blink::LocalFrameToken& /*local_frame_token*/,
+      const blink::LocalFrameToken& local_frame_token,
       mojo::PendingReceiver<blink::mojom::blink::StorageArea> area) override {
+    const std::string key = ScopedAreaKey(
+        SessionKeyForFrameToken(local_frame_token), "ls:",
+        KeyForStorageKey(storage_key));
     mojo::MakeSelfOwnedReceiver(
-        std::make_unique<MbStorageArea>(KeyForStorageKey(storage_key),
-                                        /*broadcast=*/true),
+        std::make_unique<MbStorageArea>(key, /*broadcast=*/true),
         std::move(area));
   }
 
@@ -210,7 +232,7 @@ class MbDomStorage : public blink::mojom::blink::DomStorage {
 
   void BindSessionStorageArea(
       const blink::BlinkStorageKey& storage_key,
-      const blink::LocalFrameToken& /*local_frame_token*/,
+      const blink::LocalFrameToken& local_frame_token,
       const blink::String& namespace_id,
       mojo::PendingReceiver<blink::mojom::blink::StorageArea> session_area)
       override {
@@ -218,8 +240,9 @@ class MbDomStorage : public blink::mojom::blink::DomStorage {
     // by (namespace_id, origin). Each view has a UNIQUE namespace id (minted at
     // view creation), so same-view same-origin frames SHARE sessionStorage (incl.
     // the 'storage' event) while different views stay isolated.
-    const std::string key =
-        "ss:" + namespace_id.Utf8() + ":" + KeyForStorageKey(storage_key);
+    const std::string key = ScopedAreaKey(
+        SessionKeyForFrameToken(local_frame_token), "ss:",
+        namespace_id.Utf8() + ":" + KeyForStorageKey(storage_key));
     mojo::MakeSelfOwnedReceiver(
         std::make_unique<MbStorageArea>(key, /*broadcast=*/false),
         std::move(session_area));
@@ -255,6 +278,36 @@ void BindDomStorageProviderOnServiceThread(
                 std::make_unique<MbDomStorageProvider>(), std::move(r));
           },
           std::move(receiver)));
+}
+
+void MbClearDomStorageForSession(const std::string& session_key) {
+  if (session_key.empty())
+    return;
+  scoped_refptr<base::SingleThreadTaskRunner> runner =
+      MbRuntime::ServiceTaskRunner();
+  if (!runner)
+    return;
+  auto clear = base::BindOnce(
+      [](std::string prefix) {
+        for (auto& [key, area] : Stores()) {
+          if (key.rfind(prefix, 0) != 0)
+            continue;
+          const bool was_nonempty = !area.entries.empty();
+          area.entries.clear();
+          // Blink requires sessionStorage invalidation to stay renderer-local;
+          // a backend KeyChanged/AllDeleted for it trips !IsSessionStorage().
+          if (key.compare(prefix.size(), 3, "ls:") == 0) {
+            ForEachObserver(area, [&](StorageAreaObserver* observer) {
+              observer->AllDeleted(was_nonempty, nullptr);
+            });
+          }
+        }
+      },
+      session_key + "\x1f");
+  if (runner->RunsTasksInCurrentSequence())
+    std::move(clear).Run();
+  else
+    runner->PostTask(FROM_HERE, std::move(clear));
 }
 
 }  // namespace mb

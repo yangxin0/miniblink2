@@ -4,12 +4,14 @@
 #   /cookies              -> {"cookies": {<from request Cookie header>}}
 #   /headers              -> {"headers": {<request headers, original case>}}
 import json
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 COUNTS = {}
+AUTH_OBSERVATIONS = {}
 COUNTS_LOCK = threading.Lock()
 
 class H(BaseHTTPRequestHandler):
@@ -45,6 +47,82 @@ class H(BaseHTTPRequestHandler):
             self.send_header('Location', target)
             self.send_header('Content-Length', '0')
             self.end_headers()
+            return
+        if u.path == '/auth-chain-start':
+            # Record the credential on the redirecting hop. The final endpoint
+            # returns both observations, making preservation/re-application tests
+            # discriminating instead of checking only the destination request.
+            key = q.get('key', ['default'])[0]
+            target = q.get('url', ['/auth-chain-final?key=' + key])[0]
+            with COUNTS_LOCK:
+                AUTH_OBSERVATIONS[key] = self.headers.get('Authorization', '')
+            self.send_response(302)
+            self.send_header('Location', target)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+        if u.path == '/auth-chain-final':
+            key = q.get('key', ['default'])[0]
+            with COUNTS_LOCK:
+                initial = AUTH_OBSERVATIONS.get(key, '')
+            self.send_body(200, json.dumps({
+                'initial_authorization': initial,
+                'final_authorization': self.headers.get('Authorization', ''),
+                'host': self.headers.get('Host', ''),
+            }), 'application/json')
+            return
+        if u.path == '/rewrite-chain-start':
+            self.send_response(302)
+            self.send_header('Location', '/rewrite-chain-mid')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+        if u.path == '/rewrite-chain-mid':
+            # This response is deliberately wrong. A visible-hop rewrite must
+            # replace this transport target with /rewrite-chain-rematched.
+            self.send_body(200, '<html><body id="rewrite-chain">UNREWRITTEN</body></html>')
+            return
+        if u.path == '/rewrite-chain-rematched':
+            self.send_response(302)
+            self.send_header('Location', '/rewrite-chain-final')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+        if u.path == '/rewrite-chain-final':
+            self.send_body(200, '<html><body id="rewrite-chain">REMATCHED</body></html>')
+            return
+        if u.path == '/absolute-host-redirect':
+            # Model a backend/reverse proxy that constructs an absolute redirect
+            # from the transport Host rather than the page-visible public origin.
+            host = self.headers.get('Host', '')
+            self.send_response(302)
+            self.send_header('Location', f'http://{host}/origin?via=absolute')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+        if u.path == '/scheme-relative-host-redirect':
+            # Same reverse-proxy behavior, but with a network-path reference. A
+            # public https URL rewritten to this http backend must project the
+            # backend authority despite the two URL spaces using different schemes.
+            host = self.headers.get('Host', '')
+            target = q.get('target', ['/origin?via=scheme-relative'])[0]
+            if not target.startswith('/'):
+                target = '/'
+            self.send_response(302)
+            self.send_header('Location', f'//{host}{target}')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+        if u.path == '/drop-connection':
+            # Deterministic curl transport failure: accept the request but produce
+            # no HTTP response. Used to verify transparent backend URLs never reach
+            # top-level failure callbacks.
+            self.close_connection = True
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            self.connection.close()
             return
         if u.path.startswith('/redirect/'):
             try:
@@ -107,6 +185,31 @@ class H(BaseHTTPRequestHandler):
                            {'Access-Control-Allow-Origin': '*',
                             'Cache-Control': 'no-cache'})
             return
+        if u.path == '/sse-stream':
+            # Deterministic long-lived SSE probe: flush several events while the
+            # response remains open, so the client must deliver them before EOF.
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            try:
+                for i in range(3):
+                    self.wfile.write(f'data: local-{i}\n\n'.encode())
+                    self.wfile.flush()
+                    time.sleep(0.05)
+                # Stay open beyond mb_smoke's 12s deadline. SSE comments keep
+                # writes active so the thread notices promptly when the real
+                # streaming client closes after its third event. A buffered
+                # loader gets no EOF and therefore cannot false-pass this probe.
+                deadline = time.monotonic() + 15.0
+                while time.monotonic() < deadline:
+                    self.wfile.write(b': heartbeat\n\n')
+                    self.wfile.flush()
+                    time.sleep(0.1)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
         if u.path == '/head-only':
             self.send_body(405, 'GET was used', 'text/plain')
             return
@@ -126,7 +229,7 @@ class H(BaseHTTPRequestHandler):
                     n, _, val = part.partition('=')
                     jar[n.strip()] = val.strip()
             body = json.dumps({'cookies': jar})
-        elif u.path == '/headers':
+        elif u.path == '/headers' or u.path.startswith('/headers/'):
             hdrs = {k: v for k, v in self.headers.items()}
             body = json.dumps({'headers': hdrs})
         elif u.path == '/cors-headers':
@@ -173,13 +276,27 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         length = int(self.headers.get('Content-Length', '0'))
         raw = self.rfile.read(length).decode(errors='replace')
+        if u.path == '/redirect-post':
+            q = parse_qs(u.query)
+            status = int(q.get('status_code', ['307'])[0])
+            target = q.get('url', ['/post'])[0]
+            self.send_response(status)
+            self.send_header('Location', target)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
         fields = {k: values[0] for k, values in parse_qs(raw).items() if values}
-        body = json.dumps({'data': raw, 'form': fields,
+        body = json.dumps({'method': 'POST', 'path': u.path,
+                           'data': raw, 'form': fields,
                            'headers': dict(self.headers.items())})
         self.send_body(200, body, 'application/json')
 
 if __name__ == '__main__':
+    # Optional argv[1] port; 0 asks the OS for a free one (the smoke harness
+    # auto-spawn passes 0 and parses the printed address).
+    import sys
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8899
     ThreadingHTTPServer.allow_reuse_address = True
-    srv = ThreadingHTTPServer(('127.0.0.1', 8899), H)
-    print('listening on 127.0.0.1:8899', flush=True)
+    srv = ThreadingHTTPServer(('127.0.0.1', port), H)
+    print('listening on 127.0.0.1:%d' % srv.server_address[1], flush=True)
     srv.serve_forever()

@@ -12,6 +12,8 @@
 #include "base/files/file_util.h"
 #include "base/strings/string_util.h"
 #include "base/unguessable_token.h"
+#include "miniblink_host/frame/mb_dom_storage.h"
+#include "miniblink_host/frame/mb_frame_broker.h"
 #include "miniblink_host/frame/mb_indexeddb.h"
 #include "miniblink_host/frame/mb_opfs.h"
 #include "miniblink_host/loader/mb_url_loader.h"
@@ -219,14 +221,10 @@ bool BackupMigratedSnapshot(const base::FilePath& path) {
   return false;
 }
 
-// A profile name is used verbatim as ONE directory component (<persist_path>/<name>), so it
-// must be a portable, unambiguous filename. Rather than lossy sanitization (which aliased
-// distinct names — "a/b", "a\b", "a_b" all collapsed to "a_b" — sharing storage), we REJECT
-// anything unsafe: empty, "."/"..", path separators/NUL/control chars, characters illegal on
-// Windows (: * ? " < > |), a trailing dot or space (Windows strips those), and Windows
-// reserved device names (CON/PRN/AUX/NUL/COM1-9/LPT1-9, with or without extension). A caller
-// that needs a structured rejection reason uses mbCreateSessionEx; mbCreateSession returns
-// null. This keeps the documented <persist_path>/<name> layout stable and injective.
+// A profile name used by the strict mbCreateSessionEx path is one directory
+// component (<persist_path>/<name>), so it must be portable and unambiguous.
+// The original mbCreateSession entry point predates this rule and remains
+// permissive for binary/source compatibility; see CreateLegacy below.
 bool IsPortableProfileName(const std::string& name) {
   if (name.empty() || name == "." || name == "..")
     return false;
@@ -272,6 +270,20 @@ MbSession* MbSession::Default() {
 MbSession* MbSession::Create(const std::string& name,
                              const std::string& persist_path,
                              MbSessionCreateResult* out_result) {
+  return CreateImpl(name, persist_path, true, out_result);
+}
+
+// static
+MbSession* MbSession::CreateLegacy(const std::string& name,
+                                   const std::string& persist_path) {
+  return CreateImpl(name, persist_path, false, nullptr);
+}
+
+// static
+MbSession* MbSession::CreateImpl(const std::string& name,
+                                 const std::string& persist_path,
+                                 bool validate_name,
+                                 MbSessionCreateResult* out_result) {
   if (out_result)
     *out_result = MbSessionCreateResult::kError;
 
@@ -285,9 +297,10 @@ MbSession* MbSession::Create(const std::string& name,
     const uint64_t n = counter.fetch_add(1, std::memory_order_relaxed) + 1;
     id = "e:" + name + ":" + std::to_string(n);
   } else {
-    // Persistent: the name must be a portable single component (no separators/traversal),
-    // else refuse — an unsafe name can neither be stored safely nor round-trip.
-    if (!IsPortableProfileName(name)) {
+    // The Ex API rejects ambiguous/non-portable names. The legacy symbol used
+    // raw string concatenation and accepted them, so keep that path available
+    // without weakening the new API's contract.
+    if (validate_name && !IsPortableProfileName(name)) {
       if (out_result)
         *out_result = MbSessionCreateResult::kInvalidName;
       return nullptr;
@@ -297,30 +310,59 @@ MbSession* MbSession::Create(const std::string& name,
     // filesystems, where two distinct name spellings can address one directory.
     // The durable identity is the marker inside that directory, not a spelling
     // of its path, so symlink/case/normalization aliases cannot split storage.
-    base::FilePath root = base::FilePath::FromUTF8Unsafe(persist_path);
-    if (root.empty() || !base::CreateDirectory(root))
-      return nullptr;
-    const base::FilePath canonical_root = base::MakeAbsoluteFilePath(root);
-    if (canonical_root.empty())
-      return nullptr;
-    const base::FilePath requested_profile =
-        canonical_root.Append(base::FilePath::FromUTF8Unsafe(name));
-    if (!base::CreateDirectory(requested_profile))
-      return nullptr;
+    base::FilePath requested_profile;
+    if (validate_name) {
+      base::FilePath root = base::FilePath::FromUTF8Unsafe(persist_path);
+      if (root.empty() || !base::CreateDirectory(root))
+        return nullptr;
+      const base::FilePath canonical_root = base::MakeAbsoluteFilePath(root);
+      if (canonical_root.empty())
+        return nullptr;
+      requested_profile =
+          canonical_root.Append(base::FilePath::FromUTF8Unsafe(name));
+    } else {
+      // Match the pre-Ex symbol exactly: append '/' when needed, then append
+      // the name verbatim. In particular, nested names and ".." remain valid
+      // trusted-host input for this deprecated compatibility entry point.
+      std::string legacy_dir = persist_path;
+      if (!legacy_dir.empty() && legacy_dir.back() != '/')
+        legacy_dir += '/';
+      legacy_dir += name;
+      requested_profile = base::FilePath::FromUTF8Unsafe(legacy_dir);
+    }
+    if (requested_profile.empty() || !base::CreateDirectory(requested_profile)) {
+      if (validate_name)
+        return nullptr;
+      // The old function still returned a handle for an unwritable path. Keep
+      // that behavior; FlushToDisk's identity check will safely refuse writes.
+      dir = requested_profile.AsUTF8Unsafe();
+      id = "p:legacy:" + dir;
+    }
     base::FilePath profile_dir;
     // Normalize the EXISTING full directory through the filesystem. Unlike
     // MakeAbsoluteFilePath on Windows, this resolves junctions/symlinks and
     // canonical casing (GetFinalPathNameByHandle), so aliases share one marker
     // binding on every platform.
-    if (!base::NormalizeFilePath(requested_profile, &profile_dir) ||
-        profile_dir.empty()) {
-      return nullptr;
+    if (id.empty()) {
+      if (!base::NormalizeFilePath(requested_profile, &profile_dir) ||
+          profile_dir.empty()) {
+        if (validate_name)
+          return nullptr;
+        dir = requested_profile.AsUTF8Unsafe();
+        id = "p:legacy:" + dir;
+      } else {
+        std::string profile_id;
+        if (!LoadOrCreateProfileId(profile_dir, &profile_id)) {
+          if (validate_name)
+            return nullptr;
+          dir = profile_dir.AsUTF8Unsafe();
+          id = "p:legacy:" + dir;
+        } else {
+          dir = profile_dir.AsUTF8Unsafe();
+          id = "p:" + profile_id;
+        }
+      }
     }
-    std::string profile_id;
-    if (!LoadOrCreateProfileId(profile_dir, &profile_id))
-      return nullptr;
-    dir = profile_dir.AsUTF8Unsafe();
-    id = "p:" + profile_id;
   }
 
   auto* session = new MbSession(name, dir, id);
@@ -423,6 +465,8 @@ void MbSession::RestoreFromDisk() {
 
 void MbSession::ClearStorage() {
   MbClearCookieJar(id_);
+  MbClearPageCookieStoreForSession(id_);
+  MbClearDomStorageForSession(id_);
   MbClearIndexedDBScoped(scope_prefix());
   MbClearOPFSScoped(scope_prefix());
   // Explicit clearing authorizes replacing an unreadable legacy snapshot with

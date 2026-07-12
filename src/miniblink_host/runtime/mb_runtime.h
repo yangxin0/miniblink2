@@ -52,6 +52,11 @@ class MbRuntime {
   static MbRuntime* Get();        // null until Initialize()
   static bool Initialize();       // returns false if already initialized / failed
   static void Shutdown();
+  // True once Shutdown() has begun (cleared by a later Initialize()). After this
+  // the host promises no further engine-loop pumping, so a worker parked on an
+  // engine-sequence rendezvous must abandon instead of polling forever. Readable
+  // from any thread.
+  static bool ShutdownStarted();
 
   // Drain the main-thread task runner once (loading, parsing, lifecycle steps).
   // Run ready main-thread work. budget_seconds > 0 bounds the slice: the

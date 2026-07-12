@@ -8,6 +8,7 @@
 
 #include <set>
 
+#include "base/check.h"
 #include "miniblink_host/devtools/mb_devtools.h"
 #include "miniblink_host/session/mb_session.h"
 #include "miniblink_host/view/mb_damage_tracker.h"
@@ -217,8 +218,16 @@ void* MbWebView::CompositorIOSurface() const {
 
 std::unique_ptr<MbWebView> MbWebView::Create(int width, int height,
                                              MbWebView* opener,
-                                             int compositing_override) {
-  auto v = std::unique_ptr<MbWebView>(new MbWebView());
+                                             int compositing_override,
+                                             MbSession* session) {
+  // An opener child shares a browsing-context/agent group with its parent and
+  // therefore cannot safely live in a different storage/network partition.
+  // Make inheritance structural; reject any future mismatched internal caller.
+  if (opener) {
+    CHECK(!session || session == opener->session());
+    session = opener->session();
+  }
+  auto v = std::unique_ptr<MbWebView>(new MbWebView(session));
   v->view_width_ = width;
   v->view_height_ = height;
   v->view_client_ = std::make_unique<MbViewClient>();
@@ -266,6 +275,11 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height,
       /*color_provider_colors=*/nullptr,
       /*history_index=*/-1,
       /*history_length=*/0));
+
+  // Install sessionStorage and the localStorage frontend-cache partition before
+  // creating the main frame. No document or worker can observe an unpartitioned
+  // Page, and every MbWebView creation path necessarily passes this chokepoint.
+  v->InstallStorageNamespacesForBoundSession();
 
   // Default fonts: generic_font_family_settings_ is empty by default, so without
   // this the FontCache resolves no font and no glyphs paint. Use stock macOS fonts.
@@ -334,23 +348,35 @@ std::unique_ptr<MbWebView> MbWebView::Create(int width, int height,
   // (NetworkStateNotifier suppresses the event for the very first transition).
   blink::GetNetworkStateNotifier().SetOnLine(true);
 
-  // 4. Attach a session-storage namespace to the page so window.sessionStorage
-  //    resolves (without it StorageNamespace::From(page) is null -> TypeError).
-  //    The id is normally a browser-assigned 36-char token; we mint a UNIQUE one
-  //    per view so each view's sessionStorage is isolated (the DOM Storage backend
-  //    keys session areas by this id), while same-view frames share it. localStorage
-  //    needs no namespace (it goes through the StorageController directly).
-  if (blink::Page* page = v->web_view_->GetPage()) {
-    static uint64_t session_ns_counter = 0;
-    char id[blink::kSessionStorageNamespaceIdLength + 1];
-    snprintf(id, sizeof(id), "%0*llu",
-             static_cast<int>(blink::kSessionStorageNamespaceIdLength),
-             static_cast<unsigned long long>(++session_ns_counter));
-    blink::StorageNamespace::ProvideSessionStorageNamespaceTo(*page,
-                                                              std::string(id));
-  }
-
   return v;
+}
+
+void MbWebView::InstallStorageNamespacesForBoundSession() {
+  CHECK(session_);
+  CHECK(web_view_);
+  blink::Page* page = web_view_->GetPage();
+  CHECK(page);
+  // This helper is creation-only. A pre-existing supplement would mean a new
+  // path tried to rebind a live Page, which would invalidate frame/worker
+  // partition identities.
+  CHECK(!blink::StorageNamespace::From(page));
+
+  // window.sessionStorage requires a per-Page namespace. The id is normally a
+  // browser-assigned 36-char token; mint a unique one per view so each view is
+  // isolated while same-view frames share it.
+  static uint64_t session_ns_counter = 0;
+  char id[blink::kSessionStorageNamespaceIdLength + 1];
+  snprintf(id, sizeof(id), "%0*llu",
+           static_cast<int>(blink::kSessionStorageNamespaceIdLength),
+           static_cast<unsigned long long>(++session_ns_counter));
+  blink::StorageNamespace::ProvideSessionStorageNamespaceTo(*page,
+                                                            std::string(id));
+  CHECK(blink::StorageNamespace::From(page));
+
+  // localStorage uses a process-global renderer namespace, so patch 0044 reads
+  // this immutable per-Page profile id when selecting its frontend cache.
+  blink::StorageNamespace::SetLocalStorageCachePartitionFor(
+      *page, blink::String::FromUtf8(session_->id()));
 }
 
 namespace {
@@ -376,30 +402,32 @@ void DispatchNonCompositedPaint(blink::LocalFrameView& root_view,
 
 }  // namespace
 
-MbWebView::MbWebView() {
+MbWebView::MbWebView(MbSession* session)
+    : session_(session ? session : MbSession::Default()) {
   // Route blink's non-composited paint cycles to the damage tracker (dirty
   // rects, item 2 tail). Installing per-construction is idempotent; the hook
   // stays installed for the process (dispatch over an empty set no-ops).
   blink::LocalFrameView::SetMbNonCompositedPaintHookForHost(
       &DispatchNonCompositedPaint);
   AllViews().insert(this);
-  // Every view starts in the implicit default session — session_ is "never
-  // null after construction" (SetCookie/ClearCookies/session-scope lookups
-  // rely on it); CreateViewInSession swaps it later via SetSession. These
-  // lines previously sat at the top of the DESTRUCTOR (a misplaced edit in
-  // Sessions stage 1), leaving every plain mbCreateView view with a null
-  // session_ for its whole life — the first mbSetCookie/mbClearCookies
-  // crashed on session_->id().
-  session_ = MbSession::Default();
+  // Bind the final profile before Blink creates the Page. This pointer never
+  // changes: frame and worker loader identities and patch 0044's renderer cache
+  // partition all derive from it.
   session_->AddRef();
+  loader_view_context_ = base::MakeRefCounted<MbLoaderViewContext>(
+      this, base::SingleThreadTaskRunner::GetCurrentDefault(), session_->id());
   MbSetLoaderSessionKey(this, session_->id());
 }
 
 MbWebView::~MbWebView() {
+  // Worker URLLoaders may outlive the Blink view while their thread unwinds. Revoke
+  // their raw-view attribution before any teardown can pump/re-enter host callbacks.
+  loader_view_context_->Invalidate();
   // Abort any coordinated navigation, including a page navigation whose
   // BeginNavigation task is queued but has not attached its reactor fetch yet.
   // Posted completions also no-op through alive_token_.
-  SupersedePendingMainNavigation("view destroyed", /*notify_failure=*/false);
+  SupersedePendingMainNavigation("view destroyed", /*notify_failure=*/false,
+                                 NavigationOutcome::kCancelled);
   // Leave the paint-hook registry first: teardown below can still drive paint
   // cycles, and they must not dispatch into a half-dead view. The tracker (and
   // its RasterInvalidator) dies with this object; the artifacts it references
@@ -439,6 +467,11 @@ MbWebView::~MbWebView() {
     web_view_ = nullptr;
     main_frame_ = nullptr;
   }
+  // Legacy loaders can still use the raw MbWebView address as their activity key.
+  // They are gone after Close(); retire that compatibility bucket now. Modern
+  // frame/worker loaders use loader_view_context_, whose own final destructor performs
+  // the same cleanup only after every worker-held reference has drained.
+  MbNetForgetActivityContext(this);
 }
 
 void MbWebView::Resize(int width, int height) {
@@ -489,8 +522,35 @@ void MbWebView::CommitHtml(const char* data, size_t len, const char* base_url,
     base::RunLoop().RunUntilIdle();
 }
 
+void MbWebView::EmitNavigationEvent(
+    const PendingMainNavigation& navigation,
+    NavigationPhase phase,
+    NavigationOutcome outcome,
+    const std::string& url,
+    int http_status,
+    const std::string& error_domain,
+    int error_code,
+    const std::string& description) {
+  NavigationEventFn callback = on_navigation_event_;
+  if (!callback)
+    return;
+  NavigationEventData event;
+  event.navigation_id = navigation.navigation_id;
+  event.phase = phase;
+  event.outcome = outcome;
+  event.requested_url = navigation.url;
+  event.url = url.empty() ? navigation.url : url;
+  event.http_status = http_status;
+  event.error_domain = error_domain;
+  event.error_code = error_code;
+  event.description = description;
+  callback(event);
+}
+
 uint64_t MbWebView::BeginMainNavigation(const std::string& url,
-                                        bool notify_started) {
+                                        bool notify_started,
+                                        uint64_t navigation_id,
+                                        bool api_cancellable) {
   // Reserve the new generation BEFORE terminalizing an older navigation. A
   // fail callback may re-enter and start another load; if so, this caller sees
   // itself as stale and must not overwrite that later request.
@@ -506,13 +566,31 @@ uint64_t MbWebView::BeginMainNavigation(const std::string& url,
     last_error_ = "superseded by a newer navigation";
     last_error_domain_ = "cancelled";
     last_error_code_ = 0;
-    NotifyLoadFailed(old->url);
+    const std::string terminal_error = last_error_;
+    const std::string terminal_domain = last_error_domain_;
+    load_finished_ = true;
+    EmitNavigationEvent(*old, NavigationPhase::kTerminal,
+                        NavigationOutcome::kSuperseded, old->current_url,
+                        old->http_status, terminal_domain, /*error_code=*/0,
+                        terminal_error);
+    NotifyLoadFailed(old->url, terminal_domain, /*error_code=*/0,
+                     terminal_error);
     if (!IsMainNavigationGenerationCurrent(generation))
       return generation;
   }
 
-  pending_main_navigation_ =
-      PendingMainNavigation{generation, url, std::nullopt, false, false};
+  PendingMainNavigation pending;
+  pending.generation = generation;
+  pending.url = url;
+  pending.current_url = url;
+  pending.navigation_id = navigation_id;
+  // Reserve an mbNavigate* id before STARTED fires. This makes cancellation
+  // from inside the structured STARTED callback deterministic even though the
+  // reactor request is not registered until BeginMainNavigation returns.
+  if (navigation_id && api_cancellable)
+    pending.fetch_id = navigation_id;
+  pending.api_cancellable = api_cancellable;
+  pending_main_navigation_ = std::move(pending);
   http_status_ = 0;
   response_headers_.clear();
   last_error_.clear();
@@ -523,6 +601,9 @@ uint64_t MbWebView::BeginMainNavigation(const std::string& url,
   pending_base_.clear();
   pending_charset_.clear();
   load_finished_ = false;
+  PendingMainNavigation started = *pending_main_navigation_;
+  EmitNavigationEvent(started, NavigationPhase::kStarted,
+                      NavigationOutcome::kNone, url, /*http_status=*/0);
   if (notify_started && on_nav_started_)
     on_nav_started_(url);
   return generation;
@@ -530,7 +611,8 @@ uint64_t MbWebView::BeginMainNavigation(const std::string& url,
 
 uint64_t MbWebView::SupersedePendingMainNavigation(
     const std::string& error,
-    bool notify_failure) {
+    bool notify_failure,
+    NavigationOutcome outcome) {
   const uint64_t generation = ++main_navigation_generation_;
   std::optional<PendingMainNavigation> old =
       std::move(pending_main_navigation_);
@@ -543,7 +625,14 @@ uint64_t MbWebView::SupersedePendingMainNavigation(
     last_error_ = error.empty() ? "cancelled" : error;
     last_error_domain_ = "cancelled";
     last_error_code_ = 0;
-    NotifyLoadFailed(old->url);
+    const std::string terminal_error = last_error_;
+    const std::string terminal_domain = last_error_domain_;
+    load_finished_ = true;
+    EmitNavigationEvent(*old, NavigationPhase::kTerminal, outcome,
+                        old->current_url, old->http_status,
+                        terminal_domain, /*error_code=*/0, terminal_error);
+    NotifyLoadFailed(old->url, terminal_domain, /*error_code=*/0,
+                     terminal_error);
   }
   return generation;
 }
@@ -570,6 +659,7 @@ bool MbWebView::PrepareMainNavigationCommit(uint64_t generation,
   last_error_code_ = 0;
   pending_main_navigation_->fetch_id.reset();
   pending_main_navigation_->api_cancellable = false;
+  pending_main_navigation_->http_status = status;
   pending_main_navigation_->committed = true;
   return true;
 }
@@ -592,14 +682,25 @@ bool MbWebView::FailMainNavigation(uint64_t generation,
     ClassifyFetchFailure();
   else if (last_error_.empty())
     last_error_ = "navigation failed";
+  PendingMainNavigation failed = *pending_main_navigation_;
+  failed.current_url = failed_url;
+  failed.http_status = status;
+  const std::string terminal_error = last_error_;
+  const std::string terminal_domain = last_error_domain_;
+  const int terminal_code = last_error_code_;
   pending_main_navigation_.reset();
-  NotifyLoadFailed(failed_url);
+  load_finished_ = true;
+  EmitNavigationEvent(failed, NavigationPhase::kTerminal,
+                      NavigationOutcome::kFailure, failed_url, status,
+                      terminal_domain, terminal_code, terminal_error);
+  NotifyLoadFailed(failed_url, terminal_domain, terminal_code, terminal_error);
   return true;
 }
 
 bool MbWebView::FinishMainNavigationWithoutCommit(uint64_t generation,
                                                   int status,
-                                                  std::string headers) {
+                                                  std::string headers,
+                                                  const std::string& final_url) {
   if (!IsMainNavigationPending(generation))
     return false;
   http_status_ = status;
@@ -607,8 +708,13 @@ bool MbWebView::FinishMainNavigationWithoutCommit(uint64_t generation,
   last_error_.clear();
   last_error_domain_.clear();
   last_error_code_ = 0;
+  PendingMainNavigation download = *pending_main_navigation_;
+  download.current_url = final_url;
+  download.http_status = status;
   pending_main_navigation_.reset();
   load_finished_ = true;
+  EmitNavigationEvent(download, NavigationPhase::kTerminal,
+                      NavigationOutcome::kDownload, final_url, status);
   if (on_load_finish_)
     on_load_finish_();
   return true;
@@ -691,7 +797,8 @@ void MbWebView::LoadURL(const char* utf8_url) {
     // An unsupported host request still supersedes queued/fetching page work,
     // while preserving the legacy no-start/no-fail behavior for itself.
     const uint64_t generation = SupersedePendingMainNavigation(
-        "superseded by a newer navigation", /*notify_failure=*/true);
+        "superseded by a newer navigation", /*notify_failure=*/true,
+        NavigationOutcome::kSuperseded);
     if (!IsMainNavigationGenerationCurrent(generation))
       return;  // the superseded load's failure callback started something newer
     http_status_ = 0;
@@ -787,7 +894,7 @@ void MbWebView::LoadURL(const char* utf8_url) {
     if (ok && (on_download_ || HasDownloadStreamSink()) &&
         IsDownloadResponse(doc_url, mime, headers, &dl_name)) {
       if (!FinishMainNavigationWithoutCommit(generation, status,
-                                             std::move(headers)))
+                                             std::move(headers), doc_url))
         return;
       if (HasDownloadStreamSink()) {
         // Streaming sink takes precedence. The navigation fetch is inherently
@@ -837,18 +944,19 @@ void MbWebView::ClassifyFetchFailure() {
     last_error_ = "navigation failed";  // never leave the message blank
 }
 
-void MbWebView::NotifyLoadFailed(const std::string& failed_url) {
-  // A top-level load that never commits (file read / fetch failure) still ENDED — mark
-  // it finished and fire the load-finish callback, so mbIsLoadFinished is true and a
+void MbWebView::NotifyLoadFailed(const std::string& failed_url,
+                                 const std::string& error_domain,
+                                 int error_code,
+                                 const std::string& error) {
+  // A top-level load that never commits (file read / fetch failure) still ENDED — its
+  // owner has already marked it finished; fire the legacy fail + finish callbacks so a
   // caller awaiting completion isn't stuck. (Success runs through DidFinishLoad instead.)
   // `failed_url` is the ATTEMPTED target: GetURL() would return the PREVIOUS committed
   // document here (this navigation never committed), which misreports which URL failed.
-  load_finished_ = true;
   if (on_fail_loading_ex_)
-    on_fail_loading_ex_(failed_url, last_error_domain_, last_error_code_,
-                        last_error_);
+    on_fail_loading_ex_(failed_url, error_domain, error_code, error);
   else if (on_fail_loading_)
-    on_fail_loading_(failed_url, last_error_);
+    on_fail_loading_(failed_url, error);
   // Per-frame lifecycle (item 42): a top-level failure is the main frame's
   // FAIL phase (subframe fetch failures surface as network errors in-page,
   // not frame-load failures).
@@ -902,7 +1010,8 @@ void MbWebView::PostURL(const char* utf8_url, const char* utf8_body,
   std::string url(utf8_url ? utf8_url : "");
   if (url.rfind("http", 0) != 0) {
     SupersedePendingMainNavigation("superseded by a newer navigation",
-                                   /*notify_failure=*/true);
+                                   /*notify_failure=*/true,
+                                   NavigationOutcome::kSuperseded);
     return;  // POST navigation is only meaningful for http(s)
   }
   const uint64_t generation =
@@ -962,7 +1071,8 @@ uint64_t MbWebView::NavigateEx(const std::string& url, const std::string& method
   // must not collide (cancelling one would abort the other).
   const uint64_t id = mb::MbNextNavigationId();
   const uint64_t generation =
-      BeginMainNavigation(url, /*notify_started=*/true);
+      BeginMainNavigation(url, /*notify_started=*/true, id,
+                          /*api_cancellable=*/true);
   if (!IsMainNavigationPending(generation) ||
       !AttachMainNavigationFetch(generation, id,
                                  /*api_cancellable=*/true)) {
@@ -978,6 +1088,7 @@ uint64_t MbWebView::NavigateEx(const std::string& url, const std::string& method
   req.user_agent = frame_client_ ? frame_client_->user_agent() : std::string();
   req.extra_headers = frame_client_ ? frame_client_->extra_headers() : std::string();
   req.host_ctx = this;
+  req.view_context = loader_view_context_;
   // Guard the posted completion with alive_token_ so it no-ops if the view is destroyed.
   std::weak_ptr<int> token(alive_token_);
   MbWebView* self = this;
@@ -1001,7 +1112,8 @@ bool MbWebView::CancelNavigation(uint64_t id) {
       !pending_main_navigation_->api_cancellable) {
     return false;  // not the active navigation (finished, superseded, or unknown)
   }
-  SupersedePendingMainNavigation("cancelled", /*notify_failure=*/true);
+  SupersedePendingMainNavigation("cancelled", /*notify_failure=*/true,
+                                 NavigationOutcome::kCancelled);
   return true;
 }
 
@@ -1033,6 +1145,8 @@ void MbWebView::OnNavigationComplete(uint64_t generation,
   // Fire the MAIN-document response hook (may rewrite status/headers/body). Do NOT clear the
   // generation guard first: if the hook starts another navigation (or cancels this one), the
   // guard changes and this now-stale result must NOT commit over the newer one.
+  pending_main_navigation_->current_url = visible_url;
+  pending_main_navigation_->http_status = result.local_response ? 0 : result.status;
   MbInvokeResponseHook(this, visible_url, &result.status, &result.headers,
                        &result.body);
   if (!IsMainNavigationPending(generation) ||
@@ -1054,7 +1168,7 @@ void MbWebView::OnNavigationComplete(uint64_t generation,
                                      ? std::string()
                                      : std::move(result.headers);
     if (!FinishMainNavigationWithoutCommit(generation, stored_status,
-                                           std::move(stored_headers)))
+                                           std::move(stored_headers), visible_url))
       return;
     if (HasDownloadStreamSink()) {
       const unsigned did = ++next_download_id_;
@@ -1699,6 +1813,7 @@ void MbWebView::SetCookie(const char* url, const char* cookie) {
 
 void MbWebView::ClearCookies() {
   MbClearCookieJar(session_->id());
+  MbClearPageCookieStoreForSession(session_->id());
 }
 
 std::string MbWebView::GetURL() {
@@ -2430,7 +2545,8 @@ void MbWebView::StopLoading() {
   // Invalidate the view-wide generation even when a page navigation is still
   // only a queued BeginNavigation task and has no reactor fetch id yet.
   const uint64_t stop_generation =
-      SupersedePendingMainNavigation("cancelled", /*notify_failure=*/true);
+      SupersedePendingMainNavigation("cancelled", /*notify_failure=*/true,
+                                     NavigationOutcome::kCancelled);
   // Abort any in-flight load on the main frame (provisional navigation or
   // pending main resource). A cancellation callback may start a newer load;
   // do not stop that re-entrant generation.
@@ -2440,6 +2556,13 @@ void MbWebView::StopLoading() {
 }
 
 void MbWebView::OnDidCommitMainFrame(const std::string& url, bool standard) {
+  if (pending_main_navigation_ && pending_main_navigation_->committed) {
+    pending_main_navigation_->current_url = url;
+    PendingMainNavigation committed = *pending_main_navigation_;
+    EmitNavigationEvent(committed, NavigationPhase::kCommitted,
+                        NavigationOutcome::kNone, url,
+                        committed.http_status);
+  }
   if (on_begin_loading_)
     on_begin_loading_(url);
   if (!user_stylesheet_.empty() && main_frame_)
@@ -2530,18 +2653,29 @@ void MbWebView::OnDidFinishLoad() {
   // Suppress a still-loading OLD document's finish while a NEW coordinated
   // navigation is queued/fetching. Once the new document commits, its own
   // DidFinishLoad consumes the committed generation.
+  std::optional<PendingMainNavigation> finished;
   if (pending_main_navigation_) {
     if (!pending_main_navigation_->committed)
       return;
+    finished = std::move(pending_main_navigation_);
     pending_main_navigation_.reset();
   }
   load_finished_ = true;
+  if (finished) {
+    EmitNavigationEvent(*finished, NavigationPhase::kTerminal,
+                        NavigationOutcome::kSuccess,
+                        finished->current_url, finished->http_status);
+  }
   if (on_load_finish_)
     on_load_finish_();
 }
 
 void MbWebView::SetLoadFinishCallback(std::function<void()> cb) {
   on_load_finish_ = std::move(cb);
+}
+
+void MbWebView::SetNavigationEventCallback(NavigationEventFn cb) {
+  on_navigation_event_ = std::move(cb);
 }
 
 void MbWebView::SetNavigationStartedCallback(
@@ -2758,20 +2892,23 @@ unsigned MbWebView::StartDownloadStream(const std::string& url,
   std::string fetch_url = MbApplyUrlRewrites(url);
   std::string headers = frame_client_ ? frame_client_->extra_headers()
                                       : std::string();
+  std::string first_request_headers = headers;
+  MbApplyRequestHeaders(fetch_url, &first_request_headers,
+                        /*follow_redirects=*/false);
   std::string pin_pubkey;
-  std::string initial_origin_headers;
   if (MbIsUrlBlocked(fetch_url) ||
-      MbRequestHookBlocks(url, "GET", std::string(), std::string()))
+      MbRequestHookBlocks(url, "GET", first_request_headers, std::string()))
     return 0;
   {
     MbRequestMutation mutation;
-    if (MbRunRequestMutateHook(fetch_url, "GET", headers, std::string(),
+    if (MbRunRequestMutateHook(fetch_url, "GET", first_request_headers,
+                               std::string(),
                                &mutation)) {
       if (mutation.block)
         return 0;
       if (!mutation.set_url.empty() && GURL(mutation.set_url).is_valid())
         fetch_url = mutation.set_url;
-      initial_origin_headers = std::move(mutation.add_headers);
+      MbMergeRequestHeaders(&first_request_headers, mutation.add_headers);
       pin_pubkey = std::move(mutation.pin_pubkey);
     }
   }
@@ -2816,7 +2953,7 @@ unsigned MbWebView::StartDownloadStream(const std::string& url,
   auto runner = base::SingleThreadTaskRunner::GetCurrentDefault();
   std::weak_ptr<int> token(alive_token_);
   dl.stream = MbStartDownloadStream(
-      fetch_url, MbLoaderSessionKeyFor(this), headers,
+      fetch_url, url, MbLoaderSessionKeyFor(this), headers,
       frame_client_ ? frame_client_->user_agent() : std::string(),
       base::BindPostTask(
           runner,
@@ -2847,7 +2984,7 @@ unsigned MbWebView::StartDownloadStream(const std::string& url,
                                        success);
                       },
                       token, this, id)),
-      std::move(pin_pubkey), std::move(initial_origin_headers), this);
+      std::move(pin_pubkey), std::move(first_request_headers), this);
   return id;
 }
 
@@ -4022,11 +4159,43 @@ bool MbWebView::WaitForSelectorHidden(const char* css, int timeout_ms) {
 bool MbWebView::WaitForNetworkIdle(int idle_ms, int timeout_ms) {
   if (!main_frame_)
     return false;
+  // Preserve the API-level-1 entry point's observable behavior: it watches the
+  // process-wide capped diagnostic log and only notices count changes. New code
+  // should use WaitForNetworkIdleEx, which is per-view and tracks in-flight work.
+  if (idle_ms <= 0)
+    idle_ms = 500;
+  size_t last = mb::MbRequestCount();
+  const base::TimeTicks hard_deadline =
+      base::TimeTicks::Now() + base::Milliseconds(timeout_ms > 0 ? timeout_ms : 0);
+  base::TimeTicks idle_deadline =
+      base::TimeTicks::Now() + base::Milliseconds(idle_ms);
+  for (;;) {
+    base::RunLoop().RunUntilIdle();
+    ServiceAnimations();
+    const base::TimeTicks now = base::TimeTicks::Now();
+    const size_t cur = mb::MbRequestCount();
+    if (cur != last) {
+      last = cur;
+      idle_deadline = now + base::Milliseconds(idle_ms);
+    }
+    if (now >= idle_deadline)
+      return true;
+    if (now >= hard_deadline)
+      return false;
+    base::PlatformThread::Sleep(base::Milliseconds(10));
+  }
+}
+
+bool MbWebView::WaitForNetworkIdleEx(int idle_ms, int timeout_ms) {
+  if (!main_frame_)
+    return false;
   // Pump until THIS view has had no outstanding request and no newly-started
   // request for `idle_ms` (Puppeteer's networkidle0) — for SPAs that lazy-fetch
-  // after the initial load. The signal is per-view (keyed by `this`, the loaders'
-  // host_ctx), so another view's traffic can't disturb this wait, and it is driven
-  // by two robust counters rather than the capped request-log size:
+  // after the initial load. Main-resource navigations remain keyed by `this`; frame
+  // and worker subresources use the view's stable loader-context key so worker
+  // teardown can never collide with a reused MbWebView address. Both are per-view,
+  // so another view's traffic can't disturb this wait, and they are driven by two
+  // robust counters rather than the capped request-log size:
   //   - in_flight > 0 keeps the view busy while any request is still running (so a
   //     single slow fetch is not mistaken for idle), and
   //   - a monotonic `started` count restarts the window whenever a NEW request
@@ -4036,7 +4205,14 @@ bool MbWebView::WaitForNetworkIdle(int idle_ms, int timeout_ms) {
   if (idle_ms <= 0)
     idle_ms = 500;
   const void* ctx = this;
-  uint64_t last_started = mb::MbNetStartedCount(ctx);
+  const void* loader_ctx = loader_view_context_->activity_key();
+  auto started_count = [&] {
+    return mb::MbNetStartedCount(ctx) + mb::MbNetStartedCount(loader_ctx);
+  };
+  auto in_flight_count = [&] {
+    return mb::MbNetInFlight(ctx) + mb::MbNetInFlight(loader_ctx);
+  };
+  uint64_t last_started = started_count();
   const base::TimeTicks hard_deadline =
       base::TimeTicks::Now() + base::Milliseconds(timeout_ms > 0 ? timeout_ms : 0);
   base::TimeTicks idle_deadline =
@@ -4045,8 +4221,8 @@ bool MbWebView::WaitForNetworkIdle(int idle_ms, int timeout_ms) {
     base::RunLoop().RunUntilIdle();
     ServiceAnimations();
     const base::TimeTicks now = base::TimeTicks::Now();
-    const uint64_t started = mb::MbNetStartedCount(ctx);
-    const int in_flight = mb::MbNetInFlight(ctx);
+    const uint64_t started = started_count();
+    const int in_flight = in_flight_count();
     if (started != last_started || in_flight > 0) {  // activity -> restart window
       last_started = started;
       idle_deadline = now + base::Milliseconds(idle_ms);
@@ -4258,16 +4434,6 @@ bool MbWebView::PaintToBitmap(void* out_bgra, int w, int h, int stride, bool set
     widget_->set_needs_frame(true);  // nothing painted; the request stands
   }
   return ok;
-}
-
-void MbWebView::SetSession(MbSession* session) {
-  if (!session || session == session_)
-    return;
-  session->AddRef();
-  if (session_)
-    session_->Release();
-  session_ = session;
-  MbSetLoaderSessionKey(this, session_->id());
 }
 
 void MbWebView::SetDirty() {

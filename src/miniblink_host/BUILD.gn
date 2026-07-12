@@ -325,7 +325,7 @@ shared_library("miniblink2") {
 executable("mb_smoke") {
   sources = [ "test/mb_smoke.cc" ]
   include_dirs = [ "//third_party/blink/renderer" ]
-  deps = [ ":miniblink_host" ]
+  deps = [ ":miniblink_host", "//base", "//net", "//url" ]
 }
 
 # Split themed smoke programs (peeled from the mb_smoke monolith; share
@@ -333,13 +333,13 @@ executable("mb_smoke") {
 executable("mb_smoke_platform") {
   sources = [ "test/mb_smoke_platform.cc" ]
   include_dirs = [ "//third_party/blink/renderer" ]
-  deps = [ ":miniblink_host" ]
+  deps = [ ":miniblink_host", "//base", "//net", "//url" ]
 }
 
 executable("mb_smoke_render") {
   sources = [ "test/mb_smoke_render.cc" ]
   include_dirs = [ "//third_party/blink/renderer" ]
-  deps = [ ":miniblink_host" ]
+  deps = [ ":miniblink_host", "//base" ]
   # Feature-aware assertions: the WebGPU / WebAssembly cases test the real
   # end-to-end path when the feature is compiled in (--webgpu / --wasm), and
   # the DOCUMENTED graceful degradation when it is compiled out.

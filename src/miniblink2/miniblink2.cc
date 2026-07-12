@@ -181,7 +181,10 @@ int mbAbiEpoch(void) {
 
 int mbCheckCompat(int abi_epoch, int api_level) {
   // Same breaking-ABI epoch AND an engine additive level at least the host's.
-  return (abi_epoch == MB_ABI_EPOCH && MB_API_LEVEL >= api_level) ? 1 : 0;
+  return (abi_epoch == MB_ABI_EPOCH && api_level >= 0 &&
+          MB_API_LEVEL >= api_level)
+             ? 1
+             : 0;
 }
 
 int mbHasFeature(const char* feature) {
@@ -566,6 +569,13 @@ int mbWaitForNetworkIdle(mbView* v, int idle_ms, int timeout_ms) {
   return v->impl->WaitForNetworkIdle(idle_ms, timeout_ms) ? 1 : 0;
 }
 
+int mbWaitForNetworkIdleEx(mbView* v, int idle_ms, int timeout_ms) {
+  EngineScope engine_scope;
+  if (!v || !v->impl)
+    return 0;
+  return v->impl->WaitForNetworkIdleEx(idle_ms, timeout_ms) ? 1 : 0;
+}
+
 int mbWaitForFunction(mbView* v, const char* js_expr, int timeout_ms) {
   EngineScope engine_scope;
   if (!v || !v->impl || !js_expr)
@@ -588,6 +598,11 @@ void DeleteSessionHandle(mbSession* h) {
 mbSession* mbCreateSessionEx(const char* name, const char* persist_path,
                              mbSessionCreateStatus* out_status) {
   EngineScope engine_scope;
+  if (!mb::MbRuntime::Get()) {
+    if (out_status)
+      *out_status = MB_SESSION_ERROR;
+    return nullptr;
+  }
   const bool persistent = persist_path && *persist_path;
   // Preserve the historical friendly fallback for ephemeral handles, but do
   // not hide a missing persistent name: it must be rejected rather than alias
@@ -616,7 +631,15 @@ mbSession* mbCreateSessionEx(const char* name, const char* persist_path,
 }
 
 mbSession* mbCreateSession(const char* name, const char* persist_path) {
-  return mbCreateSessionEx(name, persist_path, nullptr);
+  EngineScope engine_scope;
+  auto s = std::make_unique<mbSession>();
+  s->impl = mb::MbSession::CreateLegacy(name && *name ? name : "unnamed",
+                                        persist_path ? persist_path : "");
+  if (!s->impl)
+    return nullptr;
+  s->impl->set_host_handle(s.get());
+  s->impl->set_host_handle_deleter(&DeleteSessionHandle);
+  return s.release();
 }
 
 void mbDestroySession(mbSession* s) {
@@ -681,10 +704,17 @@ int mbSessionGetPersistPath(mbSession* s, char* out, int out_cap) {
 }
 
 mbView* mbCreateViewInSession(int width, int height, mbSession* session) {
-  mbView* v = mbCreateView(width, height);
-  if (v && v->impl && session && session->impl)
-    v->impl->SetSession(session->impl);
-  return v;
+  EngineScope engine_scope;
+  if (!mb::MbRuntime::Get())
+    return nullptr;  // must mbInitialize() first
+  auto view = std::make_unique<mbView>();
+  view->impl = mb::MbWebView::Create(
+      width, height, /*opener=*/nullptr, /*compositing_override=*/-1,
+      session && session->impl ? session->impl : nullptr);
+  if (!view->impl)
+    return nullptr;
+  RegisterViewHandle(view.get());
+  return view.release();
 }
 
 mbSession* mbViewGetSession(mbView* v) {
@@ -713,8 +743,9 @@ mbViewConfig* mbCreateViewConfig(void) {
 void mbDestroyViewConfig(mbViewConfig* c) {
   if (!c)
     return;
-  // Release the ref this config held on its session's impl (see SetSession) so a
-  // session captured only by a config can tear down once the config is gone.
+  // Release the ref this config held on its session's impl (see
+  // mbViewConfigSetSession) so a session captured only by a config can tear down
+  // once the config is gone.
   if (c->session && c->session->impl)
     c->session->impl->Release();
   delete c;
@@ -796,14 +827,15 @@ mbView* mbCreateViewWithConfig(int width, int height, const mbViewConfig* c) {
     return nullptr;  // must mbInitialize() first
   auto view = std::make_unique<mbView>();
   view->impl = mb::MbWebView::Create(width, height, /*opener=*/nullptr,
-                                     c ? c->compositing : -1);
+                                     c ? c->compositing : -1,
+                                     c && c->session && c->session->impl
+                                         ? c->session->impl
+                                         : nullptr);
   if (!view->impl)
     return nullptr;
   if (c) {
     // Apply the collected choices before any document exists — the whole point
     // of the config path (no "call before first load" ordering to get wrong).
-    if (c->session && c->session->impl)
-      view->impl->SetSession(c->session->impl);
     if (c->transparent >= 0)
       view->impl->SetTransparentBackground(c->transparent != 0);
     if (c->device_scale > 0)
@@ -903,15 +935,25 @@ mbNavigationId mbNavigateEx(mbView* v, const char* utf8_url,
   if (!v || !v->impl)
     return 0;
   std::string method, body, content_type;
-  // Accept a stable prefix (offsetof of the last field we read) so an older/newer caller's
-  // struct is honored — same prefix-ABI rule as the typed input events.
-  if (opts && opts->struct_size >=
-                  static_cast<int>(offsetof(mbNavigationOptions, content_type) +
-                                   sizeof(const char*))) {
+  // Read each field only when the caller's declared prefix reaches it. This
+  // makes future appended fields safe and lets a deliberately shorter prefix
+  // retain the fields it does provide instead of silently becoming a GET.
+  auto has_field = [&](size_t offset, size_t size) {
+    return opts && opts->struct_size >= 0 &&
+           static_cast<size_t>(opts->struct_size) >= offset + size;
+  };
+  if (has_field(offsetof(mbNavigationOptions, method),
+                sizeof(opts->method))) {
     if (opts->method)
       method = opts->method;
+  }
+  if (has_field(offsetof(mbNavigationOptions, body_len),
+                sizeof(opts->body_len))) {
     if (opts->body && opts->body_len)
       body.assign(static_cast<const char*>(opts->body), opts->body_len);
+  }
+  if (has_field(offsetof(mbNavigationOptions, content_type),
+                sizeof(opts->content_type))) {
     if (opts->content_type)
       content_type = opts->content_type;
   }
@@ -939,6 +981,31 @@ void mbOnLoadFinish(mbView* v, mbLoadFinishCallback cb, void* userdata) {
     v->impl->SetLoadFinishCallback([v, cb, userdata]() { cb(v, userdata); });
   else
     v->impl->SetLoadFinishCallback({});
+}
+
+void mbOnNavigationEvent(mbView* v, mbNavigationEventCallback cb,
+                         void* userdata) {
+  if (!v || !v->impl)
+    return;
+  if (cb) {
+    v->impl->SetNavigationEventCallback(
+        [v, cb, userdata](const mb::MbWebView::NavigationEventData& data) {
+          mbNavigationEvent event = {};
+          event.struct_size = sizeof(event);
+          event.navigation_id = data.navigation_id;
+          event.phase = static_cast<int>(data.phase);
+          event.outcome = static_cast<int>(data.outcome);
+          event.requested_url = data.requested_url.c_str();
+          event.url = data.url.c_str();
+          event.http_status = data.http_status;
+          event.error_domain = data.error_domain.c_str();
+          event.error_code = data.error_code;
+          event.description = data.description.c_str();
+          cb(v, userdata, &event);
+        });
+  } else {
+    v->impl->SetNavigationEventCallback({});
+  }
 }
 
 void mbOnNavigationStarted(mbView* v, mbNavigationStartedCallback cb,
@@ -1197,8 +1264,8 @@ void mbOnCreateChildView(mbView* v, mbCreateChildViewCallback cb,
         child->impl = mb::MbWebView::Create(cw, ch, v->impl.get());
         if (!child->impl)
           return nullptr;
-        // The child browses in the parent's profile (cookies, storage).
-        child->impl->SetSession(v->impl->session());
+        // Create() structurally binds opener children to the parent's profile
+        // before Blink creates their Page (cookies, storage, workers).
         // Register the reverse handle so loader callbacks (e.g. the response hook)
         // can report THIS child view — without it an adopted popup's responses
         // would surface a null view. mbDestroyView unregisters it.
@@ -1695,12 +1762,12 @@ void mbClearCookies(mbView* v) {
 }
 
 int mbSaveCookies(const char* path) {
-  // Process-wide (the jar is shared): write the whole cookie jar to `path`.
+  // Legacy no-view API: the empty key selects the implicit default session.
   return (path && mb::MbSaveCookies(path)) ? 1 : 0;
 }
 
 int mbLoadCookies(const char* path) {
-  // Process-wide: load a previously-saved jar from `path` into the shared jar.
+  // Legacy no-view API: merge into the implicit default session only.
   return (path && mb::MbLoadCookies(path)) ? 1 : 0;
 }
 

@@ -2,10 +2,16 @@
 
 #include <stdint.h>
 
+#include <atomic>
+#include <map>
+#include <memory>
+#include <optional>
 #include <utility>
 
 #include "base/containers/span.h"
 #include "base/functional/bind.h"
+#include "base/no_destructor.h"
+#include "base/synchronization/lock.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
@@ -22,9 +28,12 @@
 #include <vector>
 
 #include "base/synchronization/waitable_event.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/time/time.h"
 #include "miniblink_host/blob/mb_blob_registry.h"
 #include "miniblink_host/loader/mb_url_loader.h"
 #include "miniblink_host/runtime/mb_runtime.h"
+#include "miniblink_host/test/mb_test_seams.h"
 
 namespace mb {
 namespace {
@@ -74,21 +83,59 @@ class MbWorkerScript : public network::mojom::URLLoader {
   std::string body_;  // must outlive the async write (STAYS_VALID_UNTIL_COMPLETION)
 };
 
-}  // namespace
+struct WorkerScriptFetchState {
+  base::WaitableEvent done;
+  std::atomic<bool> cancelled{false};
+  bool ok = false;
+  std::string body;
+  std::string content_type;
+};
 
-std::unique_ptr<blink::WorkerMainScriptLoadParameters> MakeWorkerMainScriptParams(
-    const std::string& url, const void* host_ctx) {
-  std::string body, content_type;
+base::Lock& WorkerScriptWaiterLock() {
+  static base::NoDestructor<base::Lock> lock;
+  return *lock;
+}
+
+std::map<std::string, int>& WorkerScriptWaitersForTesting() {
+  static auto* waiters = new std::map<std::string, int>();
+  return *waiters;
+}
+
+class ScopedWorkerScriptWaiterForTesting {
+ public:
+  explicit ScopedWorkerScriptWaiterForTesting(std::string url)
+      : url_(std::move(url)) {
+    base::AutoLock guard(WorkerScriptWaiterLock());
+    ++WorkerScriptWaitersForTesting()[url_];
+  }
+
+  ~ScopedWorkerScriptWaiterForTesting() {
+    base::AutoLock guard(WorkerScriptWaiterLock());
+    auto it = WorkerScriptWaitersForTesting().find(url_);
+    if (it == WorkerScriptWaitersForTesting().end())
+      return;
+    if (--it->second == 0)
+      WorkerScriptWaitersForTesting().erase(it);
+  }
+
+ private:
+  const std::string url_;
+};
+
+void FetchWorkerScriptOnEngine(
+    std::string url,
+    scoped_refptr<MbLoaderViewContext> view_context,
+    std::shared_ptr<WorkerScriptFetchState> state) {
+  if (state->cancelled.load(std::memory_order_acquire)) {
+    state->done.Signal();
+    return;
+  }
+
+  const void* host_ctx = view_context ? view_context->host_ctx() : nullptr;
   if (url.rfind("blob:", 0) == 0) {
-    // `new Worker(URL.createObjectURL(blob))` — the bundler-standard way to spawn a
-    // worker (Baidu MapGL's tile worker, webpack worker-loader, ...). The script bytes
-    // live in our in-process blob registry on the SERVICE thread, not anywhere curl can
-    // fetch — so resolve there and wait. This runs on the main thread while the registry
-    // lives on the service thread, so the brief sync wait cannot deadlock (same
-    // off-thread-service reasoning as the [Sync] BlobRegistry.Register handshake).
-    // Before this, a blob: worker hung forever with no error event: MbFetchUrl failed,
-    // OnScriptLoadStartFailed was reported, but the page-visible symptom was silence.
-    base::WaitableEvent done;
+    // Blob bytes live on the runtime service sequence. The engine sequence may wait for
+    // that service reply; worker callers wait on this engine task, never the reverse.
+    base::WaitableEvent blob_done;
     std::vector<uint8_t> bytes;
     MbRuntime::ServiceTaskRunner()->PostTask(
         FROM_HERE,
@@ -104,20 +151,98 @@ std::unique_ptr<blink::WorkerMainScriptLoadParameters> MakeWorkerMainScriptParam
                          },
                          out, done));
             },
-            url, &bytes, &done));
-    done.Wait();
-    if (bytes.empty())
-      return nullptr;  // unknown/revoked blob URL
-    body.assign(bytes.begin(), bytes.end());
-    content_type = "text/javascript";
-  } else if (!MbFetchUrl(url, &body, &content_type, /*user_agent=*/"",
-                         /*extra_headers=*/"", /*post_body=*/"",
-                         /*post_content_type=*/"", /*http_method=*/"",
-                         /*out_final_url=*/nullptr, /*out_status=*/nullptr,
-                         /*out_headers=*/nullptr, /*out_error=*/nullptr,
-                         /*out_error_code=*/nullptr, host_ctx)) {
-    return nullptr;
+            url, &bytes, &blob_done));
+    blob_done.Wait();
+    if (!bytes.empty()) {
+      state->body.assign(bytes.begin(), bytes.end());
+      state->content_type = "text/javascript";
+      int status = 200;
+      std::string headers;
+      MbInvokeResponseHook(host_ctx, url, &status, &headers, &state->body);
+      state->ok = true;
+    }
+  } else {
+    state->ok = MbFetchUrl(
+        url, &state->body, &state->content_type, /*user_agent=*/"",
+        /*extra_headers=*/"", /*post_body=*/"", /*post_content_type=*/"",
+        /*http_method=*/"", /*out_final_url=*/nullptr,
+        /*out_status=*/nullptr, /*out_headers=*/nullptr, /*out_error=*/nullptr,
+        /*out_error_code=*/nullptr, host_ctx, /*run_response_hook=*/true,
+        view_context ? view_context->session_key() : std::string());
   }
+  state->done.Signal();
+}
+
+bool FetchWorkerScript(
+    const std::string& url,
+    const scoped_refptr<MbLoaderViewContext>& view_context,
+    std::string* body,
+    std::string* content_type) {
+  std::vector<scoped_refptr<MbLoaderViewContext>> activity_contexts;
+  if (view_context)
+    activity_contexts = view_context->activity_contexts();
+  for (const auto& activity_context : activity_contexts)
+    MbNetRequestStarted(activity_context->activity_key());
+  auto finish_activity = [&] {
+    for (const auto& activity_context : activity_contexts)
+      MbNetRequestFinished(activity_context->activity_key());
+  };
+
+  auto state = std::make_shared<WorkerScriptFetchState>();
+  const scoped_refptr<base::SingleThreadTaskRunner> engine_runner =
+      view_context ? view_context->engine_task_runner() : nullptr;
+  if (!engine_runner || engine_runner->RunsTasksInCurrentSequence()) {
+    FetchWorkerScriptOnEngine(url, view_context, state);
+  } else {
+    if (!engine_runner->PostTask(
+            FROM_HERE,
+            base::BindOnce(&FetchWorkerScriptOnEngine, url, view_context,
+                           state))) {
+      finish_activity();
+      return false;
+    }
+    std::optional<ScopedWorkerScriptWaiterForTesting> waiter;
+    while (!state->done.TimedWait(base::Milliseconds(10))) {
+      // Publish only once this worker has genuinely waited for the engine task.
+      // That makes teardown tests distinguish the rendezvous from a merely
+      // queued worker creation request.
+      if (!waiter)
+        waiter.emplace(url);
+      // Destroying the creating view can synchronously terminate/join this worker.
+      // Abandon the rendezvous rather than deadlocking teardown; the posted task owns
+      // its state and observes cancellation before starting if it runs later. Same
+      // escape once mbShutdown has begun: the engine loop is never pumped again.
+      if ((view_context && !view_context->is_alive()) ||
+          mb::MbRuntime::ShutdownStarted()) {
+        state->cancelled.store(true, std::memory_order_release);
+        finish_activity();
+        return false;
+      }
+    }
+  }
+
+  finish_activity();
+  if (!state->ok)
+    return false;
+  *body = std::move(state->body);
+  *content_type = std::move(state->content_type);
+  return true;
+}
+
+}  // namespace
+
+int MbWorkerScriptWaiterCountForTesting(const std::string& url) {
+  base::AutoLock guard(WorkerScriptWaiterLock());
+  auto it = WorkerScriptWaitersForTesting().find(url);
+  return it == WorkerScriptWaitersForTesting().end() ? 0 : it->second;
+}
+
+std::unique_ptr<blink::WorkerMainScriptLoadParameters> MakeWorkerMainScriptParams(
+    const std::string& url,
+    scoped_refptr<MbLoaderViewContext> view_context) {
+  std::string body, content_type;
+  if (!FetchWorkerScript(url, view_context, &body, &content_type))
+    return nullptr;
   std::string mime = content_type.substr(0, content_type.find(';'));
   if (mime.empty())
     mime = "text/javascript";

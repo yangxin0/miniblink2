@@ -29,6 +29,12 @@ class MbSession {
   static MbSession* Create(const std::string& name,
                            const std::string& persist_path,
                            MbSessionCreateResult* out_result = nullptr);
+  // Compatibility path for the original mbCreateSession symbol. It preserves
+  // that entry point's permissive profile-name handling; new callers should use
+  // Create()/mbCreateSessionEx so malformed persistent names are rejected with
+  // a structured status.
+  static MbSession* CreateLegacy(const std::string& name,
+                                 const std::string& persist_path);
 
   const std::string& id() const { return id_; }
   const std::string& name() const { return name_; }
@@ -41,8 +47,9 @@ class MbSession {
 
   // Stage 3 (persistence): persistent sessions restore at Create and flush at
   // FlushToDisk / final teardown; ephemeral sessions no-op. ClearStorage wipes
-  // this profile's cookies + IndexedDB + OPFS (live documents' DOM storage is
-  // blink-internal and not reachable service-side - documented gap).
+  // this profile's cookies, DOM-storage backend, IndexedDB, and OPFS. Live
+  // localStorage caches are invalidated; Blink does not permit backend-driven
+  // sessionStorage invalidation, so a live document may retain that cache.
   // Returns true if everything was persisted (or nothing needed to be, for an
   // ephemeral profile); false if the profile dir or any store could not be
   // written — the C API surfaces this via mbSessionFlush's return.
@@ -66,6 +73,10 @@ class MbSession {
   }
 
  private:
+  static MbSession* CreateImpl(const std::string& name,
+                               const std::string& persist_path,
+                               bool validate_name,
+                               MbSessionCreateResult* out_result);
   MbSession(std::string name, std::string persist_dir, std::string id);
   ~MbSession();
   void MaybeDelete();

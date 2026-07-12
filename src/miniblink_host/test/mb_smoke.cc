@@ -2,10 +2,17 @@
 // content and ASSERTS engine behavior (mostly via mbEvalJS / getComputedStyle, which is
 // robust; plus one pixel check). Prints PASS/FAIL per case and a summary; exit 0 iff all pass.
 #include "miniblink_host/test/mb_smoke_harness.h"
+#include "miniblink_host/test/mb_test_seams.h"
 
+#include <algorithm>
 #include <filesystem>
+#include <thread>
 
+#include "base/files/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "miniblink_host/loader/mb_retry_policy.h"  // mb::MbShouldRetryFetch (predicate test)
+#include "net/base/filename_util.h"
+#include "url/gurl.h"
 
 // Narrow internal test hooks used only to evict migrated in-memory state
 // before reopening the profile. Forward declarations keep this C-ABI smoke
@@ -13,6 +20,11 @@
 namespace mb {
 void MbClearIndexedDBScoped(const std::string& scope_prefix);
 void MbClearOPFSScoped(const std::string& scope_prefix);
+void MbNetRequestStarted(const void* view_ctx);
+void MbNetRequestFinished(const void* view_ctx);
+uint64_t MbNetStartedCount(const void* view_ctx);
+int MbNetInFlight(const void* view_ctx);
+void MbNetForgetActivityContext(const void* view_ctx);
 }  // namespace mb
 
 using mbsmoke::Eval;     // shared harness helpers (see mb_smoke_harness.h)
@@ -37,6 +49,56 @@ const char* SmokeEcho(void* userdata, int argc, const char** argv,
 const char* SmokeJson(void*, int, const char**, const int*, int* out_type) {
   *out_type = 5;  // json
   return "{\"a\":1,\"b\":[2,3]}";
+}
+
+struct NavigationEventRecord {
+  mbNavigationId id = 0;
+  mbNavigationPhase phase = MB_NAVIGATION_PHASE_STARTED;
+  mbNavigationOutcome outcome = MB_NAVIGATION_OUTCOME_NONE;
+  std::string requested_url;
+  std::string url;
+  int http_status = 0;
+  std::string error_domain;
+  int error_code = 0;
+  std::string description;
+  int struct_size = 0;
+};
+
+void RecordNavigationEvent(mbView*, void* userdata,
+                           const mbNavigationEvent* event) {
+  if (!userdata || !event)
+    return;
+  NavigationEventRecord record;
+  record.id = event->navigation_id;
+  record.phase = event->phase;
+  record.outcome = event->outcome;
+  record.requested_url = event->requested_url ? event->requested_url : "";
+  record.url = event->url ? event->url : "";
+  record.http_status = event->http_status;
+  record.error_domain = event->error_domain ? event->error_domain : "";
+  record.error_code = event->error_code;
+  record.description = event->description ? event->description : "";
+  record.struct_size = event->struct_size;
+  static_cast<std::vector<NavigationEventRecord>*>(userdata)->push_back(
+      std::move(record));
+}
+
+struct CancelOnNavigationStartState {
+  std::vector<NavigationEventRecord> events;
+  mbNavigationId started_id = 0;
+  int cancel_result = 0;
+};
+
+void CancelOnNavigationStart(mbView* view, void* userdata,
+                             const mbNavigationEvent* event) {
+  auto* state = static_cast<CancelOnNavigationStartState*>(userdata);
+  if (!state || !event)
+    return;
+  RecordNavigationEvent(view, &state->events, event);
+  if (event->phase == MB_NAVIGATION_PHASE_STARTED && event->navigation_id) {
+    state->started_id = event->navigation_id;
+    state->cancel_result = mbCancelNavigation(view, event->navigation_id);
+  }
 }
 
 void AppendU32(std::string* out, uint32_t value) {
@@ -131,6 +193,9 @@ bool WriteLegacySessionFixtures(const std::filesystem::path& profile_dir,
 }  // namespace
 
 int main() {
+  // Self-contained wire-level coverage: spawn the bundled echo server (unless
+  // the environment already configured or disabled the network cases).
+  mbsmoke::EnsureLocalEchoServer();
   if (!mbInitialize()) {
     std::fprintf(stderr, "init failed\n");
     return 1;
@@ -218,6 +283,8 @@ int main() {
   {
     static std::string* seq = new std::string();  // -Wexit-time-destructors
     seq->clear();
+    std::vector<NavigationEventRecord> nav_events;
+    mbOnNavigationEvent(v, &RecordNavigationEvent, &nav_events);
     mbOnNavigationStarted(
         v, [](mbView*, void*, const char*) { *seq += "S"; }, nullptr);
     mbOnLoadFinish(v, [](mbView*, void*) { *seq += "F"; }, nullptr);
@@ -231,15 +298,120 @@ int main() {
                       3000);
     const std::string r = Eval(v, "document.body?document.body.textContent:''");
     const int cancel_done = mbCancelNavigation(v, id);  // already finished -> 0
+    const bool structured_lifecycle =
+        nav_events.size() == 3 &&
+        nav_events[0].struct_size ==
+            static_cast<int>(sizeof(mbNavigationEvent)) &&
+        nav_events[0].id == id &&
+        nav_events[0].phase == MB_NAVIGATION_PHASE_STARTED &&
+        nav_events[0].outcome == MB_NAVIGATION_OUTCOME_NONE &&
+        nav_events[1].id == id &&
+        nav_events[1].phase == MB_NAVIGATION_PHASE_COMMITTED &&
+        nav_events[1].outcome == MB_NAVIGATION_OUTCOME_NONE &&
+        nav_events[2].id == id &&
+        nav_events[2].phase == MB_NAVIGATION_PHASE_TERMINAL &&
+        nav_events[2].outcome == MB_NAVIGATION_OUTCOME_SUCCESS;
     Expect(id != 0 && r.find("async-nav") != std::string::npos &&
                seq->find('S') != std::string::npos &&
-               seq->find('F') != std::string::npos && cancel_done == 0,
-           "mbNavigate commits asynchronously (mock-served) with started+finish lifecycle",
+               seq->find('F') != std::string::npos && cancel_done == 0 &&
+               structured_lifecycle,
+           "mbNavigate exposes one id-correlated started/commit/success lifecycle",
            "id=" + std::to_string(id) + " body=[" + r + "] seq=[" + *seq +
-               "] cancel_finished=" + std::to_string(cancel_done));
+               "] events=" + std::to_string(nav_events.size()) +
+               " cancel_finished=" + std::to_string(cancel_done));
+    mbOnNavigationEvent(v, nullptr, nullptr);
     mbOnNavigationStarted(v, nullptr, nullptr);
     mbOnLoadFinish(v, nullptr, nullptr);
     mbClearMocks();
+  }
+
+  // 0b4b. Even an in-process dynamic mock is not resolved inside mbNavigate. The API
+  // returns its id first; policy/mock lookup starts from the posted navigation task.
+  {
+    static int* mock_calls = new int(0);
+    *mock_calls = 0;
+    mbOnRequestMock(
+        v,
+        [](const char* url, mbRequestMock* mock, void*) -> int {
+          if (!url || !std::strstr(url, "nav-posted-mock.test"))
+            return 0;
+          ++*mock_calls;
+          const char body[] = "<body>posted-local-nav</body>";
+          mbRequestMockResponse(mock, body, sizeof(body) - 1, "text/html", 200);
+          return 1;
+        },
+        nullptr);
+    mbLoadHTML(v, "<body>before-posted-nav</body>", "about:blank");
+    const std::string body_before_nav =
+        Eval(v, "document.body?document.body.textContent:''");
+    const mbNavigationId id =
+        mbNavigate(v, "https://nav-posted-mock.test/");
+    const int calls_before_return = *mock_calls;
+    mbWaitForFunction(v,
+                      "document.body&&document.body.textContent==='posted-local-nav'",
+                      3000);
+    const std::string body_after_pump =
+        Eval(v, "document.body?document.body.textContent:''");
+    mbOnRequestMock(v, nullptr, nullptr);
+    Expect(id != 0 && calls_before_return == 0 && *mock_calls == 1 &&
+               body_before_nav == "before-posted-nav" &&
+               body_after_pump == "posted-local-nav",
+           "mbNavigate returns before local mock resolution/materialization",
+           "id=" + std::to_string(id) + " calls=" +
+               std::to_string(calls_before_return) + "->" +
+               std::to_string(*mock_calls) + " bodies=[" + body_before_nav +
+               "]/ [" + body_after_pump + "]");
+  }
+
+  // 0b4c. Async local navigation drives the posted ThreadPool branches for both
+  // data: decoding and file: IO; neither may commit inline with mbNavigate.
+  {
+    // Drive both local branches of the async engine. Neither data decoding nor file IO
+    // may commit inline with mbNavigate; each resolves on the blocking pool and replies
+    // to the engine sequence afterward.
+    mbLoadHTML(v, "<body>local-nav-baseline</body>", "about:blank");
+    const mbNavigationId data_id =
+        mbNavigate(v, "data:text/html,<body>async-data-nav</body>");
+    const std::string data_immediate =
+        Eval(v, "document.body?document.body.textContent:''");
+    const bool data_done =
+        mbWaitForFunction(v,
+                          "document.body&&document.body.textContent==='async-data-nav'",
+                          3000) == 1;
+
+    base::ScopedTempDir local_dir;
+    const bool temp_ready = local_dir.CreateUniqueTempDir();
+    const base::FilePath local_path =
+        temp_ready ? local_dir.GetPath().AppendASCII("page.html")
+                   : base::FilePath();
+    static const char kLocalHtml[] = "<body>async-file-nav</body>";
+    const bool file_written =
+        temp_ready && base::WriteFile(local_path, kLocalHtml);
+    const std::string local_url =
+        file_written ? net::FilePathToFileURL(local_path).spec() : std::string();
+    const mbNavigationId file_id =
+        file_written ? mbNavigate(v, local_url.c_str()) : 0;
+    const std::string file_immediate =
+        file_written ? Eval(v, "document.body?document.body.textContent:''")
+                     : std::string();
+    const bool file_done =
+        file_written &&
+        mbWaitForFunction(v,
+                          "document.body&&document.body.textContent==='async-file-nav'",
+                          3000) == 1;
+    const std::string file_final =
+        file_written ? Eval(v, "document.body?document.body.textContent:''")
+                     : std::string();
+    Expect(data_id != 0 && temp_ready && file_written && file_id != 0 &&
+               data_immediate == "local-nav-baseline" && data_done &&
+               file_immediate == "async-data-nav" && file_done &&
+               file_final == "async-file-nav",
+           "mbNavigate resolves data: decoding and file: IO asynchronously",
+           "temp=" + std::to_string(temp_ready) + "/" +
+               std::to_string(file_written) + " ids=" +
+               std::to_string(data_id) + "/" +
+               std::to_string(file_id) + " immediate=[" + data_immediate +
+               "]/ [" + file_immediate + "] final=[" + file_final + "]");
   }
 
   // 0b5. Cancellation: a navigation cancelled before it commits NEVER commits — the current
@@ -248,14 +420,28 @@ int main() {
     mbLoadHTML(v, "<body>cancel-baseline</body>", "https://cancel.base.test/");
     mbMockResponse("cancel.target.test", "<body>SHOULD-NOT-COMMIT</body>", "text/html",
                    200);
+    CancelOnNavigationStartState state;
+    mbOnNavigationEvent(v, &CancelOnNavigationStart, &state);
     const mbNavigationId id = mbNavigate(v, "https://cancel.target.test/");
-    const int cancelled = mbCancelNavigation(v, id);  // active -> 1, and dropped
     mbWait(v, 300);  // pump: the (superseded) completion must NOT commit
     const std::string body = Eval(v, "document.body?document.body.textContent:''");
-    Expect(cancelled == 1 && body.find("cancel-baseline") != std::string::npos &&
-               body.find("SHOULD-NOT-COMMIT") == std::string::npos,
-           "mbCancelNavigation drops an in-flight navigation (never commits)",
-           "cancelled=" + std::to_string(cancelled) + " body=[" + body + "]");
+    const bool cancelled_lifecycle =
+        state.events.size() == 2 && state.events[0].id == id &&
+        state.events[0].phase == MB_NAVIGATION_PHASE_STARTED &&
+        state.events[1].id == id &&
+        state.events[1].phase == MB_NAVIGATION_PHASE_TERMINAL &&
+        state.events[1].outcome == MB_NAVIGATION_OUTCOME_CANCELLED &&
+        state.events[1].error_domain == "cancelled";
+    Expect(state.started_id == id && state.cancel_result == 1 &&
+               body.find("cancel-baseline") != std::string::npos &&
+               body.find("SHOULD-NOT-COMMIT") == std::string::npos &&
+               cancelled_lifecycle,
+           "STARTED carries the return id and can cancel it before mbNavigate returns",
+           "id=" + std::to_string(id) +
+               " callback_id=" + std::to_string(state.started_id) +
+               " cancelled=" + std::to_string(state.cancel_result) + " body=[" +
+               body + "] events=" + std::to_string(state.events.size()));
+    mbOnNavigationEvent(v, nullptr, nullptr);
     mbClearMocks();
   }
 
@@ -264,13 +450,32 @@ int main() {
   {
     mbMockResponse("supersede.a.test", "<body>FIRST</body>", "text/html", 200);
     mbMockResponse("supersede.b.test", "<body>SECOND</body>", "text/html", 200);
-    mbNavigate(v, "https://supersede.a.test/");
-    mbNavigate(v, "https://supersede.b.test/");  // supersedes the first
+    std::vector<NavigationEventRecord> nav_events;
+    mbOnNavigationEvent(v, &RecordNavigationEvent, &nav_events);
+    const mbNavigationId first_id =
+        mbNavigate(v, "https://supersede.a.test/");
+    const mbNavigationId second_id =
+        mbNavigate(v, "https://supersede.b.test/");  // supersedes the first
     mbWaitForFunction(v, "document.body&&document.body.textContent==='SECOND'", 3000);
     const std::string body = Eval(v, "document.body?document.body.textContent:''");
-    Expect(body == "SECOND",
-           "a second mbNavigate supersedes the first (only the second commits)",
-           "body=[" + body + "]");
+    const bool superseded_lifecycle =
+        nav_events.size() == 5 && nav_events[0].id == first_id &&
+        nav_events[0].phase == MB_NAVIGATION_PHASE_STARTED &&
+        nav_events[1].id == first_id &&
+        nav_events[1].phase == MB_NAVIGATION_PHASE_TERMINAL &&
+        nav_events[1].outcome == MB_NAVIGATION_OUTCOME_SUPERSEDED &&
+        nav_events[2].id == second_id &&
+        nav_events[2].phase == MB_NAVIGATION_PHASE_STARTED &&
+        nav_events[3].id == second_id &&
+        nav_events[3].phase == MB_NAVIGATION_PHASE_COMMITTED &&
+        nav_events[4].id == second_id &&
+        nav_events[4].phase == MB_NAVIGATION_PHASE_TERMINAL &&
+        nav_events[4].outcome == MB_NAVIGATION_OUTCOME_SUCCESS;
+    Expect(body == "SECOND" && superseded_lifecycle,
+           "a newer id terminates the old id as SUPERSEDED, then succeeds",
+           "body=[" + body + "] events=" +
+               std::to_string(nav_events.size()));
+    mbOnNavigationEvent(v, nullptr, nullptr);
     mbClearMocks();
   }
 
@@ -291,6 +496,48 @@ int main() {
                       3000);
     const std::string b1 = Eval(v, "document.body?document.body.textContent:''");
 
+    // A shorter declared struct prefix still contributes every complete field it
+    // contains. This models an older caller after future fields have been appended:
+    // method/body are honored, while content_type outside the prefix is not read.
+    static std::string* prefix_method = new std::string();
+    static std::string* prefix_body = new std::string();
+    static int* prefix_saw_content_type = new int(0);
+    prefix_method->clear();
+    prefix_body->clear();
+    *prefix_saw_content_type = 0;
+    mbSetRequestCallbackEx(
+        [](const char* url, const char* method, const char* headers,
+           const char* body, int body_len, void*) -> int {
+          if (!url || !std::strstr(url, "navex-prefix.test"))
+            return 0;
+          prefix_method->assign(method ? method : "");
+          prefix_body->assign(body ? body : "",
+                              body_len > 0 ? static_cast<size_t>(body_len) : 0u);
+          *prefix_saw_content_type =
+              headers && std::strstr(headers, "SHOULD-NOT-BE-READ") ? 1 : 0;
+          return 0;
+        },
+        nullptr);
+    mbMockResponse("navex-prefix.test", "<body>prefix-ok</body>", "text/html",
+                   200);
+    mbNavigationOptions prefix_opt = {};
+    prefix_opt.struct_size =
+        static_cast<int>(offsetof(mbNavigationOptions, body_len) +
+                         sizeof(prefix_opt.body_len));
+    prefix_opt.method = "PUT";
+    prefix_opt.body = "q=2";
+    prefix_opt.body_len = 3;
+    prefix_opt.content_type = "SHOULD-NOT-BE-READ";
+    const mbNavigationId prefix_id =
+        mbNavigateEx(v, "https://navex-prefix.test/", &prefix_opt);
+    mbWaitForFunction(v,
+                      "document.readyState==='complete'&&document.body&&"
+                      "document.body.textContent==='prefix-ok'",
+                      3000);
+    const std::string prefix_page =
+        Eval(v, "document.body?document.body.textContent:''");
+    mbSetRequestCallbackEx(nullptr, nullptr);
+
     // mbStopLoading cancels an in-flight async nav before it commits.
     mbLoadHTML(v, "<body>stop-baseline</body>", "https://stop.base.test/");
     mbMockResponse("stop.target.test", "<body>STOPPED-OUT</body>", "text/html", 200);
@@ -299,10 +546,17 @@ int main() {
     mbWait(v, 300);
     const std::string b2 = Eval(v, "document.body?document.body.textContent:''");
     Expect(nid != 0 && b1.find("navex-ok") != std::string::npos &&
+               prefix_id != 0 && *prefix_method == "PUT" &&
+               *prefix_body == "q=2" && !*prefix_saw_content_type &&
+               prefix_page == "prefix-ok" &&
                b2.find("stop-baseline") != std::string::npos &&
                b2.find("STOPPED-OUT") == std::string::npos,
-           "mbNavigateEx (POST) commits async; mbStopLoading cancels an in-flight nav",
-           "id=" + std::to_string(nid) + " navex=[" + b1 + "] afterstop=[" + b2 + "]");
+           "mbNavigateEx honors struct prefixes; mbStopLoading cancels an in-flight nav",
+           "id=" + std::to_string(nid) + " navex=[" + b1 + "] prefix=" +
+               std::to_string(prefix_id) + "/" + *prefix_method + "/" +
+               *prefix_body + "/ct=" +
+               std::to_string(*prefix_saw_content_type) + " page=[" +
+               prefix_page + "] afterstop=[" + b2 + "]");
     mbClearMocks();
   }
 
@@ -410,6 +664,54 @@ int main() {
            "mbNavigate honors mbBlockUrl and legacy request callbacks",
            "static=" + std::to_string(static_blocked) + " callback=" +
                std::to_string(callback_blocked));
+  }
+
+  // 0b10b. The default/offline suite covers the load-bearing request-policy order too:
+  // globally interleaved static registrations compose before the mutable hook, and the
+  // hook's URL mutation is the final policy step before mock lookup.
+  {
+    static int* saw_later_static = new int(0);
+    *saw_later_static = 0;
+    mbClearRequestHeaders();
+    mbSetRequestHeaderForOrigin("https://policy-order.test", "X-Policy-Order",
+                                "origin-first");
+    mbSetRequestHeader("policy-order.test/start", "X-Policy-Order",
+                       "substring-later");
+    mbSetRequestHook(
+        [](mbRequest* request, void*) {
+          const char* url = mbRequestURL(request);
+          if (!url || !std::strstr(url, "policy-order.test/start"))
+            return;
+          const std::string headers = mbRequestHeaders(request);
+          constexpr char kField[] = "X-Policy-Order:";
+          int field_count = 0;
+          for (size_t at = headers.find(kField); at != std::string::npos;
+               at = headers.find(kField, at + 1)) {
+            ++field_count;
+          }
+          *saw_later_static =
+              field_count == 1 &&
+                      headers.find("X-Policy-Order: substring-later") !=
+                          std::string::npos &&
+                      headers.find("origin-first") == std::string::npos
+                  ? 1
+                  : 0;
+          mbRequestSetHeader(request, "X-Policy-Order", "hook-final");
+          mbRequestSetUrl(request, "https://policy-order.test/final");
+        },
+        nullptr);
+    mbMockResponse("policy-order.test/final", "<body>policy-order-ok</body>",
+                   "text/html", 200);
+    mbLoadURL(v, "https://policy-order.test/start");
+    const std::string policy_body =
+        Eval(v, "document.body?document.body.textContent:''");
+    mbSetRequestHook(nullptr, nullptr);
+    mbClearRequestHeaders();
+    mbClearMocks();
+    Expect(*saw_later_static && policy_body == "policy-order-ok",
+           "request policy composes one globally ordered static field before the hook",
+           "saw=" + std::to_string(*saw_later_static) + " body=[" +
+               policy_body + "]");
   }
 
   // 0b11. In-memory content and response-hook reentrancy both supersede an
@@ -1011,6 +1313,8 @@ int main() {
     static std::string* dl = new std::string();  // -Wexit-time-destructors
     dl->clear();
     mbLoadHTML(v, "<body>PAGE</body>", "about:blank");  // a real page first
+    std::vector<NavigationEventRecord> nav_events;
+    mbOnNavigationEvent(v, &RecordNavigationEvent, &nav_events);
     mbOnDownload(
         v,
         [](mbView*, void*, const char* /*url*/, const char* mime,
@@ -1020,9 +1324,18 @@ int main() {
         nullptr);
     mbLoadURL(v, "data:application/octet-stream,DLBYTES");
     const std::string body = Eval(v, "document.body.textContent");
-    Expect(*dl == "mime=application/octet-stream body=DLBYTES" && body == "PAGE",
-           "mbOnDownload diverts a non-renderable navigation to the callback",
-           "dl=[" + *dl + "] body=[" + body + "]");
+    const bool download_lifecycle =
+        nav_events.size() == 2 && nav_events[0].id == 0 &&
+        nav_events[0].phase == MB_NAVIGATION_PHASE_STARTED &&
+        nav_events[1].id == 0 &&
+        nav_events[1].phase == MB_NAVIGATION_PHASE_TERMINAL &&
+        nav_events[1].outcome == MB_NAVIGATION_OUTCOME_DOWNLOAD;
+    Expect(*dl == "mime=application/octet-stream body=DLBYTES" &&
+               body == "PAGE" && download_lifecycle,
+           "download diversion has a terminal DOWNLOAD outcome and no commit",
+           "dl=[" + *dl + "] body=[" + body + "] events=" +
+               std::to_string(nav_events.size()));
+    mbOnNavigationEvent(v, nullptr, nullptr);
     mbOnDownload(v, nullptr, nullptr);
   }
 
@@ -1151,14 +1464,25 @@ int main() {
     static int* fin = new int(0);  // -Wexit-time-destructors
     *fin = 0;
     mbLoadHTML(v, "<body>OK</body>", "about:blank");  // a real page first
+    std::vector<NavigationEventRecord> nav_events;
+    mbOnNavigationEvent(v, &RecordNavigationEvent, &nav_events);
     mbOnLoadFinish(
         v, [](mbView*, void* ud) { ++*static_cast<int*>(ud); }, fin);
     const int before = *fin;
     mbLoadURL(v, "file:///no/such/mb/missing/file.html");  // read fails -> no commit
-    Expect(*fin > before && mbIsLoadFinished(v) == 1,
-           "a failed top-level load still fires mbOnLoadFinish / sets mbIsLoadFinished",
+    const bool failure_lifecycle =
+        nav_events.size() == 2 && nav_events[0].id == 0 &&
+        nav_events[0].phase == MB_NAVIGATION_PHASE_STARTED &&
+        nav_events[1].id == 0 &&
+        nav_events[1].phase == MB_NAVIGATION_PHASE_TERMINAL &&
+        nav_events[1].outcome == MB_NAVIGATION_OUTCOME_FAILURE &&
+        nav_events[1].error_domain == "file";
+    Expect(*fin > before && mbIsLoadFinished(v) == 1 && failure_lifecycle,
+           "a failed load reports FAILURE while legacy load-finish still completes",
            "fin delta=" + std::to_string(*fin - before) +
-               " finished=" + std::to_string(mbIsLoadFinished(v)));
+               " finished=" + std::to_string(mbIsLoadFinished(v)) +
+               " events=" + std::to_string(nav_events.size()));
+    mbOnNavigationEvent(v, nullptr, nullptr);
     mbOnLoadFinish(v, nullptr, nullptr);  // clear before `fin` leaves scope
   }
 
@@ -2593,18 +2917,29 @@ int main() {
   }
 
   // 23k4. REAL streaming SSE over the worker-thread loader (MbSseStream): connect
-  // to a PUBLIC long-lived stream (Wikimedia EventStreams, which pushes recent-
-  // change events continuously) and receive events INCREMENTALLY. The old buffered
-  // loader would hang forever (the stream never EOFs), so any delivered event
-  // proves the streaming path works. Gated on MB_NET_TESTS (real network).
+  // to a long-lived stream and receive events INCREMENTALLY. With a loopback
+  // MB_NET_HOST, echo_server.py flushes three events while deliberately keeping
+  // the response open; otherwise use Wikimedia EventStreams. The old buffered
+  // loader would wait for EOF, so any delivered event proves the streaming path.
   if (getenv("MB_NET_TESTS")) {
-    mbLoadHTML(v, "<body>sse-stream</body>", "https://ssereal.test/");
+    const char* configured_net_host = getenv("MB_NET_HOST");
+    const std::string configured_host =
+        configured_net_host ? configured_net_host : "";
+    const bool loopback_stream =
+        configured_host.find("127.0.0.1") != std::string::npos ||
+        configured_host.find("localhost") != std::string::npos;
+    const std::string stream_url =
+        loopback_stream
+            ? configured_host + "/sse-stream"
+            : "https://stream.wikimedia.org/v2/stream/recentchange";
+    const std::string stream_page =
+        loopback_stream ? configured_host + "/" : "https://ssereal.test/";
+    mbLoadHTML(v, "<body>sse-stream</body>", stream_page.c_str());
     mbRunJS(v,
-            "window.__n=0;"
-            "var es=new EventSource("
-            "'https://stream.wikimedia.org/v2/stream/recentchange');"
-            "es.onmessage=function(e){window.__n++;if(window.__n>=3)es.close();};"
-            "es.onerror=function(){window.__sseE=(window.__sseE||0)+1;};");
+            ("window.__n=0;var es=new EventSource('" + stream_url +
+             "');es.onmessage=function(e){window.__n++;if(window.__n>=3)es.close();};"
+             "es.onerror=function(){window.__sseE=(window.__sseE||0)+1;};")
+                .c_str());
     std::string n;
     for (int i = 0; i < 240; ++i) {  // ~12s; the stream emits many events/sec
       mbWait(v, 50);
@@ -2613,7 +2948,7 @@ int main() {
         break;
     }
     Expect(std::atoi(n.c_str()) >= 3,
-           "real streaming SSE delivers events incrementally (Wikimedia stream)",
+           "real streaming SSE delivers events incrementally before EOF",
            "events=" + n);
     mbRunJS(v, "try{es.close()}catch(e){}");
     mbWait(v, 200);  // let the worker observe stop_ + tear down
@@ -3394,6 +3729,73 @@ int main() {
            "mw=[" + r + "]");
   }
 
+  // Worker-owned URLLoaders run on their worker sequence, but every public request/mock
+  // callback is engine-main-thread-only. Both callbacks below are triggered by fetch()
+  // inside a dedicated worker; the response is computed by the per-view mock callback.
+  {
+    static std::thread::id* engine_thread = new std::thread::id();
+    static int* request_seen = new int(0);
+    static int* request_on_engine = new int(0);
+    static int* mock_seen = new int(0);
+    static int* mock_on_engine = new int(0);
+    *engine_thread = std::this_thread::get_id();
+    *request_seen = *mock_seen = 0;
+    *request_on_engine = *mock_on_engine = 1;
+    mbMockResponse(
+        "https://worker-hook.test/w.js",
+        "fetch('/worker-data').then(function(r){return r.text();})"
+        ".then(function(t){self.postMessage(t);})"
+        ".catch(function(e){self.postMessage('err:'+e.name);});",
+        "text/javascript", 200);
+    mbSetRequestHook(
+        [](mbRequest* request, void*) {
+          const char* url = mbRequestURL(request);
+          if (url && std::strstr(url, "/worker-data")) {
+            ++*request_seen;
+            *request_on_engine =
+                *request_on_engine &&
+                        std::this_thread::get_id() == *engine_thread
+                    ? 1
+                    : 0;
+            mbRequestSetHeader(request, "X-Worker-Hook", "engine-thread");
+          }
+        },
+        nullptr);
+    mbOnRequestMock(
+        v,
+        [](const char* url, mbRequestMock* mock, void*) -> int {
+          if (!url || !std::strstr(url, "/worker-data"))
+            return 0;
+          ++*mock_seen;
+          *mock_on_engine =
+              *mock_on_engine &&
+                      std::this_thread::get_id() == *engine_thread
+                  ? 1
+                  : 0;
+          const char body[] = "worker-policy-ok";
+          mbRequestMockResponse(mock, body, sizeof(body) - 1, "text/plain", 200);
+          return 1;
+        },
+        nullptr);
+    mbLoadHTML(v, "<body>x</body>", "https://worker-hook.test/");
+    Eval(v,
+         "window.__wpol='';var w=new Worker('/w.js');"
+         "w.onmessage=function(e){window.__wpol=e.data;w.terminate();};");
+    mbWaitForFunction(v, "window.__wpol!==''", 4000);
+    const std::string result = Eval(v, "String(window.__wpol)");
+    mbOnRequestMock(v, nullptr, nullptr);
+    mbSetRequestHook(nullptr, nullptr);
+    mbClearMocks();
+    Expect(result == "worker-policy-ok" && *request_seen == 1 &&
+               *request_on_engine && *mock_seen == 1 && *mock_on_engine,
+           "worker request + mock callbacks marshal to the engine thread",
+           "result=[" + result + "] request=" +
+               std::to_string(*request_seen) + "/" +
+               std::to_string(*request_on_engine) + " mock=" +
+               std::to_string(*mock_seen) + "/" +
+               std::to_string(*mock_on_engine));
+  }
+
   // 23ah. OPFS sync access handles (createSyncAccessHandle, Worker-only): in a same-origin
   // worker (served via a mock so the origin isn't opaque), open a file, write bytes
   // synchronously, getSize/read them back, and postMessage the result. Exercises the in-memory
@@ -4063,11 +4465,13 @@ int main() {
                " hit=" + (hit ? "1" : "0"));
   }
 
-  // Network cases (31, 32) are OPT-IN via MB_NET_TESTS=1: a dead host costs ~45s
-  // per load (connect-timeout x retries), which would make every default run crawl.
-  // They still skip gracefully if enabled but httpbin is unreachable.
-  // Network cases use an httpbin-shaped echo host: default httpbin.org, override
-  // with MB_NET_HOST for a deterministic local run, e.g.:
+  // Network cases run against an httpbin-shaped echo host. By default main()
+  // auto-spawns the bundled echo_server.py on a free loopback port and exports
+  // MB_NET_TESTS/MB_NET_HOST (see EnsureLocalEchoServer), so a plain ./mb_smoke
+  // covers them hermetically. Environment still wins: MB_NET_TESTS=0 skips them
+  // (e.g. no python3), and an explicit MB_NET_HOST (with MB_NET_TESTS=1) targets
+  // that host unchanged — a dead remote host costs ~45s per load, which is why
+  // the cases stay env-gated rather than unconditional:
   //   python3 src/miniblink_host/test/echo_server.py &   # serves 127.0.0.1:8899
   //   MB_NET_TESTS=1 MB_NET_HOST=http://127.0.0.1:8899 ./mb_smoke
   if (std::getenv("MB_NET_TESTS")) {
@@ -4090,6 +4494,20 @@ int main() {
       other_origin.replace(p, std::strlen("127.0.0.1"), "localhost");
     else if (auto q = other_origin.find("localhost"); q != std::string::npos)
       other_origin.replace(q, std::strlen("localhost"), "127.0.0.1");
+    const std::string::size_type echo_scheme_end = host.find("://");
+    const std::string::size_type echo_host_start =
+        echo_scheme_end == std::string::npos ? 0 : echo_scheme_end + 3;
+    const std::string::size_type echo_host_end =
+        host.find(':', echo_host_start);
+    const std::string echo_host_name = host.substr(
+        echo_host_start, echo_host_end == std::string::npos
+                             ? std::string::npos
+                             : echo_host_end - echo_host_start);
+    const std::string echo_port_suffix =
+        echo_host_end == std::string::npos ? std::string()
+                                           : host.substr(echo_host_end);
+    const std::string subdomain_origin =
+        host.substr(0, echo_host_start) + "sub.localhost" + echo_port_suffix;
 
     // Navigation ids share one process-global cancellation-token namespace.
     // Canceling a slow navigation in one view must not abort another view's
@@ -4181,6 +4599,498 @@ int main() {
            "synchronous redirects retain an omitted fragment",
            "hash=[" + sync_redirect_hash + "]");
 
+    // Transparent rewrites maintain distinct public/transport URL chains. The echo
+    // backend returns a RELATIVE Location (/get): curl must stay on the local backend,
+    // while sync navigation, async lifecycle, and fetch Response.url all stay public.
+    const std::string public_origin = "https://rewrite-visible.test";
+    mbClearUrlRewrites();
+    mbRewriteUrl((public_origin + "/redirect/1").c_str(),
+                 (host + "/redirect/1").c_str());
+    mbLoadURL(v, (public_origin + "/redirect/1").c_str());
+    const std::string rewritten_sync_url = Eval(v, "String(location.href)");
+
+    std::vector<NavigationEventRecord> rewrite_events;
+    mbOnNavigationEvent(v, &RecordNavigationEvent, &rewrite_events);
+    const mbNavigationId rewrite_id =
+        mbNavigate(v, (public_origin + "/redirect/1").c_str());
+    for (int i = 0; !mbIsLoadFinished(v) && i < 300; ++i)
+      mbWait(v, 10);
+    const std::string rewritten_async_url = Eval(v, "String(location.href)");
+    std::string lifecycle_committed_url;
+    std::string lifecycle_final_url;
+    for (const NavigationEventRecord& event : rewrite_events) {
+      if (event.id == rewrite_id &&
+          event.phase == MB_NAVIGATION_PHASE_COMMITTED)
+        lifecycle_committed_url = event.url;
+      if (event.id == rewrite_id &&
+          event.phase == MB_NAVIGATION_PHASE_TERMINAL)
+        lifecycle_final_url = event.url;
+    }
+    mbOnNavigationEvent(v, nullptr, nullptr);
+
+    mbRunJS(v,
+            "window.__rewriteFetch='pending';"
+            "fetch('https://rewrite-visible.test/redirect/1')"
+            ".then(function(r){window.__rewriteFetch=r.url+'|'+r.redirected;})"
+            ".catch(function(e){window.__rewriteFetch='error:'+e.name;});");
+    mbWaitForFunction(v, "window.__rewriteFetch!=='pending'", 3000);
+    const std::string rewritten_fetch_url =
+        Eval(v, "String(window.__rewriteFetch)");
+    mbClearUrlRewrites();
+    Expect(rewritten_sync_url == public_origin + "/get" &&
+               rewritten_async_url == public_origin + "/get" &&
+               lifecycle_committed_url == public_origin + "/get" &&
+               lifecycle_final_url == public_origin + "/get" &&
+               rewritten_fetch_url == public_origin + "/get|true",
+           "relative backend redirects preserve public URLs across sync/async/fetch",
+           "sync=[" + rewritten_sync_url + "] async=[" +
+               rewritten_async_url + "] committed=[" +
+               lifecycle_committed_url + "] terminal=[" + lifecycle_final_url +
+               "] fetch=[" + rewritten_fetch_url + "]");
+
+    // Re-consult the rewrite table against EACH visible redirect target. The first
+    // backend hop points at /rewrite-chain-mid, whose response is deliberately
+    // UNREWRITTEN. A rule matching that intermediate PUBLIC URL must instead fetch
+    // /rewrite-chain-rematched, follow its second redirect, and expose the public final
+    // URL through both location.href and the direct mbResponseURL hook.
+    struct RewriteResponseTrace {
+      std::vector<std::string> urls;
+    };
+    static RewriteResponseTrace* rematch_response_trace =
+        new RewriteResponseTrace();
+    *rematch_response_trace = RewriteResponseTrace();
+    const std::string rematch_public_origin =
+        "https://rewrite-rematch-visible.test";
+    const std::string rematch_public_start =
+        rematch_public_origin + "/rewrite-chain-start";
+    const std::string rematch_public_mid =
+        rematch_public_origin + "/rewrite-chain-mid";
+    const std::string rematch_public_final =
+        rematch_public_origin + "/rewrite-chain-final";
+    mbClearUrlRewrites();
+    mbRewriteUrl(rematch_public_start.c_str(),
+                 (host + "/rewrite-chain-start").c_str());
+    mbRewriteUrl(rematch_public_mid.c_str(),
+                 (host + "/rewrite-chain-rematched").c_str());
+    mbSetResponseCallback(
+        [](mbResponse* response, void*) {
+          const char* url = mbResponseURL(response);
+          if (url && (std::strstr(url, "rewrite-rematch-visible.test") ||
+                      std::strstr(url, "/rewrite-chain"))) {
+            rematch_response_trace->urls.emplace_back(url);
+          }
+        },
+        nullptr);
+    mbLoadURL(v, rematch_public_start.c_str());
+    const std::string rematch_body =
+        Eval(v, "document.body?document.body.textContent:''");
+    const std::string rematch_location = Eval(v, "String(location.href)");
+    mbSetResponseCallback(nullptr, nullptr);
+    mbClearUrlRewrites();
+    bool response_url_saw_final = false;
+    bool response_urls_all_public = !rematch_response_trace->urls.empty();
+    std::string rematch_response_urls;
+    for (const std::string& response_url : rematch_response_trace->urls) {
+      response_url_saw_final =
+          response_url_saw_final || response_url == rematch_public_final;
+      response_urls_all_public =
+          response_urls_all_public &&
+          response_url.rfind(rematch_public_origin + "/", 0) == 0;
+      rematch_response_urls += "[" + response_url + "]";
+    }
+    Expect(rematch_body == "REMATCHED" &&
+               rematch_location == rematch_public_final &&
+               response_url_saw_final && response_urls_all_public,
+           "redirect chains re-match visible-hop rewrites and mbResponseURL stays public",
+           "body=[" + rematch_body + "] location=[" + rematch_location +
+               "] response_count=" +
+               std::to_string(rematch_response_trace->urls.size()) +
+               " responses=" + rematch_response_urls);
+
+    // A backend commonly builds an ABSOLUTE Location from the transport Host.
+    // When that target points back to the exact rewritten backend origin, it is
+    // still part of the transparent chain: keep fetching the backend but expose
+    // the public origin through synchronous navigation, mbNavigate, and fetch().
+    const std::string absolute_public_origin =
+        "https://rewrite-absolute-visible.test";
+    const std::string absolute_public_url =
+        absolute_public_origin + "/absolute-host-redirect";
+    const std::string absolute_final_url =
+        absolute_public_origin + "/origin?via=absolute";
+    mbClearUrlRewrites();
+    mbRewriteUrl(absolute_public_url.c_str(),
+                 (host + "/absolute-host-redirect").c_str());
+    mbLoadURL(v, absolute_public_url.c_str());
+    const std::string absolute_sync_url = Eval(v, "String(location.href)");
+
+    mbLoadHTML(v, "<body>absolute-async-baseline</body>",
+               (absolute_public_origin + "/async-baseline").c_str());
+    std::vector<NavigationEventRecord> absolute_events;
+    mbOnNavigationEvent(v, &RecordNavigationEvent, &absolute_events);
+    const mbNavigationId absolute_nav_id =
+        mbNavigate(v, absolute_public_url.c_str());
+    for (int i = 0; !mbIsLoadFinished(v) && i < 300; ++i)
+      mbWait(v, 10);
+    const bool absolute_async_finished = mbIsLoadFinished(v) == 1;
+    const std::string absolute_async_url = Eval(v, "String(location.href)");
+    std::string absolute_committed_url;
+    std::string absolute_terminal_url;
+    mbNavigationOutcome absolute_terminal_outcome =
+        MB_NAVIGATION_OUTCOME_NONE;
+    for (const NavigationEventRecord& event : absolute_events) {
+      if (event.id != absolute_nav_id)
+        continue;
+      if (event.phase == MB_NAVIGATION_PHASE_COMMITTED)
+        absolute_committed_url = event.url;
+      if (event.phase == MB_NAVIGATION_PHASE_TERMINAL) {
+        absolute_terminal_url = event.url;
+        absolute_terminal_outcome = event.outcome;
+      }
+    }
+    mbOnNavigationEvent(v, nullptr, nullptr);
+
+    mbRunJS(v,
+            ("window.__absoluteRewriteFetch='pending';fetch('" +
+             absolute_public_url +
+             "').then(function(r){window.__absoluteRewriteFetch="
+             "r.url+'|'+r.redirected;}).catch(function(e){"
+             "window.__absoluteRewriteFetch='error:'+e.name;});")
+                .c_str());
+    mbWaitForFunction(v, "window.__absoluteRewriteFetch!=='pending'", 3000);
+    const std::string absolute_fetch_url =
+        Eval(v, "String(window.__absoluteRewriteFetch)");
+
+    // Do not over-project: a backend's explicit absolute redirect to a DIFFERENT
+    // origin is a real redirect and must remain visible to the page.
+    const std::string absolute_other_public_url =
+        absolute_public_origin + "/absolute-other-origin";
+    mbRewriteUrl(
+        absolute_other_public_url.c_str(),
+        (host + "/redirect-to?status_code=302&url=" + other_origin +
+         "/origin")
+            .c_str());
+    mbLoadURL(v, absolute_other_public_url.c_str());
+    const std::string absolute_other_origin = Eval(v, "String(location.origin)");
+    mbClearUrlRewrites();
+    Expect(absolute_nav_id != 0 && absolute_sync_url == absolute_final_url &&
+               absolute_async_finished &&
+               absolute_async_url == absolute_final_url &&
+               absolute_committed_url == absolute_final_url &&
+               absolute_terminal_url == absolute_final_url &&
+               absolute_terminal_outcome == MB_NAVIGATION_OUTCOME_SUCCESS &&
+               absolute_fetch_url == absolute_final_url + "|true" &&
+               absolute_other_origin == other_origin,
+           "same-backend absolute redirects preserve public URLs across sync/async/fetch",
+           "sync=[" + absolute_sync_url + "] async=[" +
+               absolute_async_url + "] committed=[" +
+               absolute_committed_url + "] terminal=[" +
+               absolute_terminal_url + "]/" +
+               std::to_string(absolute_terminal_outcome) + " fetch=[" +
+               absolute_fetch_url + "] other=[" + absolute_other_origin +
+               "]");
+
+    // A network-path Location (//backend/path) inherits the base scheme in each
+    // URL space. That means a public https URL rewritten to this http echo server
+    // used to miss same-backend projection: the transport result was http://backend
+    // while the visible result was https://backend. Exact backend authority must
+    // still project to the public origin for both navigation and fetch().
+    const std::string network_path_public_origin =
+        "https://rewrite-network-path-visible.test";
+    const std::string network_path_public_url =
+        network_path_public_origin + "/scheme-relative-host-redirect";
+    const std::string network_path_final_url =
+        network_path_public_origin + "/origin?via=scheme-relative";
+    mbClearUrlRewrites();
+    mbRewriteUrl(network_path_public_url.c_str(),
+                 (host + "/scheme-relative-host-redirect").c_str());
+    mbLoadURL(v, network_path_public_url.c_str());
+    const std::string network_path_sync_url = Eval(v, "String(location.href)");
+    mbRunJS(v,
+            ("window.__networkPathFetch='pending';fetch('" +
+             network_path_public_url +
+             "').then(function(r){window.__networkPathFetch="
+             "r.url+'|'+r.redirected;}).catch(function(e){"
+             "window.__networkPathFetch='error:'+e.name;});")
+                .c_str());
+    mbWaitForFunction(v, "window.__networkPathFetch!=='pending'", 3000);
+    const std::string network_path_fetch_url =
+        Eval(v, "String(window.__networkPathFetch)");
+    mbClearUrlRewrites();
+    Expect(network_path_sync_url == network_path_final_url &&
+               network_path_fetch_url == network_path_final_url + "|true",
+           "same-backend network-path redirects preserve public URLs across rewrites",
+           "sync=[" + network_path_sync_url + "] fetch=[" +
+               network_path_fetch_url + "]");
+
+    // Authority projection is exact-origin, including the effective port. A
+    // scheme-relative redirect to the same backend HOST but another port remains
+    // visible. Block it in the policy callback so the test never connects to the
+    // deliberately unused port.
+    struct PortRedirectVisibility {
+      std::string initial;
+      std::vector<std::string> urls;
+    };
+    static PortRedirectVisibility* port_redirect_visibility =
+        new PortRedirectVisibility();
+    *port_redirect_visibility = PortRedirectVisibility();
+    const std::string port_redirect_public_url =
+        network_path_public_origin + "/different-backend-port";
+    port_redirect_visibility->initial = port_redirect_public_url;
+    mbSetRequestCallback(
+        [](const char* url, void*) -> int {
+          const std::string seen = url ? url : "";
+          port_redirect_visibility->urls.push_back(seen);
+          return seen == port_redirect_visibility->initial ? 0 : 1;
+        },
+        nullptr);
+    mbRewriteUrl(
+        port_redirect_public_url.c_str(),
+        (host + "/redirect-to?status_code=302&url=//" + echo_host_name +
+         ":1/origin?via=different-port")
+            .c_str());
+    mbLoadURL(v, port_redirect_public_url.c_str());
+    mbClearUrlRewrites();
+    mbSetRequestCallback(nullptr, nullptr);
+    const bool different_port_visible =
+        port_redirect_visibility->urls.size() >= 2 &&
+        port_redirect_visibility->urls[1].rfind(
+            "https://" + echo_host_name + ":1/origin", 0) == 0;
+    Expect(different_port_visible,
+           "same-host different-port redirects remain visible real redirects",
+           "calls=" + std::to_string(port_redirect_visibility->urls.size()) +
+               (port_redirect_visibility->urls.size() < 2
+                    ? std::string()
+                    : " second=[" + port_redirect_visibility->urls[1] + "]"));
+
+    // A transport failure before any HTTP response must likewise report the
+    // attempted PUBLIC URL, never the transparent backend target, through both
+    // the synchronous mbLoadURL and asynchronous mbNavigate failure paths.
+    struct RewriteFailState {
+      std::vector<std::string> urls;
+      std::vector<std::string> domains;
+      std::vector<int> codes;
+    };
+    static RewriteFailState* rewrite_fail = new RewriteFailState();
+    *rewrite_fail = RewriteFailState();
+    mbOnFailLoadingEx(
+        v,
+        [](mbView*, void*, const char* url, const char* domain, int code,
+           const char*) {
+          rewrite_fail->urls.push_back(url ? url : "");
+          rewrite_fail->domains.push_back(domain ? domain : "");
+          rewrite_fail->codes.push_back(code);
+        },
+        nullptr);
+    const std::string failure_public_url =
+        "https://rewrite-failure-visible.test/transport-fail";
+    mbRewriteUrl(failure_public_url.c_str(),
+                 (host + "/drop-connection").c_str());
+    mbLoadURL(v, failure_public_url.c_str());
+    const mbNavigationId failure_nav_id =
+        mbNavigate(v, failure_public_url.c_str());
+    for (int i = 0; !mbIsLoadFinished(v) && i < 400; ++i)
+      mbWait(v, 10);
+    mbClearUrlRewrites();
+    mbOnFailLoadingEx(v, nullptr, nullptr);
+    const bool failure_urls_public =
+        rewrite_fail->urls.size() == 2 &&
+        rewrite_fail->urls[0] == failure_public_url &&
+        rewrite_fail->urls[1] == failure_public_url;
+    const bool failure_codes_structured =
+        rewrite_fail->domains.size() == 2 && rewrite_fail->codes.size() == 2 &&
+        rewrite_fail->domains[0] == "curl" &&
+        rewrite_fail->domains[1] == "curl" &&
+        rewrite_fail->codes[0] != 0 && rewrite_fail->codes[1] != 0;
+    Expect(failure_nav_id != 0 && failure_urls_public &&
+               failure_codes_structured,
+           "transparent rewrite transport failures report only the public URL",
+           "urls=" + std::to_string(rewrite_fail->urls.size()) +
+               (rewrite_fail->urls.empty()
+                    ? std::string()
+                    : " first=[" + rewrite_fail->urls.front() + "]") +
+               (rewrite_fail->urls.size() < 2
+                    ? std::string()
+                    : " second=[" + rewrite_fail->urls[1] + "]"));
+
+    // Header precedence is one global registration timeline across categories. The later
+    // substring rule must beat the earlier origin rule; the mutable hook must inspect that
+    // composed value and then override the actual header curl sends.
+    static int* hook_saw_static = new int(0);
+    *hook_saw_static = 0;
+    mbClearRequestHeaders();
+    mbSetRequestHeaderForOrigin(host.c_str(), "X-Mb-Layer", "origin-first");
+    mbSetRequestHeader("/headers?header-order=1", "X-Mb-Layer",
+                       "substring-later");
+    mbSetRequestHook(
+        [](mbRequest* request, void*) {
+          const char* url = mbRequestURL(request);
+          if (!url || !std::strstr(url, "header-order=1"))
+            return;
+          const char* headers = mbRequestHeaders(request);
+          if (headers && std::strstr(headers, "X-Mb-Layer: substring-later"))
+            *hook_saw_static = 1;
+          mbRequestSetHeader(request, "X-Mb-Layer", "hook-final");
+        },
+        nullptr);
+    mbLoadURL(v, (host + "/headers?header-order=1").c_str());
+    const std::string layered_headers =
+        Eval(v, "document.body?document.body.innerText:''");
+    mbSetRequestHook(nullptr, nullptr);
+    mbClearRequestHeaders();
+    Expect(*hook_saw_static &&
+               layered_headers.find("hook-final") != std::string::npos &&
+               layered_headers.find("substring-later") == std::string::npos &&
+               layered_headers.find("origin-first") == std::string::npos,
+           "static headers follow global call order and mutable hook wins last",
+           "saw=" + std::to_string(*hook_saw_static) + " response=[" +
+               layered_headers + "]");
+
+    // Host-scoped registrations must both reach curl and participate in the SAME
+    // registration timeline as origin/substring rules. Exercise both orderings so
+    // a fixed category-order implementation cannot accidentally pass.
+    mbClearRequestHeaders();
+    mbSetRequestHeaderForOrigin(host.c_str(), "X-Mb-Host-Order",
+                                "origin-first");
+    mbSetRequestHeaderForHost(echo_host_name.c_str(), "X-Mb-Host-Order",
+                              "host-last");
+    mbSetRequestHeaderForHost(echo_host_name.c_str(), "X-Mb-Host-Only",
+                              "host-delivered");
+    mbSetRequestHeaderForHost("not-the-echo-host.invalid", "X-Mb-Host-Skip",
+                              "must-not-deliver");
+    mbLoadURL(v, (host + "/headers?host-precedence=a").c_str());
+    const std::string host_rule_last =
+        Eval(v, "document.body?document.body.innerText:''");
+
+    mbClearRequestHeaders();
+    mbSetRequestHeaderForHost(echo_host_name.c_str(), "X-Mb-Host-Order",
+                              "host-first");
+    mbSetRequestHeader("/headers?host-precedence=b", "X-Mb-Host-Order",
+                       "substring-last");
+    mbLoadURL(v, (host + "/headers?host-precedence=b").c_str());
+    const std::string host_rule_first =
+        Eval(v, "document.body?document.body.innerText:''");
+    mbClearRequestHeaders();
+    const bool host_header_delivery =
+        host_rule_last.find("host-delivered") != std::string::npos &&
+        host_rule_last.find("must-not-deliver") == std::string::npos;
+    const bool host_header_order =
+        host_rule_last.find("host-last") != std::string::npos &&
+        host_rule_last.find("origin-first") == std::string::npos &&
+        host_rule_first.find("substring-last") != std::string::npos &&
+        host_rule_first.find("host-first") == std::string::npos;
+    Expect(host_header_delivery && host_header_order,
+           "mbSetRequestHeaderForHost delivers and obeys global registration order",
+           "host-last=[" + host_rule_last + "] host-first=[" +
+               host_rule_first + "]");
+
+    // Exercise the two nontrivial host-filter modes directly. A leading dot opts
+    // into true subdomain matching (while the exact-host control must miss), and a
+    // /path/ suffix narrows an otherwise matching host to that path prefix.
+    mbClearRequestHeaders();
+    mbSetRequestHeaderForHost(".localhost", "X-Mb-Subdomain-Mode",
+                              "leading-dot-hit");
+    mbSetRequestHeaderForHost("localhost", "X-Mb-Exact-Mode",
+                              "exact-host-must-miss");
+    mbLoadURL(v, (subdomain_origin + "/headers/subdomain-mode").c_str());
+    const std::string subdomain_mode_headers =
+        Eval(v, "document.body?document.body.innerText:''");
+
+    mbClearRequestHeaders();
+    mbSetRequestHeaderForHost(
+        (echo_host_name + "/headers/host-prefix/").c_str(),
+        "X-Mb-Host-Path", "host-path-hit");
+    mbLoadURL(v, (host + "/headers/host-prefix/item").c_str());
+    const std::string host_path_match_headers =
+        Eval(v, "document.body?document.body.innerText:''");
+    mbLoadURL(v, (host + "/headers/host-prefixish/item").c_str());
+    const std::string host_path_miss_headers =
+        Eval(v, "document.body?document.body.innerText:''");
+    mbClearRequestHeaders();
+    const bool subdomain_filter_ok =
+        subdomain_mode_headers.find("leading-dot-hit") != std::string::npos &&
+        subdomain_mode_headers.find("exact-host-must-miss") ==
+            std::string::npos;
+    const bool host_path_filter_ok =
+        host_path_match_headers.find("host-path-hit") != std::string::npos &&
+        host_path_miss_headers.find("host-path-hit") == std::string::npos;
+    Expect(subdomain_filter_ok && host_path_filter_ok,
+           "mbSetRequestHeaderForHost honors subdomain and path-prefix modes",
+           "subdomain=[" + subdomain_mode_headers + "] path-hit=[" +
+               host_path_match_headers + "] path-miss=[" +
+               host_path_miss_headers + "]");
+
+    // Credential stripping recognizes the literal Authorization header, not
+    // merely the arbitrary hook-header case exercised below. The view-global
+    // header reaches its intended first origin, then must be absent after a
+    // redirect to the alternate loopback origin.
+    mbSetExtraHeaders(v, "Authorization: Bearer mb-auth-secret");
+    mbLoadURL(v, (host + "/headers?authorization=direct").c_str());
+    const std::string direct_authorization =
+        Eval(v, "document.body?document.body.innerText:''");
+    mbLoadURL(v,
+              (host + "/redirect-to?status_code=302&url=" + other_origin +
+               "/headers?authorization=redirected")
+                  .c_str());
+    const std::string redirected_authorization =
+        Eval(v, "document.body?document.body.innerText:''");
+    mbSetExtraHeaders(v, "");
+    Expect(direct_authorization.find("mb-auth-secret") != std::string::npos &&
+               redirected_authorization.find("mb-auth-secret") ==
+                   std::string::npos,
+           "Authorization is delivered first-party then stripped on redirect",
+           "direct=[" + direct_authorization + "] redirected=[" +
+               redirected_authorization + "]");
+
+    // Do not over-strip: a caller-supplied Authorization header is carried through
+    // a same-origin redirect. The echo fixture reports both hops so merely sending
+    // the credential on the first request cannot make this pass.
+    mbSetExtraHeaders(v, "Authorization: Bearer mb-same-origin-secret");
+    mbLoadURL(v,
+              (host +
+               "/auth-chain-start?key=same-origin&url=/auth-chain-final?key=same-origin")
+                  .c_str());
+    const std::string same_origin_authorization =
+        Eval(v, "document.body?document.body.innerText:''");
+    mbSetExtraHeaders(v, "");
+    const bool same_origin_authorization_kept =
+        same_origin_authorization.find(
+            "\"initial_authorization\": \"Bearer mb-same-origin-secret\"") !=
+            std::string::npos &&
+        same_origin_authorization.find(
+            "\"final_authorization\": \"Bearer mb-same-origin-secret\"") !=
+            std::string::npos;
+    Expect(same_origin_authorization_kept,
+           "same-origin redirects preserve caller Authorization",
+           "response=[" + same_origin_authorization + "]");
+
+    // Registered credentials are evaluated anew on every hop. Bind distinct
+    // Authorization values to the source and destination origins: the first hop
+    // must receive only the source value, then the cross-origin target must receive
+    // the destination registration rather than retaining or permanently losing it.
+    mbClearRequestHeaders();
+    mbSetRequestHeaderForOrigin(host.c_str(), "Authorization",
+                                "Bearer mb-source-registration");
+    mbSetRequestHeaderForOrigin(other_origin.c_str(), "Authorization",
+                                "Bearer mb-destination-registration");
+    mbLoadURL(
+        v,
+        (host + "/auth-chain-start?key=registered-per-hop&url=" +
+         other_origin + "/auth-chain-final?key=registered-per-hop")
+            .c_str());
+    const std::string registered_authorization =
+        Eval(v, "document.body?document.body.innerText:''");
+    mbClearRequestHeaders();
+    const bool registered_authorization_reapplied =
+        registered_authorization.find(
+            "\"initial_authorization\": \"Bearer mb-source-registration\"") !=
+            std::string::npos &&
+        registered_authorization.find(
+            "\"final_authorization\": \"Bearer mb-destination-registration\"") !=
+            std::string::npos;
+    Expect(registered_authorization_reapplied,
+           "origin-registered Authorization is re-evaluated on each redirect hop",
+           "response=[" + registered_authorization + "]");
+
     mbNavigationOptions head_options = {};
     head_options.struct_size = sizeof(head_options);
     head_options.method = "HEAD";
@@ -4196,6 +5106,165 @@ int main() {
            "mbNavigateEx preserves an explicit HEAD method",
            "status=" + std::to_string(mbGetHttpStatus(v)) + " headers=[" +
                head_headers + "]");
+
+    // Content-Type is request metadata, not evidence that a body is non-empty. An
+    // explicit empty POST must retain it rather than ConfigureCurlEasy silently dropping it.
+    mbLoadHTML(v, "<body>empty-post</body>", (host + "/").c_str());
+    mbRunJS(v,
+            "window.__emptyPost='pending';"
+            "fetch('/post',{method:'POST',headers:{'Content-Type':'application/x-empty'}})"
+            ".then(function(r){return r.text();})"
+            ".then(function(t){window.__emptyPost=t;})"
+            ".catch(function(e){window.__emptyPost='error:'+e.name;});");
+    mbWaitForFunction(v, "window.__emptyPost!=='pending'", 2500);
+    const std::string empty_post = Eval(v, "String(window.__emptyPost)");
+    Expect(empty_post.find("application/x-empty") != std::string::npos,
+           "empty-body POST preserves its explicit Content-Type",
+           "response=[" + empty_post + "]");
+
+    // 307 and 308 are method-preserving redirects. Exercise the host-driven POST
+    // path through a transparent rewrite: the backend receives the original POST
+    // body on the second hop while the committed URL remains on the public origin.
+    bool preserved_307_308 = true;
+    std::string preserved_307_308_detail;
+    for (int redirect_status : {307, 308}) {
+      const std::string status_text = std::to_string(redirect_status);
+      const std::string post_public_origin =
+          "https://rewrite-post-visible.test";
+      const std::string post_public_url =
+          post_public_origin + "/start-" + status_text;
+      const std::string post_final_url =
+          post_public_origin + "/post?via=" + status_text;
+      const std::string post_body =
+          "redirect_code=" + status_text + "&payload=preserved-" + status_text;
+      mbClearUrlRewrites();
+      mbRewriteUrl(
+          post_public_url.c_str(),
+          (host + "/redirect-post?status_code=" + status_text +
+           "&url=/post?via=" + status_text)
+              .c_str());
+      mbPostURL(v, post_public_url.c_str(), post_body.c_str(),
+                "application/x-www-form-urlencoded");
+      const std::string echoed_post =
+          Eval(v, "document.body?document.body.innerText:''");
+      const std::string committed_post_url = Eval(v, "String(location.href)");
+      const bool one_preserved =
+          committed_post_url == post_final_url &&
+          echoed_post.find("\"method\": \"POST\"") != std::string::npos &&
+          echoed_post.find(post_body) != std::string::npos;
+      preserved_307_308 = preserved_307_308 && one_preserved;
+      preserved_307_308_detail +=
+          status_text + ":url=[" + committed_post_url + "] body=[" +
+          echoed_post + "] ";
+    }
+    mbClearUrlRewrites();
+    Expect(preserved_307_308,
+           "rewritten 307/308 redirects preserve POST method and body",
+           preserved_307_308_detail);
+
+    // The non-blocking navigation engine owns a separate redirect loop. Drive
+    // mbNavigateEx through both preserving statuses and require the final public
+    // URL plus the exact POST body, so falling back to GET cannot false-pass.
+    bool async_preserved_307_308 = true;
+    std::string async_preserved_detail;
+    for (int redirect_status : {307, 308}) {
+      const std::string status_text = std::to_string(redirect_status);
+      const std::string async_public_origin =
+          "https://rewrite-post-async-visible.test";
+      const std::string async_public_url =
+          async_public_origin + "/start-" + status_text;
+      const std::string async_final_url =
+          async_public_origin + "/post?via=async-" + status_text;
+      const std::string async_body =
+          "redirect_code=" + status_text + "&payload=async-preserved-" +
+          status_text;
+      mbClearUrlRewrites();
+      mbRewriteUrl(
+          async_public_url.c_str(),
+          (host + "/redirect-post?status_code=" + status_text +
+           "&url=/post?via=async-" + status_text)
+              .c_str());
+      mbNavigationOptions async_options = {};
+      async_options.struct_size = sizeof(async_options);
+      async_options.method = "POST";
+      async_options.body = async_body.data();
+      async_options.body_len = async_body.size();
+      async_options.content_type = "application/x-www-form-urlencoded";
+      const mbNavigationId async_id =
+          mbNavigateEx(v, async_public_url.c_str(), &async_options);
+      const std::string async_wait =
+          "document.body&&document.body.innerText.indexOf('async-preserved-" +
+          status_text + "')>=0";
+      mbWaitForFunction(v, async_wait.c_str(), 4000);
+      const std::string async_echoed_post =
+          Eval(v, "document.body?document.body.innerText:''");
+      const std::string async_committed_url = Eval(v, "String(location.href)");
+      const bool one_async_preserved =
+          async_id != 0 && mbIsLoadFinished(v) == 1 &&
+          async_committed_url == async_final_url &&
+          async_echoed_post.find("\"method\": \"POST\"") !=
+              std::string::npos &&
+          async_echoed_post.find(async_body) != std::string::npos;
+      async_preserved_307_308 =
+          async_preserved_307_308 && one_async_preserved;
+      async_preserved_detail +=
+          status_text + ":id=" + std::to_string(async_id) + " url=[" +
+          async_committed_url + "] body=[" + async_echoed_post + "] ";
+    }
+    mbClearUrlRewrites();
+    Expect(async_preserved_307_308,
+           "mbNavigateEx preserves rewritten POST bodies across 307/308",
+           async_preserved_detail);
+
+    // fetch()/XHR has a third redirect implementation, including Blink's
+    // WillFollowRedirect header/method edits. Keep the page on the public origin
+    // and assert Response.url/redirected together with the final echoed POST.
+    bool fetch_preserved_307_308 = true;
+    std::string fetch_preserved_detail;
+    const std::string fetch_post_public_origin =
+        "https://rewrite-post-fetch-visible.test";
+    mbLoadHTML(v, "<body>fetch-post-redirect</body>",
+               (fetch_post_public_origin + "/page").c_str());
+    for (int redirect_status : {307, 308}) {
+      const std::string status_text = std::to_string(redirect_status);
+      const std::string fetch_public_url =
+          fetch_post_public_origin + "/start-" + status_text;
+      const std::string fetch_final_url =
+          fetch_post_public_origin + "/post?via=fetch-" + status_text;
+      const std::string fetch_body =
+          "redirect_code=" + status_text + "&payload=fetch-preserved-" +
+          status_text;
+      mbClearUrlRewrites();
+      mbRewriteUrl(
+          fetch_public_url.c_str(),
+          (host + "/redirect-post?status_code=" + status_text +
+           "&url=/post?via=fetch-" + status_text)
+              .c_str());
+      const std::string fetch_script =
+          "window.__preservedPost='pending';fetch('" + fetch_public_url +
+          "',{method:'POST',headers:{'Content-Type':"
+          "'application/x-www-form-urlencoded'},body:'" +
+          fetch_body +
+          "'}).then(function(r){var meta=r.url+'|'+r.redirected+'|';"
+          "return r.text().then(function(t){window.__preservedPost=meta+t;});})"
+          ".catch(function(e){window.__preservedPost='error:'+e.name;});";
+      mbRunJS(v, fetch_script.c_str());
+      mbWaitForFunction(v, "window.__preservedPost!=='pending'", 3000);
+      const std::string fetch_result =
+          Eval(v, "String(window.__preservedPost)");
+      const bool one_fetch_preserved =
+          fetch_result.rfind(fetch_final_url + "|true|", 0) == 0 &&
+          fetch_result.find("\"method\": \"POST\"") != std::string::npos &&
+          fetch_result.find(fetch_body) != std::string::npos;
+      fetch_preserved_307_308 =
+          fetch_preserved_307_308 && one_fetch_preserved;
+      fetch_preserved_detail +=
+          status_text + ":[" + fetch_result + "] ";
+    }
+    mbClearUrlRewrites();
+    Expect(fetch_preserved_307_308,
+           "fetch preserves rewritten POST bodies across 307/308",
+           fetch_preserved_detail);
 
     // Mutable-hook headers are request/origin scoped even on transports that
     // cannot call the main-thread hook again while following redirects.
@@ -4253,6 +5322,7 @@ int main() {
     // such as X-Hook-Key must not be carried to the alternate origin.
     struct StreamState {
       std::string bytes;
+      std::string begin_url;
       int finished = 0;
       int success = 0;
     } direct, redirected;
@@ -4274,7 +5344,11 @@ int main() {
         nullptr);
     auto run_stream = [&](const std::string& url, StreamState* state) {
       mbOnDownloadStream(
-          v, nullptr,
+          v,
+          [](mbView*, void* ud, unsigned, const char* url, const char*,
+             const char*, long long) {
+            static_cast<StreamState*>(ud)->begin_url = url ? url : "";
+          },
           [](mbView*, void* ud, unsigned, const char* bytes, int len,
              long long, long long) {
             static_cast<StreamState*>(ud)->bytes.append(bytes,
@@ -4329,6 +5403,91 @@ int main() {
            "SSE scopes mutable-hook headers across redirects",
            "direct=[" + direct_sse + "] redirect=[" + redirected_sse +
                "] hook_calls=" + std::to_string(*stream_hook_calls));
+
+    // The SSE and streaming-download redirect loops have their own detached
+    // transports. Drive both through a transparent cross-scheme rewrite whose
+    // backend emits //backend/... and verify two things independently: bytes/events
+    // arrive from the backend, while request-policy callbacks see only the public
+    // initial and final URLs (never the backend authority).
+    std::vector<std::string> streaming_visible_urls;
+    mbSetRequestCallback(
+        [](const char* url, void* userdata) -> int {
+          auto* urls = static_cast<std::vector<std::string>*>(userdata);
+          const std::string seen = url ? url : "";
+          if (seen.find("rewrite-stream-visible.test") != std::string::npos ||
+              seen.find("rewrite-sse-visible.test") != std::string::npos) {
+            urls->push_back(seen);
+          }
+          return 0;
+        },
+        &streaming_visible_urls);
+    const std::string download_public_origin =
+        "https://rewrite-stream-visible.test";
+    const std::string download_public_url =
+        download_public_origin + "/start-download";
+    const std::string download_final_public_url =
+        download_public_origin + "/stream-auth";
+    const std::string sse_public_origin =
+        "https://rewrite-sse-visible.test";
+    const std::string sse_public_url = sse_public_origin + "/start-sse";
+    const std::string sse_final_public_url = sse_public_origin + "/sse-auth";
+    mbClearUrlRewrites();
+    mbRewriteUrl(
+        download_public_url.c_str(),
+        (host + "/scheme-relative-host-redirect?target=/stream-auth").c_str());
+    mbRewriteUrl(
+        sse_public_url.c_str(),
+        (host + "/scheme-relative-host-redirect?target=/sse-auth").c_str());
+
+    StreamState rewritten_download;
+    const unsigned rewritten_download_id =
+        run_stream(download_public_url, &rewritten_download);
+
+    mbLoadHTML(v, "<body>rewritten-sse</body>",
+               (sse_public_origin + "/page").c_str());
+    mbRunJS(v,
+            ("window.__rewrittenSse='pending';var rewrittenEs=new EventSource('" +
+             sse_public_url +
+             "');rewrittenEs.onmessage=function(e){window.__rewrittenSse=e.data;"
+             "rewrittenEs.close();};rewrittenEs.onerror=function(){"
+             "if(window.__rewrittenSse==='pending')window.__rewrittenSse='error';};")
+                .c_str());
+    mbWaitForFunction(v, "window.__rewrittenSse!=='pending'", 3000);
+    const std::string rewritten_sse =
+        Eval(v, "String(window.__rewrittenSse)");
+    mbOnDownloadStream(v, nullptr, nullptr, nullptr, nullptr);
+    mbSetRequestCallback(nullptr, nullptr);
+    mbClearUrlRewrites();
+
+    const auto saw_visible_url = [&](const std::string& wanted) {
+      return std::find(streaming_visible_urls.begin(),
+                       streaming_visible_urls.end(), wanted) !=
+             streaming_visible_urls.end();
+    };
+    bool streaming_backend_hidden = true;
+    for (const std::string& seen : streaming_visible_urls) {
+      if (seen.find(echo_host_name) != std::string::npos)
+        streaming_backend_hidden = false;
+    }
+    const bool download_visible_chain_ok =
+        rewritten_download_id != 0 && rewritten_download.success == 1 &&
+        rewritten_download.begin_url == download_public_url &&
+        rewritten_download.bytes.find("host=" + echo_host_name) !=
+            std::string::npos &&
+        saw_visible_url(download_public_url) &&
+        saw_visible_url(download_final_public_url);
+    const bool sse_visible_chain_ok =
+        rewritten_sse == "hook=" && saw_visible_url(sse_public_url) &&
+        saw_visible_url(sse_final_public_url);
+    std::string streaming_trace;
+    for (const std::string& seen : streaming_visible_urls)
+      streaming_trace += "[" + seen + "]";
+    Expect(download_visible_chain_ok && sse_visible_chain_ok &&
+               streaming_backend_hidden,
+           "rewritten SSE/download streams expose only their public redirect chains",
+           "download=[" + rewritten_download.bytes + "] begin=[" +
+               rewritten_download.begin_url + "] sse=[" + rewritten_sse +
+               "] trace=" + streaming_trace);
   }
 
   // 31r. The response hook exposes the raw RESPONSE HEADERS (mbResponseHeaders) for http
@@ -5348,8 +6507,14 @@ int main() {
   {
     const std::string ver = mbVersion() ? mbVersion() : "";
     const std::string cr = mbChromiumVersion() ? mbChromiumVersion() : "";
-    Expect(!ver.empty() && mbApiVersion() == MB_API_VERSION &&
-               cr.rfind("150.", 0) == 0,
+    const bool compat =
+        mbAbiEpoch() == MB_ABI_EPOCH && mbApiLevel() == MB_API_LEVEL &&
+        mbApiVersion() == MB_API_VERSION &&
+        mbCheckCompat(MB_ABI_EPOCH, MB_API_LEVEL) == 1 &&
+        mbCheckCompat(MB_ABI_EPOCH + 1, MB_API_LEVEL) == 0 &&
+        mbCheckCompat(MB_ABI_EPOCH, MB_API_LEVEL + 1) == 0 &&
+        mbCheckCompat(MB_ABI_EPOCH, -1) == 0;
+    Expect(!ver.empty() && compat && cr.rfind("150.", 0) == 0,
            "version handshake exports (engine / API / Chromium)",
            "ver=[" + ver + "] api=" + std::to_string(mbApiVersion()) +
                " chromium=[" + cr + "]");
@@ -5864,17 +7029,31 @@ int main() {
         mbCreateSessionEx("", "/tmp/mb-smoke-r4-profiles", &empty_st);
     mbSessionCreateStatus eph_st = MB_SESSION_ERROR;
     mbSession* empty_ephemeral = mbCreateSessionEx("", nullptr, &eph_st);
+    // The original symbol remains permissive for API-level-1 callers. Strict
+    // validation is additive in Ex, not a behavior change to an old export.
+    mbSession* legacy_nested =
+        mbCreateSession("legacy/nested", "/tmp/mb-smoke-r4-profiles");
+    mbSession* legacy_unnamed =
+        mbCreateSession(nullptr, "/tmp/mb-smoke-r4-profiles");
+    char legacy_name[64] = {0};
+    if (legacy_unnamed)
+      mbSessionGetName(legacy_unnamed, legacy_name, sizeof(legacy_name));
+    const bool legacy_compatible = legacy_nested && legacy_unnamed &&
+                                   std::string(legacy_name) == "unnamed";
     const bool reject_ok = bad == nullptr && st == MB_SESSION_INVALID_NAME &&
                            bad_null == nullptr &&
                            null_st == MB_SESSION_INVALID_NAME &&
                            bad_empty == nullptr &&
                            empty_st == MB_SESSION_INVALID_NAME &&
                            empty_ephemeral != nullptr && eph_st == MB_SESSION_OK;
+    mbDestroySession(legacy_unnamed);
+    mbDestroySession(legacy_nested);
     mbDestroySession(empty_ephemeral);
     Expect(std::string(name) == "r4-ephemeral" && eph == 0 && eplen == 0 &&
                per == 1 && path_ok && std::string(pname) == "r4-persistent" &&
-               reject_ok && mbSessionIsPersistent(mbDefaultSession()) == 0,
-           "session introspection getters + portable-name validation",
+               reject_ok && legacy_compatible &&
+               mbSessionIsPersistent(mbDefaultSession()) == 0,
+           "session introspection + strict Ex and compatible legacy creation",
            "name=[" + std::string(name) + "] eph=" + std::to_string(eph) +
                " per=" + std::to_string(per) + " pname=[" + std::string(pname) +
                "] path=[" + ppath_s + "] reject_st=" + std::to_string(st) +
@@ -6325,6 +7504,42 @@ int main() {
                  "] width=[" + w + "]");
 #endif
     }
+  }
+
+  // R5g. Per-view network-idle counters are monotonic for the whole lifetime of a
+  // stable activity identity, then release their map slot when that identity is
+  // retired. A defensive retirement path keeps an entry until an already-counted
+  // load balances, instead of either leaking it forever or erasing an in-flight
+  // counter.
+  {
+    int live_identity = 0;
+    const void* key = &live_identity;
+    mb::MbNetRequestStarted(key);
+    mb::MbNetRequestFinished(key);
+    mb::MbNetRequestStarted(key);
+    mb::MbNetRequestFinished(key);
+    const bool live_monotonic = mb::MbNetStartedCount(key) == 2 &&
+                                mb::MbNetInFlight(key) == 0 &&
+                                mb::MbNetHasActivityContextForTesting(key);
+    mb::MbNetForgetActivityContext(key);
+    const bool released = !mb::MbNetHasActivityContextForTesting(key);
+
+    int retiring_identity = 0;
+    const void* retiring_key = &retiring_identity;
+    mb::MbNetRequestStarted(retiring_key);
+    mb::MbNetForgetActivityContext(retiring_key);
+    const bool deferred = mb::MbNetHasActivityContextForTesting(retiring_key) &&
+                          mb::MbNetInFlight(retiring_key) == 1;
+    mb::MbNetRequestFinished(retiring_key);
+    const bool drained =
+        !mb::MbNetHasActivityContextForTesting(retiring_key);
+    Expect(live_monotonic && released && deferred && drained,
+           "network-idle activity entries stay monotonic while live and are "
+           "released after teardown",
+           "live=" + std::to_string(live_monotonic) +
+               " released=" + std::to_string(released) +
+               " deferred=" + std::to_string(deferred) +
+               " drained=" + std::to_string(drained));
   }
 
   mbDestroyView(v);

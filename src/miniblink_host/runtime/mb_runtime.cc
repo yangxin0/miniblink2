@@ -7,6 +7,7 @@
 
 #include "miniblink_host/runtime/mb_runtime.h"
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <optional>
@@ -108,12 +109,20 @@ class MbDiscardableAllocator : public base::DiscardableMemoryAllocator {
 };
 }  // namespace
 
+namespace {
+// Set when Shutdown() begins; polled (off-thread) by the worker rendezvous
+// loops in mb_url_loader.cc / mb_worker_script.cc as their release-of-last-
+// resort once the host stops pumping the engine loop.
+std::atomic<bool> g_shutdown_started{false};
+}  // namespace
+
 MbRuntime* MbRuntime::Get() {
   return g_runtime;
 }
 
 // static
 bool MbRuntime::Initialize() {
+  g_shutdown_started.store(false, std::memory_order_release);
   if (g_runtime)
     return true;
   g_runtime = new MbRuntime();
@@ -140,6 +149,16 @@ void MbRuntime::Shutdown() {
   // freed memory and (b) made any re-init re-run the one-time globals and crash. Both
   // are gone now: Shutdown is a safe no-op. (Matches the single-process Chromium model,
   // where process-global singletons are intentionally leaked rather than destroyed.)
+  //
+  // The one observable effect: mark shutdown as started, releasing any worker
+  // thread parked on an engine-sequence rendezvous (the host has just promised
+  // it will not pump the engine loop again).
+  g_shutdown_started.store(true, std::memory_order_release);
+}
+
+// static
+bool MbRuntime::ShutdownStarted() {
+  return g_shutdown_started.load(std::memory_order_acquire);
 }
 
 MbRuntime::MbRuntime() {

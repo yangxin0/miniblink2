@@ -22,17 +22,23 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/scoped_refptr.h"
 #include "third_party/blink/public/platform/web_worker_fetch_context.h"
 #include "third_party/blink/renderer/platform/loader/fetch/url_loader/url_loader_factory.h"
 
 namespace mb {
+
+class MbLoaderViewContext;
 
 // A blink::URLLoaderFactory that ignores the network-service plumbing and hands back the
 // host's own libcurl-backed loader for every request — the worker analogue of how the
 // frame's subresources are loaded (MbFrameClient::CreateURLLoaderForTesting).
 class MbWorkerURLLoaderFactory : public blink::URLLoaderFactory {
  public:
-  MbWorkerURLLoaderFactory(std::string user_agent, std::string extra_headers);
+  MbWorkerURLLoaderFactory(
+      std::string user_agent,
+      std::string extra_headers,
+      scoped_refptr<MbLoaderViewContext> view_context);
   ~MbWorkerURLLoaderFactory() override;
 
   std::unique_ptr<blink::URLLoader> CreateURLLoader(
@@ -47,6 +53,7 @@ class MbWorkerURLLoaderFactory : public blink::URLLoaderFactory {
  private:
   std::string user_agent_;
   std::string extra_headers_;
+  scoped_refptr<MbLoaderViewContext> view_context_;
 };
 
 // The per-worker fetch context. All ten WebWorkerFetchContext pure-virtuals; the only
@@ -58,7 +65,8 @@ class MbWorkerFetchContext : public blink::WebWorkerFetchContext {
   // worker MUST report a non-null top-frame origin (WorkerFetchContext DCHECKs that only
   // shared/service workers may have none), so this is required, not optional.
   MbWorkerFetchContext(std::string user_agent, std::string extra_headers,
-                       std::string top_frame_origin);
+                       std::string top_frame_origin,
+                       scoped_refptr<MbLoaderViewContext> view_context);
 
   // blink::WebWorkerFetchContext:
   void SetTerminateSyncLoadEvent(base::WaitableEvent*) override;
@@ -80,6 +88,9 @@ class MbWorkerFetchContext : public blink::WebWorkerFetchContext {
   // Make a fresh context with the same identity, for a nested worker (the worker-host
   // factory client's CloneWorkerFetchContext).
   scoped_refptr<MbWorkerFetchContext> CloneContext() const;
+  const scoped_refptr<MbLoaderViewContext>& loader_view_context() const {
+    return view_context_;
+  }
 
  private:
   ~MbWorkerFetchContext() override;
@@ -87,6 +98,7 @@ class MbWorkerFetchContext : public blink::WebWorkerFetchContext {
   std::string user_agent_;
   std::string extra_headers_;
   std::string top_frame_origin_;  // serialized; rebuilt per call (worker-thread safe)
+  scoped_refptr<MbLoaderViewContext> view_context_;
   std::unique_ptr<MbWorkerURLLoaderFactory> factory_;
 };
 
