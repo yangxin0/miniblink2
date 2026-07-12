@@ -10,6 +10,79 @@ Release notes for miniblink2. Each release is an annotated git tag
 
 ---
 
+## v0.6 — 2026-07-12 (`v0.6`)
+
+**The async-navigation release.** Navigation grows a non-blocking engine with
+an id-correlated lifecycle, transparent URL rewriting stays invisible across
+redirects on every transport, network-idle becomes truly per-view, and session
+identity binds immutably at view creation. The whole cycle was driven by an
+adversarial review program — five rounds of findings, each fix verified by new
+deterministic tests — growing the battery 494 → 575 cases. All suites green:
+`mb_smoke` 279, `mb_smoke_render` 151, `mb_smoke_platform` 55, `mb_smoke_r6`
+24, `mb_shot_smoke` 66 — 0 failures.
+
+**Async navigation.**
+
+- `mbNavigate` / `mbNavigateEx` return immediately with a process-unique
+  navigation id; the initial hop never runs on the caller's stack, and local
+  payloads (`data:` decode, `file:` reads) materialize on the blocking pool.
+  `mbCancelNavigation` cancels by id, safely across views.
+- `mbOnNavigationEvent` — a structured STARTED / COMMITTED / TERMINAL
+  lifecycle carrying the id, requested and current URLs, HTTP status, and a
+  terminal outcome (success / failure / cancelled / superseded / download).
+  The id is reserved before STARTED fires, so same-URL, superseded, and
+  reentrant navigations are unambiguous; redirect policy re-evaluates per hop.
+
+**Transparent rewriting keeps public URLs.** Every transport (sync loads,
+async navigation, subresources, SSE, download streams) tracks separate
+visible and fetch URL chains: relative `Location` values resolve in both
+spaces, absolute and network-path (`//host/...`) redirects naming the exact
+backend origin are projected back onto the public authority, and failure
+callbacks report the public URL. Request-header composition is
+registrations-then-hook with true last-registration-wins across the
+substring / host / origin scopes (`mbSetRequestHeaderForHost` /
+`ForOrigin`), re-run on every redirect hop.
+
+**Per-view network idle.** `mbWaitForNetworkIdle` now implements
+networkidle0 per view — in-flight and monotonic started counters cover
+main-frame, child-frame, subresource, and dedicated/shared-worker loads;
+another view's traffic cannot disturb the wait; a SharedWorker request is
+charged to the views connected when it started. Deadlines derive from one
+timestamp and success requires the quiet window to complete by the timeout.
+
+**Session identity.** A view's session binds in the constructor — there is
+no runtime setter, and popups inherit the opener's session structurally.
+localStorage and the `document.cookie` mirror partition by (session, origin);
+patch 0044 partitions the renderer-side dom-storage cache per session, so
+same-session reads stay synchronous while profiles isolate. Persistent
+profile names validate uniformly, and `mbCreateSessionEx` reports why
+creation failed.
+
+**Workers.** Worker-owned loaders carry a ref-counted, thread-safe view
+context instead of raw view pointers: response hooks and request policy
+marshal onto the engine thread, worker traffic feeds the per-view idle
+counters, teardown releases any parked rendezvous (verified by genuinely
+concurrent destroy tests), and a SharedWorker survives its starting view's
+destruction while other clients remain. `mbShutdown` releases workers parked
+on an engine rendezvous.
+
+**ABI: 0.6.0, epoch 2.** The pre-1.0 policy is explicit (see the note above):
+entry points change in place until 1.0. This release removed interim
+compatibility scaffolding (`mbWaitForNetworkIdleEx`, the permissive legacy
+`mbCreateSession` path) — a binary break, hence ABI epoch 2 with the API
+level restarting at 1; `mbCheckCompat` refuses mismatched dev builds.
+
+**Test infrastructure.** `mb_smoke` spawns the bundled echo server itself,
+so the wire-level cases (redirect projection, header precedence,
+Authorization handling, 307/308 bodies) run in a default invocation
+(`MB_NET_TESTS=0` opts out). The echo server gains `/latch` endpoints so
+cross-view accounting tests gate on proven server states instead of sleeps;
+deterministic test seams (`mb_test_seams.h` — local-navigation barrier
+probes, parked-waiter counters) turn off-engine-thread and teardown-race
+properties into exact assertions. The README was rewritten for concision.
+
+---
+
 ## v0.5 — 2026-07-10 (`v0.5`)
 
 **The interactive-host release.** The embedder API is finished (rounds 5 and
